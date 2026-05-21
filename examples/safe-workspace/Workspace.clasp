@@ -1,0 +1,22 @@
+module Workspace
+
+foreign workspacePathRaw : Str -> Str -> Result Str = "workspacePath"
+foreign workspaceReadFileRaw : Str -> Str -> Result Str = "workspaceReadFile"
+foreign workspaceWriteFileRaw : Str -> Str -> Str -> Result Str = "workspaceWriteFile"
+foreign workspaceMkdirAllRaw : Str -> Str -> Result Str = "workspaceMkdirAll"
+foreign workspaceListDirRaw : Str -> Str -> Result [Str] = "workspaceListDir"
+
+workspacePath : Str -> Str -> Result Str
+workspacePath root relative = workspacePathRaw root relative
+
+workspaceReadText : Str -> Str -> Result Str
+workspaceReadText root relative = workspaceReadFileRaw root relative
+
+workspaceWriteText : Str -> Str -> Str -> Result Str
+workspaceWriteText root relative contents = workspaceWriteFileRaw root relative contents
+
+workspaceMkdirAll : Str -> Str -> Result Str
+workspaceMkdirAll root relative = workspaceMkdirAllRaw root relative
+
+workspaceListDir : Str -> Str -> Result [Str]
+workspaceListDir root relative = workspaceListDirRaw root relative

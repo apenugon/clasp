@@ -142,6 +142,8 @@ assert(parserDiagnostic.code === "E_PARSE_EMPTY_EXPRESSION", `parser code: ${par
 assert(parserDiagnostic.file === parserSource, `parser file: ${parserDiagnostic.file}`);
 assert(parserDiagnostic.line === 3, `parser line: ${parserDiagnostic.line}`);
 assert(parserDiagnostic.column === 7, `parser column: ${parserDiagnostic.column}`);
+assert(parserDiagnostic.expected === "expression", `parser expected: ${parserDiagnostic.expected}`);
+assert(parserDiagnostic.actual === "end of line", `parser actual: ${parserDiagnostic.actual}`);
 assert(parserDiagnostic.primarySpan.start.line === 3, "parser span line");
 assert(parserDiagnostic.primarySpan.start.column === 7, "parser span column");
 
@@ -151,6 +153,10 @@ assert(checkerDiagnostic.code === "E_TYPE_MISMATCH", `checker code: ${checkerDia
 assert(checkerDiagnostic.file === checkerSource, `checker file: ${checkerDiagnostic.file}`);
 assert(checkerDiagnostic.line === 4, `checker line: ${checkerDiagnostic.line}`);
 assert(checkerDiagnostic.column === 8, `checker column: ${checkerDiagnostic.column}`);
+assert(checkerDiagnostic.context === "main", `checker context: ${checkerDiagnostic.context}`);
+assert(checkerDiagnostic.target === "1", `checker target: ${checkerDiagnostic.target}`);
+assert(checkerDiagnostic.expected === "Str", `checker expected: ${checkerDiagnostic.expected}`);
+assert(checkerDiagnostic.actual === "Int", `checker actual: ${checkerDiagnostic.actual}`);
 assert(
   checkerDiagnostic.message.includes("expected Str, found Int"),
   `checker message: ${checkerDiagnostic.message}`,
@@ -167,7 +173,9 @@ NODE
 
 grep -F 'CLASP_DIAGNOSTIC phase=parser code=E_PARSE_EMPTY_EXPRESSION' "$parser_pretty" >/dev/null
 grep -F 'line=3 column=7' "$parser_pretty" >/dev/null
+grep -F 'expected="expression" actual="end of line"' "$parser_pretty" >/dev/null
 grep -F 'CLASP_DIAGNOSTIC phase=checker code=E_TYPE_MISMATCH' "$checker_pretty" >/dev/null
 grep -F 'line=4 column=8' "$checker_pretty" >/dev/null
+grep -F 'context="main" target="1" expected="Str" actual="Int"' "$checker_pretty" >/dev/null
 
 printf 'test-native-claspc-diagnostics: ok\n'

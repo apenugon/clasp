@@ -301,6 +301,15 @@ ClaspRtResultString *clasp_rt_read_file(ClaspRtString *path);
 ClaspRtResultString *clasp_rt_write_file(ClaspRtString *path, ClaspRtString *contents);
 ClaspRtResultString *clasp_rt_append_file(ClaspRtString *path, ClaspRtString *contents);
 ClaspRtResultString *clasp_rt_mkdir_all(ClaspRtString *path);
+ClaspRtResultString *clasp_rt_workspace_path(ClaspRtString *root, ClaspRtString *relative);
+ClaspRtResultString *clasp_rt_workspace_read_file(ClaspRtString *root, ClaspRtString *relative);
+ClaspRtResultString *clasp_rt_workspace_write_file(
+  ClaspRtString *root,
+  ClaspRtString *relative,
+  ClaspRtString *contents
+);
+ClaspRtResultString *clasp_rt_workspace_mkdir_all(ClaspRtString *root, ClaspRtString *relative);
+ClaspRtHeader *clasp_rt_workspace_list_dir(ClaspRtString *root, ClaspRtString *relative);
 ClaspRtResultString *clasp_rt_run_process_json(
   ClaspRtString *cwd,
   ClaspRtHeader *env_values,
@@ -310,6 +319,12 @@ ClaspRtResultString *clasp_rt_run_process_timeout_json(
   ClaspRtString *cwd,
   ClaspRtHeader *timeout_ms,
   ClaspRtHeader *env_values,
+  ClaspRtHeader *command
+);
+ClaspRtResultString *clasp_rt_run_workspace_command_timeout_json(
+  ClaspRtString *root,
+  ClaspRtString *cwd,
+  ClaspRtHeader *timeout_ms,
   ClaspRtHeader *command
 );
 

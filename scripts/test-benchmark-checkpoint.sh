@@ -5,6 +5,7 @@ project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 test_root="$(mktemp -d)"
 report_path="$test_root/checkpoint.json"
 no_native_report_path="$test_root/checkpoint-no-native.json"
+readiness_report_path="$test_root/agent-readiness-checkpoint.json"
 
 cleanup() {
   rm -rf "$test_root"
@@ -74,4 +75,63 @@ if (report.nativeIncrementalReport !== null) {
 if (report.commandSummary["native-incremental-body-change"]) {
   throw new Error("native incremental command should be absent when disabled");
 }
+EOF
+
+node "$project_root/scripts/benchmark-checkpoint.mjs" \
+  --fixture \
+  --agent-readiness \
+  --generated-at 2026-05-21T00:00:00.000Z \
+  --tmp-root "$test_root" \
+  --output "$readiness_report_path" >/dev/null
+
+node - "$readiness_report_path" "$project_root/benchmarks/checkpoints/2026-05-21-wave1-agent-readiness-probe.json" <<'EOF'
+const fs = require("node:fs");
+
+const report = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const documented = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
+
+function assert(condition, message) {
+  if (!condition) {
+    throw new Error(message);
+  }
+}
+
+const expectedLabels = [
+  "safe-workspace-operations",
+  "safe-subprocess-verifier-execution",
+  "structured-diagnostics-feedback",
+  "ordinary-agent-loop-scenario",
+];
+
+assert(report.schemaVersion === 1, "readiness schema version should be stable");
+assert(report.kind === "clasp-agent-readiness-checkpoint", `unexpected readiness kind: ${report.kind}`);
+assert(report.mode === "fixture", "readiness fixture should report fixture mode");
+assert(report.fullBenchmarkRun === false, "readiness checkpoint must not claim a full benchmark run");
+assert(report.generatedAt === "2026-05-21T00:00:00.000Z", "readiness generatedAt should be controllable");
+assert(report.finalStatus === "ok", "readiness fixture should pass");
+assert(report.tmpDir === null, "readiness fixture should omit temporary directory unless kept");
+assert(Array.isArray(report.commands) && report.commands.length === expectedLabels.length, "expected four readiness commands");
+assert(report.commands.every((command) => command.command.startsWith("timeout ")), "readiness commands should be timeout-wrapped");
+assert(JSON.stringify(report.commands.map((command) => command.label)) === JSON.stringify(expectedLabels), "readiness command labels changed");
+assert(report.commands.every((command) => command.exitStatus === 0), "readiness fixture commands should pass");
+assert(Array.isArray(report.readinessSignals) && report.readinessSignals.length === expectedLabels.length, "readiness signals missing");
+assert(report.readinessSignals.every((signal) => signal.status === "pass"), "all readiness signals should pass in fixture mode");
+for (const signal of ["safeWorkspaceOperations", "subprocessVerifierExecution", "structuredDiagnostics", "ordinaryProgramAgentLoop"]) {
+  assert(report.readinessSignalSummary[signal] === "pass", `missing pass summary for ${signal}`);
+}
+
+const capabilityByName = new Map(report.capabilitySignals.map((signal) => [signal.name, signal]));
+assert(capabilityByName.get("ordinary_program_execution")?.status === "pass", "ordinary_program_execution should pass");
+assert(capabilityByName.get("clasp_native_control_api")?.status === "pass", "clasp_native_control_api should pass");
+assert(capabilityByName.get("orchestration_viability")?.status === "pass", "orchestration_viability should pass");
+assert(capabilityByName.get("verification_gate")?.status === "pass", "verification_gate should pass");
+assert(capabilityByName.get("durable_native_substrate")?.status === "partial", "durable_native_substrate should be explicitly partial in this bounded probe");
+
+assert(documented.schemaVersion === 1, "documented readiness probe schema version should be stable");
+assert(documented.kind === "clasp-agent-readiness-probe", `unexpected documented kind: ${documented.kind}`);
+assert(documented.fullBenchmarkRun === false, "documented probe must not claim a full benchmark run");
+assert(documented.expectedCommandLabels.length === expectedLabels.length, "documented command label count changed");
+assert(JSON.stringify(documented.expectedCommandLabels) === JSON.stringify(expectedLabels), "documented command labels should match the fixture");
+assert(documented.requiredSignals.every((signal) => report.readinessSignalSummary[signal] === "pass"), "documented required signals should be present in checkpoint output");
+assert(documented.validationCommand.includes("--agent-readiness"), "documented validation command should use agent-readiness mode");
 EOF

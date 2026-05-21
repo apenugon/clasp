@@ -35,6 +35,7 @@ build_local_debug_bin() {
   if command -v cargo >/dev/null 2>&1; then
     (
       cd "$project_root"
+      export CARGO_TARGET_DIR="$project_root/runtime/target"
       cargo build --quiet --manifest-path runtime/Cargo.toml --bin claspc
     ) >&2
     return 0
@@ -53,6 +54,7 @@ build_local_debug_bin() {
     cd \"$project_root\"
     export CLASP_PROJECT_ROOT=\"$project_root\"
     export CLASP_RESOLVE_CLASPC_NIX_REENTRY=1
+    export CARGO_TARGET_DIR=\"$project_root/runtime/target\"
     cargo build --quiet --manifest-path runtime/Cargo.toml --bin claspc
   " >&2
 }

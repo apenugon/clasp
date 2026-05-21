@@ -255,9 +255,12 @@ const COMMANDS = {
   monitoredWorkflow: "bash scripts/test-monitored-workflow.sh",
   codexLoopProgram: "bash scripts/test-codex-loop-program.sh",
   hostRuntime: "bash scripts/test-host-runtime.sh",
+  safeWorkspace: "bash scripts/test-safe-workspace.sh",
+  safeSubprocess: "bash scripts/test-safe-subprocess.sh",
   runtimeSliceProcess: "bash scripts/verify-runtime-slice.sh process",
   runtimeSliceWorkflow: "bash scripts/verify-runtime-slice.sh workflow",
   runtimeSliceCodexLoop: "bash scripts/verify-runtime-slice.sh codex-loop",
+  runtimeSliceWorkspace: "bash scripts/verify-runtime-slice.sh workspace",
   runtimeSliceManagedLoop: "bash scripts/verify-runtime-slice.sh managed-loop",
   goalManagerFast: "bash scripts/test-goal-manager-fast.sh",
   goalManagerPlannerReportDecode: "bash scripts/test-goal-manager-planner-report-decode.sh",
@@ -835,6 +838,18 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
       addSelected(selectedByCommand, "host-runtime", COMMANDS.hostRuntime, "host runtime path", file);
     }
 
+    if (file.startsWith("examples/safe-workspace/")) {
+      matched = true;
+      reason(file, "safe-workspace", "safe workspace example path uses focused ordinary-program root-bounded file API coverage");
+      addSelected(selectedByCommand, "safe-workspace", COMMANDS.safeWorkspace, "safe workspace path", file);
+    }
+
+    if (file.startsWith("examples/safe-subprocess/")) {
+      matched = true;
+      reason(file, "safe-subprocess", "safe subprocess example path uses focused ordinary-program root-bounded process API coverage");
+      addSelected(selectedByCommand, "safe-subprocess", COMMANDS.safeSubprocess, "safe subprocess path", file);
+    }
+
     if (hostRuntimeDocFiles.has(file)) {
       matched = true;
       reason(file, "host-runtime-docs", "host runtime documentation changes use focused ordinary host API coverage");
@@ -1011,6 +1026,32 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
         file,
       );
       addSelected(selectedByCommand, "host-runtime", COMMANDS.hostRuntime, "host runtime harness", file);
+    }
+
+    if (file === "scripts/test-safe-workspace.sh") {
+      matched = true;
+      reason(file, "safe-workspace-harness", "safe workspace harness uses shell syntax plus ordinary-program workspace API coverage");
+      addSelected(
+        selectedByCommand,
+        `bash-syntax:${file}`,
+        `bash -n ${shellQuote(file)}`,
+        "safe workspace shell syntax",
+        file,
+      );
+      addSelected(selectedByCommand, "runtime-slice:workspace", COMMANDS.runtimeSliceWorkspace, "safe workspace harness", file);
+    }
+
+    if (file === "scripts/test-safe-subprocess.sh") {
+      matched = true;
+      reason(file, "safe-subprocess-harness", "safe subprocess harness uses shell syntax plus ordinary-program process API coverage");
+      addSelected(
+        selectedByCommand,
+        `bash-syntax:${file}`,
+        `bash -n ${shellQuote(file)}`,
+        "safe subprocess shell syntax",
+        file,
+      );
+      addSelected(selectedByCommand, "runtime-slice:process", COMMANDS.runtimeSliceProcess, "safe subprocess harness", file);
     }
 
     if (file === "scripts/test-swarm-native-managed-loop.sh") {

@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 1,
+  "kind": "clasp-agent-readiness-probe",
+  "generatedAt": "2026-05-21T00:00:00.000Z",
+  "wave": "wave1",
+  "taskId": "wave1-benchmark-probe",
+  "fullBenchmarkRun": false,
+  "purpose": "Bounded checkpoint handoff for benchmark-relevant agent-loop readiness signals without running the full benchmark harness.",
+  "validationCommand": "node scripts/benchmark-checkpoint.mjs --agent-readiness --output benchmarks/checkpoints/<generated-agent-readiness-checkpoint>.json",
+  "expectedCommandLabels": [
+    "safe-workspace-operations",
+    "safe-subprocess-verifier-execution",
+    "structured-diagnostics-feedback",
+    "ordinary-agent-loop-scenario"
+  ],
+  "requiredSignals": [
+    "safeWorkspaceOperations",
+    "subprocessVerifierExecution",
+    "structuredDiagnostics",
+    "ordinaryProgramAgentLoop"
+  ],
+  "benchmarkRelevantSignals": [
+    {
+      "name": "safeWorkspaceOperations",
+      "commandLabel": "safe-workspace-operations",
+      "expectedEvidence": "Root-bounded read/write/list/mkdir behavior and stable path-escape errors are checked from ordinary Clasp code.",
+      "capabilities": [
+        "clasp_native_control_api",
+        "orchestration_viability",
+        "verification_gate"
+      ]
+    },
+    {
+      "name": "subprocessVerifierExecution",
+      "commandLabel": "safe-subprocess-verifier-execution",
+      "expectedEvidence": "Workspace-confined argv subprocess execution reports stdout, stderr, exit status, timeout, cwd escape, and shell-string rejection data.",
+      "capabilities": [
+        "clasp_native_control_api",
+        "orchestration_viability",
+        "verification_gate"
+      ]
+    },
+    {
+      "name": "structuredDiagnostics",
+      "commandLabel": "structured-diagnostics-feedback",
+      "expectedEvidence": "Native parser/checker diagnostics expose stable location, code, context, expected, and actual fields for verifier assertions.",
+      "capabilities": [
+        "ergonomics",
+        "orchestration_viability",
+        "verification_gate"
+      ]
+    },
+    {
+      "name": "ordinaryProgramAgentLoop",
+      "commandLabel": "ordinary-agent-loop-scenario",
+      "expectedEvidence": "claspc run executes a Clasp builder/verifier loop that invokes Codex directly, writes durable status/events/artifacts, and runs a verifier command.",
+      "capabilities": [
+        "ordinary_program_execution",
+        "durable_native_substrate",
+        "clasp_native_control_api",
+        "orchestration_viability",
+        "verification_gate"
+      ]
+    }
+  ],
+  "capabilityCoverage": [
+    {
+      "name": "ordinary_program_execution",
+      "expectedStatusWhenCommandsPass": "pass",
+      "scope": "ordinary Clasp agent-loop scenario via claspc run"
+    },
+    {
+      "name": "durable_native_substrate",
+      "expectedStatusWhenCommandsPass": "partial",
+      "scope": "status, event, and artifact persistence only; DAG edges, leases, approvals, and merge policy state are outside this bounded probe"
+    },
+    {
+      "name": "clasp_native_control_api",
+      "expectedStatusWhenCommandsPass": "pass",
+      "scope": "ordinary Clasp workspace and subprocess APIs used without compiler-level swarm commands"
+    },
+    {
+      "name": "orchestration_viability",
+      "expectedStatusWhenCommandsPass": "pass",
+      "scope": "combined file, process, diagnostic, and builder/verifier-loop readiness"
+    },
+    {
+      "name": "ergonomics",
+      "expectedStatusWhenCommandsPass": "pass",
+      "scope": "small ordinary Clasp wrappers and stable failure data for state-heavy code"
+    },
+    {
+      "name": "verification_gate",
+      "expectedStatusWhenCommandsPass": "pass",
+      "scope": "scenario-level focused checks for benchmark-facing ordinary-program and runtime behavior"
+    }
+  ]
+}

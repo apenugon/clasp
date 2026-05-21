@@ -1,0 +1,106 @@
+module Main
+
+import Workspace
+
+record SafeWorkspaceReport = {
+  normalizedPath : Str,
+  mkdirResult : Str,
+  writeResult : Str,
+  readText : Str,
+  nestedListing : Str,
+  rootListing : Str,
+  parentEscape : Str,
+  absoluteEscape : Str,
+  chainedEscape : Str,
+  missingRead : Str
+}
+
+firstTextOrEmpty : [Str] -> Str
+firstTextOrEmpty values = {
+  let mut first = "";
+  let mut found = false;
+  for value in values {
+    if found then
+      found
+    else {
+      first = value;
+      found = true;
+      found
+    }
+  };
+  first
+}
+
+secondTextOrEmpty : [Str] -> Str
+secondTextOrEmpty values = {
+  let mut second = "";
+  let mut index = 0;
+  for value in values {
+    if index == 0 then {
+      index = 1;
+      index
+    } else if index == 1 then {
+      second = value;
+      index = 2;
+      index
+    } else
+      index
+  };
+  second
+}
+
+workspaceRoot : Str
+workspaceRoot = {
+  let configured = firstTextOrEmpty argv;
+  if configured == "" then "safe-workspace-state" else configured
+}
+
+outsidePath : Str
+outsidePath = secondTextOrEmpty argv
+
+resultText : Result Str -> Str
+resultText result = match result {
+  Ok value -> value,
+  Err message -> textConcat ["ERR:", message]
+}
+
+resultListText : Result [Str] -> Str
+resultListText result = match result {
+  Ok values -> textJoin "," values,
+  Err message -> textConcat ["ERR:", message]
+}
+
+absoluteEscapeResult : Str
+absoluteEscapeResult =
+  if outsidePath == "" then
+    "skipped"
+  else
+    resultText (workspaceWriteText workspaceRoot outsidePath "leaked")
+
+scenarioReport : SafeWorkspaceReport
+scenarioReport = {
+  let normalized = resultText (workspacePath workspaceRoot "nested/result.txt");
+  let madeLogs = resultText (workspaceMkdirAll workspaceRoot "logs");
+  let written = resultText (workspaceWriteText workspaceRoot "nested/result.txt" "workspace-text");
+  let readBack = resultText (workspaceReadText workspaceRoot "nested/result.txt");
+  let nestedNames = resultListText (workspaceListDir workspaceRoot "nested");
+  let rootNames = resultListText (workspaceListDir workspaceRoot ".");
+  let parentEscape = resultText (workspaceWriteText workspaceRoot "../outside.txt" "leaked");
+  let chainedEscape = resultText (workspaceReadText workspaceRoot "nested/../../outside.txt");
+  let missingRead = resultText (workspaceReadText workspaceRoot "missing.txt");
+  SafeWorkspaceReport {
+    normalizedPath = normalized,
+    mkdirResult = madeLogs,
+    writeResult = written,
+    readText = readBack,
+    nestedListing = nestedNames,
+    rootListing = rootNames,
+    parentEscape = parentEscape,
+    absoluteEscape = absoluteEscapeResult,
+    chainedEscape = chainedEscape,
+    missingRead = missingRead
+  }
+}
+
+main : Str
+main = encode scenarioReport

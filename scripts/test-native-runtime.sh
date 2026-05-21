@@ -9,10 +9,13 @@ test_root="$(mktemp -d "$TMPDIR/test-native-runtime.XXXXXX")"
 cc_bin="${CC:-cc}"
 cargo_bin="${CARGO:-cargo}"
 rustc_bin="${RUSTC:-rustc}"
-rust_runtime_lib="$project_root/runtime/target/debug/libclasp_runtime.a"
+runtime_target_dir="$project_root/runtime/target"
+rust_runtime_lib="$runtime_target_dir/debug/libclasp_runtime.a"
 fallback_rust_runtime_lib="$project_root/libclasp_runtime.a"
 node_bin="${NODE:-node}"
 nix_reentry="${CLASP_NATIVE_RUNTIME_NIX_REENTRY:-0}"
+
+export CARGO_TARGET_DIR="$runtime_target_dir"
 
 cleanup() {
   rm -rf "$test_root"
@@ -54,6 +57,7 @@ maybe_enter_nix_shell() {
     cd \"$project_root\"
     export CLASP_PROJECT_ROOT=\"$project_root\"
     export CLASP_NATIVE_RUNTIME_NIX_REENTRY=1
+    export CARGO_TARGET_DIR=\"$runtime_target_dir\"
     bash scripts/test-native-runtime.sh
   "
   exit 0
@@ -65,7 +69,7 @@ if [[ ! -f "$rust_runtime_lib" && -f "$fallback_rust_runtime_lib" ]]; then
   rust_runtime_lib="$fallback_rust_runtime_lib"
 fi
 
-claspc_bin="$("$project_root/scripts/resolve-claspc.sh")"
+claspc_bin="$(env -u CLASP_CLASPC -u CLASPC_BIN CLASP_PROJECT_ROOT="$project_root" "$project_root/scripts/resolve-claspc.sh")"
 export CLASPC_BIN="$claspc_bin"
 
 ir_path="$test_root/durable-workflow.native.ir"

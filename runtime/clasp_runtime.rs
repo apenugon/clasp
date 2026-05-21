@@ -11,7 +11,7 @@ use std::mem::{align_of, size_of};
 use std::os::raw::c_int;
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 use std::ptr::{self, null_mut, NonNull};
 use std::process::{Child, Command as ProcessCommand, Stdio};
 use std::slice;
@@ -3120,6 +3120,11 @@ fn interpret_runtime_binding(
         ("pathDirname", 1) => unsafe { clasp_rt_path_dirname(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("fileExists", 1) => unsafe { build_runtime_bool(clasp_rt_file_exists(args[0] as *mut ClaspRtString)) as *mut ClaspRtHeader },
         ("listDir", 1) => unsafe { clasp_rt_list_dir(args[0] as *mut ClaspRtString) },
+        ("workspacePath", 2) => unsafe { clasp_rt_workspace_path(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("workspaceReadFile", 2) => unsafe { clasp_rt_workspace_read_file(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("workspaceWriteFile", 3) => unsafe { clasp_rt_workspace_write_file(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("workspaceMkdirAll", 2) => unsafe { clasp_rt_workspace_mkdir_all(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("workspaceListDir", 2) => unsafe { clasp_rt_workspace_list_dir(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) },
         ("swarmBootstrapJson", 3) => unsafe { clasp_rt_swarm_bootstrap_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmStartJson", 3) => unsafe { clasp_rt_swarm_start_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmLeaseJson", 3) => unsafe { clasp_rt_swarm_lease_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
@@ -3171,6 +3176,14 @@ fn interpret_runtime_binding(
         ("runProcessTimeoutJson", 4) => unsafe {
             clasp_rt_run_process_timeout_json(args[0] as *mut ClaspRtString, args[1], args[2], args[3])
                 as *mut ClaspRtHeader
+        },
+        ("runWorkspaceCommandTimeoutJson", 4) => unsafe {
+            clasp_rt_run_workspace_command_timeout_json(
+                args[0] as *mut ClaspRtString,
+                args[1] as *mut ClaspRtString,
+                args[2],
+                args[3],
+            ) as *mut ClaspRtHeader
         },
         ("spawnCommandJson", 6) => unsafe {
             clasp_rt_spawn_command_json(
@@ -3337,6 +3350,11 @@ fn interpret_builtin_runtime_binding(
         ("pathDirname", 1) => unsafe { clasp_rt_path_dirname(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("fileExists", 1) => unsafe { build_runtime_bool(clasp_rt_file_exists(args[0] as *mut ClaspRtString)) as *mut ClaspRtHeader },
         ("listDir", 1) => unsafe { clasp_rt_list_dir(args[0] as *mut ClaspRtString) },
+        ("workspacePath", 2) => unsafe { clasp_rt_workspace_path(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("workspaceReadFile", 2) => unsafe { clasp_rt_workspace_read_file(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("workspaceWriteFile", 3) => unsafe { clasp_rt_workspace_write_file(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("workspaceMkdirAll", 2) => unsafe { clasp_rt_workspace_mkdir_all(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("workspaceListDir", 2) => unsafe { clasp_rt_workspace_list_dir(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) },
         ("swarmBootstrapJson", 3) => unsafe { clasp_rt_swarm_bootstrap_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmStartJson", 3) => unsafe { clasp_rt_swarm_start_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmLeaseJson", 3) => unsafe { clasp_rt_swarm_lease_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
@@ -3388,6 +3406,14 @@ fn interpret_builtin_runtime_binding(
         ("runProcessTimeoutJson", 4) => unsafe {
             clasp_rt_run_process_timeout_json(args[0] as *mut ClaspRtString, args[1], args[2], args[3])
                 as *mut ClaspRtHeader
+        },
+        ("runWorkspaceCommandTimeoutJson", 4) => unsafe {
+            clasp_rt_run_workspace_command_timeout_json(
+                args[0] as *mut ClaspRtString,
+                args[1] as *mut ClaspRtString,
+                args[2],
+                args[3],
+            ) as *mut ClaspRtHeader
         },
         ("spawnCommandJson", 6) => unsafe {
             clasp_rt_spawn_command_json(
@@ -3526,6 +3552,11 @@ fn builtin_runtime_binding_name(name: &str) -> bool {
             | "pathDirname"
             | "fileExists"
             | "listDir"
+            | "workspacePath"
+            | "workspaceReadFile"
+            | "workspaceWriteFile"
+            | "workspaceMkdirAll"
+            | "workspaceListDir"
             | "swarmBootstrapJson"
             | "swarmStartJson"
             | "swarmLeaseJson"
@@ -3563,6 +3594,7 @@ fn builtin_runtime_binding_name(name: &str) -> bool {
             | "runCommandTimeoutJson"
             | "runProcessJson"
             | "runProcessTimeoutJson"
+            | "runWorkspaceCommandTimeoutJson"
             | "spawnCommandJson"
             | "watchCommandJson"
             | "reconcileWatchedProcessJson"
@@ -7279,6 +7311,183 @@ fn write_file_atomic(path: &str, bytes: &[u8]) -> Result<(), String> {
     write_result
 }
 
+fn display_path(path: &Path) -> String {
+    path.to_string_lossy().into_owned()
+}
+
+fn canonical_workspace_root(root: &str) -> Result<PathBuf, String> {
+    if root.trim().is_empty() {
+        return Err(
+            "workspace_root_missing: workspace root must be a non-empty path".to_owned(),
+        );
+    }
+    let root_path = Path::new(root);
+    let canonical = fs::canonicalize(root_path).map_err(|err| {
+        format!(
+            "workspace_root_missing: workspace root `{}` must exist before workspace file operations: {err}",
+            root_path.display()
+        )
+    })?;
+    if !canonical.is_dir() {
+        return Err(format!(
+            "workspace_not_directory: workspace root `{}` is not a directory",
+            canonical.display()
+        ));
+    }
+    Ok(canonical)
+}
+
+fn normalize_workspace_relative_path(relative: &str) -> Result<PathBuf, String> {
+    let relative_path = Path::new(relative);
+    if relative_path.is_absolute() {
+        return Err(
+            "workspace_path_escape: absolute paths are not allowed; pass a path relative to the workspace root"
+                .to_owned(),
+        );
+    }
+
+    let mut normalized = PathBuf::new();
+    for component in relative_path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::Normal(part) => normalized.push(part),
+            Component::ParentDir => {
+                return Err(
+                    "workspace_path_escape: `..` path segments are not allowed; pass a path inside the workspace root"
+                        .to_owned(),
+                )
+            }
+            Component::RootDir | Component::Prefix(_) => {
+                return Err(
+                    "workspace_path_escape: rooted paths are not allowed; pass a path relative to the workspace root"
+                        .to_owned(),
+                )
+            }
+        }
+    }
+    Ok(normalized)
+}
+
+fn ensure_workspace_existing_prefix(root: &Path, relative: &Path) -> Result<(), String> {
+    let mut current = root.to_path_buf();
+    for component in relative.components() {
+        current.push(component.as_os_str());
+        if current.exists() {
+            let canonical = fs::canonicalize(&current).map_err(|err| {
+                format!(
+                    "workspace_io_error: failed to resolve workspace path `{}`: {err}",
+                    current.display()
+                )
+            })?;
+            if !canonical.starts_with(root) {
+                return Err(format!(
+                    "workspace_path_escape: resolved path `{}` escapes workspace root `{}`",
+                    canonical.display(),
+                    root.display()
+                ));
+            }
+        } else {
+            break;
+        }
+    }
+    Ok(())
+}
+
+fn resolve_workspace_path(root: &str, relative: &str) -> Result<PathBuf, String> {
+    let root = canonical_workspace_root(root)?;
+    let relative = normalize_workspace_relative_path(relative)?;
+    ensure_workspace_existing_prefix(&root, &relative)?;
+    Ok(root.join(relative))
+}
+
+fn resolve_existing_workspace_path(root: &str, relative: &str) -> Result<PathBuf, String> {
+    let root = canonical_workspace_root(root)?;
+    let relative = normalize_workspace_relative_path(relative)?;
+    let target = root.join(relative);
+    let canonical = fs::canonicalize(&target).map_err(|err| {
+        if err.kind() == std::io::ErrorKind::NotFound {
+            format!("workspace_missing: `{}` does not exist", target.display())
+        } else {
+            format!(
+                "workspace_io_error: failed to resolve workspace path `{}`: {err}",
+                target.display()
+            )
+        }
+    })?;
+    if !canonical.starts_with(&root) {
+        return Err(format!(
+            "workspace_path_escape: resolved path `{}` escapes workspace root `{}`",
+            canonical.display(),
+            root.display()
+        ));
+    }
+    Ok(canonical)
+}
+
+fn resolve_workspace_process_cwd(root: &str, relative: &str) -> Result<PathBuf, String> {
+    let path = resolve_existing_workspace_path(root, relative)?;
+    if !path.is_dir() {
+        return Err(format!(
+            "workspace_not_directory: process cwd `{}` is not a directory",
+            path.display()
+        ));
+    }
+    Ok(path)
+}
+
+fn create_workspace_dir_all(root: &str, relative: &str) -> Result<PathBuf, String> {
+    let root = canonical_workspace_root(root)?;
+    let relative = normalize_workspace_relative_path(relative)?;
+    ensure_workspace_existing_prefix(&root, &relative)?;
+    let target = root.join(&relative);
+    fs::create_dir_all(&target).map_err(|err| {
+        format!(
+            "workspace_io_error: failed to create workspace directory `{}`: {err}",
+            target.display()
+        )
+    })?;
+    let canonical = fs::canonicalize(&target).map_err(|err| {
+        format!(
+            "workspace_io_error: failed to resolve workspace directory `{}`: {err}",
+            target.display()
+        )
+    })?;
+    if !canonical.starts_with(&root) {
+        return Err(format!(
+            "workspace_path_escape: resolved path `{}` escapes workspace root `{}`",
+            canonical.display(),
+            root.display()
+        ));
+    }
+    Ok(canonical)
+}
+
+fn prepare_workspace_write_path(root: &str, relative: &str) -> Result<PathBuf, String> {
+    let root = canonical_workspace_root(root)?;
+    let relative = normalize_workspace_relative_path(relative)?;
+    if relative.as_os_str().is_empty() || relative.file_name().is_none() {
+        return Err(
+            "workspace_invalid_path: write path must name a file inside the workspace root"
+                .to_owned(),
+        );
+    }
+    if let Some(parent) = relative.parent() {
+        if !parent.as_os_str().is_empty() {
+            let parent_text = display_path(parent);
+            create_workspace_dir_all(&display_path(&root), &parent_text)?;
+        }
+    }
+    ensure_workspace_existing_prefix(&root, &relative)?;
+    let target = root.join(relative);
+    if target.is_dir() {
+        return Err(format!(
+            "workspace_not_file: `{}` is a directory",
+            target.display()
+        ));
+    }
+    Ok(target)
+}
+
 fn configure_killable_process_command(command: &mut ProcessCommand) {
     #[cfg(unix)]
     unsafe {
@@ -9782,6 +9991,143 @@ pub unsafe extern "C" fn clasp_rt_read_file(path: *mut ClaspRtString) -> *mut Cl
     }
 }
 
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_workspace_path(
+    root: *mut ClaspRtString,
+    relative: *mut ClaspRtString,
+) -> *mut ClaspRtResultString {
+    let root_string = String::from_utf8_lossy(string_bytes(root)).into_owned();
+    let relative_string = String::from_utf8_lossy(string_bytes(relative)).into_owned();
+    match resolve_workspace_path(&root_string, &relative_string) {
+        Ok(path) => {
+            let path_text = display_path(&path);
+            clasp_rt_result_ok_string(build_runtime_string(path_text.as_bytes()))
+        }
+        Err(message) => clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_workspace_read_file(
+    root: *mut ClaspRtString,
+    relative: *mut ClaspRtString,
+) -> *mut ClaspRtResultString {
+    let root_string = String::from_utf8_lossy(string_bytes(root)).into_owned();
+    let relative_string = String::from_utf8_lossy(string_bytes(relative)).into_owned();
+    let path = match resolve_existing_workspace_path(&root_string, &relative_string) {
+        Ok(path) => path,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    if path.is_dir() {
+        let message = format!("workspace_not_file: `{}` is a directory", path.display());
+        return clasp_rt_result_err_string(build_runtime_string(message.as_bytes()));
+    }
+    match fs::read(&path) {
+        Ok(bytes) => clasp_rt_result_ok_string(build_runtime_string(&bytes)),
+        Err(err) => {
+            let message = format!(
+                "workspace_io_error: failed to read workspace file `{}`: {err}",
+                path.display()
+            );
+            clasp_rt_result_err_string(build_runtime_string(message.as_bytes()))
+        }
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_workspace_write_file(
+    root: *mut ClaspRtString,
+    relative: *mut ClaspRtString,
+    contents: *mut ClaspRtString,
+) -> *mut ClaspRtResultString {
+    let root_string = String::from_utf8_lossy(string_bytes(root)).into_owned();
+    let relative_string = String::from_utf8_lossy(string_bytes(relative)).into_owned();
+    let path = match prepare_workspace_write_path(&root_string, &relative_string) {
+        Ok(path) => path,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let path_text = display_path(&path);
+    match write_file_atomic(&path_text, string_bytes(contents)) {
+        Ok(_) => clasp_rt_result_ok_string(build_runtime_string(path_text.as_bytes())),
+        Err(err) => {
+            let message = format!(
+                "workspace_io_error: failed to write workspace file `{}`: {err}",
+                path.display()
+            );
+            clasp_rt_result_err_string(build_runtime_string(message.as_bytes()))
+        }
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_workspace_mkdir_all(
+    root: *mut ClaspRtString,
+    relative: *mut ClaspRtString,
+) -> *mut ClaspRtResultString {
+    let root_string = String::from_utf8_lossy(string_bytes(root)).into_owned();
+    let relative_string = String::from_utf8_lossy(string_bytes(relative)).into_owned();
+    match create_workspace_dir_all(&root_string, &relative_string) {
+        Ok(path) => {
+            let path_text = display_path(&path);
+            clasp_rt_result_ok_string(build_runtime_string(path_text.as_bytes()))
+        }
+        Err(message) => clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_workspace_list_dir(
+    root: *mut ClaspRtString,
+    relative: *mut ClaspRtString,
+) -> *mut ClaspRtHeader {
+    let root_string = String::from_utf8_lossy(string_bytes(root)).into_owned();
+    let relative_string = String::from_utf8_lossy(string_bytes(relative)).into_owned();
+    let path = match resolve_existing_workspace_path(&root_string, &relative_string) {
+        Ok(path) => path,
+        Err(message) => return runtime_result_err(&message),
+    };
+    let entries = match fs::read_dir(&path) {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == std::io::ErrorKind::NotADirectory => {
+            let message = format!("workspace_not_directory: `{}` is not a directory", path.display());
+            return runtime_result_err(&message);
+        }
+        Err(err) => {
+            let message = format!(
+                "workspace_io_error: failed to list workspace directory `{}`: {err}",
+                path.display()
+            );
+            return runtime_result_err(&message);
+        }
+    };
+
+    let mut names = Vec::new();
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(err) => {
+                let message = format!(
+                    "workspace_io_error: failed to read workspace directory entry `{}`: {err}",
+                    path.display()
+                );
+                return runtime_result_err(&message);
+            }
+        };
+        let name = match entry.file_name().into_string() {
+            Ok(name) => name,
+            Err(_) => return runtime_result_err("workspace_invalid_utf8: directory entry is not valid UTF-8"),
+        };
+        names.push(name);
+    }
+    names.sort();
+
+    let items = names
+        .iter()
+        .map(|name| build_runtime_string(name.as_bytes()) as *mut ClaspRtHeader)
+        .collect();
+    runtime_result_ok(clasp_rt_build_list_header(items))
+}
+
 unsafe fn clasp_rt_result_string_from_owned(value: Result<String, String>) -> *mut ClaspRtResultString {
     match value {
         Ok(text) => clasp_rt_result_ok_string(build_runtime_string(text.as_bytes())),
@@ -10381,7 +10727,51 @@ unsafe fn clasp_rt_process_argv_arg(command: *mut ClaspRtHeader) -> Result<Vec<S
     if command_values.is_empty() {
         return Err("missing_command".to_owned());
     }
+    if command_values.iter().any(|value| value.contains('\0')) {
+        return Err("invalid_command: command arguments must not contain NUL bytes".to_owned());
+    }
     Ok(command_values)
+}
+
+fn process_program_basename(program: &str) -> &str {
+    Path::new(program)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or(program)
+}
+
+fn process_program_is_shell(program: &str) -> bool {
+    matches!(
+        process_program_basename(program),
+        "sh" | "bash" | "dash" | "zsh" | "fish" | "ksh"
+    )
+}
+
+fn process_arg_is_shell_string_flag(arg: &str) -> bool {
+    arg == "-c" || (arg.starts_with('-') && !arg.starts_with("--") && arg.contains('c'))
+}
+
+fn validate_workspace_process_command(command_values: &[String]) -> Result<(), String> {
+    if command_values.is_empty() {
+        return Err("missing_command".to_owned());
+    }
+    if command_values[0].starts_with('@') {
+        return Err(
+            "process_reserved_command: workspace subprocess commands must name an executable, not an internal runtime command"
+                .to_owned(),
+        );
+    }
+    if process_program_is_shell(&command_values[0])
+        && command_values[1..]
+            .iter()
+            .any(|arg| process_arg_is_shell_string_flag(arg))
+    {
+        return Err(
+            "process_shell_string_rejected: pass the executable and arguments directly; shell -c is not allowed"
+                .to_owned(),
+        );
+    }
+    Ok(())
 }
 
 fn parse_process_env_assignment(assignment: &str) -> Result<(String, String), String> {
@@ -10432,6 +10822,30 @@ fn spawn_process_command(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     apply_process_env(&mut command, env_values);
+    configure_killable_process_command(&mut command);
+    command.spawn()
+}
+
+fn run_workspace_process_command_output(
+    cwd: &Path,
+    command_values: &[String],
+) -> std::io::Result<std::process::Output> {
+    ProcessCommand::new(&command_values[0])
+        .args(&command_values[1..])
+        .current_dir(cwd)
+        .output()
+}
+
+fn spawn_workspace_process_command(
+    cwd: &Path,
+    command_values: &[String],
+) -> std::io::Result<std::process::Child> {
+    let mut command = ProcessCommand::new(&command_values[0]);
+    command
+        .args(&command_values[1..])
+        .current_dir(cwd)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     configure_killable_process_command(&mut command);
     command.spawn()
 }
@@ -10561,6 +10975,98 @@ pub unsafe extern "C" fn clasp_rt_run_command_timeout_json(
     configure_killable_process_command(&mut command);
 
     let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(err) => {
+            return clasp_rt_result_err_string(build_runtime_string(err.to_string().as_bytes()));
+        }
+    };
+    let child_id = child.id();
+
+    let started = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_status)) => match child.wait_with_output() {
+                Ok(output) => {
+                    return render_payload(
+                        output.status.code().unwrap_or(-1),
+                        &output.stdout,
+                        &output.stderr,
+                        false,
+                        "",
+                    );
+                }
+                Err(err) => {
+                    return clasp_rt_result_err_string(build_runtime_string(err.to_string().as_bytes()));
+                }
+            },
+            Ok(None) => {
+                if started.elapsed() >= Duration::from_millis(timeout_ms_value) {
+                    terminate_child_tree(&mut child, child_id);
+                    match child.wait_with_output() {
+                        Ok(output) => {
+                            return render_payload(124, &output.stdout, &output.stderr, true, "timeout");
+                        }
+                        Err(err) => {
+                            return clasp_rt_result_err_string(build_runtime_string(err.to_string().as_bytes()));
+                        }
+                    }
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+            Err(err) => {
+                return clasp_rt_result_err_string(build_runtime_string(err.to_string().as_bytes()));
+            }
+        }
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_run_workspace_command_timeout_json(
+    root: *mut ClaspRtString,
+    cwd: *mut ClaspRtString,
+    timeout_ms: *mut ClaspRtHeader,
+    command: *mut ClaspRtHeader,
+) -> *mut ClaspRtResultString {
+    let root_string = String::from_utf8_lossy(string_bytes(root)).into_owned();
+    let cwd_relative_string = String::from_utf8_lossy(string_bytes(cwd)).into_owned();
+    let timeout_ms_value = match clasp_rt_int_arg(timeout_ms) {
+        Ok(value) => value.max(0) as u64,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let command_values = match clasp_rt_process_argv_arg(command) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    if let Err(message) = validate_workspace_process_command(&command_values) {
+        return clasp_rt_result_err_string(build_runtime_string(message.as_bytes()));
+    }
+    let cwd_path = match resolve_workspace_process_cwd(&root_string, &cwd_relative_string) {
+        Ok(path) => path,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+
+    let render_payload = |exit_code: i32, stdout: &[u8], stderr: &[u8], timed_out: bool, error: &str| {
+        let payload = render_run_command_timeout_payload(exit_code, stdout, stderr, timed_out, error);
+        clasp_rt_result_ok_string(build_runtime_string(&payload))
+    };
+
+    if timeout_ms_value == 0 {
+        let output = match run_workspace_process_command_output(&cwd_path, &command_values) {
+            Ok(output) => output,
+            Err(err) => {
+                return clasp_rt_result_err_string(build_runtime_string(err.to_string().as_bytes()));
+            }
+        };
+        return render_payload(
+            output.status.code().unwrap_or(-1),
+            &output.stdout,
+            &output.stderr,
+            false,
+            "",
+        );
+    }
+
+    let mut child = match spawn_workspace_process_command(&cwd_path, &command_values) {
         Ok(child) => child,
         Err(err) => {
             return clasp_rt_result_err_string(build_runtime_string(err.to_string().as_bytes()));
@@ -11059,6 +11565,10 @@ mod tests {
             .map(|value| build_runtime_string(value) as *mut ClaspRtHeader)
             .collect();
         build_runtime_list_value(items) as *mut ClaspRtHeader
+    }
+
+    unsafe fn result_string_text(result: *mut ClaspRtResultString) -> String {
+        String::from_utf8_lossy(string_bytes((*result).value)).into_owned()
     }
 
     #[test]
@@ -12542,6 +13052,111 @@ mod tests {
             release_header(null_mut(), path as *mut ClaspRtHeader);
             release_header(null_mut(), result);
         }
+    }
+
+    #[test]
+    fn workspace_file_api_reads_writes_lists_and_rejects_escapes() {
+        let temp_parent = env::temp_dir().join(format!("clasp-workspace-api-{}", unique_test_suffix()));
+        let workspace_root = temp_parent.join("workspace");
+        let outside_path = temp_parent.join("outside.txt");
+        fs::create_dir_all(&workspace_root).expect("expected workspace root");
+        fs::write(&outside_path, "outside-secret").expect("expected outside fixture");
+
+        unsafe {
+            let root_text = workspace_root.to_string_lossy().into_owned();
+            let outside_text = outside_path.to_string_lossy().into_owned();
+            let root = build_runtime_string(root_text.as_bytes());
+            let nested_path = build_runtime_string(b"nested/result.txt");
+            let nested_dir = build_runtime_string(b"nested");
+            let contents = build_runtime_string(b"workspace-text");
+
+            let write_result = clasp_rt_workspace_write_file(root, nested_path, contents);
+            assert!((*write_result).is_ok, "expected workspace write to succeed");
+            assert!(
+                result_string_text(write_result).ends_with("nested/result.txt"),
+                "expected normalized write path"
+            );
+
+            let read_result = clasp_rt_workspace_read_file(root, nested_path);
+            assert!((*read_result).is_ok, "expected workspace read to succeed");
+            assert_eq!(result_string_text(read_result), "workspace-text");
+
+            let list_result = clasp_rt_workspace_list_dir(root, nested_dir);
+            assert_eq!(variant_tag_text(list_result), Some("Ok".to_owned()));
+            let list_items = variant_items(list_result as *mut ClaspRtVariantValue);
+            let names = list_value_items(list_items[0] as *mut ClaspRtListValue);
+            assert_eq!(names.len(), 1);
+            assert_eq!(
+                String::from_utf8_lossy(string_bytes(names[0] as *mut ClaspRtString)),
+                "result.txt"
+            );
+
+            let parent_escape = build_runtime_string(b"../outside.txt");
+            let escape_result = clasp_rt_workspace_write_file(root, parent_escape, contents);
+            assert!(!(*escape_result).is_ok, "expected parent escape to fail");
+            assert!(
+                result_string_text(escape_result).contains("workspace_path_escape"),
+                "expected actionable escape error"
+            );
+
+            let absolute_escape = build_runtime_string(outside_text.as_bytes());
+            let absolute_result = clasp_rt_workspace_read_file(root, absolute_escape);
+            assert!(!(*absolute_result).is_ok, "expected absolute path to fail");
+            assert!(
+                result_string_text(absolute_result).contains("absolute paths are not allowed"),
+                "expected actionable absolute-path error"
+            );
+
+            release_header(null_mut(), root as *mut ClaspRtHeader);
+            release_header(null_mut(), nested_path as *mut ClaspRtHeader);
+            release_header(null_mut(), nested_dir as *mut ClaspRtHeader);
+            release_header(null_mut(), contents as *mut ClaspRtHeader);
+            release_header(null_mut(), write_result as *mut ClaspRtHeader);
+            release_header(null_mut(), read_result as *mut ClaspRtHeader);
+            release_header(null_mut(), list_result);
+            release_header(null_mut(), parent_escape as *mut ClaspRtHeader);
+            release_header(null_mut(), escape_result as *mut ClaspRtHeader);
+            release_header(null_mut(), absolute_escape as *mut ClaspRtHeader);
+            release_header(null_mut(), absolute_result as *mut ClaspRtHeader);
+        }
+
+        assert_eq!(
+            fs::read_to_string(&outside_path).expect("expected outside file"),
+            "outside-secret"
+        );
+        let _ = fs::remove_dir_all(temp_parent);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn workspace_file_api_rejects_symlink_escape() {
+        use std::os::unix::fs::symlink;
+
+        let temp_parent = env::temp_dir().join(format!("clasp-workspace-symlink-{}", unique_test_suffix()));
+        let workspace_root = temp_parent.join("workspace");
+        let outside_path = temp_parent.join("outside.txt");
+        fs::create_dir_all(&workspace_root).expect("expected workspace root");
+        fs::write(&outside_path, "outside-secret").expect("expected outside fixture");
+        symlink(&outside_path, workspace_root.join("outside-link")).expect("expected symlink fixture");
+
+        unsafe {
+            let root_text = workspace_root.to_string_lossy().into_owned();
+            let root = build_runtime_string(root_text.as_bytes());
+            let link_path = build_runtime_string(b"outside-link");
+
+            let result = clasp_rt_workspace_read_file(root, link_path);
+            assert!(!(*result).is_ok, "expected symlink escape to fail");
+            assert!(
+                result_string_text(result).contains("workspace_path_escape"),
+                "expected symlink escape diagnostic"
+            );
+
+            release_header(null_mut(), root as *mut ClaspRtHeader);
+            release_header(null_mut(), link_path as *mut ClaspRtHeader);
+            release_header(null_mut(), result as *mut ClaspRtHeader);
+        }
+
+        let _ = fs::remove_dir_all(temp_parent);
     }
 
     #[test]

@@ -1,0 +1,46 @@
+module Process
+
+foreign runWorkspaceCommandTimeoutRaw : Str -> Str -> Int -> [Str] -> Result Str = "runWorkspaceCommandTimeoutJson"
+
+record ProcessResult = {
+  exitCode : Int,
+  stdout : Str,
+  stderr : Str,
+  timedOut : Bool,
+  error : Str
+}
+
+record CommandSpec = {
+  root : Str,
+  cwd : Str,
+  timeoutMs : Int,
+  command : [Str]
+}
+
+processResultError : Str -> Result ProcessResult
+processResultError message = Err message
+
+commandSpec : Str -> Str -> Int -> [Str] -> CommandSpec
+commandSpec root cwd timeoutMs command =
+  CommandSpec {
+    root = root,
+    cwd = cwd,
+    timeoutMs = timeoutMs,
+    command = command
+  }
+
+processResult : Result Str -> Result ProcessResult
+processResult value = match value {
+  Ok raw -> Ok (decode ProcessResult raw),
+  Err message -> processResultError message
+}
+
+run : CommandSpec -> Result ProcessResult
+run spec =
+  processResult (
+    runWorkspaceCommandTimeoutRaw
+      spec.root
+      spec.cwd
+      spec.timeoutMs
+      spec.command
+  )

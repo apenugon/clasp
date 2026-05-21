@@ -1,0 +1,159 @@
+module Main
+
+import Process
+
+record SafeSubprocessReport = {
+  successExitCode : Int,
+  successStdout : Str,
+  successStderr : Str,
+  nonzeroExitCode : Int,
+  nonzeroStdout : Str,
+  nonzeroStderr : Str,
+  timeoutExitCode : Int,
+  timeoutStdout : Str,
+  timeoutStderr : Str,
+  timeoutTimedOut : Bool,
+  timeoutError : Str,
+  missingCwd : Str,
+  parentEscape : Str,
+  absoluteCwd : Str,
+  shellString : Str
+}
+
+firstTextOrEmpty : [Str] -> Str
+firstTextOrEmpty values = {
+  let mut first = "";
+  let mut found = false;
+  for value in values {
+    if found then
+      found
+    else {
+      first = value;
+      found = true;
+      found
+    }
+  };
+  first
+}
+
+secondTextOrEmpty : [Str] -> Str
+secondTextOrEmpty values = {
+  let mut second = "";
+  let mut index = 0;
+  for value in values {
+    if index == 0 then {
+      index = 1;
+      index
+    } else if index == 1 then {
+      second = value;
+      index = 2;
+      index
+    } else
+      index
+  };
+  second
+}
+
+workspaceRoot : Str
+workspaceRoot = {
+  let configured = firstTextOrEmpty argv;
+  if configured == "" then "safe-subprocess-state" else configured
+}
+
+absoluteOutsideCwd : Str
+absoluteOutsideCwd = secondTextOrEmpty argv
+
+resultText : Result ProcessResult -> Str
+resultText result = match result {
+  Ok value -> encode value,
+  Err message -> textConcat ["ERR:", message]
+}
+
+exitCodeOf : Result ProcessResult -> Int
+exitCodeOf result = match result {
+  Ok value -> value.exitCode,
+  Err message -> 0
+}
+
+stdoutOf : Result ProcessResult -> Str
+stdoutOf result = match result {
+  Ok value -> value.stdout,
+  Err message -> ""
+}
+
+stderrOf : Result ProcessResult -> Str
+stderrOf result = match result {
+  Ok value -> value.stderr,
+  Err message -> ""
+}
+
+timedOutOf : Result ProcessResult -> Bool
+timedOutOf result = match result {
+  Ok value -> value.timedOut,
+  Err message -> false
+}
+
+errorOf : Result ProcessResult -> Str
+errorOf result = match result {
+  Ok value -> value.error,
+  Err message -> textConcat ["ERR:", message]
+}
+
+successCommand : [Str]
+successCommand = [
+  "node",
+  "-e",
+  "process.stdout.write(process.cwd().endsWith('/work') ? 'success-out' : process.cwd()); process.stderr.write('success-err')"
+]
+
+nonzeroCommand : [Str]
+nonzeroCommand = [
+  "node",
+  "-e",
+  "process.stdout.write('nonzero-out'); process.stderr.write('nonzero-err'); process.exit(7)"
+]
+
+timeoutCommand : [Str]
+timeoutCommand = [
+  "node",
+  "-e",
+  "process.stdout.write('before-timeout'); setInterval(() => {}, 1000)"
+]
+
+shellStringCommand : [Str]
+shellStringCommand = ["bash", "-lc", "printf should-not-run"]
+
+safeSubprocessReport : SafeSubprocessReport
+safeSubprocessReport = {
+  let success = run (commandSpec workspaceRoot "work" 1000 successCommand);
+  let nonzero = run (commandSpec workspaceRoot "work" 1000 nonzeroCommand);
+  let timeout = run (commandSpec workspaceRoot "work" 50 timeoutCommand);
+  let missingCwd = run (commandSpec workspaceRoot "missing" 1000 successCommand);
+  let parentEscape = run (commandSpec workspaceRoot "../outside" 1000 successCommand);
+  let absoluteCwd =
+    if absoluteOutsideCwd == "" then
+      missingCwd
+    else
+      run (commandSpec workspaceRoot absoluteOutsideCwd 1000 successCommand);
+  let shellString = run (commandSpec workspaceRoot "work" 1000 shellStringCommand);
+  SafeSubprocessReport {
+    successExitCode = exitCodeOf success,
+    successStdout = stdoutOf success,
+    successStderr = stderrOf success,
+    nonzeroExitCode = exitCodeOf nonzero,
+    nonzeroStdout = stdoutOf nonzero,
+    nonzeroStderr = stderrOf nonzero,
+    timeoutExitCode = exitCodeOf timeout,
+    timeoutStdout = stdoutOf timeout,
+    timeoutStderr = stderrOf timeout,
+    timeoutTimedOut = timedOutOf timeout,
+    timeoutError = errorOf timeout,
+    missingCwd = resultText missingCwd,
+    parentEscape = resultText parentEscape,
+    absoluteCwd = resultText absoluteCwd,
+    shellString = resultText shellString
+  }
+}
+
+main : Str
+main = encode safeSubprocessReport

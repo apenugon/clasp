@@ -16,6 +16,7 @@ function usage() {
       "  [--tmp-root PATH] [--generated-at ISO]",
       "  [--source-run-timeout SECONDS] [--compiler-slice-timeout SECONDS]",
       "  [--native-incremental-timeout SECONDS] [--no-native-incremental]",
+      "  [--agent-readiness] [--readiness-timeout SECONDS]",
     ].join("\n"),
   );
 }
@@ -49,7 +50,12 @@ function parseArgs(argv) {
       process.env.CLASP_BENCHMARK_NATIVE_INCREMENTAL_TIMEOUT_SECS || "240",
       "native incremental timeout",
     ),
+    readinessTimeoutSeconds: parsePositiveInt(
+      process.env.CLASP_BENCHMARK_READINESS_TIMEOUT_SECS || "180",
+      "agent readiness timeout",
+    ),
     includeNativeIncremental: true,
+    agentReadiness: false,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -89,6 +95,12 @@ function parseArgs(argv) {
         break;
       case "--no-native-incremental":
         options.includeNativeIncremental = false;
+        break;
+      case "--agent-readiness":
+        options.agentReadiness = true;
+        break;
+      case "--readiness-timeout":
+        options.readinessTimeoutSeconds = parsePositiveInt(argv[++index], "--readiness-timeout");
         break;
       default:
         fail(`unsupported argument: ${arg}`);
@@ -300,6 +312,147 @@ console.log(JSON.stringify(report));
   return plan;
 }
 
+function defaultAgentReadinessCommandPlan(options, tmpDir) {
+  const timeoutSeconds = options.readinessTimeoutSeconds;
+  const baseEnv = { CLASP_TEST_TMPDIR: path.join(tmpDir, "agent-readiness") };
+  return [
+    commandRecord("safe-workspace-operations", "ordinary-program-workspace-safety", timeoutSeconds, [
+      "bash",
+      "scripts/test-safe-workspace.sh",
+    ], { env: baseEnv }),
+    commandRecord("safe-subprocess-verifier-execution", "ordinary-program-subprocess-safety", timeoutSeconds, [
+      "bash",
+      "scripts/test-safe-subprocess.sh",
+    ], { env: baseEnv }),
+    commandRecord("structured-diagnostics-feedback", "machine-readable-diagnostics", timeoutSeconds, [
+      "bash",
+      "scripts/test-native-claspc-diagnostics.sh",
+    ], { env: baseEnv }),
+    commandRecord("ordinary-agent-loop-scenario", "ordinary-program-agent-loop", timeoutSeconds, [
+      "bash",
+      "examples/agent-loop-scenario/scripts/verify.sh",
+    ], { env: baseEnv }),
+  ];
+}
+
+function fixtureAgentReadinessCommandPlan(options) {
+  const timeoutSeconds = Math.min(options.readinessTimeoutSeconds, 5);
+  const print = (text) => `process.stdout.write(${JSON.stringify(`${text}\n`)});`;
+  return [
+    commandRecord("safe-workspace-operations", "ordinary-program-workspace-safety", timeoutSeconds, [
+      "node",
+      "-e",
+      print("safe-workspace-ok"),
+    ]),
+    commandRecord("safe-subprocess-verifier-execution", "ordinary-program-subprocess-safety", timeoutSeconds, [
+      "node",
+      "-e",
+      print("safe-subprocess-ok"),
+    ]),
+    commandRecord("structured-diagnostics-feedback", "machine-readable-diagnostics", timeoutSeconds, [
+      "node",
+      "-e",
+      print("test-native-claspc-diagnostics: ok"),
+    ]),
+    commandRecord("ordinary-agent-loop-scenario", "ordinary-program-agent-loop", timeoutSeconds, [
+      "node",
+      "-e",
+      print("agent-loop-scenario-ok"),
+    ]),
+  ];
+}
+
+const readinessSignalDefinitions = [
+  {
+    name: "safeWorkspaceOperations",
+    commandLabel: "safe-workspace-operations",
+    category: "safe-workspace-operations",
+    benchmarkRelevance:
+      "Ordinary Clasp programs can perform root-bounded reads, writes, directory creation, listing, and path-escape rejection.",
+  },
+  {
+    name: "subprocessVerifierExecution",
+    commandLabel: "safe-subprocess-verifier-execution",
+    category: "subprocess-verifier-execution",
+    benchmarkRelevance:
+      "Ordinary Clasp programs can run verifier-style subprocesses with confined cwd, captured stdout/stderr, exit status, and timeout data.",
+  },
+  {
+    name: "structuredDiagnostics",
+    commandLabel: "structured-diagnostics-feedback",
+    category: "structured-diagnostics",
+    benchmarkRelevance:
+      "Parser/checker failures expose stable machine-readable fields that benchmark verifiers and agent loops can assert.",
+  },
+  {
+    name: "ordinaryProgramAgentLoop",
+    commandLabel: "ordinary-agent-loop-scenario",
+    category: "ordinary-program-scenario",
+    benchmarkRelevance:
+      "A Clasp program invokes Codex directly, writes durable artifacts/status/events, runs a verifier command, and returns a structured report.",
+  },
+];
+
+const capabilitySignalDefinitions = [
+  {
+    name: "ordinary_program_execution",
+    commandLabels: ["ordinary-agent-loop-scenario"],
+    statusWhenPassed: "pass",
+    coverage: "claspc run executes the ordinary Clasp builder/verifier loop scenario.",
+  },
+  {
+    name: "durable_native_substrate",
+    commandLabels: ["ordinary-agent-loop-scenario"],
+    statusWhenPassed: "partial",
+    coverage:
+      "The probe covers durable status, event, and artifact persistence; DAG edges, leases, approvals, and merge-policy state remain outside this bounded checkpoint.",
+  },
+  {
+    name: "clasp_native_control_api",
+    commandLabels: [
+      "safe-workspace-operations",
+      "safe-subprocess-verifier-execution",
+      "ordinary-agent-loop-scenario",
+    ],
+    statusWhenPassed: "pass",
+    coverage: "Ordinary Clasp code reaches workspace and subprocess orchestration APIs without compiler swarm commands.",
+  },
+  {
+    name: "orchestration_viability",
+    commandLabels: [
+      "safe-workspace-operations",
+      "safe-subprocess-verifier-execution",
+      "structured-diagnostics-feedback",
+      "ordinary-agent-loop-scenario",
+    ],
+    statusWhenPassed: "pass",
+    coverage:
+      "The combined probe checks file access, process execution, diagnostics, and a realistic builder/verifier loop fixture.",
+  },
+  {
+    name: "ergonomics",
+    commandLabels: [
+      "safe-workspace-operations",
+      "safe-subprocess-verifier-execution",
+      "structured-diagnostics-feedback",
+    ],
+    statusWhenPassed: "pass",
+    coverage: "State-heavy orchestration examples remain expressible through small ordinary Clasp wrappers and stable failure data.",
+  },
+  {
+    name: "verification_gate",
+    commandLabels: [
+      "safe-workspace-operations",
+      "safe-subprocess-verifier-execution",
+      "structured-diagnostics-feedback",
+      "ordinary-agent-loop-scenario",
+    ],
+    statusWhenPassed: "pass",
+    coverage:
+      "Focused scenario-level checks exist for the benchmark-relevant ordinary-program loop and runtime/control-plane behavior.",
+  },
+];
+
 function successful(records, label) {
   return records.find((record) => record.label === label && record.exitStatus === 0);
 }
@@ -378,6 +531,84 @@ function buildBottlenecks(records, nativeIncrementalReport) {
   return bottlenecks.slice(0, 2).map((entry, index) => ({ rank: index + 1, ...entry }));
 }
 
+function recordStatus(record) {
+  if (!record) return "missing";
+  if (record.timedOut) return "timeout";
+  return record.exitStatus === 0 ? "pass" : "fail";
+}
+
+function buildReadinessSignals(records) {
+  return readinessSignalDefinitions.map((definition) => {
+    const record = records.find((candidate) => candidate.label === definition.commandLabel);
+    const status = recordStatus(record);
+    return {
+      name: definition.name,
+      category: definition.category,
+      status,
+      commandLabel: definition.commandLabel,
+      durationMs: record?.durationMs ?? null,
+      exitStatus: record?.exitStatus ?? null,
+      timedOut: record?.timedOut ?? null,
+      evidence: record
+        ? `${record.label} exitStatus=${record.exitStatus} timedOut=${record.timedOut}`
+        : `${definition.commandLabel} did not run`,
+      benchmarkRelevance: definition.benchmarkRelevance,
+    };
+  });
+}
+
+function buildCapabilitySignals(records) {
+  return capabilitySignalDefinitions.map((definition) => {
+    const commandStatuses = definition.commandLabels.map((label) => ({
+      commandLabel: label,
+      status: recordStatus(records.find((record) => record.label === label)),
+    }));
+    const allPassed = commandStatuses.every((entry) => entry.status === "pass");
+    return {
+      name: definition.name,
+      status: allPassed ? definition.statusWhenPassed : "fail",
+      coverage: definition.coverage,
+      evidenceCommands: definition.commandLabels,
+      commandStatuses,
+    };
+  });
+}
+
+function readinessSignalSummary(signals) {
+  const summary = {};
+  for (const signal of signals) {
+    summary[signal.name] = signal.status;
+  }
+  return summary;
+}
+
+function agentReadinessReport(options, tmpDir, records) {
+  const failed = records.filter((record) => record.exitStatus !== 0);
+  const readinessSignals = buildReadinessSignals(records);
+  return {
+    schemaVersion: 1,
+    kind: "clasp-agent-readiness-checkpoint",
+    generatedAt: options.generatedAt,
+    projectRoot,
+    mode: options.fixture ? "fixture" : "live",
+    fullBenchmarkRun: false,
+    tmpDir: options.keepTmp ? tmpDir : null,
+    checkpointFocus: [
+      "safe workspace operations",
+      "subprocess verifier execution",
+      "structured diagnostics",
+      "ordinary-program agent loop scenario",
+    ],
+    commandSummary: commandSummary(records),
+    commands: records,
+    readinessSignals,
+    readinessSignalSummary: readinessSignalSummary(readinessSignals),
+    capabilitySignals: buildCapabilitySignals(records),
+    finalStatus: failed.length === 0 ? "ok" : "failed",
+    failedCommands: failed.map((record) => record.label),
+  };
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   await mkdir(options.tmpRoot, { recursive: true });
@@ -385,14 +616,32 @@ async function main() {
   let tmpKept = options.keepTmp;
 
   try {
-    const claspcBin = options.fixture ? "fixture-claspc" : await resolveClaspc();
-    const plan = options.fixture
-      ? fixtureCommandPlan(options, tmpDir)
-      : defaultCommandPlan(options, tmpDir, claspcBin);
+    const claspcBin = options.agentReadiness ? null : options.fixture ? "fixture-claspc" : await resolveClaspc();
+    const plan = options.agentReadiness
+      ? options.fixture
+        ? fixtureAgentReadinessCommandPlan(options)
+        : defaultAgentReadinessCommandPlan(options, tmpDir)
+      : options.fixture
+        ? fixtureCommandPlan(options, tmpDir)
+        : defaultCommandPlan(options, tmpDir, claspcBin);
     const records = [];
 
     for (const spec of plan) {
       records.push(await runCommand(spec));
+    }
+
+    if (options.agentReadiness) {
+      const report = agentReadinessReport(options, tmpDir, records);
+      const text = `${JSON.stringify(report, null, 2)}\n`;
+      if (options.output) {
+        await mkdir(path.dirname(path.resolve(options.output)), { recursive: true });
+        await writeFile(options.output, text);
+      }
+      process.stdout.write(text);
+      if (report.failedCommands.length > 0) {
+        process.exitCode = 1;
+      }
+      return;
     }
 
     const nativeSpec = plan.find((spec) => spec.label === "native-incremental-body-change");

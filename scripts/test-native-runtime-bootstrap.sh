@@ -45,6 +45,7 @@ fi
 
 command_text="$6"
 [[ "$command_text" == *'export CLASP_NATIVE_RUNTIME_NIX_REENTRY=1'* ]]
+[[ "$command_text" == *'export CARGO_TARGET_DIR='* ]]
 [[ "$command_text" == *'bash scripts/test-native-runtime.sh'* ]]
 EOF
 chmod +x "$test_root/bin/nix"
@@ -58,6 +59,8 @@ CLASP_TEST_NATIVE_RUNTIME_NIX_LOG="$nix_log" \
 grep -F "develop path:$test_root --command bash -lc" "$nix_log" >/dev/null
 grep -F 'if [[ "$nix_reentry" == "1" ]]; then' "$test_root/scripts/test-native-runtime.sh" >/dev/null
 grep -F 'native_runtime_artifacts_ready()' "$test_root/scripts/test-native-runtime.sh" >/dev/null
+grep -F 'export CARGO_TARGET_DIR="$runtime_target_dir"' "$test_root/scripts/test-native-runtime.sh" >/dev/null
+grep -F 'env -u CLASP_CLASPC -u CLASPC_BIN CLASP_PROJECT_ROOT="$project_root" "$project_root/scripts/resolve-claspc.sh"' "$test_root/scripts/test-native-runtime.sh" >/dev/null
 grep -F 'rust_link_args=(-lm)' "$test_root/scripts/test-native-runtime.sh" >/dev/null
 grep -F 'return 0' "$test_root/scripts/test-native-runtime.sh" >/dev/null
 grep -F 'nativeImageSourceText' "$test_root/scripts/test-native-runtime.sh" >/dev/null

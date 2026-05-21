@@ -83,6 +83,10 @@ struct CompilerDiagnostic {
     code: &'static str,
     message: String,
     primary_location: Option<DiagnosticLocation>,
+    context: Option<String>,
+    target: Option<String>,
+    expected: Option<String>,
+    actual: Option<String>,
 }
 
 fn diagnostic_json_value(diagnostic: &CompilerDiagnostic) -> serde_json::Value {
@@ -90,6 +94,10 @@ fn diagnostic_json_value(diagnostic: &CompilerDiagnostic) -> serde_json::Value {
     fields.insert("phase".to_owned(), serde_json::json!(diagnostic.phase));
     fields.insert("code".to_owned(), serde_json::json!(diagnostic.code));
     fields.insert("message".to_owned(), serde_json::json!(&diagnostic.message));
+    fields.insert("context".to_owned(), json_optional_string(&diagnostic.context));
+    fields.insert("target".to_owned(), json_optional_string(&diagnostic.target));
+    fields.insert("expected".to_owned(), json_optional_string(&diagnostic.expected));
+    fields.insert("actual".to_owned(), json_optional_string(&diagnostic.actual));
 
     match &diagnostic.primary_location {
         Some(location) => {
@@ -122,6 +130,20 @@ fn diagnostic_json_value(diagnostic: &CompilerDiagnostic) -> serde_json::Value {
     serde_json::Value::Object(fields)
 }
 
+fn json_optional_string(value: &Option<String>) -> serde_json::Value {
+    value
+        .as_ref()
+        .map(|text| serde_json::json!(text))
+        .unwrap_or(serde_json::Value::Null)
+}
+
+fn render_diagnostic_detail_field(name: &str, value: &Option<String>) -> String {
+    value
+        .as_ref()
+        .map(|text| format!(" {name}={}", json_string(text)))
+        .unwrap_or_default()
+}
+
 fn print_json_diagnostic_error(diagnostic: &CompilerDiagnostic) {
     println!(
         "{}",
@@ -143,14 +165,22 @@ fn render_pretty_diagnostic(diagnostic: &CompilerDiagnostic) -> String {
             json_string(&location.file),
             location.line,
             location.column,
-            json_string(&diagnostic.message),
+            json_string(&diagnostic.message)
+                + &render_diagnostic_detail_field("context", &diagnostic.context)
+                + &render_diagnostic_detail_field("target", &diagnostic.target)
+                + &render_diagnostic_detail_field("expected", &diagnostic.expected)
+                + &render_diagnostic_detail_field("actual", &diagnostic.actual),
             diagnostic.message,
         ),
         None => format!(
             "CLASP_DIAGNOSTIC phase={} code={} file=null line=null column=null message={}\n{}",
             diagnostic.phase,
             diagnostic.code,
-            json_string(&diagnostic.message),
+            json_string(&diagnostic.message)
+                + &render_diagnostic_detail_field("context", &diagnostic.context)
+                + &render_diagnostic_detail_field("target", &diagnostic.target)
+                + &render_diagnostic_detail_field("expected", &diagnostic.expected)
+                + &render_diagnostic_detail_field("actual", &diagnostic.actual),
             diagnostic.message,
         ),
     }
@@ -666,11 +696,20 @@ fn structured_check_diagnostic_from_summary(
         return None;
     }
     let code = checker_diagnostic_code(message)?;
+    let context = diagnostic_context_decl(message);
+    let target = diagnostic_target_text(message);
+    let (expected, actual) = type_mismatch_expected_found(message)
+        .map(|(expected, actual)| (Some(expected.to_owned()), Some(actual.to_owned())))
+        .unwrap_or((None, None));
     Some(CompilerDiagnostic {
         phase: "checker",
         code,
         message: message.to_owned(),
         primary_location: checker_diagnostic_location(message, bundle_build),
+        context,
+        target,
+        expected,
+        actual,
     })
 }
 
@@ -724,6 +763,10 @@ fn empty_rhs_parse_diagnostic_for_source(file: &str, source: &str) -> Option<Com
                 code: "E_PARSE_EMPTY_EXPRESSION",
                 message: "Missing expression after `=`.".to_owned(),
                 primary_location: Some(location),
+                context: None,
+                target: None,
+                expected: Some("expression".to_owned()),
+                actual: Some("end of line".to_owned()),
             });
         }
     }
@@ -777,6 +820,10 @@ fn structured_diagnostic_from_message(
             code: "E_PARSE_MODULE_HEADER",
             message: enhanced,
             primary_location: Some(first_source_location(input_path)),
+            context: None,
+            target: Some("module header".to_owned()),
+            expected: Some("module <Name>".to_owned()),
+            actual: None,
         });
     }
     bundle_build.and_then(|build| structured_check_diagnostic_from_summary(&enhanced, build))
@@ -3085,6 +3132,8 @@ mod tests {
             diagnostic.primary_location.as_ref().map(|location| (location.line, location.column)),
             Some((3, 7))
         );
+        assert_eq!(diagnostic.expected.as_deref(), Some("expression"));
+        assert_eq!(diagnostic.actual.as_deref(), Some("end of line"));
     }
 
     #[test]
@@ -3135,6 +3184,13 @@ main =
             .expect("expected real generic mismatch diagnostic");
         assert_eq!(diagnostic.phase, "checker");
         assert_eq!(diagnostic.code, "E_TYPE_MISMATCH");
+        assert_eq!(diagnostic.context.as_deref(), Some("bad"));
+        assert_eq!(diagnostic.target.as_deref(), Some("bad"));
+        assert_eq!(diagnostic.expected.as_deref(), Some("a -> b"));
+        assert_eq!(
+            diagnostic.actual.as_deref(),
+            Some("inst.aae962142451c7fc.a -> inst.aae962142451c7fc.a")
+        );
     }
 
     #[test]

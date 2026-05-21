@@ -17,6 +17,9 @@ test_root="$(mktemp -d "$tmp_root/verify-affected.XXXXXX")"
 project_copy="$test_root/project"
 mkdir -p "$project_copy/scripts" "$project_copy/src/scripts" "$project_copy/src/Compiler" \
   "$project_copy/runtime" "$project_copy/examples/swarm-native" "$project_copy/examples/feedback-loop" \
+  "$project_copy/examples/safe-workspace" \
+  "$project_copy/examples/safe-subprocess" \
+  "$project_copy/examples/agent-loop-scenario/scripts" \
   "$project_copy/examples/agent-task-scenario/scripts" \
   "$project_copy/examples/lead-app/Shared" "$project_copy/examples/lead-app/scripts" \
   "$project_copy/examples/lead-app/benchmark-prep" \
@@ -35,6 +38,14 @@ cp "$project_root/scripts/verify-compiler-slice.sh" "$project_copy/scripts/verif
 cp "$project_root/scripts/test-verify-compiler-slice.sh" "$project_copy/scripts/test-verify-compiler-slice.sh"
 cp "$project_root/scripts/verify-runtime-slice.sh" "$project_copy/scripts/verify-runtime-slice.sh"
 cp "$project_root/scripts/test-verify-runtime-slice.sh" "$project_copy/scripts/test-verify-runtime-slice.sh"
+touch "$project_copy/examples/safe-workspace/Main.clasp"
+touch "$project_copy/examples/safe-workspace/Workspace.clasp"
+touch "$project_copy/examples/safe-subprocess/Main.clasp"
+touch "$project_copy/examples/safe-subprocess/Process.clasp"
+touch "$project_copy/examples/agent-loop-scenario/Main.clasp"
+touch "$project_copy/examples/agent-loop-scenario/Workspace.clasp"
+touch "$project_copy/examples/agent-loop-scenario/Process.clasp"
+touch "$project_copy/examples/agent-loop-scenario/scripts/verify.sh"
 touch "$project_copy/examples/lead-app/Shared/Lead.clasp"
 touch "$project_copy/examples/lead-app/scripts/verify.sh"
 touch "$project_copy/examples/agent-task-scenario/Main.clasp"
@@ -247,6 +258,17 @@ switch (scenario) {
     assert(report.usedVerifyFastFallback === false, "known agent task scenario inputs should not use verify-fast fallback");
     assert(logHas("examples/agent-task-scenario/scripts/verify.sh"), "fake agent task scenario verifier command should execute");
     break;
+  case "agent-loop-scenario":
+    assert(report.changedFiles.includes("examples/agent-loop-scenario/Main.clasp"), "agent loop scenario source should be present");
+    assert(report.changedFiles.includes("examples/agent-loop-scenario/Workspace.clasp"), "agent loop workspace wrapper should be present");
+    assert(report.changedFiles.includes("examples/agent-loop-scenario/Process.clasp"), "agent loop process wrapper should be present");
+    assert(report.changedFiles.includes("examples/agent-loop-scenario/scripts/verify.sh"), "agent loop verifier should be present");
+    assert(hasCommand("bash examples/agent-loop-scenario/scripts/verify.sh"), "agent loop scenario should run its scenario verifier");
+    assert(hasCommand("bash -n 'examples/agent-loop-scenario/scripts/verify.sh'"), "agent loop verifier should run shell syntax check");
+    assert(report.selectedCommands.filter((command) => command.command === "bash examples/agent-loop-scenario/scripts/verify.sh").length === 1, "agent loop verifier should be deduplicated");
+    assert(report.usedVerifyFastFallback === false, "known agent loop scenario inputs should not use verify-fast fallback");
+    assert(logHas("examples/agent-loop-scenario/scripts/verify.sh"), "fake agent loop scenario verifier command should execute");
+    break;
   case "monitored-workflow-script":
     assert(report.changedFiles.includes("scripts/test-monitored-workflow.sh"), "monitored workflow harness should be present");
     assert(hasCommand("bash -n 'scripts/test-monitored-workflow.sh'"), "monitored workflow harness should run shell syntax check");
@@ -275,6 +297,28 @@ switch (scenario) {
     assert(report.selectedCommands.filter((command) => command.command === "bash scripts/test-host-runtime.sh").length === 1, "host runtime command should be deduplicated");
     assert(report.usedVerifyFastFallback === false, "known host runtime inputs should not use verify-fast fallback");
     assert(logHas("scripts/test-host-runtime.sh"), "fake host runtime command should execute");
+    break;
+  case "safe-workspace":
+    assert(report.changedFiles.includes("examples/safe-workspace/Main.clasp"), "safe workspace source should be present");
+    assert(report.changedFiles.includes("examples/safe-workspace/Workspace.clasp"), "safe workspace wrapper should be present");
+    assert(report.changedFiles.includes("scripts/test-safe-workspace.sh"), "safe workspace harness should be present");
+    assert(hasCommand("bash -n 'scripts/test-safe-workspace.sh'"), "safe workspace harness should run shell syntax check");
+    assert(hasCommand("bash scripts/verify-runtime-slice.sh workspace"), "safe workspace route should run focused runtime slice coverage");
+    assert(report.selectedCommands.filter((command) => command.command === "bash scripts/verify-runtime-slice.sh workspace").length === 1, "safe workspace slice should be deduplicated");
+    assert(report.usedVerifyFastFallback === false, "known safe workspace inputs should not use verify-fast fallback");
+    assert(logHas("scripts/verify-runtime-slice.sh workspace"), "fake safe workspace slice command should execute");
+    break;
+  case "safe-subprocess":
+    assert(report.changedFiles.includes("examples/safe-subprocess/Main.clasp"), "safe subprocess source should be present");
+    assert(report.changedFiles.includes("examples/safe-subprocess/Process.clasp"), "safe subprocess wrapper should be present");
+    assert(report.changedFiles.includes("scripts/test-safe-subprocess.sh"), "safe subprocess harness should be present");
+    assert(hasCommand("bash -n 'scripts/test-safe-subprocess.sh'"), "safe subprocess harness should run shell syntax check");
+    assert(hasCommand("bash scripts/verify-runtime-slice.sh process"), "safe subprocess harness should run focused process runtime slice coverage");
+    assert(hasCommand("bash scripts/test-safe-subprocess.sh"), "safe subprocess source route should run focused scenario coverage");
+    assert(report.selectedCommands.filter((command) => command.command === "bash scripts/verify-runtime-slice.sh process").length === 1, "safe subprocess process slice should be deduplicated");
+    assert(report.usedVerifyFastFallback === false, "known safe subprocess inputs should not use verify-fast fallback");
+    assert(logHas("scripts/verify-runtime-slice.sh process"), "fake safe subprocess process slice command should execute");
+    assert(logHas("scripts/test-safe-subprocess.sh"), "fake safe subprocess command should execute");
     break;
   case "source-benchmark-mixed":
     assert(report.changedFiles.includes("src/Compiler/SemanticArtifacts.clasp"), "source context artifact file should be present");
@@ -430,6 +474,16 @@ CLASP_TEST_FAKE_COMMAND_LOG="$agent_task_scenario_log" \
     --changed-file examples/agent-task-scenario/scripts/verify.sh > "$agent_task_scenario_report"
 assert_report "$agent_task_scenario_report" "$agent_task_scenario_log" agent-task-scenario
 
+agent_loop_scenario_report="$test_root/agent-loop-scenario-report.json"
+agent_loop_scenario_log="$test_root/agent-loop-scenario.log"
+CLASP_TEST_FAKE_COMMAND_LOG="$agent_loop_scenario_log" \
+  run_verify_affected \
+    --changed-file examples/agent-loop-scenario/Main.clasp \
+    --changed-file examples/agent-loop-scenario/Workspace.clasp \
+    --changed-file examples/agent-loop-scenario/Process.clasp \
+    --changed-file examples/agent-loop-scenario/scripts/verify.sh > "$agent_loop_scenario_report"
+assert_report "$agent_loop_scenario_report" "$agent_loop_scenario_log" agent-loop-scenario
+
 monitored_workflow_script_report="$test_root/monitored-workflow-script-report.json"
 monitored_workflow_script_log="$test_root/monitored-workflow-script.log"
 CLASP_TEST_FAKE_COMMAND_LOG="$monitored_workflow_script_log" \
@@ -453,6 +507,24 @@ CLASP_TEST_FAKE_COMMAND_LOG="$host_runtime_log" \
     --changed-file docs/autonomous-swarm-build-plan.md \
     --changed-file .workspace-ready > "$host_runtime_report"
 assert_report "$host_runtime_report" "$host_runtime_log" host-runtime
+
+safe_workspace_report="$test_root/safe-workspace-report.json"
+safe_workspace_log="$test_root/safe-workspace.log"
+CLASP_TEST_FAKE_COMMAND_LOG="$safe_workspace_log" \
+  run_verify_affected \
+    --changed-file examples/safe-workspace/Main.clasp \
+    --changed-file examples/safe-workspace/Workspace.clasp \
+    --changed-file scripts/test-safe-workspace.sh > "$safe_workspace_report"
+assert_report "$safe_workspace_report" "$safe_workspace_log" safe-workspace
+
+safe_subprocess_report="$test_root/safe-subprocess-report.json"
+safe_subprocess_log="$test_root/safe-subprocess.log"
+CLASP_TEST_FAKE_COMMAND_LOG="$safe_subprocess_log" \
+  run_verify_affected \
+    --changed-file examples/safe-subprocess/Main.clasp \
+    --changed-file examples/safe-subprocess/Process.clasp \
+    --changed-file scripts/test-safe-subprocess.sh > "$safe_subprocess_report"
+assert_report "$safe_subprocess_report" "$safe_subprocess_log" safe-subprocess
 
 source_benchmark_report="$test_root/source-benchmark-report.json"
 source_benchmark_log="$test_root/source-benchmark.log"

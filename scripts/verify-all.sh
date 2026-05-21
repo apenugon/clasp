@@ -43,10 +43,13 @@ bash scripts/test-swarm-ready-gate.sh
 bash scripts/test-swarm-native-managed-loop.sh
 bash scripts/test-monitored-loop.sh
 bash scripts/test-monitored-step.sh
+bash scripts/test-safe-subprocess.sh
 bash scripts/test-monitored-workflow.sh
 bash scripts/test-codex-loop-program.sh
+bash examples/agent-loop-scenario/scripts/verify.sh
 bash scripts/test-js-process-runtime.sh
 bash scripts/test-host-runtime.sh
+bash scripts/test-safe-workspace.sh
 bash scripts/test-goal-manager-child-loop-monitor.sh
 bash scripts/test-feedback-loop-resume.sh
 bash scripts/test-native-runtime.sh
@@ -78,6 +81,7 @@ bash scripts/test-verify-compiler-slice.sh
 bash scripts/test-verify-runtime-slice.sh
 bash scripts/test-promoted-source-export-cache.sh
 bash examples/agent-task-scenario/scripts/verify.sh
+bash examples/agent-loop-scenario/scripts/verify.sh
 bash scripts/test-task-manifest.sh
 '
 

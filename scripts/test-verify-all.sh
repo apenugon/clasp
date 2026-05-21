@@ -50,9 +50,11 @@ cp "$project_root/scripts/test-source-run-cache.sh" "$test_root/scripts/test-sou
 cp "$project_root/scripts/test-native-claspc.sh" "$test_root/scripts/test-native-claspc.sh"
 cp "$project_root/scripts/test-monitored-loop.sh" "$test_root/scripts/test-monitored-loop.sh"
 cp "$project_root/scripts/test-monitored-step.sh" "$test_root/scripts/test-monitored-step.sh"
+cp "$project_root/scripts/test-safe-subprocess.sh" "$test_root/scripts/test-safe-subprocess.sh"
 cp "$project_root/scripts/test-monitored-workflow.sh" "$test_root/scripts/test-monitored-workflow.sh"
 cp "$project_root/scripts/test-codex-loop-program.sh" "$test_root/scripts/test-codex-loop-program.sh"
 cp "$project_root/scripts/test-host-runtime.sh" "$test_root/scripts/test-host-runtime.sh"
+cp "$project_root/scripts/test-safe-workspace.sh" "$test_root/scripts/test-safe-workspace.sh"
 cp "$project_root/scripts/test-goal-manager-child-loop-monitor.sh" "$test_root/scripts/test-goal-manager-child-loop-monitor.sh"
 cp "$project_root/scripts/test-goal-manager-fast.sh" "$test_root/scripts/test-goal-manager-fast.sh"
 cp "$project_root/scripts/test-swarm-ready-gate.sh" "$test_root/scripts/test-swarm-ready-gate.sh"
@@ -80,7 +82,7 @@ grep -F 'bash scripts/test-promoted-source-export-cache.sh' "$test_root/scripts/
 grep -F 'bash scripts/test-native-claspc.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-native-runtime.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/verify-compiler-slice.sh all' "$test_root/scripts/verify-fast.sh" >/dev/null
-grep -F 'bash scripts/verify-runtime-slice.sh process workflow codex-loop' "$test_root/scripts/verify-fast.sh" >/dev/null
+grep -F 'bash scripts/verify-runtime-slice.sh process workflow codex-loop agent-loop workspace' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash examples/agent-task-scenario/scripts/verify.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-verify-affected.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-verify-compiler-slice.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
@@ -125,9 +127,12 @@ grep -F 'command failed (exit %s)' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-native-claspc.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-swarm-ready-gate.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-monitored-step.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'bash scripts/test-safe-subprocess.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-monitored-workflow.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-codex-loop-program.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'bash examples/agent-loop-scenario/scripts/verify.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-host-runtime.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'bash scripts/test-safe-workspace.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-feedback-loop-resume.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash src/scripts/verify.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash examples/agent-task-scenario/scripts/verify.sh' "$test_root/scripts/verify-all.sh" >/dev/null
@@ -141,8 +146,11 @@ grep -F 'examples/compiler-checker.clasp' "$test_root/scripts/test-verify-compil
 grep -F 'examples/compiler-lower.clasp' "$test_root/scripts/test-verify-compiler-slice.sh" >/dev/null
 grep -F 'usage: scripts/verify-runtime-slice.sh' "$test_root/scripts/verify-runtime-slice.sh" >/dev/null
 grep -F 'CLASP_RUNTIME_SLICE_TIMEOUT_SECS' "$test_root/scripts/verify-runtime-slice.sh" >/dev/null
-grep -F 'process workflow codex-loop managed-loop' "$test_root/scripts/verify-runtime-slice.sh" >/dev/null
+grep -F 'process workflow codex-loop agent-loop workspace managed-loop' "$test_root/scripts/verify-runtime-slice.sh" >/dev/null
+grep -F 'scripts/test-safe-subprocess.sh' "$test_root/scripts/verify-runtime-slice.sh" >/dev/null
 grep -F 'scripts/test-monitored-workflow.sh' "$test_root/scripts/test-verify-runtime-slice.sh" >/dev/null
+grep -F 'scripts/test-safe-subprocess.sh' "$test_root/scripts/test-verify-runtime-slice.sh" >/dev/null
+grep -F 'examples/agent-loop-scenario/scripts/verify.sh' "$test_root/scripts/test-verify-runtime-slice.sh" >/dev/null
 grep -F 'scripts/test-swarm-native-managed-loop.sh' "$test_root/scripts/test-verify-runtime-slice.sh" >/dev/null
 grep -F 'CLASP_VERIFY_CHANGED_FILES' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'verificationFallbackMode' "$test_root/scripts/verify-affected.mjs" >/dev/null
@@ -153,6 +161,7 @@ grep -F 'bash scripts/test-verify-compiler-slice.sh' "$test_root/scripts/verify-
 grep -F 'bash scripts/test-verify-runtime-slice.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'bash scripts/verify-runtime-slice.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'bash scripts/test-codex-loop-program.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
+grep -F 'bash scripts/test-safe-subprocess.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'bash scripts/verify-compiler-slice.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'bash scripts/test-promoted-source-export-cache.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'node --check scripts/generate-promoted-source-export-cache.mjs' "$test_root/scripts/verify-affected.mjs" >/dev/null

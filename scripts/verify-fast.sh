@@ -12,7 +12,7 @@ bash scripts/test-native-runtime.sh
 '
 fast_sequential_verify_commands=$'
 bash scripts/verify-compiler-slice.sh all
-bash scripts/verify-runtime-slice.sh process workflow codex-loop
+bash scripts/verify-runtime-slice.sh process workflow codex-loop agent-loop workspace
 bash examples/agent-task-scenario/scripts/verify.sh
 bash scripts/test-js-process-runtime.sh
 bash scripts/test-verify-all.sh
@@ -22,7 +22,7 @@ bash scripts/test-verify-runtime-slice.sh
 '
 fallback_verify_commands=$'
 bash scripts/verify-compiler-slice.sh all
-bash scripts/verify-runtime-slice.sh process workflow codex-loop
+bash scripts/verify-runtime-slice.sh process workflow codex-loop agent-loop workspace
 bash scripts/test-native-claspc-diagnostics.sh
 bash scripts/test-promoted-source-export-cache.sh
 bash examples/agent-task-scenario/scripts/verify.sh

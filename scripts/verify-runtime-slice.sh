@@ -6,15 +6,17 @@ timeout_secs="${CLASP_RUNTIME_SLICE_TIMEOUT_SECS:-180}"
 
 usage() {
   cat <<'EOF'
-usage: scripts/verify-runtime-slice.sh [--list] [process|workflow|codex-loop|managed-loop|all ...]
+usage: scripts/verify-runtime-slice.sh [--list] [process|workflow|codex-loop|agent-loop|workspace|managed-loop|all ...]
 
 Runs focused runtime and orchestration scenario verifiers for fast local
 feedback before the broader verify-all path.
 
 Slices:
-  process       Monitored process step: stdout/stderr/exit/heartbeat artifacts.
+  process       Process primitives: safe subprocess plus monitored stdout/stderr/exit artifacts.
   workflow      Ordinary Clasp monitored workflow with durable status/events.
   codex-loop    Ordinary Clasp program invoking codex exec directly.
+  agent-loop    Ordinary Clasp builder/verifier loop using safe workspace and subprocess APIs.
+  workspace     Root-bounded workspace file API from ordinary Clasp code.
   managed-loop  Native control-plane managed builder/verifier loop.
 
 Environment:
@@ -29,7 +31,7 @@ EOF
 }
 
 list_slices() {
-  printf '%s\n' process workflow codex-loop managed-loop
+  printf '%s\n' process workflow codex-loop agent-loop workspace managed-loop
 }
 
 fail() {
@@ -43,16 +45,23 @@ parse_positive_timeout() {
   fi
 }
 
-script_for_slice() {
+scripts_for_slice() {
   case "$1" in
     process)
       printf '%s\n' "scripts/test-monitored-step.sh"
+      printf '%s\n' "scripts/test-safe-subprocess.sh"
       ;;
     workflow)
       printf '%s\n' "scripts/test-monitored-workflow.sh"
       ;;
     codex-loop)
       printf '%s\n' "scripts/test-codex-loop-program.sh"
+      ;;
+    agent-loop)
+      printf '%s\n' "examples/agent-loop-scenario/scripts/verify.sh"
+      ;;
+    workspace)
+      printf '%s\n' "scripts/test-safe-workspace.sh"
       ;;
     managed-loop)
       printf '%s\n' "scripts/test-swarm-native-managed-loop.sh"
@@ -65,14 +74,17 @@ script_for_slice() {
 
 run_slice() {
   local slice="$1"
+  local script_paths=()
   local script_path=""
 
-  script_path="$(script_for_slice "$slice")"
+  mapfile -t script_paths < <(scripts_for_slice "$slice")
   printf 'verify-runtime-slice: %s\n' "$slice"
-  (
-    cd "$project_root"
-    timeout "$timeout_secs" bash "$script_path"
-  )
+  for script_path in "${script_paths[@]}"; do
+    (
+      cd "$project_root"
+      timeout "$timeout_secs" bash "$script_path"
+    )
+  done
 }
 
 slices=()
@@ -87,9 +99,9 @@ while [[ $# -gt 0 ]]; do
       exit 0
       ;;
     all)
-      slices=(process workflow codex-loop managed-loop)
+      slices=(process workflow codex-loop agent-loop workspace managed-loop)
       ;;
-    process|workflow|codex-loop|managed-loop)
+    process|workflow|codex-loop|agent-loop|workspace|managed-loop)
       slices+=("$1")
       ;;
     *)
@@ -100,7 +112,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ "${#slices[@]}" == "0" ]]; then
-  slices=(process workflow codex-loop)
+  slices=(process workflow codex-loop agent-loop workspace)
 fi
 
 parse_positive_timeout
