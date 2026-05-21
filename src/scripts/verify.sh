@@ -318,6 +318,7 @@ run_parallel_commands() {
     local finished_command=""
     local finished_log_path=""
     local finished_pid=""
+    local fallback_pid=""
 
     if wait -n -p finished_pid; then
       wait_status=0
@@ -327,9 +328,19 @@ run_parallel_commands() {
     finished_pid="${finished_pid:-}"
 
     if [[ -z "$finished_pid" ]]; then
-      printf 'selfhost-native-verify: parallel wait returned without a pid\n' >&2
-      rm -rf "$temp_root"
-      return 1
+      for fallback_pid in "${!pid_to_command[@]}"; do
+        finished_pid="$fallback_pid"
+        break
+      done
+      if [[ -z "$finished_pid" ]]; then
+        printf 'selfhost-native-verify: parallel wait returned without a pid and no tracked jobs remain\n' >&2
+        rm -rf "$temp_root"
+        return 1
+      fi
+      set +e
+      wait "$finished_pid"
+      wait_status=$?
+      set -e
     fi
 
     finished_log_path="${pid_to_log[$finished_pid]:-}"

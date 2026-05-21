@@ -165,9 +165,30 @@ grep -F 'bash scripts/test-host-runtime.sh' "$test_root/scripts/verify-all.sh" >
 grep -F 'bash scripts/test-safe-workspace.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-feedback-loop-resume.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash src/scripts/verify.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'selfhost-native-verify: parallel wait returned without a pid and no tracked jobs remain' "$test_root/src/scripts/verify.sh" >/dev/null
+grep -F 'local fallback_pid=""' "$test_root/src/scripts/verify.sh" >/dev/null
+grep -F 'wait "$finished_pid"' "$test_root/src/scripts/verify.sh" >/dev/null
 grep -F 'bash examples/agent-metadata/scripts/verify.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash examples/agent-task-scenario/scripts/verify.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-js-emitter-determinism.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'parallel wait returned without a pid and no tracked jobs remain' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'local fallback_pid=""' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'wait "$finished_pid"' "$test_root/scripts/verify-all.sh" >/dev/null
+node - "$test_root/scripts/verify-all.sh" <<'NODE'
+const fs = require("fs");
+const script = fs.readFileSync(process.argv[2], "utf8");
+const match = script.match(/full_sequential_verify_commands=\$'([\s\S]*?)'\n/);
+if (!match) {
+  throw new Error("missing full sequential verify commands");
+}
+const count = match[1]
+  .split(/\n/)
+  .filter((line) => line.trim() === "bash scripts/test-js-emitter-determinism.sh")
+  .length;
+if (count !== 1) {
+  throw new Error(`verify-all should run test-js-emitter-determinism exactly once, saw ${count}`);
+}
+NODE
 grep -F 'bash scripts/test-verify-affected.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-verify-compiler-slice.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-verify-runtime-slice.sh' "$test_root/scripts/verify-all.sh" >/dev/null

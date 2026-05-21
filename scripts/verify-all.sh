@@ -64,7 +64,6 @@ bash examples/agent-metadata/scripts/verify.sh
 bash examples/agent-task-scenario/scripts/verify.sh
 bash scripts/test-verify-all.sh
 bash scripts/test-verify-affected.sh
-bash scripts/test-js-emitter-determinism.sh
 bash scripts/test-verify-compiler-slice.sh
 bash scripts/test-verify-runtime-slice.sh
 bash examples/lead-app-ts/scripts/verify.sh
@@ -509,6 +508,7 @@ run_parallel_commands() {
     local finished_command=""
     local finished_log_path=""
     local finished_pid=""
+    local fallback_pid=""
     local finished_started_ms=0
     local finished_ended_ms=0
     local killed_status=0
@@ -521,9 +521,19 @@ run_parallel_commands() {
     finished_pid="${finished_pid:-}"
 
     if [[ -z "$finished_pid" ]]; then
-      printf '%s: parallel wait returned without a pid\n' "$verify_label" >&2
-      rm -rf "$temp_root"
-      return 1
+      for fallback_pid in "${!pid_to_command[@]}"; do
+        finished_pid="$fallback_pid"
+        break
+      done
+      if [[ -z "$finished_pid" ]]; then
+        printf '%s: parallel wait returned without a pid and no tracked jobs remain\n' "$verify_label" >&2
+        rm -rf "$temp_root"
+        return 1
+      fi
+      set +e
+      wait "$finished_pid"
+      wait_status=$?
+      set -e
     fi
 
     finished_log_path="${pid_to_log[$finished_pid]:-}"
