@@ -1086,6 +1086,19 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
       addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "GoalManager fast harness", file);
     }
 
+    if (file === "scripts/ensure-goal-manager-binary.sh") {
+      matched = true;
+      reason(file, "goal-manager-binary-helper", "GoalManager binary helper uses shell syntax plus focused cache/stale-reuse regression coverage");
+      addSelected(
+        selectedByCommand,
+        `bash-syntax:${file}`,
+        `bash -n ${shellQuote(file)}`,
+        "GoalManager binary helper shell syntax",
+        file,
+      );
+      addSelected(selectedByCommand, "verify-all-regression", COMMANDS.verifyAllRegression, "GoalManager binary helper regression", file);
+    }
+
     if (file === "scripts/test-swarm-ready-gate.sh") {
       matched = true;
       reason(file, "swarm-ready-gate-harness", "swarm-ready gate uses shell syntax plus its focused structural coverage");

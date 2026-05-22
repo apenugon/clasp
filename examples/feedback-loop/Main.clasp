@@ -1221,6 +1221,8 @@ baselineExcludeFlags =
     "--exclude=*/help ",
     "--exclude=--help ",
     "--exclude=*/--help ",
+    "--exclude=native-verify-cache ",
+    "--exclude=*/native-verify-cache ",
     "--exclude=src/native-verify-cache ",
     "--exclude=*/src/native-verify-cache "
   ]

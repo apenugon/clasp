@@ -755,7 +755,7 @@ else
     exit 1
   fi
   sed -n '1,120p' "$goal_manager_ensure_stderr" >&2 || true
-  if grep -F 'using stale goal manager binary' "$goal_manager_ensure_stderr" >/dev/null 2>&1; then
+  if grep -F 'using validated stale goal manager binary' "$goal_manager_ensure_stderr" >/dev/null 2>&1; then
     goal_manager_binary_fresh=0
   fi
   goal_manager_binary="$goal_manager_live_binary"

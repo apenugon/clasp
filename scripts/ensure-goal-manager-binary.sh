@@ -26,6 +26,7 @@ claspc_bin="${CLASP_GOAL_MANAGER_CLASPC_BIN:-$("$project_root/scripts/resolve-cl
 compile_timeout_secs="${CLASP_GOAL_MANAGER_COMPILE_TIMEOUT_SECS:-180}"
 compile_attempts="${CLASP_GOAL_MANAGER_COMPILE_ATTEMPTS:-2}"
 allow_stale_on_compile_failure="${CLASP_GOAL_MANAGER_ALLOW_STALE_ON_COMPILE_FAILURE:-1}"
+stale_smoke_timeout_secs="${CLASP_GOAL_MANAGER_STALE_SMOKE_TIMEOUT_SECS:-5}"
 goal_manager_native_bundle_jobs="${CLASP_NATIVE_BUNDLE_JOBS:-8}"
 goal_manager_native_image_section_jobs="${CLASP_NATIVE_IMAGE_SECTION_JOBS:-8}"
 goal_manager_native_image_monolithic_decl_threshold="${CLASP_NATIVE_IMAGE_MONOLITHIC_DECL_THRESHOLD:-999999}"
@@ -267,22 +268,73 @@ sync_goal_manager_alias() {
   mv "$alias_tmp" "$alias_path"
 }
 
-find_stale_goal_manager_binary() {
+emit_stale_goal_manager_candidates() {
   local candidate
+  local -A seen=()
 
   for candidate in "${alias_paths[@]}"; do
-    if [[ -x "$candidate" ]]; then
+    if [[ -x "$candidate" && -z "${seen[$candidate]:-}" ]]; then
+      seen["$candidate"]=1
       printf '%s\n' "$candidate"
-      return 0
     fi
   done
 
   while IFS= read -r candidate; do
-    if [[ -n "$candidate" && "$candidate" != "$goal_manager_binary" && -x "$candidate" ]]; then
+    if [[ -n "$candidate" && "$candidate" != "$goal_manager_binary" && -x "$candidate" && -z "${seen[$candidate]:-}" ]]; then
+      seen["$candidate"]=1
+      printf '%s\n' "$candidate"
+    fi
+  done < <(find "$cache_root" -mindepth 2 -maxdepth 2 -type f -name swarm-goal-manager -printf '%T@ %p\n' 2>/dev/null | sort -nr | cut -d' ' -f2-)
+}
+
+validate_stale_goal_manager_binary() {
+  local candidate="$1"
+  local smoke_root
+  local smoke_output
+  local smoke_status=0
+
+  if ! [[ "$stale_smoke_timeout_secs" =~ ^[0-9]+$ ]]; then
+    stale_smoke_timeout_secs=5
+  fi
+
+  smoke_root="$(mktemp -d "${TMPDIR:-/tmp}/clasp-goal-manager-stale-smoke.XXXXXX")"
+  if (( stale_smoke_timeout_secs > 0 )); then
+    smoke_output="$(
+      timeout --kill-after=2s "$stale_smoke_timeout_secs" \
+        env CLASP_MANAGER_COMMAND=status CLASP_LOOP_COMMAND=status "$candidate" "$smoke_root" 2>&1
+    )" || smoke_status=$?
+  else
+    smoke_output="$(
+      env CLASP_MANAGER_COMMAND=status CLASP_LOOP_COMMAND=status "$candidate" "$smoke_root" 2>&1
+    )" || smoke_status=$?
+  fi
+  rm -rf "$smoke_root"
+
+  if (( smoke_status != 0 )); then
+    printf 'stale goal manager candidate failed status smoke with exit %s: %s\n' "$smoke_status" "$candidate" >&2
+    return 1
+  fi
+  if [[ "$smoke_output" == *"runtime failed to execute native compiler export main"* ]]; then
+    printf 'stale goal manager candidate failed status smoke with native export error: %s\n' "$candidate" >&2
+    return 1
+  fi
+  if [[ "$smoke_output" != *'"state"'* || "$smoke_output" != *'"phase"'* ]]; then
+    printf 'stale goal manager candidate failed status smoke with unexpected output: %s\n' "$candidate" >&2
+    return 1
+  fi
+
+  return 0
+}
+
+find_stale_goal_manager_binary() {
+  local candidate
+
+  while IFS= read -r candidate; do
+    if validate_stale_goal_manager_binary "$candidate"; then
       printf '%s\n' "$candidate"
       return 0
     fi
-  done < <(find "$cache_root" -mindepth 2 -maxdepth 2 -type f -name swarm-goal-manager -printf '%T@ %p\n' 2>/dev/null | sort -nr | cut -d' ' -f2-)
+  done < <(emit_stale_goal_manager_candidates)
 
   return 1
 }
@@ -299,7 +351,7 @@ use_stale_goal_manager_binary() {
     return 1
   fi
 
-  printf 'goal manager compile failed; using stale goal manager binary: %s\n' "$fallback_binary" >&2
+  printf 'goal manager compile failed; using validated stale goal manager binary: %s\n' "$fallback_binary" >&2
   goal_manager_binary="$fallback_binary"
 }
 

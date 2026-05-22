@@ -484,6 +484,8 @@ printf 'changed feedback loop\n' >"$derived_loop_workspace_root/examples/feedbac
 mkdir -p "$derived_loop_workspace_root/runtime/target/debug"
 printf 'Signature: 8a477f597d28d172789f06886806bc55\n' >"$derived_loop_workspace_root/runtime/target/CACHEDIR.TAG"
 printf 'generated runtime build noise\n' >"$derived_loop_workspace_root/runtime/target/debug/generated.txt"
+mkdir -p "$derived_loop_workspace_root/src/native-verify-cache/xdg/generated"
+printf 'generated native verify cache noise\n' >"$derived_loop_workspace_root/src/native-verify-cache/xdg/generated/cache.txt"
 cat >"$derived_loop_state_root/state.json" <<'JSON'
 {"attempt":1,"phase":"verifier-step-ready","verdict":"pending","completed":false,"builderRuns":1,"verifierRuns":1,"healthy":true,"needsAttention":false,"attentionReason":"","final":false}
 JSON
@@ -516,6 +518,11 @@ if grep -F 'bash scripts/verify-fast.sh' "$derived_loop_state_root/focused-verif
 fi
 if grep -E '^(---|\+\+\+) ' "$derived_loop_state_root/changes-1.diff" | grep -F 'runtime/target' >/dev/null; then
   printf 'loop-only focused diff unexpectedly included runtime/target noise\n' >&2
+  sed -n '1,120p' "$derived_loop_state_root/changes-1.diff" >&2
+  exit 1
+fi
+if grep -E '^(---|\+\+\+) ' "$derived_loop_state_root/changes-1.diff" | grep -F 'src/native-verify-cache' >/dev/null; then
+  printf 'loop-only focused diff unexpectedly included native verify cache noise\n' >&2
   sed -n '1,120p' "$derived_loop_state_root/changes-1.diff" >&2
   exit 1
 fi

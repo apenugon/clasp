@@ -451,6 +451,29 @@ switch (scenario) {
     assert(logHas("scripts/test-goal-manager-fast.sh"), "fake GoalManager fast command should execute");
     assert(logHas("scripts/test-swarm-ready-gate.sh"), "fake swarm-ready command should execute");
     break;
+  case "goal-manager-binary-helper":
+    assert(report.changedFiles.includes("scripts/ensure-goal-manager-binary.sh"), "GoalManager binary helper should be present");
+    assert(hasCommand("bash -n 'scripts/ensure-goal-manager-binary.sh'"), "GoalManager binary helper should run shell syntax check");
+    assert(hasCommand("bash scripts/test-verify-all.sh"), "GoalManager binary helper should run focused cache/stale regression coverage");
+    assert(!hasCommand("bash scripts/test-selfhost.sh"), "GoalManager binary helper route should avoid broad selfhost coverage");
+    assert(report.usedVerifyFastFallback === false, "known GoalManager binary helper should not use verify-fast fallback");
+    assert(logHas("scripts/test-verify-all.sh"), "fake verify-all regression command should execute");
+    break;
+  case "verify-harness-mixed":
+    assert(report.changedFiles.includes("scripts/verify-all.sh"), "verify-all harness should be present");
+    assert(report.changedFiles.includes("scripts/test-verify-all.sh"), "verify-all regression harness should be present");
+    assert(report.changedFiles.includes("src/scripts/verify.sh"), "selfhost native verify script should be present");
+    assert(hasCommand("bash -n 'scripts/verify-all.sh'"), "verify-all harness should run shell syntax check");
+    assert(hasCommand("bash -n 'scripts/test-verify-all.sh'"), "verify-all regression harness should run shell syntax check");
+    assert(hasCommand("bash -n 'src/scripts/verify.sh'"), "selfhost native verify script should run shell syntax check");
+    assert(hasCommand("bash scripts/test-verify-all.sh"), "verify harness changes should run focused verify-all regression");
+    assert(hasCommand("bash scripts/test-selfhost-verify-mode-split.sh"), "selfhost native verify script should run focused mode split regression");
+    assert(!hasCommand("bash scripts/test-selfhost.sh"), "mixed verifier harness route should avoid broad selfhost coverage");
+    assert(!hasCommand("bash src/scripts/verify.sh"), "mixed verifier harness route should avoid recursive hosted source verification");
+    assert(report.usedVerifyFastFallback === false, "known mixed verifier harness inputs should not use verify-fast fallback");
+    assert(logHas("scripts/test-verify-all.sh"), "fake verify-all regression command should execute");
+    assert(logHas("scripts/test-selfhost-verify-mode-split.sh"), "fake selfhost verify mode split command should execute");
+    break;
   case "planner-report-decode":
     assert(report.changedFiles.includes("examples/swarm-native/GoalManagerReportIO.clasp"), "planner report IO source should be present");
     assert(report.changedFiles.includes("scripts/test-goal-manager-planner-report-decode.sh"), "planner report decode harness should be present");
@@ -699,6 +722,21 @@ goal_manager_log="$test_root/goal-manager.log"
 CLASP_TEST_FAKE_COMMAND_LOG="$goal_manager_log" \
   run_verify_affected --changed-file scripts/test-goal-manager-fast.sh --changed-file scripts/test-swarm-ready-gate.sh > "$goal_manager_report"
 assert_report "$goal_manager_report" "$goal_manager_log" goal-manager-fast-script
+
+goal_manager_binary_helper_report="$test_root/goal-manager-binary-helper-report.json"
+goal_manager_binary_helper_log="$test_root/goal-manager-binary-helper.log"
+CLASP_TEST_FAKE_COMMAND_LOG="$goal_manager_binary_helper_log" \
+  run_verify_affected --changed-file scripts/ensure-goal-manager-binary.sh > "$goal_manager_binary_helper_report"
+assert_report "$goal_manager_binary_helper_report" "$goal_manager_binary_helper_log" goal-manager-binary-helper
+
+verify_harness_mixed_report="$test_root/verify-harness-mixed-report.json"
+verify_harness_mixed_log="$test_root/verify-harness-mixed.log"
+CLASP_TEST_FAKE_COMMAND_LOG="$verify_harness_mixed_log" \
+  run_verify_affected \
+    --changed-file scripts/verify-all.sh \
+    --changed-file scripts/test-verify-all.sh \
+    --changed-file src/scripts/verify.sh > "$verify_harness_mixed_report"
+assert_report "$verify_harness_mixed_report" "$verify_harness_mixed_log" verify-harness-mixed
 
 planner_report_decode_report="$test_root/planner-report-decode-report.json"
 planner_report_decode_log="$test_root/planner-report-decode.log"

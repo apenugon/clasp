@@ -260,6 +260,7 @@ grep -F 'fast_verify_fixture_root="$verify_root/fast-project"' "$test_root/src/s
 grep -F 'CLASP_GOAL_MANAGER_COMPILE_TIMEOUT_SECS' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
 grep -F 'CLASP_GOAL_MANAGER_COMPILE_ATTEMPTS' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
 grep -F 'CLASP_GOAL_MANAGER_ALLOW_STALE_ON_COMPILE_FAILURE' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
+grep -F 'CLASP_GOAL_MANAGER_STALE_SMOKE_TIMEOUT_SECS' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
 grep -F 'GoalManager.clasp' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
 grep -F 'GoalManager.wrapper.clasp' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
 grep -F 'GoalManagerProgram2.split.clasp' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
@@ -276,6 +277,8 @@ grep -F 'emit_goal_manager_file_cache_hash()' "$test_root/scripts/ensure-goal-ma
 grep -F 'sha256sum "$claspc_bin" | awk' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
 grep -F 'default_cache_parent="${XDG_CACHE_HOME:-/tmp/clasp-nix-cache}"' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
 grep -F 'compile_lock="$(dirname "$goal_manager_binary")/compile.lock"' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
+grep -F 'emit_stale_goal_manager_candidates()' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
+grep -F 'validate_stale_goal_manager_binary()' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
 grep -F 'find_stale_goal_manager_binary()' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
 grep -F 'use_stale_goal_manager_binary()' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
 
@@ -305,6 +308,10 @@ goal_manager_stale_stderr="$test_root/goal-manager-stale.stderr"
 mkdir -p "$(dirname "$goal_manager_stale_alias")"
 cat > "$goal_manager_stale_alias" <<'EOF'
 #!/usr/bin/env bash
+if [[ "${CLASP_MANAGER_COMMAND:-}" == "status" || "${CLASP_LOOP_COMMAND:-}" == "status" ]]; then
+  printf '{"state":{"phase":"needs-planner","verdict":"pending"}}\n'
+  exit 0
+fi
 printf 'stale-goal-manager-ok\n'
 EOF
 chmod +x "$goal_manager_stale_alias"
@@ -319,7 +326,27 @@ goal_manager_stale_binary="$(
 )"
 [[ "$goal_manager_stale_binary" == "$goal_manager_stale_alias" ]]
 "$goal_manager_stale_binary" | grep -F 'stale-goal-manager-ok' >/dev/null
-grep -F 'goal manager compile failed; using stale goal manager binary:' "$goal_manager_stale_stderr" >/dev/null
+grep -F 'goal manager compile failed; using validated stale goal manager binary:' "$goal_manager_stale_stderr" >/dev/null
+
+goal_manager_invalid_stale_alias="$test_root/goal-manager-invalid-stale-alias/swarm-goal-manager"
+goal_manager_invalid_stale_stderr="$test_root/goal-manager-invalid-stale.stderr"
+mkdir -p "$(dirname "$goal_manager_invalid_stale_alias")"
+cat > "$goal_manager_invalid_stale_alias" <<'EOF'
+#!/usr/bin/env bash
+printf 'stale-goal-manager-without-status-smoke\n'
+EOF
+chmod +x "$goal_manager_invalid_stale_alias"
+if CLASP_GOAL_MANAGER_CLASPC_BIN="$test_root/bin/fake-slow-claspc" \
+  CLASP_GOAL_MANAGER_CACHE_DIR="$test_root/goal-manager-invalid-stale-cache" \
+  CLASP_GOAL_MANAGER_COMPILE_TIMEOUT_SECS=1 \
+  CLASP_GOAL_MANAGER_COMPILE_ATTEMPTS=1 \
+  "$bash_bin" "$test_root/scripts/ensure-goal-manager-binary.sh" \
+  --alias "$goal_manager_invalid_stale_alias" \
+  >/dev/null 2>"$goal_manager_invalid_stale_stderr"; then
+  echo "expected invalid stale goal manager binary to be rejected" >&2
+  exit 1
+fi
+grep -F 'stale goal manager candidate failed status smoke with unexpected output:' "$goal_manager_invalid_stale_stderr" >/dev/null
 
 cat > "$test_root/bin/fake-fast-claspc" <<'EOF'
 #!/usr/bin/env bash
