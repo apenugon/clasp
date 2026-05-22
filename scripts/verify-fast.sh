@@ -90,7 +90,7 @@ fi
 
 fast_parallel_verify_commands=$'
 bash scripts/test-native-claspc-diagnostics.sh
-bash scripts/test-selfhost.sh
+bash src/scripts/verify.sh
 bash scripts/test-source-run-cache.sh
 bash scripts/test-promoted-source-export-cache.sh
 bash scripts/test-native-runtime.sh
@@ -113,6 +113,7 @@ fallback_verify_commands=$'
 bash scripts/verify-compiler-slice.sh all
 bash scripts/test-record-update-parity.sh
 bash scripts/verify-runtime-slice.sh process workflow codex-loop agent-loop workspace
+bash src/scripts/verify.sh
 bash scripts/test-native-claspc-diagnostics.sh
 bash scripts/test-native-claspc-smoke.sh
 bash scripts/test-promoted-source-export-cache.sh

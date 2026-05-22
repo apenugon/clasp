@@ -81,7 +81,11 @@ printf 'fake-claspc\n'
 EOF
 chmod +x "$test_root/bin/fake-claspc"
 
-grep -F 'bash scripts/test-selfhost.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
+grep -F 'bash src/scripts/verify.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
+if grep -F 'bash scripts/test-selfhost.sh' "$test_root/scripts/verify-fast.sh" >/dev/null 2>&1; then
+  printf 'fast verification should use the focused selfhost verifier, not broad test-selfhost\n' >&2
+  exit 1
+fi
 grep -F 'bash scripts/test-native-claspc-diagnostics.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-source-run-cache.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-promoted-source-export-cache.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
