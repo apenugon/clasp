@@ -63,6 +63,7 @@ cp "$project_root/scripts/test-goal-manager-fast.sh" "$test_root/scripts/test-go
 cp "$project_root/scripts/test-swarm-ready-gate.sh" "$test_root/scripts/test-swarm-ready-gate.sh"
 cp "$project_root/scripts/test-swarm-native-feedback-loop.sh" "$test_root/scripts/test-swarm-native-feedback-loop.sh"
 cp "$project_root/scripts/test-feedback-loop-resume.sh" "$test_root/scripts/test-feedback-loop-resume.sh"
+cp "$project_root/scripts/test-feedback-loop-routing.sh" "$test_root/scripts/test-feedback-loop-routing.sh"
 cp "$project_root/scripts/ensure-goal-manager-binary.sh" "$test_root/scripts/ensure-goal-manager-binary.sh"
 cp "$project_root/src/scripts/verify.sh" "$test_root/src/scripts/verify.sh"
 cp "$project_root/src/scripts/run-native-tool.sh" "$test_root/src/scripts/run-native-tool.sh"
@@ -225,7 +226,8 @@ grep -F 'bash scripts/test-selfhost-verify-mode-split.sh' "$test_root/scripts/ve
 grep -F 'bash scripts/verify-runtime-slice.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'bash scripts/test-codex-loop-program.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'bash scripts/test-safe-subprocess.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
-grep -F 'bash scripts/test-feedback-loop-resume.sh loop-routing' "$test_root/scripts/verify-affected.mjs" >/dev/null
+grep -F 'bash scripts/test-feedback-loop-routing.sh loop-routing' "$test_root/scripts/verify-affected.mjs" >/dev/null
+grep -F 'bash scripts/test-feedback-loop-routing.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'bash scripts/test-feedback-loop-resume.sh smoke' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'bash scripts/test-record-update-parity.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'bash scripts/verify-compiler-slice.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null

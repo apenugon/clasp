@@ -1,0 +1,64 @@
+module FocusedSelectionProbe
+
+import FocusedSelection
+
+record FocusedSelectionProbeSnapshot = {
+  loop : FocusedVerifySelection,
+  generatedLoop : FocusedVerifySelection,
+  nativeScenario : FocusedVerifySelection,
+  controlPlane : FocusedVerifySelection,
+  compilerSpeed : FocusedVerifySelection,
+  verifyHarness : FocusedVerifySelection,
+  broad : FocusedVerifySelection,
+  unknown : FocusedVerifySelection,
+  noDiff : FocusedVerifySelection,
+  managerOverride : FocusedVerifySelection,
+  readError : FocusedVerifySelection
+}
+
+probeCacheReportPaths : [Str]
+probeCacheReportPaths = ["missing-native-cache-report.json"]
+
+probeDiffPath : Str
+probeDiffPath = "changes-1.diff"
+
+probeDiffForPath : Str -> Str
+probeDiffForPath path =
+  textJoin "\n" [
+    textConcat ["--- a/", path],
+    textConcat ["+++ b/", path],
+    "@@ -1 +1 @@",
+    "-old",
+    "+new"
+  ]
+
+probeDiffForPaths : [Str] -> Str
+probeDiffForPaths paths = textJoin "\n" (map probeDiffForPath paths)
+
+probeSelection : Str -> FocusedVerifySelection
+probeSelection diffText =
+  focusedSelectionBuildFromDiffText probeDiffPath probeCacheReportPaths diffText
+
+snapshot : FocusedSelectionProbeSnapshot
+snapshot =
+  FocusedSelectionProbeSnapshot {
+    loop = probeSelection (probeDiffForPath "examples/feedback-loop/Main.clasp"),
+    generatedLoop = probeSelection (probeDiffForPaths ["examples/feedback-loop/Main.clasp", "runtime/target/debug/generated.txt"]),
+    nativeScenario = probeSelection (probeDiffForPath "examples/swarm-native/Swarm.clasp"),
+    controlPlane = probeSelection (probeDiffForPath "scripts/ensure-goal-manager-binary.sh"),
+    compilerSpeed = probeSelection (probeDiffForPath "scripts/measure-native-incremental.sh"),
+    verifyHarness = probeSelection (probeDiffForPath "src/scripts/verify.sh"),
+    broad = probeSelection (probeDiffForPath "runtime/claspc.rs"),
+    unknown = probeSelection (probeDiffForPath "README.md"),
+    noDiff = probeSelection "",
+    managerOverride =
+      focusedSelectionBuildFromManager
+        probeDiffPath
+        probeCacheReportPaths
+        ["bash scripts/test-swarm-ready-gate.sh"]
+        (probeDiffForPath "README.md"),
+    readError = focusedSelectionBuildReadError probeDiffPath probeCacheReportPaths "fixture missing"
+  }
+
+main : Str
+main = encode snapshot

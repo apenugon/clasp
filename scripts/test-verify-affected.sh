@@ -203,7 +203,7 @@ switch (scenario) {
     assert(hasCommand("bash scripts/verify-runtime-slice.sh codex-loop"), "feedback-loop route should run ordinary Codex runtime slice coverage");
     assert(hasCommand("bash scripts/verify-runtime-slice.sh managed-loop"), "swarm route should run managed-loop runtime slice coverage");
     assert(hasCommand("bash scripts/verify-runtime-slice.sh swarm-feedback-loop"), "swarm route should run FeedbackLoop runtime slice coverage");
-    assert(hasCommand("bash scripts/test-feedback-loop-resume.sh loop-routing"), "feedback-loop route should run the narrow loop-routing resume scenario");
+    assert(hasCommand("bash scripts/test-feedback-loop-routing.sh loop-routing"), "feedback-loop route should run the lightweight loop-routing selector probe");
     assert(report.selectedCommands.filter((command) => command.command === "bash scripts/test-native-claspc.sh").length === 1, "native claspc command should be deduplicated");
     assert(report.usedVerifyFastFallback === false, "mixed known inputs should not fall back to verify-fast");
     break;
@@ -304,6 +304,14 @@ switch (scenario) {
     assert(report.selectedCommands.filter((command) => command.command === "bash scripts/test-feedback-loop-resume.sh smoke").length === 1, "feedback-loop resume smoke command should be deduplicated");
     assert(report.usedVerifyFastFallback === false, "known feedback-loop resume script should not use verify-fast fallback");
     assert(logHas("scripts/test-feedback-loop-resume.sh smoke"), "fake feedback-loop resume smoke command should execute");
+    break;
+  case "feedback-loop-routing-script":
+    assert(report.changedFiles.includes("scripts/test-feedback-loop-routing.sh"), "feedback-loop routing script should be present");
+    assert(hasCommand("bash -n 'scripts/test-feedback-loop-routing.sh'"), "feedback-loop routing script should run shell syntax check");
+    assert(hasCommand("bash scripts/test-feedback-loop-routing.sh"), "feedback-loop routing script should run the lightweight selector probe");
+    assert(report.selectedCommands.filter((command) => command.command === "bash scripts/test-feedback-loop-routing.sh").length === 1, "feedback-loop routing command should be deduplicated");
+    assert(report.usedVerifyFastFallback === false, "known feedback-loop routing script should not use verify-fast fallback");
+    assert(logHas("scripts/test-feedback-loop-routing.sh"), "fake feedback-loop routing command should execute");
     break;
   case "compiler-slice-fixture":
     assert(report.changedFiles.includes("examples/compiler-checker.clasp"), "compiler checker fixture should be present");
@@ -627,6 +635,13 @@ CLASP_TEST_FAKE_COMMAND_LOG="$feedback_loop_resume_script_log" \
   run_verify_affected \
     --changed-file scripts/test-feedback-loop-resume.sh > "$feedback_loop_resume_script_report"
 assert_report "$feedback_loop_resume_script_report" "$feedback_loop_resume_script_log" feedback-loop-resume-script
+
+feedback_loop_routing_script_report="$test_root/feedback-loop-routing-script-report.json"
+feedback_loop_routing_script_log="$test_root/feedback-loop-routing-script.log"
+CLASP_TEST_FAKE_COMMAND_LOG="$feedback_loop_routing_script_log" \
+  run_verify_affected \
+    --changed-file scripts/test-feedback-loop-routing.sh > "$feedback_loop_routing_script_report"
+assert_report "$feedback_loop_routing_script_report" "$feedback_loop_routing_script_log" feedback-loop-routing-script
 
 agent_task_scenario_report="$test_root/agent-task-scenario-report.json"
 agent_task_scenario_log="$test_root/agent-task-scenario.log"

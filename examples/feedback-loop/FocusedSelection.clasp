@@ -1,0 +1,522 @@
+module FocusedSelection
+
+record FocusedVerifySelection = {
+  source : Str,
+  diffPath : Str,
+  changedSurfaceCategories : [Str],
+  commands : [Str],
+  reason : Str,
+  fallbackReason : Str,
+  cacheEvidence : [Str],
+  checkEvidence : [Str]
+}
+
+record DiffFocusedState = {
+  changed : Bool,
+  broad : Bool,
+  unknown : Bool,
+  loop : Bool,
+  nativeScenario : Bool,
+  compilerSpeed : Bool,
+  controlPlane : Bool,
+  verifyHarness : Bool
+}
+
+focusedSelectionEmptyTexts : [Str]
+focusedSelectionEmptyTexts = []
+
+focusedSelectionNonEmptyText : Str -> Bool
+focusedSelectionNonEmptyText value = value != ""
+
+focusedSelectionTextIncludes : Str -> Str -> Bool
+focusedSelectionTextIncludes value needle = length (textSplit value needle) > 1
+
+focusedSelectionVerifyFastCommands : [Str]
+focusedSelectionVerifyFastCommands = ["bash scripts/verify-fast.sh"]
+
+focusedSelectionNoDiffCommands : [Str]
+focusedSelectionNoDiffCommands = ["$(scripts/resolve-claspc.sh) --json check examples/feedback-loop/Main.clasp"]
+
+focusedSelectionFeedbackLoopCommands : [Str]
+focusedSelectionFeedbackLoopCommands = [
+  "$(scripts/resolve-claspc.sh) --json check examples/feedback-loop/Main.clasp",
+  "$(scripts/resolve-claspc.sh) --json check examples/feedback-loop/ProcessDemo.clasp",
+  "bash scripts/test-feedback-loop-routing.sh loop-routing",
+  "bash scripts/test-swarm-ready-gate.sh"
+]
+
+focusedSelectionControlPlaneCommands : [Str]
+focusedSelectionControlPlaneCommands = [
+  "$(scripts/resolve-claspc.sh) --json check examples/swarm-native/GoalManager.clasp",
+  "bash scripts/test-goal-manager-fast.sh",
+  "bash scripts/test-swarm-ready-gate.sh"
+]
+
+focusedSelectionNativeScenarioCommands : [Str]
+focusedSelectionNativeScenarioCommands = [
+  "$(scripts/resolve-claspc.sh) --json check examples/swarm-native/Main.clasp",
+  "bash scripts/test-native-claspc.sh",
+  "bash scripts/test-swarm-ready-gate.sh"
+]
+
+focusedSelectionCompilerSpeedCommands : [Str]
+focusedSelectionCompilerSpeedCommands = [
+  "bash -n scripts/measure-native-incremental.sh scripts/test-native-incremental-guard.sh scripts/test-selfhost.sh",
+  "node --check scripts/native-incremental-guard.mjs",
+  "bash scripts/test-native-incremental-guard.sh"
+]
+
+focusedSelectionVerifyHarnessCommands : [Str]
+focusedSelectionVerifyHarnessCommands = [
+  "bash scripts/test-verify-all.sh",
+  "bash scripts/test-swarm-ready-gate.sh"
+]
+
+focusedSelectionEmptyDiffState : DiffFocusedState
+focusedSelectionEmptyDiffState =
+  DiffFocusedState {
+    changed = false,
+    broad = false,
+    unknown = false,
+    loop = false,
+    nativeScenario = false,
+    compilerSpeed = false,
+    controlPlane = false,
+    verifyHarness = false
+  }
+
+focusedSelectionDiffLinePathText : Str -> Str
+focusedSelectionDiffLinePathText line =
+  match textPrefix line "+++ " {
+    Ok tail ->
+      tail,
+    Err notPlus ->
+      match textPrefix line "--- " {
+        Ok tail ->
+          tail,
+        Err notMinus ->
+          ""
+      }
+  }
+
+focusedSelectionDiffPathTouchesBroadCompilerRuntime : Str -> Bool
+focusedSelectionDiffPathTouchesBroadCompilerRuntime pathText =
+  if focusedSelectionTextIncludes pathText "/src/scripts/verify.sh" then
+    false
+  else if focusedSelectionTextIncludes pathText "/src/" then
+    true
+  else
+    focusedSelectionTextIncludes pathText "/runtime/"
+
+focusedSelectionDiffPathIsGeneratedRuntimeTarget : Str -> Bool
+focusedSelectionDiffPathIsGeneratedRuntimeTarget pathText =
+  if focusedSelectionTextIncludes pathText "/runtime/target/" then
+    true
+  else
+    focusedSelectionTextIncludes pathText "/runtime/target"
+
+focusedSelectionDiffPathTouchesLoop : Str -> Bool
+focusedSelectionDiffPathTouchesLoop pathText =
+  if focusedSelectionTextIncludes pathText "/examples/feedback-loop/" then
+    true
+  else if focusedSelectionTextIncludes pathText "/scripts/test-feedback-loop-resume.sh" then
+    true
+  else if focusedSelectionTextIncludes pathText "/scripts/test-feedback-loop-routing.sh" then
+    true
+  else
+    focusedSelectionTextIncludes pathText "/scripts/test-swarm-ready-gate.sh"
+
+focusedSelectionDiffPathTouchesControlPlane : Str -> Bool
+focusedSelectionDiffPathTouchesControlPlane pathText =
+  if focusedSelectionTextIncludes pathText "/examples/swarm-native/GoalManager" then
+    true
+  else if focusedSelectionTextIncludes pathText "/scripts/ensure-goal-manager-binary.sh" then
+    true
+  else if focusedSelectionTextIncludes pathText "/examples/swarm-native/Service.clasp" then
+    true
+  else if focusedSelectionTextIncludes pathText "/examples/swarm-native/FeedbackLoop.clasp" then
+    true
+  else if focusedSelectionTextIncludes pathText "/scripts/test-goal-manager-fast.sh" then
+    true
+  else
+    false
+
+focusedSelectionDiffPathTouchesNativeScenario : Str -> Bool
+focusedSelectionDiffPathTouchesNativeScenario pathText =
+  if focusedSelectionTextIncludes pathText "/examples/swarm-native/Swarm.clasp" then
+    true
+  else if focusedSelectionTextIncludes pathText "/examples/swarm-native/Main.clasp" then
+    true
+  else
+    focusedSelectionTextIncludes pathText "/scripts/test-native-claspc.sh"
+
+focusedSelectionDiffPathTouchesCompilerSpeed : Str -> Bool
+focusedSelectionDiffPathTouchesCompilerSpeed pathText =
+  if focusedSelectionTextIncludes pathText "/scripts/measure-native-incremental.sh" then
+    true
+  else if focusedSelectionTextIncludes pathText "/scripts/native-incremental-guard.mjs" then
+    true
+  else if focusedSelectionTextIncludes pathText "/scripts/test-native-incremental-guard.sh" then
+    true
+  else
+    focusedSelectionTextIncludes pathText "/scripts/test-selfhost.sh"
+
+focusedSelectionDiffPathTouchesVerifyHarness : Str -> Bool
+focusedSelectionDiffPathTouchesVerifyHarness pathText =
+  if focusedSelectionTextIncludes pathText "/scripts/verify-fast.sh" then
+    true
+  else if focusedSelectionTextIncludes pathText "/scripts/verify-all.sh" then
+    true
+  else if focusedSelectionTextIncludes pathText "/scripts/verify-affected.mjs" then
+    true
+  else if focusedSelectionTextIncludes pathText "/scripts/test-verify-affected.sh" then
+    true
+  else if focusedSelectionTextIncludes pathText "/scripts/test-selfhost-verify-mode-split.sh" then
+    true
+  else if focusedSelectionTextIncludes pathText "/src/scripts/verify.sh" then
+    true
+  else
+    focusedSelectionTextIncludes pathText "/scripts/test-verify-all.sh"
+
+focusedSelectionMarkBroad : DiffFocusedState -> DiffFocusedState
+focusedSelectionMarkBroad state =
+  DiffFocusedState {
+    changed = true,
+    broad = true,
+    unknown = state.unknown,
+    loop = state.loop,
+    nativeScenario = state.nativeScenario,
+    compilerSpeed = state.compilerSpeed,
+    controlPlane = state.controlPlane,
+    verifyHarness = state.verifyHarness
+  }
+
+focusedSelectionMarkUnknown : DiffFocusedState -> DiffFocusedState
+focusedSelectionMarkUnknown state =
+  DiffFocusedState {
+    changed = true,
+    broad = state.broad,
+    unknown = true,
+    loop = state.loop,
+    nativeScenario = state.nativeScenario,
+    compilerSpeed = state.compilerSpeed,
+    controlPlane = state.controlPlane,
+    verifyHarness = state.verifyHarness
+  }
+
+focusedSelectionMarkLoop : DiffFocusedState -> DiffFocusedState
+focusedSelectionMarkLoop state =
+  DiffFocusedState {
+    changed = true,
+    broad = state.broad,
+    unknown = state.unknown,
+    loop = true,
+    nativeScenario = state.nativeScenario,
+    compilerSpeed = state.compilerSpeed,
+    controlPlane = state.controlPlane,
+    verifyHarness = state.verifyHarness
+  }
+
+focusedSelectionMarkNativeScenario : DiffFocusedState -> DiffFocusedState
+focusedSelectionMarkNativeScenario state =
+  DiffFocusedState {
+    changed = true,
+    broad = state.broad,
+    unknown = state.unknown,
+    loop = state.loop,
+    nativeScenario = true,
+    compilerSpeed = state.compilerSpeed,
+    controlPlane = state.controlPlane,
+    verifyHarness = state.verifyHarness
+  }
+
+focusedSelectionMarkCompilerSpeed : DiffFocusedState -> DiffFocusedState
+focusedSelectionMarkCompilerSpeed state =
+  DiffFocusedState {
+    changed = true,
+    broad = state.broad,
+    unknown = state.unknown,
+    loop = state.loop,
+    nativeScenario = state.nativeScenario,
+    compilerSpeed = true,
+    controlPlane = state.controlPlane,
+    verifyHarness = state.verifyHarness
+  }
+
+focusedSelectionMarkControlPlane : DiffFocusedState -> DiffFocusedState
+focusedSelectionMarkControlPlane state =
+  DiffFocusedState {
+    changed = true,
+    broad = state.broad,
+    unknown = state.unknown,
+    loop = state.loop,
+    nativeScenario = state.nativeScenario,
+    compilerSpeed = state.compilerSpeed,
+    controlPlane = true,
+    verifyHarness = state.verifyHarness
+  }
+
+focusedSelectionMarkVerifyHarness : DiffFocusedState -> DiffFocusedState
+focusedSelectionMarkVerifyHarness state =
+  DiffFocusedState {
+    changed = true,
+    broad = state.broad,
+    unknown = state.unknown,
+    loop = state.loop,
+    nativeScenario = state.nativeScenario,
+    compilerSpeed = state.compilerSpeed,
+    controlPlane = state.controlPlane,
+    verifyHarness = true
+  }
+
+focusedSelectionClassifyDiffLine : DiffFocusedState -> Str -> DiffFocusedState
+focusedSelectionClassifyDiffLine state line = {
+  let pathText = focusedSelectionDiffLinePathText line in
+  if pathText == "" then
+    state
+  else if focusedSelectionTextIncludes pathText "/dev/null" then
+    state
+  else if focusedSelectionDiffPathIsGeneratedRuntimeTarget pathText then
+    state
+  else if focusedSelectionDiffPathTouchesVerifyHarness pathText then
+    focusedSelectionMarkVerifyHarness state
+  else if focusedSelectionDiffPathTouchesBroadCompilerRuntime pathText then
+    focusedSelectionMarkBroad state
+  else if focusedSelectionDiffPathTouchesLoop pathText then
+    focusedSelectionMarkLoop state
+  else if focusedSelectionDiffPathTouchesNativeScenario pathText then
+    focusedSelectionMarkNativeScenario state
+  else if focusedSelectionDiffPathTouchesCompilerSpeed pathText then
+    focusedSelectionMarkCompilerSpeed state
+  else if focusedSelectionDiffPathTouchesControlPlane pathText then
+    focusedSelectionMarkControlPlane state
+  else
+    focusedSelectionMarkUnknown state
+}
+
+focusedSelectionClassifyDiffText : Str -> DiffFocusedState
+focusedSelectionClassifyDiffText diffText =
+  fold focusedSelectionClassifyDiffLine focusedSelectionEmptyDiffState (textSplit diffText "\n")
+
+focusedSelectionKnownCommands : DiffFocusedState -> [Str]
+focusedSelectionKnownCommands state = {
+  let loopCommands = if state.loop then focusedSelectionFeedbackLoopCommands else focusedSelectionEmptyTexts in
+  let nativeCommands = if state.nativeScenario then focusedSelectionNativeScenarioCommands else focusedSelectionEmptyTexts in
+  let speedCommands = if state.compilerSpeed then focusedSelectionCompilerSpeedCommands else focusedSelectionEmptyTexts in
+  let controlCommands = if state.controlPlane then focusedSelectionControlPlaneCommands else focusedSelectionEmptyTexts in
+  let verifyCommands = if state.verifyHarness then focusedSelectionVerifyHarnessCommands else focusedSelectionEmptyTexts in
+  let combined = append (append (append (append loopCommands nativeCommands) speedCommands) controlCommands) verifyCommands in
+  if length combined == 0 then
+    focusedSelectionNoDiffCommands
+  else
+    combined
+}
+
+focusedSelectionCommandsForDiffState : DiffFocusedState -> [Str]
+focusedSelectionCommandsForDiffState state =
+  if state.changed then
+    if state.broad then
+      focusedSelectionVerifyFastCommands
+    else if state.unknown then
+      focusedSelectionVerifyFastCommands
+    else
+      focusedSelectionKnownCommands state
+  else
+    focusedSelectionNoDiffCommands
+
+focusedSelectionReasonForDiffState : DiffFocusedState -> Str
+focusedSelectionReasonForDiffState state =
+  if state.changed then
+    if state.broad then
+      "diff touched compiler/runtime substrate; selected conservative verify-fast"
+    else if state.unknown then
+      "diff included unknown paths; selected conservative verify-fast"
+    else
+      "diff touched only known feedback-loop/native-scenario/compiler-speed/control-plane/verification harness paths; selected narrow focused checks"
+  else
+    "baseline diff was empty; selected a lightweight feedback-loop check"
+
+focusedSelectionFallbackReasonForDiffState : DiffFocusedState -> Str
+focusedSelectionFallbackReasonForDiffState state =
+  if state.changed then
+    if state.broad then
+      "compiler/runtime changes can invalidate the compiler, native runtime, cache, or promoted self-hosting gates; focused selection falls back to verify-fast"
+    else if state.unknown then
+      "one or more changed paths did not match a known narrow surface; focused selection falls back to verify-fast"
+    else
+      ""
+  else
+    ""
+
+focusedSelectionManagerFallbackReasonForDiffState : DiffFocusedState -> Str
+focusedSelectionManagerFallbackReasonForDiffState state =
+  if state.broad then
+    "manager supplied focused commands, so the compiler/runtime diff fallback was recorded but not applied"
+  else if state.unknown then
+    "manager supplied focused commands, so the unknown-path diff fallback was recorded but not applied"
+  else
+    ""
+
+focusedSelectionSurfaceCategoriesForDiffState : DiffFocusedState -> [Str]
+focusedSelectionSurfaceCategoriesForDiffState state = {
+  let broadCategories = if state.broad then ["compiler_runtime_broad"] else focusedSelectionEmptyTexts in
+  let loopCategories = if state.loop then ["feedback_loop"] else focusedSelectionEmptyTexts in
+  let nativeCategories = if state.nativeScenario then ["native_scenario"] else focusedSelectionEmptyTexts in
+  let speedCategories = if state.compilerSpeed then ["compiler_speed"] else focusedSelectionEmptyTexts in
+  let controlCategories = if state.controlPlane then ["control_plane"] else focusedSelectionEmptyTexts in
+  let verifyCategories = if state.verifyHarness then ["verification_harness"] else focusedSelectionEmptyTexts in
+  let unknownCategories = if state.unknown then ["unknown_path"] else focusedSelectionEmptyTexts in
+  let combined =
+    append
+      (append (append (append (append broadCategories loopCategories) nativeCategories) speedCategories) (append controlCategories verifyCategories))
+      unknownCategories in
+  if state.changed then
+    if length combined == 0 then
+      ["unknown_path"]
+    else
+      combined
+  else
+    ["no_diff"]
+}
+
+focusedSelectionReadTextOrEmpty : Str -> Str
+focusedSelectionReadTextOrEmpty path = match readFile path {
+  Ok raw -> raw,
+  Err message -> ""
+}
+
+focusedSelectionCacheReportEvidenceForPath : Str -> Str
+focusedSelectionCacheReportEvidenceForPath path =
+  if fileExists path then {
+    let raw = focusedSelectionReadTextOrEmpty path in
+    let matches =
+      if focusedSelectionTextIncludes raw "\"matchesExpectations\":true" then
+        "matchesExpectations=true"
+      else if focusedSelectionTextIncludes raw "\"matchesExpectations\": true" then
+        "matchesExpectations=true"
+      else if focusedSelectionTextIncludes raw "\"matchesExpectations\":false" then
+        "matchesExpectations=false"
+      else if focusedSelectionTextIncludes raw "\"matchesExpectations\": false" then
+        "matchesExpectations=false"
+      else
+        "matchesExpectations=unknown" in
+    let observed =
+      if focusedSelectionTextIncludes raw "\"observedChangedModules\"" then
+        "observedChangedModules=present"
+      else
+        "observedChangedModules=missing" in
+    textConcat ["native-cache-report:", path, ":", matches, ":", observed]
+  } else
+    ""
+
+focusedSelectionCacheReportEvidence : [Str] -> [Str]
+focusedSelectionCacheReportEvidence cacheReportPaths =
+  filter focusedSelectionNonEmptyText (map focusedSelectionCacheReportEvidenceForPath cacheReportPaths)
+
+focusedSelectionNativeCacheEvidenceForDiffState : [Str] -> DiffFocusedState -> [Str]
+focusedSelectionNativeCacheEvidenceForDiffState cacheReportPaths state = {
+  let staticEvidence = [
+    "runtime/claspc.rs emits [claspc-cache] native-image/build-plan/decl-module/module-summary/source-export traces",
+    "scripts/native-incremental-guard.mjs validates native-cli-body-change and selfhost-body-change cache behavior",
+    "scripts/test-selfhost.sh preserves promoted module-summary cache gates and selfhost incremental cache checks"
+  ] in
+  let broadEvidence =
+    if state.broad then
+      ["broad compiler/runtime selection uses bash scripts/verify-fast.sh, which includes selfhost and native claspc checks"]
+    else
+      focusedSelectionEmptyTexts in
+  let reportEvidence = focusedSelectionCacheReportEvidence cacheReportPaths in
+  let optionalReports =
+    if length reportEvidence == 0 then
+      ["native-cache-report:none-found"]
+    else
+      reportEvidence in
+  append (append staticEvidence broadEvidence) optionalReports
+}
+
+focusedSelectionCheckEvidenceForDiffState : Str -> DiffFocusedState -> [Str]
+focusedSelectionCheckEvidenceForDiffState diffPath state =
+  append
+    [
+      textConcat ["baseline-diff:", diffPath],
+      textConcat ["diff-changed:", encode state.changed],
+      textConcat ["diff-broad:", encode state.broad],
+      textConcat ["diff-unknown:", encode state.unknown]
+    ]
+    (focusedSelectionSurfaceCategoriesForDiffState state)
+
+focusedSelectionBuildFromState : Str -> Str -> [Str] -> [Str] -> DiffFocusedState -> FocusedVerifySelection
+focusedSelectionBuildFromState source diffPath cacheReportPaths commands state =
+  FocusedVerifySelection {
+    source = source,
+    diffPath = diffPath,
+    changedSurfaceCategories = focusedSelectionSurfaceCategoriesForDiffState state,
+    commands = commands,
+    reason =
+      if source == "manager-env" then
+        "CLASP_LOOP_FOCUSED_VERIFY_COMMANDS_JSON supplied non-empty focused commands"
+      else
+        focusedSelectionReasonForDiffState state,
+    fallbackReason =
+      if source == "manager-env" then
+        focusedSelectionManagerFallbackReasonForDiffState state
+      else
+        focusedSelectionFallbackReasonForDiffState state,
+    cacheEvidence = focusedSelectionNativeCacheEvidenceForDiffState cacheReportPaths state,
+    checkEvidence = focusedSelectionCheckEvidenceForDiffState diffPath state
+  }
+
+focusedSelectionBuildFromDiffText : Str -> [Str] -> Str -> FocusedVerifySelection
+focusedSelectionBuildFromDiffText diffPath cacheReportPaths diffText = {
+  let state = focusedSelectionClassifyDiffText diffText in
+  focusedSelectionBuildFromState "diff-derived" diffPath cacheReportPaths (focusedSelectionCommandsForDiffState state) state
+}
+
+focusedSelectionBuildReadError : Str -> [Str] -> Str -> FocusedVerifySelection
+focusedSelectionBuildReadError diffPath cacheReportPaths message =
+  FocusedVerifySelection {
+    source = "diff-derived",
+    diffPath = diffPath,
+    changedSurfaceCategories = ["unknown_path"],
+    commands = focusedSelectionVerifyFastCommands,
+    reason = textConcat ["diff artifact could not be read; selected conservative verify-fast: ", message],
+    fallbackReason = "diff artifact could not be read; focused selection falls back to verify-fast",
+    cacheEvidence = focusedSelectionNativeCacheEvidenceForDiffState cacheReportPaths (focusedSelectionMarkUnknown focusedSelectionEmptyDiffState),
+    checkEvidence = [
+      textConcat ["baseline-diff:", diffPath],
+      textConcat ["diff-read-error:", message],
+      "unknown_path"
+    ]
+  }
+
+focusedSelectionBuildFromManager : Str -> [Str] -> [Str] -> Str -> FocusedVerifySelection
+focusedSelectionBuildFromManager diffPath cacheReportPaths commands diffText = {
+  let state = focusedSelectionClassifyDiffText diffText in
+  let base = focusedSelectionBuildFromState "manager-env" diffPath cacheReportPaths commands state in
+  FocusedVerifySelection {
+    source = base.source,
+    diffPath = base.diffPath,
+    changedSurfaceCategories = append ["manager_env_override"] base.changedSurfaceCategories,
+    commands = base.commands,
+    reason = base.reason,
+    fallbackReason = base.fallbackReason,
+    cacheEvidence = base.cacheEvidence,
+    checkEvidence = base.checkEvidence
+  }
+}
+
+focusedSelectionBuildManagerReadError : Str -> [Str] -> [Str] -> Str -> FocusedVerifySelection
+focusedSelectionBuildManagerReadError diffPath cacheReportPaths commands message = {
+  let state = focusedSelectionMarkUnknown focusedSelectionEmptyDiffState in
+  let base = focusedSelectionBuildFromState "manager-env" diffPath cacheReportPaths commands state in
+  FocusedVerifySelection {
+    source = base.source,
+    diffPath = base.diffPath,
+    changedSurfaceCategories = append ["manager_env_override"] base.changedSurfaceCategories,
+    commands = base.commands,
+    reason = base.reason,
+    fallbackReason = base.fallbackReason,
+    cacheEvidence = base.cacheEvidence,
+    checkEvidence = append base.checkEvidence [textConcat ["diff-read-error:", message]]
+  }
+}

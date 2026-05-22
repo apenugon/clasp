@@ -597,63 +597,8 @@ fi
 
 fi
 
-derived_loop_state_root="$test_root_abs/loop-derived-focused-state"
-derived_loop_workspace_root="$fixture_project/.clasp-task-workspaces/derived-focused-task"
-derived_loop_baseline_root="$fixture_project/.clasp-task-baselines/derived-focused-task"
-mkdir -p \
-  "$derived_loop_state_root" \
-  "$derived_loop_workspace_root/examples/feedback-loop" \
-  "$derived_loop_baseline_root/examples/feedback-loop"
-printf 'base feedback loop\n' >"$derived_loop_baseline_root/examples/feedback-loop/Main.clasp"
-cp -a "$derived_loop_baseline_root/." "$derived_loop_workspace_root/"
-printf 'changed feedback loop\n' >"$derived_loop_workspace_root/examples/feedback-loop/Main.clasp"
-mkdir -p "$derived_loop_workspace_root/runtime/target/debug"
-printf 'Signature: 8a477f597d28d172789f06886806bc55\n' >"$derived_loop_workspace_root/runtime/target/CACHEDIR.TAG"
-printf 'generated runtime build noise\n' >"$derived_loop_workspace_root/runtime/target/debug/generated.txt"
-mkdir -p "$derived_loop_workspace_root/src/native-verify-cache/xdg/generated"
-printf 'generated native verify cache noise\n' >"$derived_loop_workspace_root/src/native-verify-cache/xdg/generated/cache.txt"
-cat >"$derived_loop_state_root/state.json" <<'JSON'
-{"attempt":1,"phase":"verifier-step-ready","verdict":"pending","completed":false,"builderRuns":1,"verifierRuns":1,"healthy":true,"needsAttention":false,"attentionReason":"","final":false}
-JSON
-cat >"$derived_loop_state_root/builder-1.json" <<'JSON'
-{"summary":"builder changed feedback-loop program","files_touched":["examples/feedback-loop/Main.clasp"],"tests_run":[],"residual_risks":[],"feedback":{"summary":"derive focused loop commands","ergonomics":[],"follow_ups":[],"warnings":[]}}
-JSON
-printf 'ready\n' >"$derived_loop_state_root/baseline.ready"
-
 if case_enabled loop-routing; then
-derived_loop_output="$(
-  env -u CLASP_LOOP_FOCUSED_VERIFY_COMMANDS_JSON \
-  CLASP_LOOP_CODEX_BIN_JSON="\"$fake_codex_bin\"" \
-  CLASP_LOOP_TASK_FILE_JSON="\"$task_file\"" \
-  CLASP_LOOP_WORKSPACE_JSON="\"$derived_loop_workspace_root\"" \
-  CLASP_LOOP_BASELINE_WORKSPACE_JSON="\"$derived_loop_baseline_root\"" \
-  CLASP_LOOP_MAX_ATTEMPTS_JSON='1' \
-  CLASP_TEST_EXPECT_DERIVED_LOOP_COMMANDS='1' \
-  "$claspc_bin" run "$project_root/examples/feedback-loop/Main.clasp" -- "$derived_loop_state_root"
-)"
-
-printf '%s\n' "$derived_loop_output" | grep -Fx 'pass:1' >/dev/null
-test -f "$derived_loop_state_root/focused-verify-1.json"
-grep -F '"source":"diff-derived"' "$derived_loop_state_root/focused-verify-1.json" >/dev/null
-grep -F 'feedback_loop' "$derived_loop_state_root/focused-verify-1.json" >/dev/null
-grep -F '"fallbackReason":""' "$derived_loop_state_root/focused-verify-1.json" >/dev/null
-grep -F 'bash scripts/test-feedback-loop-resume.sh loop-routing' "$derived_loop_state_root/focused-verify-1.json" >/dev/null
-grep -F 'bash scripts/test-swarm-ready-gate.sh' "$derived_loop_state_root/focused-verify-1.json" >/dev/null
-if grep -F 'bash scripts/verify-fast.sh' "$derived_loop_state_root/focused-verify-1.json" >/dev/null; then
-  printf 'loop-only focused diff unexpectedly selected verify-fast\n' >&2
-  exit 1
-fi
-if grep -E '^(---|\+\+\+) ' "$derived_loop_state_root/changes-1.diff" | grep -F 'runtime/target' >/dev/null; then
-  printf 'loop-only focused diff unexpectedly included runtime/target noise\n' >&2
-  sed -n '1,120p' "$derived_loop_state_root/changes-1.diff" >&2
-  exit 1
-fi
-if grep -E '^(---|\+\+\+) ' "$derived_loop_state_root/changes-1.diff" | grep -F 'src/native-verify-cache' >/dev/null; then
-  printf 'loop-only focused diff unexpectedly included native verify cache noise\n' >&2
-  sed -n '1,120p' "$derived_loop_state_root/changes-1.diff" >&2
-  exit 1
-fi
-
+  "$project_root/scripts/test-feedback-loop-routing.sh" loop-routing
 fi
 
 derived_native_state_root="$test_root_abs/loop-derived-native-focused-state"

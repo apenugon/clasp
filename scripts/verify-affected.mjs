@@ -269,7 +269,8 @@ const COMMANDS = {
   runtimeSliceSwarmFeedbackLoop: "bash scripts/verify-runtime-slice.sh swarm-feedback-loop",
   goalManagerFast: "bash scripts/test-goal-manager-fast.sh",
   goalManagerPlannerReportDecode: "bash scripts/test-goal-manager-planner-report-decode.sh",
-  feedbackResumeLoopRouting: "bash scripts/test-feedback-loop-resume.sh loop-routing",
+  feedbackLoopRouting: "bash scripts/test-feedback-loop-routing.sh",
+  feedbackLoopRoutingLoop: "bash scripts/test-feedback-loop-routing.sh loop-routing",
   feedbackResumeSmoke: "bash scripts/test-feedback-loop-resume.sh smoke",
   verifyAllRegression: "bash scripts/test-verify-all.sh",
   verifyAffectedRegression: "bash scripts/test-verify-affected.sh",
@@ -922,11 +923,11 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
 
     if (file.startsWith("examples/feedback-loop/")) {
       matched = true;
-      reason(file, "feedback-loop", "feedback-loop example path uses runtime slices plus the loop-routing resume scenario");
+      reason(file, "feedback-loop", "feedback-loop example path uses runtime slices plus the lightweight loop-routing selector probe");
       addSelected(selectedByCommand, "runtime-slice:process", COMMANDS.runtimeSliceProcess, "feedback-loop path", file);
       addSelected(selectedByCommand, "runtime-slice:workflow", COMMANDS.runtimeSliceWorkflow, "feedback-loop path", file);
       addSelected(selectedByCommand, "runtime-slice:codex-loop", COMMANDS.runtimeSliceCodexLoop, "feedback-loop path", file);
-      addSelected(selectedByCommand, "feedback-resume:loop-routing", COMMANDS.feedbackResumeLoopRouting, "feedback-loop path", file);
+      addSelected(selectedByCommand, "feedback-loop-routing:loop-routing", COMMANDS.feedbackLoopRoutingLoop, "feedback-loop path", file);
     }
 
     if (file.startsWith("examples/host-runtime/")) {
@@ -1124,6 +1125,19 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
         file,
       );
       addSelected(selectedByCommand, "feedback-resume:smoke", COMMANDS.feedbackResumeSmoke, "feedback-loop resume harness", file);
+    }
+
+    if (file === "scripts/test-feedback-loop-routing.sh") {
+      matched = true;
+      reason(file, "feedback-loop-routing-harness", "feedback-loop routing harness uses shell syntax plus the lightweight ordinary-Clasp selector probe");
+      addSelected(
+        selectedByCommand,
+        `bash-syntax:${file}`,
+        `bash -n ${shellQuote(file)}`,
+        "feedback-loop routing shell syntax",
+        file,
+      );
+      addSelected(selectedByCommand, "feedback-loop-routing", COMMANDS.feedbackLoopRouting, "feedback-loop routing harness", file);
     }
 
     if (file === "scripts/test-monitored-step.sh") {
