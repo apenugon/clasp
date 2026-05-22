@@ -11,6 +11,98 @@ export XDG_CACHE_HOME="$test_root_abs/xdg-cache"
 # may export a full-signoff tier, so pin the scenario explicitly.
 export CLASP_LOOP_VERIFICATION_TIER_JSON='"focused"'
 export CLASP_TEST_REJECT_CODEX_PROMPT_ARG=1
+requested_cases=("$@")
+
+usage() {
+  cat <<'EOF'
+usage: scripts/test-feedback-loop-resume.sh [case-or-group ...]
+
+With no arguments, runs the complete resume harness. Focused verifier routes can
+run a smaller scenario:
+  smoke              loop routing plus missing-baseline fail-closed guard
+  routing            all diff-derived focused routing scenarios
+  manager-env        manager string/list command override scenarios
+  failure            oversized feedback, missing report, and missing baseline guards
+  manager-string     verifier resume with a manager string command
+  builder-stdin      builder/verifier prompts are streamed through stdin
+  oversized-feedback previous verifier feedback compaction
+  no-report          zero-exit verifier without a durable report fails closed
+  manager-list       manager JSON list command override
+  loop-routing       loop-only diff selects loop-focused checks
+  native-routing     native scenario diff selects native scenario checks
+  goal-helper-routing GoalManager helper diff selects control-plane checks
+  speed-routing      compiler speed diff selects incremental checks
+  verify-routing     verifier harness diff selects verifier harness checks
+  unknown-routing    unknown diff falls back to verify-fast
+  missing-baseline   externally supplied missing baseline fails closed
+EOF
+}
+
+case_matches() {
+  local requested="$1"
+  local candidate="$2"
+
+  case "$requested" in
+    all)
+      return 0
+      ;;
+    smoke)
+      [[ "$candidate" == "loop-routing" || "$candidate" == "missing-baseline" ]]
+      return $?
+      ;;
+    routing)
+      [[ "$candidate" == "loop-routing" || "$candidate" == "native-routing" || "$candidate" == "goal-helper-routing" || "$candidate" == "speed-routing" || "$candidate" == "verify-routing" || "$candidate" == "unknown-routing" ]]
+      return $?
+      ;;
+    manager-env)
+      [[ "$candidate" == "manager-string" || "$candidate" == "manager-list" ]]
+      return $?
+      ;;
+    failure)
+      [[ "$candidate" == "oversized-feedback" || "$candidate" == "no-report" || "$candidate" == "missing-baseline" ]]
+      return $?
+      ;;
+    manager-string|builder-stdin|oversized-feedback|no-report|manager-list|loop-routing|native-routing|goal-helper-routing|speed-routing|verify-routing|unknown-routing|missing-baseline)
+      [[ "$candidate" == "$requested" ]]
+      return $?
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+case_enabled() {
+  local candidate="$1"
+  local requested=""
+
+  if (( ${#requested_cases[@]} == 0 )); then
+    return 0
+  fi
+
+  for requested in "${requested_cases[@]}"; do
+    if case_matches "$requested" "$candidate"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+for requested_case in "${requested_cases[@]}"; do
+  case "$requested_case" in
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    all|smoke|routing|manager-env|failure|manager-string|builder-stdin|oversized-feedback|no-report|manager-list|loop-routing|native-routing|goal-helper-routing|speed-routing|verify-routing|unknown-routing|missing-baseline)
+      ;;
+    *)
+      printf 'test-feedback-loop-resume: unknown case or group: %s\n' "$requested_case" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
 
 cleanup() {
   if [[ "${CLASP_TEST_KEEP_TMP:-}" == "1" ]]; then
@@ -154,7 +246,7 @@ if [[ "${CLASP_TEST_EXPECT_DERIVED_LOOP_COMMANDS:-0}" == "1" ]]; then
     printf 'verifier prompt did not mark loop commands as diff-derived\n' >&2
     exit 74
   fi
-  if [[ "$prompt" != *"bash scripts/test-feedback-loop-resume.sh"* || "$prompt" != *"bash scripts/test-swarm-ready-gate.sh"* ]]; then
+  if [[ "$prompt" != *"bash scripts/test-feedback-loop-resume.sh loop-routing"* || "$prompt" != *"bash scripts/test-swarm-ready-gate.sh"* ]]; then
     printf 'verifier prompt did not select loop-focused checks from the diff\n' >&2
     exit 75
   fi
@@ -281,6 +373,7 @@ cat >"$state_root/builder-1.json" <<'JSON'
 JSON
 printf 'ready\n' >"$state_root/baseline.ready"
 
+if case_enabled manager-string; then
 resume_output="$(
   CLASP_LOOP_CODEX_BIN_JSON="\"$fake_codex_bin\"" \
   CLASP_LOOP_TASK_FILE_JSON="\"$task_file\"" \
@@ -329,6 +422,8 @@ do
   fi
 done
 
+fi
+
 builder_stdin_state_root="$test_root_abs/loop-builder-stdin-state"
 builder_stdin_workspace_root="$fixture_project/.clasp-task-workspaces/builder-stdin-task"
 builder_stdin_baseline_root="$fixture_project/.clasp-task-baselines/builder-stdin-task"
@@ -336,6 +431,7 @@ mkdir -p "$builder_stdin_state_root" "$builder_stdin_workspace_root" "$builder_s
 printf 'builder stdin baseline\n' >"$builder_stdin_baseline_root/workspace.txt"
 cp -a "$builder_stdin_baseline_root/." "$builder_stdin_workspace_root/"
 
+if case_enabled builder-stdin; then
 builder_stdin_output="$(
   CLASP_LOOP_CODEX_BIN_JSON="\"$fake_codex_bin\"" \
   CLASP_LOOP_TASK_FILE_JSON="\"$task_file\"" \
@@ -352,6 +448,8 @@ test -f "$builder_stdin_state_root/builder-1.prompt.md"
 test -f "$builder_stdin_state_root/verifier-1.prompt.md"
 grep -Fx 'builder' "$builder_stdin_state_root/codex-invocations.log" >/dev/null
 grep -Fx 'verifier' "$builder_stdin_state_root/codex-invocations.log" >/dev/null
+
+fi
 
 oversized_feedback_state_root="$test_root_abs/loop-oversized-feedback-state"
 oversized_feedback_workspace_root="$fixture_project/.clasp-task-workspaces/oversized-feedback-task"
@@ -378,6 +476,7 @@ fs.writeFileSync(feedbackPath, JSON.stringify({
 }));
 NODE
 
+if case_enabled oversized-feedback; then
 oversized_feedback_output="$(
   CLASP_LOOP_CODEX_BIN_JSON="\"$fake_codex_bin\"" \
   CLASP_LOOP_TASK_FILE_JSON="\"$task_file\"" \
@@ -399,6 +498,8 @@ grep -F 'oversized verifier stdout should be compacted' "$oversized_feedback_pro
 if grep -F 'stdout_tail=XXXXXXXXXXXXXXXX' "$oversized_feedback_prompt" >/dev/null; then
   printf 'oversized feedback leaked raw stdout into the builder prompt\n' >&2
   exit 1
+fi
+
 fi
 
 no_report_state_root="$test_root_abs/loop-no-report-zero-state"
@@ -425,6 +526,7 @@ cat >"$no_report_state_root/verifier-1.heartbeat.json" <<JSON
 {"pid":0,"running":false,"completed":true,"exitCode":0,"stdoutPath":"$no_report_state_root/verifier-1.stdout.jsonl","stderrPath":"$no_report_state_root/verifier-1.stderr.log","heartbeatPath":"$no_report_state_root/verifier-1.heartbeat.json","updatedAtMs":0}
 JSON
 
+if case_enabled no-report; then
 no_report_output="$(
   CLASP_LOOP_CODEX_BIN_JSON="\"$fake_codex_bin\"" \
   CLASP_LOOP_TASK_FILE_JSON="\"$task_file\"" \
@@ -453,6 +555,8 @@ if grep -F '"phase":"verifier-running"' "$no_report_state_root/state.json" >/dev
   exit 1
 fi
 
+fi
+
 manager_list_state_root="$test_root_abs/loop-manager-list-state"
 manager_list_workspace_root="$fixture_project/.clasp-task-workspaces/manager-list-task"
 manager_list_baseline_root="$fixture_project/.clasp-task-baselines/manager-list-task"
@@ -468,6 +572,7 @@ cat >"$manager_list_state_root/builder-1.json" <<'JSON'
 JSON
 printf 'ready\n' >"$manager_list_state_root/baseline.ready"
 
+if case_enabled manager-list; then
 manager_list_output="$(
   CLASP_LOOP_CODEX_BIN_JSON="\"$fake_codex_bin\"" \
   CLASP_LOOP_TASK_FILE_JSON="\"$task_file\"" \
@@ -488,6 +593,8 @@ grep -F 'bash scripts/test-swarm-ready-gate.sh' "$manager_list_state_root/focuse
 if grep -F 'bash scripts/verify-fast.sh' "$manager_list_state_root/focused-verify-1.json" >/dev/null; then
   printf 'manager list focused commands unexpectedly fell back to verify-fast\n' >&2
   exit 1
+fi
+
 fi
 
 derived_loop_state_root="$test_root_abs/loop-derived-focused-state"
@@ -513,6 +620,7 @@ cat >"$derived_loop_state_root/builder-1.json" <<'JSON'
 JSON
 printf 'ready\n' >"$derived_loop_state_root/baseline.ready"
 
+if case_enabled loop-routing; then
 derived_loop_output="$(
   env -u CLASP_LOOP_FOCUSED_VERIFY_COMMANDS_JSON \
   CLASP_LOOP_CODEX_BIN_JSON="\"$fake_codex_bin\"" \
@@ -529,7 +637,7 @@ test -f "$derived_loop_state_root/focused-verify-1.json"
 grep -F '"source":"diff-derived"' "$derived_loop_state_root/focused-verify-1.json" >/dev/null
 grep -F 'feedback_loop' "$derived_loop_state_root/focused-verify-1.json" >/dev/null
 grep -F '"fallbackReason":""' "$derived_loop_state_root/focused-verify-1.json" >/dev/null
-grep -F 'bash scripts/test-feedback-loop-resume.sh' "$derived_loop_state_root/focused-verify-1.json" >/dev/null
+grep -F 'bash scripts/test-feedback-loop-resume.sh loop-routing' "$derived_loop_state_root/focused-verify-1.json" >/dev/null
 grep -F 'bash scripts/test-swarm-ready-gate.sh' "$derived_loop_state_root/focused-verify-1.json" >/dev/null
 if grep -F 'bash scripts/verify-fast.sh' "$derived_loop_state_root/focused-verify-1.json" >/dev/null; then
   printf 'loop-only focused diff unexpectedly selected verify-fast\n' >&2
@@ -544,6 +652,8 @@ if grep -E '^(---|\+\+\+) ' "$derived_loop_state_root/changes-1.diff" | grep -F 
   printf 'loop-only focused diff unexpectedly included native verify cache noise\n' >&2
   sed -n '1,120p' "$derived_loop_state_root/changes-1.diff" >&2
   exit 1
+fi
+
 fi
 
 derived_native_state_root="$test_root_abs/loop-derived-native-focused-state"
@@ -564,6 +674,7 @@ cat >"$derived_native_state_root/builder-1.json" <<'JSON'
 JSON
 printf 'ready\n' >"$derived_native_state_root/baseline.ready"
 
+if case_enabled native-routing; then
 derived_native_output="$(
   env -u CLASP_LOOP_FOCUSED_VERIFY_COMMANDS_JSON \
   CLASP_LOOP_CODEX_BIN_JSON="\"$fake_codex_bin\"" \
@@ -591,6 +702,8 @@ if grep -F 'bash scripts/verify-fast.sh' "$derived_native_state_root/focused-ver
   exit 1
 fi
 
+fi
+
 derived_goal_helper_state_root="$test_root_abs/loop-derived-goal-helper-focused-state"
 derived_goal_helper_workspace_root="$fixture_project/.clasp-task-workspaces/derived-goal-helper-focused-task"
 derived_goal_helper_baseline_root="$fixture_project/.clasp-task-baselines/derived-goal-helper-focused-task"
@@ -609,6 +722,7 @@ cat >"$derived_goal_helper_state_root/builder-1.json" <<'JSON'
 JSON
 printf 'ready\n' >"$derived_goal_helper_state_root/baseline.ready"
 
+if case_enabled goal-helper-routing; then
 derived_goal_helper_output="$(
   env -u CLASP_LOOP_FOCUSED_VERIFY_COMMANDS_JSON \
   CLASP_LOOP_CODEX_BIN_JSON="\"$fake_codex_bin\"" \
@@ -636,6 +750,8 @@ if grep -F 'bash scripts/verify-fast.sh' "$derived_goal_helper_state_root/focuse
   exit 1
 fi
 
+fi
+
 derived_speed_state_root="$test_root_abs/loop-derived-speed-focused-state"
 derived_speed_workspace_root="$fixture_project/.clasp-task-workspaces/derived-speed-focused-task"
 derived_speed_baseline_root="$fixture_project/.clasp-task-baselines/derived-speed-focused-task"
@@ -654,6 +770,7 @@ cat >"$derived_speed_state_root/builder-1.json" <<'JSON'
 JSON
 printf 'ready\n' >"$derived_speed_state_root/baseline.ready"
 
+if case_enabled speed-routing; then
 derived_speed_output="$(
   env -u CLASP_LOOP_FOCUSED_VERIFY_COMMANDS_JSON \
   CLASP_LOOP_CODEX_BIN_JSON="\"$fake_codex_bin\"" \
@@ -677,6 +794,8 @@ if grep -F 'bash scripts/verify-fast.sh' "$derived_speed_state_root/focused-veri
   exit 1
 fi
 
+fi
+
 derived_verify_state_root="$test_root_abs/loop-derived-verify-focused-state"
 derived_verify_workspace_root="$fixture_project/.clasp-task-workspaces/derived-verify-focused-task"
 derived_verify_baseline_root="$fixture_project/.clasp-task-baselines/derived-verify-focused-task"
@@ -695,6 +814,7 @@ cat >"$derived_verify_state_root/builder-1.json" <<'JSON'
 JSON
 printf 'ready\n' >"$derived_verify_state_root/baseline.ready"
 
+if case_enabled verify-routing; then
 derived_verify_output="$(
   env -u CLASP_LOOP_FOCUSED_VERIFY_COMMANDS_JSON \
   CLASP_LOOP_CODEX_BIN_JSON="\"$fake_codex_bin\"" \
@@ -726,6 +846,8 @@ if grep -F 'bash scripts/verify-fast.sh' "$derived_verify_state_root/focused-ver
   exit 1
 fi
 
+fi
+
 unknown_state_root="$test_root_abs/loop-unknown-focused-state"
 unknown_workspace_root="$fixture_project/.clasp-task-workspaces/unknown-focused-task"
 unknown_baseline_root="$fixture_project/.clasp-task-baselines/unknown-focused-task"
@@ -741,6 +863,7 @@ cat >"$unknown_state_root/builder-1.json" <<'JSON'
 JSON
 printf 'ready\n' >"$unknown_state_root/baseline.ready"
 
+if case_enabled unknown-routing; then
 unknown_output="$(
   CLASP_LOOP_CODEX_BIN_JSON="\"$fake_codex_bin\"" \
   CLASP_LOOP_TASK_FILE_JSON="\"$task_file\"" \
@@ -764,6 +887,8 @@ if grep -F 'bash scripts/verify-all.sh' "$unknown_state_root/focused-verify-1.js
   exit 1
 fi
 
+fi
+
 missing_state_root="$test_root_abs/loop-missing-baseline-state"
 missing_workspace_root="$fixture_project/.clasp-task-workspaces/missing-baseline-task"
 missing_baseline_root="$fixture_project/.clasp-task-baselines/missing-baseline-task"
@@ -777,6 +902,7 @@ cat >"$missing_state_root/builder-1.json" <<'JSON'
 JSON
 printf 'ready\n' >"$missing_state_root/baseline.ready"
 
+if case_enabled missing-baseline; then
 missing_output="$(
   CLASP_LOOP_CODEX_BIN_JSON="\"$fake_codex_bin\"" \
   CLASP_LOOP_TASK_FILE_JSON="\"$task_file\"" \
@@ -790,3 +916,4 @@ missing_output="$(
 printf '%s\n' "$missing_output" | grep -F 'baseline-error:provided baseline workspace is missing; refusing to recreate it from a workspace that may contain builder changes' >/dev/null
 test ! -e "$missing_baseline_root"
 test ! -e "$missing_state_root/verifier-1.json"
+fi

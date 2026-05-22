@@ -203,7 +203,7 @@ switch (scenario) {
     assert(hasCommand("bash scripts/verify-runtime-slice.sh codex-loop"), "feedback-loop route should run ordinary Codex runtime slice coverage");
     assert(hasCommand("bash scripts/verify-runtime-slice.sh managed-loop"), "swarm route should run managed-loop runtime slice coverage");
     assert(hasCommand("bash scripts/verify-runtime-slice.sh swarm-feedback-loop"), "swarm route should run FeedbackLoop runtime slice coverage");
-    assert(hasCommand("bash scripts/test-feedback-loop-resume.sh"), "feedback-loop route should run resume coverage");
+    assert(hasCommand("bash scripts/test-feedback-loop-resume.sh loop-routing"), "feedback-loop route should run the narrow loop-routing resume scenario");
     assert(report.selectedCommands.filter((command) => command.command === "bash scripts/test-native-claspc.sh").length === 1, "native claspc command should be deduplicated");
     assert(report.usedVerifyFastFallback === false, "mixed known inputs should not fall back to verify-fast");
     break;
@@ -300,10 +300,10 @@ switch (scenario) {
   case "feedback-loop-resume-script":
     assert(report.changedFiles.includes("scripts/test-feedback-loop-resume.sh"), "feedback-loop resume script should be present");
     assert(hasCommand("bash -n 'scripts/test-feedback-loop-resume.sh'"), "feedback-loop resume script should run shell syntax check");
-    assert(hasCommand("bash scripts/test-feedback-loop-resume.sh"), "feedback-loop resume script should run focused resume coverage");
-    assert(report.selectedCommands.filter((command) => command.command === "bash scripts/test-feedback-loop-resume.sh").length === 1, "feedback-loop resume command should be deduplicated");
+    assert(hasCommand("bash scripts/test-feedback-loop-resume.sh smoke"), "feedback-loop resume script should run the focused smoke split");
+    assert(report.selectedCommands.filter((command) => command.command === "bash scripts/test-feedback-loop-resume.sh smoke").length === 1, "feedback-loop resume smoke command should be deduplicated");
     assert(report.usedVerifyFastFallback === false, "known feedback-loop resume script should not use verify-fast fallback");
-    assert(logHas("scripts/test-feedback-loop-resume.sh"), "fake feedback-loop resume command should execute");
+    assert(logHas("scripts/test-feedback-loop-resume.sh smoke"), "fake feedback-loop resume smoke command should execute");
     break;
   case "compiler-slice-fixture":
     assert(report.changedFiles.includes("examples/compiler-checker.clasp"), "compiler checker fixture should be present");

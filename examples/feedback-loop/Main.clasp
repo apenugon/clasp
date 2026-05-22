@@ -1282,7 +1282,7 @@ feedbackLoopFocusedCommands : [Str]
 feedbackLoopFocusedCommands = [
   "$(scripts/resolve-claspc.sh) --json check examples/feedback-loop/Main.clasp",
   "$(scripts/resolve-claspc.sh) --json check examples/feedback-loop/ProcessDemo.clasp",
-  "bash scripts/test-feedback-loop-resume.sh",
+  "bash scripts/test-feedback-loop-resume.sh loop-routing",
   "bash scripts/test-swarm-ready-gate.sh"
 ]
 

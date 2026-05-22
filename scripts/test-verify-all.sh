@@ -225,6 +225,8 @@ grep -F 'bash scripts/test-selfhost-verify-mode-split.sh' "$test_root/scripts/ve
 grep -F 'bash scripts/verify-runtime-slice.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'bash scripts/test-codex-loop-program.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'bash scripts/test-safe-subprocess.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
+grep -F 'bash scripts/test-feedback-loop-resume.sh loop-routing' "$test_root/scripts/verify-affected.mjs" >/dev/null
+grep -F 'bash scripts/test-feedback-loop-resume.sh smoke' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'bash scripts/test-record-update-parity.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'bash scripts/verify-compiler-slice.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'bash scripts/verify-compiler-slice.sh --check-only' "$test_root/scripts/verify-affected.mjs" >/dev/null
