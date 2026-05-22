@@ -12,11 +12,15 @@ else
   claspc_bin="$("$project_root/scripts/resolve-claspc.sh")"
 fi
 time_bin="$(which time 2>/dev/null || true)"
-selfhost_entry_cache_root="$test_root/selfhost-entry-cache-root"
+shared_selfhost_cache_root="${CLASP_TEST_SELFHOST_SHARED_CACHE_HOME:-${CLASP_TEST_SHARED_XDG_CACHE_HOME:-$TMPDIR/clasp-test-selfhost-cache}}"
+if [[ "${CLASP_TEST_ISOLATED_XDG_CACHE:-0}" == "1" ]]; then
+  shared_selfhost_cache_root="$test_root/selfhost-cache"
+fi
+selfhost_entry_cache_root="$shared_selfhost_cache_root/selfhost-entry"
 selfhost_entry_check_output="$test_root/selfhost.entry.check.json"
 selfhost_entry_check_log="$test_root/selfhost.entry.check.log"
-semantic_probe_cache_root="$test_root/semantic-probe-cache"
-diagnostic_probe_cache_root="$test_root/diagnostic-probe-cache"
+semantic_probe_cache_root="$shared_selfhost_cache_root/semantic-probe"
+diagnostic_probe_cache_root="$shared_selfhost_cache_root/diagnostic-probe"
 semantic_source_path="$test_root/semantic-context.clasp"
 diagnostic_unbound_source_path="$test_root/diagnostic-unbound.clasp"
 semantic_check_output="$test_root/semantic.check.txt"
@@ -358,9 +362,9 @@ EOF
 
 XDG_CACHE_HOME="$selfhost_entry_cache_root" CLASP_NATIVE_TRACE_CACHE=1 "$claspc_bin" --json check "$project_root/src/Main.clasp" >"$selfhost_entry_check_output" 2>"$selfhost_entry_check_log"
 grep -F '"status":"ok"' "$selfhost_entry_check_output" >/dev/null
-grep -F '[claspc-cache] module-summary promoted hit module=Compiler.Ast ' "$selfhost_entry_check_log" >/dev/null
-grep -F '[claspc-cache] module-summary promoted hit module=Compiler.Emit.JavaScript ' "$selfhost_entry_check_log" >/dev/null
-grep -F '[claspc-cache] module-summary promoted hit module=Main ' "$selfhost_entry_check_log" >/dev/null
+grep -E '\[claspc-cache\] module-summary (promoted )?hit module=Compiler\.Ast ' "$selfhost_entry_check_log" >/dev/null
+grep -E '\[claspc-cache\] module-summary (promoted )?hit module=Compiler\.Emit\.JavaScript ' "$selfhost_entry_check_log" >/dev/null
+grep -E '\[claspc-cache\] module-summary (promoted )?hit module=Main ' "$selfhost_entry_check_log" >/dev/null
 
 if [[ -z "$time_bin" || ! -x "$time_bin" ]]; then
   printf 'missing time binary\n' >&2
