@@ -51,6 +51,8 @@ require_pattern "scripts/test-feedback-loop-routing.sh" 'FocusedSelectionProbe.c
 reject_pattern "examples/feedback-loop/Main.clasp" '"file: workspace.txt"'
 reject_pattern "examples/feedback-loop/Main.clasp" '"--exclude=workspace.txt "'
 require_pattern "scripts/verify-all.sh" 'bash scripts/test-feedback-loop-resume.sh'
+require_pattern "scripts/test-feedback-loop-resume.sh" 'CLASP_TEST_SHARED_XDG_CACHE_HOME'
+require_pattern "scripts/test-feedback-loop-resume.sh" 'CLASP_TEST_ISOLATED_XDG_CACHE'
 require_pattern "examples/feedback-loop/Process.clasp" 'awaitWatchedProcessTimeoutJson'
 require_pattern "examples/feedback-loop/MonitoredWorkflowDemo.clasp" 'workflow-status.json'
 require_pattern "examples/feedback-loop/MonitoredWorkflowDemo.clasp" 'failure-detected'

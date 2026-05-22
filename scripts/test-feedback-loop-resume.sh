@@ -6,7 +6,12 @@ tmp_root="${CLASP_TEST_TMPDIR:-${TMPDIR:-/tmp}}"
 mkdir -p "$tmp_root"
 test_root="$(mktemp -d "$tmp_root/test-feedback-loop-resume.XXXXXX")"
 test_root_abs="$(cd "$test_root" && pwd -P)"
-export XDG_CACHE_HOME="$test_root_abs/xdg-cache"
+test_xdg_cache_home="${CLASP_TEST_SHARED_XDG_CACHE_HOME:-$tmp_root/clasp-test-xdg-cache}"
+if [[ "${CLASP_TEST_ISOLATED_XDG_CACHE:-0}" == "1" ]]; then
+  test_xdg_cache_home="$test_root_abs/xdg-cache"
+fi
+mkdir -p "$test_xdg_cache_home"
+export XDG_CACHE_HOME="$test_xdg_cache_home"
 # This fixture asserts focused verifier resume behavior. Parent swarm verifiers
 # may export a full-signoff tier, so pin the scenario explicitly.
 export CLASP_LOOP_VERIFICATION_TIER_JSON='"focused"'
@@ -35,6 +40,10 @@ run a smaller scenario:
   verify-routing     verifier harness diff selects verifier harness checks
   unknown-routing    unknown diff falls back to verify-fast
   missing-baseline   externally supplied missing baseline fails closed
+
+Diff-derived routing cases use the lightweight selector probe by default. Set
+CLASP_TEST_FEEDBACK_LOOP_RESUME_ROUTING_INTEGRATION=1 to run the older
+full feedback-loop integration form for those routing cases.
 EOF
 }
 
@@ -86,6 +95,10 @@ case_enabled() {
     fi
   done
   return 1
+}
+
+resume_routing_integration_enabled() {
+  [[ "${CLASP_TEST_FEEDBACK_LOOP_RESUME_ROUTING_INTEGRATION:-0}" == "1" ]]
 }
 
 for requested_case in "${requested_cases[@]}"; do
@@ -246,7 +259,7 @@ if [[ "${CLASP_TEST_EXPECT_DERIVED_LOOP_COMMANDS:-0}" == "1" ]]; then
     printf 'verifier prompt did not mark loop commands as diff-derived\n' >&2
     exit 74
   fi
-  if [[ "$prompt" != *"bash scripts/test-feedback-loop-resume.sh loop-routing"* || "$prompt" != *"bash scripts/test-swarm-ready-gate.sh"* ]]; then
+  if [[ "$prompt" != *"bash scripts/test-feedback-loop-routing.sh loop-routing"* || "$prompt" != *"bash scripts/test-swarm-ready-gate.sh"* ]]; then
     printf 'verifier prompt did not select loop-focused checks from the diff\n' >&2
     exit 75
   fi
@@ -597,8 +610,27 @@ fi
 
 fi
 
+route_probe_cases=()
 if case_enabled loop-routing; then
-  "$project_root/scripts/test-feedback-loop-routing.sh" loop-routing
+  route_probe_cases+=(loop-routing)
+fi
+if case_enabled native-routing; then
+  route_probe_cases+=(native-routing)
+fi
+if case_enabled goal-helper-routing; then
+  route_probe_cases+=(goal-helper-routing)
+fi
+if case_enabled speed-routing; then
+  route_probe_cases+=(speed-routing)
+fi
+if case_enabled verify-routing; then
+  route_probe_cases+=(verify-routing)
+fi
+if case_enabled unknown-routing; then
+  route_probe_cases+=(unknown-routing)
+fi
+if (( ${#route_probe_cases[@]} > 0 )); then
+  "$project_root/scripts/test-feedback-loop-routing.sh" "${route_probe_cases[@]}"
 fi
 
 derived_native_state_root="$test_root_abs/loop-derived-native-focused-state"
@@ -619,7 +651,7 @@ cat >"$derived_native_state_root/builder-1.json" <<'JSON'
 JSON
 printf 'ready\n' >"$derived_native_state_root/baseline.ready"
 
-if case_enabled native-routing; then
+if resume_routing_integration_enabled && case_enabled native-routing; then
 derived_native_output="$(
   env -u CLASP_LOOP_FOCUSED_VERIFY_COMMANDS_JSON \
   CLASP_LOOP_CODEX_BIN_JSON="\"$fake_codex_bin\"" \
@@ -667,7 +699,7 @@ cat >"$derived_goal_helper_state_root/builder-1.json" <<'JSON'
 JSON
 printf 'ready\n' >"$derived_goal_helper_state_root/baseline.ready"
 
-if case_enabled goal-helper-routing; then
+if resume_routing_integration_enabled && case_enabled goal-helper-routing; then
 derived_goal_helper_output="$(
   env -u CLASP_LOOP_FOCUSED_VERIFY_COMMANDS_JSON \
   CLASP_LOOP_CODEX_BIN_JSON="\"$fake_codex_bin\"" \
@@ -715,7 +747,7 @@ cat >"$derived_speed_state_root/builder-1.json" <<'JSON'
 JSON
 printf 'ready\n' >"$derived_speed_state_root/baseline.ready"
 
-if case_enabled speed-routing; then
+if resume_routing_integration_enabled && case_enabled speed-routing; then
 derived_speed_output="$(
   env -u CLASP_LOOP_FOCUSED_VERIFY_COMMANDS_JSON \
   CLASP_LOOP_CODEX_BIN_JSON="\"$fake_codex_bin\"" \
@@ -759,7 +791,7 @@ cat >"$derived_verify_state_root/builder-1.json" <<'JSON'
 JSON
 printf 'ready\n' >"$derived_verify_state_root/baseline.ready"
 
-if case_enabled verify-routing; then
+if resume_routing_integration_enabled && case_enabled verify-routing; then
 derived_verify_output="$(
   env -u CLASP_LOOP_FOCUSED_VERIFY_COMMANDS_JSON \
   CLASP_LOOP_CODEX_BIN_JSON="\"$fake_codex_bin\"" \
@@ -808,7 +840,7 @@ cat >"$unknown_state_root/builder-1.json" <<'JSON'
 JSON
 printf 'ready\n' >"$unknown_state_root/baseline.ready"
 
-if case_enabled unknown-routing; then
+if resume_routing_integration_enabled && case_enabled unknown-routing; then
 unknown_output="$(
   CLASP_LOOP_CODEX_BIN_JSON="\"$fake_codex_bin\"" \
   CLASP_LOOP_TASK_FILE_JSON="\"$task_file\"" \
