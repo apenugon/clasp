@@ -123,7 +123,9 @@ grep -F 'CLASP_GOAL_MANAGER_ALLOW_STALE_ON_COMPILE_FAILURE="${CLASP_GOAL_MANAGER
 grep -F 'TaskWorkspaceRuntimeHarness.clasp' "$test_root/scripts/test-goal-manager-fast.sh" >/dev/null
 grep -F 'goal_manager_binary_fresh=0' "$test_root/scripts/test-goal-manager-fast.sh" >/dev/null
 grep -F 'measure-native-incremental.sh' "$test_root/scripts/test-native-incremental-guard.sh" >/dev/null
-grep -F 'export XDG_CACHE_HOME="$test_root/xdg-cache"' "$test_root/scripts/test-native-claspc.sh" >/dev/null
+grep -F 'CLASP_TEST_NATIVE_CLASPC_SHARED_CACHE_HOME' "$test_root/scripts/test-native-claspc.sh" >/dev/null
+grep -F 'CLASP_TEST_SHARED_XDG_CACHE_HOME' "$test_root/scripts/test-native-claspc.sh" >/dev/null
+grep -F 'CLASP_TEST_ISOLATED_XDG_CACHE' "$test_root/scripts/test-native-claspc.sh" >/dev/null
 grep -F 'setup_exhaustive_native_cases()' "$test_root/scripts/test-native-claspc.sh" >/dev/null
 grep -F 'CLASP_NATIVE_CLASPC_EXHAUSTIVE' "$test_root/scripts/test-native-claspc.sh" >/dev/null
 grep -F 'ensure-goal-manager-binary.sh' "$test_root/scripts/test-native-claspc.sh" >/dev/null

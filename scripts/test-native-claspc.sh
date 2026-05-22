@@ -7,7 +7,11 @@ mkdir -p "$tmp_root"
 export TMPDIR="$tmp_root"
 test_root="$(mktemp -d "$TMPDIR/test-native-claspc.XXXXXX")"
 test_root_abs="$(cd "$test_root" && pwd -P)"
-export XDG_CACHE_HOME="$test_root/xdg-cache"
+shared_native_claspc_cache_root="${CLASP_TEST_NATIVE_CLASPC_SHARED_CACHE_HOME:-${CLASP_TEST_SHARED_XDG_CACHE_HOME:-$TMPDIR/clasp-test-xdg-cache}}"
+if [[ "${CLASP_TEST_ISOLATED_XDG_CACHE:-0}" == "1" ]]; then
+  shared_native_claspc_cache_root="$test_root/xdg-cache"
+fi
+export XDG_CACHE_HOME="$shared_native_claspc_cache_root/native-claspc"
 mkdir -p "$XDG_CACHE_HOME"
 export CLASP_MANAGER_XDG_CACHE_HOME_JSON="\"$test_root_abs/manager-xdg-cache\""
 mkdir -p "$test_root_abs/manager-xdg-cache"

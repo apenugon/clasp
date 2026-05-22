@@ -179,6 +179,8 @@ require_pattern "benchmarks/run-benchmark.mjs" 'env.CLASP_CLASPC || env.CLASPC_B
 reject_pattern "benchmarks/run-benchmark.mjs" 'unset CLASP_CLASPC CLASPC_BIN'
 
 require_pattern "scripts/test-native-claspc.sh" 'feedback_loop_live_state_root'
+require_pattern "scripts/test-native-claspc.sh" 'CLASP_TEST_NATIVE_CLASPC_SHARED_CACHE_HOME'
+require_pattern "scripts/test-native-claspc.sh" 'CLASP_TEST_ISOLATED_XDG_CACHE'
 require_pattern "scripts/test-native-claspc.sh" 'swarm_loop_builder_running_output'
 require_pattern "scripts/test-native-claspc.sh" 'record-ergonomics-app'
 require_pattern "scripts/test-native-claspc.sh" 'polymorphism-app'
