@@ -96,7 +96,7 @@ bash scripts/test-promoted-source-export-cache.sh
 bash scripts/test-native-runtime.sh
 '
 fast_sequential_verify_commands=$'
-bash scripts/test-native-claspc.sh
+bash scripts/test-native-claspc-smoke.sh
 bash scripts/verify-compiler-slice.sh all
 bash scripts/test-record-update-parity.sh
 bash scripts/verify-runtime-slice.sh process workflow codex-loop agent-loop workspace
@@ -114,6 +114,7 @@ bash scripts/verify-compiler-slice.sh all
 bash scripts/test-record-update-parity.sh
 bash scripts/verify-runtime-slice.sh process workflow codex-loop agent-loop workspace
 bash scripts/test-native-claspc-diagnostics.sh
+bash scripts/test-native-claspc-smoke.sh
 bash scripts/test-promoted-source-export-cache.sh
 bash examples/agent-metadata/scripts/verify.sh
 bash examples/agent-task-scenario/scripts/verify.sh

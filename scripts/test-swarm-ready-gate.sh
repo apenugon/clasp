@@ -23,7 +23,7 @@ reject_pattern() {
   fi
 }
 
-bash -n "$project_root/scripts/test-native-claspc.sh"
+bash -n "$project_root/scripts/test-native-claspc.sh" "$project_root/scripts/test-native-claspc-smoke.sh"
 bash -n "$project_root/scripts/test-goal-manager-planner-report-decode.sh"
 bash -n "$project_root/examples/swarm-kernel/scripts/verify.sh"
 node "$project_root/scripts/check-promoted-native-image-exports.mjs" >/dev/null
@@ -181,6 +181,9 @@ reject_pattern "benchmarks/run-benchmark.mjs" 'unset CLASP_CLASPC CLASPC_BIN'
 require_pattern "scripts/test-native-claspc.sh" 'feedback_loop_live_state_root'
 require_pattern "scripts/test-native-claspc.sh" 'CLASP_TEST_NATIVE_CLASPC_SHARED_CACHE_HOME'
 require_pattern "scripts/test-native-claspc.sh" 'CLASP_TEST_ISOLATED_XDG_CACHE'
+require_pattern "scripts/test-native-claspc-smoke.sh" 'test-native-claspc-smoke: ok'
+require_pattern "scripts/verify-fast.sh" 'bash scripts/test-native-claspc-smoke.sh'
+reject_pattern "scripts/verify-fast.sh" 'bash scripts/test-native-claspc.sh'
 require_pattern "scripts/test-native-claspc.sh" 'swarm_loop_builder_running_output'
 require_pattern "scripts/test-native-claspc.sh" 'record-ergonomics-app'
 require_pattern "scripts/test-native-claspc.sh" 'polymorphism-app'

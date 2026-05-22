@@ -47,6 +47,7 @@ cp "$project_root/scripts/test-verify-runtime-slice.sh" "$test_root/scripts/test
 cp "$project_root/scripts/test-promoted-source-export-cache.sh" "$test_root/scripts/test-promoted-source-export-cache.sh"
 cp "$project_root/scripts/test-native-incremental-guard.sh" "$test_root/scripts/test-native-incremental-guard.sh"
 cp "$project_root/scripts/test-native-claspc-diagnostics.sh" "$test_root/scripts/test-native-claspc-diagnostics.sh"
+cp "$project_root/scripts/test-native-claspc-smoke.sh" "$test_root/scripts/test-native-claspc-smoke.sh"
 cp "$project_root/scripts/test-source-run-cache.sh" "$test_root/scripts/test-source-run-cache.sh"
 cp "$project_root/scripts/test-native-claspc.sh" "$test_root/scripts/test-native-claspc.sh"
 cp "$project_root/scripts/test-record-update-parity.sh" "$test_root/scripts/test-record-update-parity.sh"
@@ -84,7 +85,7 @@ grep -F 'bash scripts/test-selfhost.sh' "$test_root/scripts/verify-fast.sh" >/de
 grep -F 'bash scripts/test-native-claspc-diagnostics.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-source-run-cache.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-promoted-source-export-cache.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
-grep -F 'bash scripts/test-native-claspc.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
+grep -F 'bash scripts/test-native-claspc-smoke.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-native-runtime.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/verify-compiler-slice.sh all' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-record-update-parity.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
@@ -110,8 +111,11 @@ const sequentialCommands = extract("fast_sequential_verify_commands");
 if (parallelCommands.includes("bash scripts/test-native-claspc.sh")) {
   throw new Error("fast native claspc harness should not run in the parallel batch");
 }
-if (!sequentialCommands.includes("bash scripts/test-native-claspc.sh")) {
-  throw new Error("fast native claspc harness should run after the parallel batch");
+if (sequentialCommands.includes("bash scripts/test-native-claspc.sh")) {
+  throw new Error("fast verification should not run the full native claspc harness");
+}
+if (!sequentialCommands.includes("bash scripts/test-native-claspc-smoke.sh")) {
+  throw new Error("fast native claspc smoke harness should run after the parallel batch");
 }
 NODE
 grep -F 'CLASP_GOAL_MANAGER_BUILD_XDG_CACHE_HOME' "$test_root/scripts/test-goal-manager-fast.sh" >/dev/null
@@ -126,6 +130,9 @@ grep -F 'measure-native-incremental.sh' "$test_root/scripts/test-native-incremen
 grep -F 'CLASP_TEST_NATIVE_CLASPC_SHARED_CACHE_HOME' "$test_root/scripts/test-native-claspc.sh" >/dev/null
 grep -F 'CLASP_TEST_SHARED_XDG_CACHE_HOME' "$test_root/scripts/test-native-claspc.sh" >/dev/null
 grep -F 'CLASP_TEST_ISOLATED_XDG_CACHE' "$test_root/scripts/test-native-claspc.sh" >/dev/null
+grep -F 'test-native-claspc-smoke: ok' "$test_root/scripts/test-native-claspc-smoke.sh" >/dev/null
+grep -F 'CLASP_TEST_NATIVE_CLASPC_SHARED_CACHE_HOME' "$test_root/scripts/test-native-claspc-smoke.sh" >/dev/null
+grep -F 'CLASP_TEST_ISOLATED_XDG_CACHE' "$test_root/scripts/test-native-claspc-smoke.sh" >/dev/null
 grep -F 'setup_exhaustive_native_cases()' "$test_root/scripts/test-native-claspc.sh" >/dev/null
 grep -F 'CLASP_NATIVE_CLASPC_EXHAUSTIVE' "$test_root/scripts/test-native-claspc.sh" >/dev/null
 grep -F 'ensure-goal-manager-binary.sh' "$test_root/scripts/test-native-claspc.sh" >/dev/null
