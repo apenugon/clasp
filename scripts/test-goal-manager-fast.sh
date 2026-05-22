@@ -207,6 +207,10 @@ fi
 
 cat >"$output" <<SCRIPT
 #!/usr/bin/env bash
+if [[ "\${CLASP_MANAGER_COMMAND:-}" == "status" || "\${CLASP_LOOP_COMMAND:-}" == "status" ]]; then
+  printf '{"state":{"phase":"needs-planner","verdict":"pending"}}\n'
+  exit 0
+fi
 printf 'compiled-source=%s\n' '$source_path'
 printf 'compiled-output=%s\n' '$output'
 printf 'compiled-threshold=%s\n' '$CLASP_NATIVE_IMAGE_MONOLITHIC_DECL_THRESHOLD'
@@ -237,6 +241,10 @@ ensure_probe_binary_two="$(
 [[ "$(grep -c '^compile-source=' "$fake_ensure_log")" == "1" ]]
 grep -F "compile-source=$goal_manager_source" "$fake_ensure_log" >/dev/null
 cmp -s "$ensure_probe_binary_one" "$ensure_probe_alias"
+[[ -f "$ensure_probe_binary_one.metadata.json" ]]
+[[ -f "$ensure_probe_alias.metadata.json" ]]
+cmp -s "$ensure_probe_binary_one.metadata.json" "$ensure_probe_alias.metadata.json"
+grep -F '"kind": "clasp-goal-manager-binary"' "$ensure_probe_binary_one.metadata.json" >/dev/null
 "$ensure_probe_alias" | grep -F "compiled-source=$goal_manager_source" >/dev/null
 
 ensure_probe_binary_build_mode="$(

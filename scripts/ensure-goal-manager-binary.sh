@@ -26,6 +26,7 @@ claspc_bin="${CLASP_GOAL_MANAGER_CLASPC_BIN:-$("$project_root/scripts/resolve-cl
 compile_timeout_secs="${CLASP_GOAL_MANAGER_COMPILE_TIMEOUT_SECS:-180}"
 compile_attempts="${CLASP_GOAL_MANAGER_COMPILE_ATTEMPTS:-2}"
 allow_stale_on_compile_failure="${CLASP_GOAL_MANAGER_ALLOW_STALE_ON_COMPILE_FAILURE:-1}"
+allow_unmanaged_stale="${CLASP_GOAL_MANAGER_ALLOW_UNMANAGED_STALE:-0}"
 stale_smoke_timeout_secs="${CLASP_GOAL_MANAGER_STALE_SMOKE_TIMEOUT_SECS:-5}"
 goal_manager_native_bundle_jobs="${CLASP_NATIVE_BUNDLE_JOBS:-8}"
 goal_manager_native_image_section_jobs="${CLASP_NATIVE_IMAGE_SECTION_JOBS:-8}"
@@ -36,6 +37,9 @@ declare -a alias_paths=()
 usage() {
   cat <<'EOF' >&2
 usage: ensure-goal-manager-binary.sh [--alias <path>]...
+
+Environment:
+  CLASP_GOAL_MANAGER_ALLOW_UNMANAGED_STALE=1  Permit stale fallback to executables without helper metadata after smoke validation.
 EOF
 }
 
@@ -81,6 +85,25 @@ canonical_existing_path() {
   parent="$(cd "$(dirname "$path")" && pwd -P)"
   name="$(basename "$path")"
   printf '%s/%s\n' "$parent" "$name"
+}
+
+json_escape_goal_manager_value() {
+  local value="$1"
+
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  value="${value//$'\n'/\\n}"
+  value="${value//$'\r'/\\r}"
+  value="${value//$'\t'/\\t}"
+  printf '%s' "$value"
+}
+
+json_goal_manager_string() {
+  printf '"%s"' "$(json_escape_goal_manager_value "$1")"
+}
+
+goal_manager_metadata_path() {
+  printf '%s.metadata.json\n' "$1"
 }
 
 goal_manager_cache_path_id() {
@@ -185,6 +208,44 @@ compute_goal_manager_cache_key() {
   } | sha256sum | awk '{print $1}'
 }
 
+write_goal_manager_binary_metadata() {
+  local binary_path="$1"
+  local metadata_path
+  local metadata_tmp
+  local source_id
+  local source_hash
+  local dependency_hash
+  local claspc_hash
+  local build_mode_hash
+  local created_at
+
+  metadata_path="$(goal_manager_metadata_path "$binary_path")"
+  metadata_tmp="$metadata_path.tmp.$$"
+  source_id="$(goal_manager_cache_path_id "$goal_manager_source")"
+  source_hash="$(sha256sum "$goal_manager_source" | awk '{print $1}')"
+  dependency_hash="$(emit_goal_manager_source_dependency_hashes | sha256sum | awk '{print $1}')"
+  claspc_hash="$(sha256sum "$claspc_bin" | awk '{print $1}')"
+  build_mode_hash="$(emit_goal_manager_build_mode_key | sha256sum | awk '{print $1}')"
+  created_at="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || printf 'unknown')"
+
+  rm -f "$metadata_tmp"
+  {
+    printf '{\n'
+    printf '  "schemaVersion": 1,\n'
+    printf '  "kind": "clasp-goal-manager-binary",\n'
+    printf '  "createdBy": "scripts/ensure-goal-manager-binary.sh",\n'
+    printf '  "createdAt": %s,\n' "$(json_goal_manager_string "$created_at")"
+    printf '  "source": %s,\n' "$(json_goal_manager_string "$source_id")"
+    printf '  "sourceSha256": %s,\n' "$(json_goal_manager_string "$source_hash")"
+    printf '  "sourceDependencySha256": %s,\n' "$(json_goal_manager_string "$dependency_hash")"
+    printf '  "claspcSha256": %s,\n' "$(json_goal_manager_string "$claspc_hash")"
+    printf '  "buildModeSha256": %s,\n' "$(json_goal_manager_string "$build_mode_hash")"
+    printf '  "cacheKey": %s\n' "$(json_goal_manager_string "$cache_key")"
+    printf '}\n'
+  } >"$metadata_tmp"
+  mv "$metadata_tmp" "$metadata_path"
+}
+
 compile_goal_manager_binary() {
   local output_path="$1"
   local output_tmp="$output_path.tmp.$$"
@@ -250,6 +311,36 @@ compile_goal_manager_binary() {
 
   chmod +x "$output_tmp"
   mv "$output_tmp" "$output_path"
+  if ! write_goal_manager_binary_metadata "$output_path"; then
+    rm -f "$output_path" "$(goal_manager_metadata_path "$output_path")"
+    return 1
+  fi
+}
+
+sync_goal_manager_alias_metadata() {
+  local source_path="$1"
+  local alias_path="$2"
+  local source_metadata
+  local alias_metadata
+  local alias_metadata_tmp
+
+  source_metadata="$(goal_manager_metadata_path "$source_path")"
+  alias_metadata="$(goal_manager_metadata_path "$alias_path")"
+  if [[ "$source_metadata" == "$alias_metadata" ]]; then
+    return 0
+  fi
+
+  if [[ -f "$source_metadata" ]]; then
+    if [[ -f "$alias_metadata" ]] && cmp -s "$source_metadata" "$alias_metadata"; then
+      return 0
+    fi
+    alias_metadata_tmp="$alias_metadata.tmp.$$"
+    rm -f "$alias_metadata_tmp"
+    cp "$source_metadata" "$alias_metadata_tmp"
+    mv "$alias_metadata_tmp" "$alias_metadata"
+  else
+    rm -f "$alias_metadata"
+  fi
 }
 
 sync_goal_manager_alias() {
@@ -259,6 +350,7 @@ sync_goal_manager_alias() {
 
   mkdir -p "$(dirname "$alias_path")"
   if [[ -x "$alias_path" ]] && cmp -s "$source_path" "$alias_path"; then
+    sync_goal_manager_alias_metadata "$source_path" "$alias_path"
     return 0
   fi
 
@@ -266,6 +358,7 @@ sync_goal_manager_alias() {
   cp "$source_path" "$alias_tmp"
   chmod +x "$alias_tmp"
   mv "$alias_tmp" "$alias_path"
+  sync_goal_manager_alias_metadata "$source_path" "$alias_path"
 }
 
 emit_stale_goal_manager_candidates() {
@@ -287,8 +380,35 @@ emit_stale_goal_manager_candidates() {
   done < <(find "$cache_root" -mindepth 2 -maxdepth 2 -type f -name swarm-goal-manager -printf '%T@ %p\n' 2>/dev/null | sort -nr | cut -d' ' -f2-)
 }
 
-validate_stale_goal_manager_binary() {
+validate_goal_manager_binary_metadata() {
   local candidate="$1"
+  local candidate_label="$2"
+  local metadata_path
+  local expected_source_json
+
+  metadata_path="$(goal_manager_metadata_path "$candidate")"
+  expected_source_json="$(json_goal_manager_string "$(goal_manager_cache_path_id "$goal_manager_source")")"
+  if [[ ! -f "$metadata_path" ]]; then
+    if [[ "$allow_unmanaged_stale" == "1" ]]; then
+      printf '%s goal manager candidate has no helper metadata; accepting only because CLASP_GOAL_MANAGER_ALLOW_UNMANAGED_STALE=1: %s\n' "$candidate_label" "$candidate" >&2
+    else
+      printf '%s goal manager candidate missing helper metadata: %s\n' "$candidate_label" "$candidate" >&2
+      return 1
+    fi
+  elif ! grep -F '"kind": "clasp-goal-manager-binary"' "$metadata_path" >/dev/null 2>&1; then
+    printf '%s goal manager candidate has invalid helper metadata: %s\n' "$candidate_label" "$candidate" >&2
+    return 1
+  elif ! grep -F "\"source\": $expected_source_json" "$metadata_path" >/dev/null 2>&1; then
+    printf '%s goal manager candidate metadata source mismatch: %s\n' "$candidate_label" "$candidate" >&2
+    return 1
+  fi
+
+  return 0
+}
+
+smoke_goal_manager_binary() {
+  local candidate="$1"
+  local candidate_label="$2"
   local smoke_root
   local smoke_output
   local smoke_status=0
@@ -311,19 +431,33 @@ validate_stale_goal_manager_binary() {
   rm -rf "$smoke_root"
 
   if (( smoke_status != 0 )); then
-    printf 'stale goal manager candidate failed status smoke with exit %s: %s\n' "$smoke_status" "$candidate" >&2
+    printf '%s goal manager candidate failed status smoke with exit %s: %s\n' "$candidate_label" "$smoke_status" "$candidate" >&2
     return 1
   fi
   if [[ "$smoke_output" == *"runtime failed to execute native compiler export main"* ]]; then
-    printf 'stale goal manager candidate failed status smoke with native export error: %s\n' "$candidate" >&2
+    printf '%s goal manager candidate failed status smoke with native export error: %s\n' "$candidate_label" "$candidate" >&2
     return 1
   fi
   if [[ "$smoke_output" != *'"state"'* || "$smoke_output" != *'"phase"'* ]]; then
-    printf 'stale goal manager candidate failed status smoke with unexpected output: %s\n' "$candidate" >&2
+    printf '%s goal manager candidate failed status smoke with unexpected output: %s\n' "$candidate_label" "$candidate" >&2
     return 1
   fi
 
   return 0
+}
+
+validate_stale_goal_manager_binary() {
+  local candidate="$1"
+
+  validate_goal_manager_binary_metadata "$candidate" "stale" &&
+    smoke_goal_manager_binary "$candidate" "stale"
+}
+
+validate_cached_goal_manager_binary() {
+  local candidate="$1"
+
+  validate_goal_manager_binary_metadata "$candidate" "cached" &&
+    smoke_goal_manager_binary "$candidate" "cached"
 }
 
 find_stale_goal_manager_binary() {
@@ -363,6 +497,10 @@ compile_lock="$(dirname "$goal_manager_binary")/compile.lock"
 
 if [[ "${CLASP_GOAL_MANAGER_FORCE_RECOMPILE:-0}" == "1" ]]; then
   rm -f "$goal_manager_binary"
+fi
+
+if [[ -x "$goal_manager_binary" ]] && ! validate_cached_goal_manager_binary "$goal_manager_binary"; then
+  rm -f "$goal_manager_binary" "$(goal_manager_metadata_path "$goal_manager_binary")"
 fi
 
 if [[ ! -x "$goal_manager_binary" ]]; then

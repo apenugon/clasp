@@ -183,6 +183,25 @@ if [[ "${CLASP_TEST_EXPECT_DERIVED_NATIVE_COMMANDS:-0}" == "1" ]]; then
   fi
 fi
 
+if [[ "${CLASP_TEST_EXPECT_DERIVED_GOAL_MANAGER_HELPER_COMMANDS:-0}" == "1" ]]; then
+  if [[ "$prompt" != *"Focused verification command source: diff-derived"* ]]; then
+    printf 'verifier prompt did not mark GoalManager helper commands as diff-derived\n' >&2
+    exit 90
+  fi
+  if [[ "$prompt" != *'$(scripts/resolve-claspc.sh) --json check examples/swarm-native/GoalManager.clasp'* || "$prompt" != *"bash scripts/test-goal-manager-fast.sh"* ]]; then
+    printf 'verifier prompt did not select GoalManager control-plane checks from the helper diff\n' >&2
+    exit 91
+  fi
+  if [[ "$prompt" == *"unknown_path"* ]]; then
+    printf 'GoalManager helper diff was misclassified as unknown\n' >&2
+    exit 92
+  fi
+  if [[ "$prompt" == *"bash scripts/verify-fast.sh"* ]]; then
+    printf 'GoalManager helper diff unexpectedly fell back to verify-fast\n' >&2
+    exit 93
+  fi
+fi
+
 if [[ "${CLASP_TEST_EXPECT_DERIVED_SPEED_COMMANDS:-0}" == "1" ]]; then
   if [[ "$prompt" != *"Focused verification command source: diff-derived"* ]]; then
     printf 'verifier prompt did not mark compiler speed commands as diff-derived\n' >&2
@@ -569,6 +588,51 @@ if grep -F 'bash scripts/test-goal-manager-fast.sh' "$derived_native_state_root/
 fi
 if grep -F 'bash scripts/verify-fast.sh' "$derived_native_state_root/focused-verify-1.json" >/dev/null; then
   printf 'native scenario focused diff unexpectedly selected verify-fast\n' >&2
+  exit 1
+fi
+
+derived_goal_helper_state_root="$test_root_abs/loop-derived-goal-helper-focused-state"
+derived_goal_helper_workspace_root="$fixture_project/.clasp-task-workspaces/derived-goal-helper-focused-task"
+derived_goal_helper_baseline_root="$fixture_project/.clasp-task-baselines/derived-goal-helper-focused-task"
+mkdir -p \
+  "$derived_goal_helper_state_root" \
+  "$derived_goal_helper_workspace_root/scripts" \
+  "$derived_goal_helper_baseline_root/scripts"
+printf 'base goal manager helper\n' >"$derived_goal_helper_baseline_root/scripts/ensure-goal-manager-binary.sh"
+cp -a "$derived_goal_helper_baseline_root/." "$derived_goal_helper_workspace_root/"
+printf 'changed goal manager helper\n' >"$derived_goal_helper_workspace_root/scripts/ensure-goal-manager-binary.sh"
+cat >"$derived_goal_helper_state_root/state.json" <<'JSON'
+{"attempt":1,"phase":"verifier-step-ready","verdict":"pending","completed":false,"builderRuns":1,"verifierRuns":1,"healthy":true,"needsAttention":false,"attentionReason":"","final":false}
+JSON
+cat >"$derived_goal_helper_state_root/builder-1.json" <<'JSON'
+{"summary":"builder changed GoalManager binary helper","files_touched":["scripts/ensure-goal-manager-binary.sh"],"tests_run":[],"residual_risks":[],"feedback":{"summary":"derive GoalManager helper checks","ergonomics":[],"follow_ups":[],"warnings":[]}}
+JSON
+printf 'ready\n' >"$derived_goal_helper_state_root/baseline.ready"
+
+derived_goal_helper_output="$(
+  env -u CLASP_LOOP_FOCUSED_VERIFY_COMMANDS_JSON \
+  CLASP_LOOP_CODEX_BIN_JSON="\"$fake_codex_bin\"" \
+  CLASP_LOOP_TASK_FILE_JSON="\"$task_file\"" \
+  CLASP_LOOP_WORKSPACE_JSON="\"$derived_goal_helper_workspace_root\"" \
+  CLASP_LOOP_BASELINE_WORKSPACE_JSON="\"$derived_goal_helper_baseline_root\"" \
+  CLASP_LOOP_MAX_ATTEMPTS_JSON='1' \
+  CLASP_TEST_EXPECT_DERIVED_GOAL_MANAGER_HELPER_COMMANDS='1' \
+  "$claspc_bin" run "$project_root/examples/feedback-loop/Main.clasp" -- "$derived_goal_helper_state_root"
+)"
+
+printf '%s\n' "$derived_goal_helper_output" | grep -Fx 'pass:1' >/dev/null
+test -f "$derived_goal_helper_state_root/focused-verify-1.json"
+grep -F '"source":"diff-derived"' "$derived_goal_helper_state_root/focused-verify-1.json" >/dev/null
+grep -F 'control_plane' "$derived_goal_helper_state_root/focused-verify-1.json" >/dev/null
+grep -F '"fallbackReason":""' "$derived_goal_helper_state_root/focused-verify-1.json" >/dev/null
+grep -F 'bash scripts/test-goal-manager-fast.sh' "$derived_goal_helper_state_root/focused-verify-1.json" >/dev/null
+grep -F '$(scripts/resolve-claspc.sh) --json check examples/swarm-native/GoalManager.clasp' "$derived_goal_helper_state_root/focused-verify-1.json" >/dev/null
+if grep -F 'unknown_path' "$derived_goal_helper_state_root/focused-verify-1.json" >/dev/null; then
+  printf 'GoalManager helper focused diff was misclassified as unknown\n' >&2
+  exit 1
+fi
+if grep -F 'bash scripts/verify-fast.sh' "$derived_goal_helper_state_root/focused-verify-1.json" >/dev/null; then
+  printf 'GoalManager helper focused diff unexpectedly selected verify-fast\n' >&2
   exit 1
 fi
 
