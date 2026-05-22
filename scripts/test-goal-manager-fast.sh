@@ -10,7 +10,8 @@ test_root="$(mktemp -d "$TMPDIR/test-goal-manager-fast.XXXXXX")"
 test_root_abs="$(cd "$test_root" && pwd -P)"
 export XDG_CACHE_HOME="$test_root/xdg-cache"
 goal_manager_shared_cache_root="${CLASP_GOAL_MANAGER_SHARED_CACHE_PROJECT_ROOT:-${CLASP_MANAGER_PROJECT_ROOT_JSON:-$project_root}}"
-goal_manager_build_cache_dir="${CLASP_GOAL_MANAGER_CACHE_DIR:-$goal_manager_shared_cache_root/.clasp-loops/.cache/goal-manager-fast/binaries}"
+goal_manager_default_binary_cache="${CLASP_GOAL_MANAGER_GLOBAL_CACHE_DIR:-/tmp/clasp-nix-cache/goal-manager-fast}"
+goal_manager_build_cache_dir="${CLASP_GOAL_MANAGER_CACHE_DIR:-$goal_manager_default_binary_cache}"
 goal_manager_build_xdg_cache_home="${CLASP_GOAL_MANAGER_BUILD_XDG_CACHE_HOME:-$goal_manager_shared_cache_root/.clasp-loops/.cache/goal-manager-fast/xdg-cache}"
 export CLASP_GOAL_MANAGER_COMPILE_TIMEOUT_SECS="${CLASP_GOAL_MANAGER_COMPILE_TIMEOUT_SECS:-180}"
 export CLASP_GOAL_MANAGER_COMPILE_ATTEMPTS="${CLASP_GOAL_MANAGER_COMPILE_ATTEMPTS:-2}"
@@ -1956,6 +1957,33 @@ run_goal_manager "$expired_planner_state" "$expired_planner_workspace" \
 grep -F '"phase":"completed"' "$expired_planner_output" >/dev/null
 grep -F '"verdict":"pass"' "$expired_planner_output" >/dev/null
 grep -F 'resume-recover-expired-planner-lease' "$expired_planner_state/trace.log" >/dev/null
+
+trace_case "planner-report-resume-uses-persisted-objective"
+persisted_objective_state="$test_root_abs/persisted-objective-state"
+persisted_objective_workspace="$test_root_abs/persisted-objective-workspace"
+persisted_objective_output="$test_root_abs/persisted-objective-output.txt"
+mkdir -p "$persisted_objective_workspace"
+"$claspc_bin" --json swarm objective create "$persisted_objective_state" best-language --max-tasks 64 --max-runs 64 >/dev/null
+"$claspc_bin" --json swarm task create "$persisted_objective_state" best-language planner --max-runs 2 --lease-timeout-ms 3600000 >/dev/null
+"$claspc_bin" --json swarm lease "$persisted_objective_state" planner >/dev/null
+cat >"$persisted_objective_state/status.json" <<'JSON'
+{"phase":"planner-running","verdict":"pending","completed":false,"objectiveId":"best-language","plannerTaskId":"planner","activeTaskId":"planner","plannedTaskIds":[],"wave":1,"benchmarkRuns":0,"final":false}
+JSON
+cat >"$persisted_objective_state/planner-1.json" <<'JSON'
+{"objectiveSummary":"Resume a durable planner report under its persisted objective.","strategy":"Use the status objective instead of a missing launch environment objective.","tasks":[{"taskId":"benchmark-gap","role":"resume-regression","detail":"Complete a resumed planned task under the persisted objective.","dependencies":[],"taskPrompt":"Complete the fake child loop after planner report resume.","coordinationFocus":["resume","objective-persistence"]}],"testsRun":["persisted-objective-resume"],"residualRisks":[]}
+JSON
+run_goal_manager "$persisted_objective_state" "$persisted_objective_workspace" \
+  CLASP_MANAGER_OBJECTIVE_ID_JSON='' \
+  CLASP_MANAGER_TRACE_JSON='true' \
+  CLASP_MANAGER_MAX_WAVES_JSON='1' \
+  >"$persisted_objective_output" 2>&1
+grep -F '"phase":"completed"' "$persisted_objective_output" >/dev/null
+grep -F '"verdict":"pass"' "$persisted_objective_output" >/dev/null
+grep -F '"objectiveId":"best-language"' "$persisted_objective_state/status.json" >/dev/null
+if grep -F 'unknown swarm objective `improve-clasp`' "$persisted_objective_state/feedback.json" >/dev/null 2>&1; then
+  echo "planner report resume should not fall back to the default objective when status.json carries one" >&2
+  exit 1
+fi
 
 trace_case "expired-child-completion-lease-recovers"
 expired_child_state="$test_root_abs/expired-child-state"

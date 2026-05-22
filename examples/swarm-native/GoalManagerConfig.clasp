@@ -65,8 +65,25 @@ goalText =
     "CLASP_MANAGER_GOAL_JSON"
     "Improve Clasp by planning bounded native compiler/runtime/language tasks and closing them with ordinary Clasp loops."
 
+objectiveIdFromStatusOr : Str -> Str
+objectiveIdFromStatusOr fallback =
+  match readFile (pathJoin [stateRootPath, "status.json"]) {
+    Ok raw ->
+      let stored = (decode ManagerState raw).objectiveId in
+      if stored == "" then
+        fallback
+      else
+        stored,
+    Err message ->
+      fallback
+  }
+
 objectiveId : Str
-objectiveId = readEnvText "CLASP_MANAGER_OBJECTIVE_ID_JSON" "improve-clasp"
+objectiveId =
+  match envVar "CLASP_MANAGER_OBJECTIVE_ID_JSON" {
+    Ok raw -> if raw == "" then objectiveIdFromStatusOr "improve-clasp" else decode Str raw,
+    Err message -> objectiveIdFromStatusOr "improve-clasp"
+  }
 
 managerProgramPath : Str
 managerProgramPath = readEnvText "CLASP_MANAGER_PROGRAM_JSON" "examples/swarm-native/GoalManager.clasp"
