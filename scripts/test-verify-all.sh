@@ -51,6 +51,7 @@ cp "$project_root/scripts/test-native-claspc-smoke.sh" "$test_root/scripts/test-
 cp "$project_root/scripts/test-source-run-cache.sh" "$test_root/scripts/test-source-run-cache.sh"
 cp "$project_root/scripts/test-native-claspc.sh" "$test_root/scripts/test-native-claspc.sh"
 cp "$project_root/scripts/test-native-runtime-smoke.sh" "$test_root/scripts/test-native-runtime-smoke.sh"
+cp "$project_root/scripts/test-verify-all-smoke.sh" "$test_root/scripts/test-verify-all-smoke.sh"
 cp "$project_root/scripts/test-record-update-parity.sh" "$test_root/scripts/test-record-update-parity.sh"
 cp "$project_root/scripts/test-monitored-loop.sh" "$test_root/scripts/test-monitored-loop.sh"
 cp "$project_root/scripts/test-monitored-step.sh" "$test_root/scripts/test-monitored-step.sh"
@@ -102,6 +103,11 @@ grep -F 'bash scripts/verify-runtime-slice.sh process workflow codex-loop agent-
 grep -F 'bash examples/agent-metadata/scripts/verify.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash examples/agent-task-scenario/scripts/verify.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-js-emitter-determinism.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
+grep -F 'bash scripts/test-verify-all-smoke.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
+if grep -F 'bash scripts/test-verify-all.sh' "$test_root/scripts/verify-fast.sh" >/dev/null 2>&1; then
+  printf 'fast verification should use test-verify-all-smoke, not exhaustive test-verify-all\n' >&2
+  exit 1
+fi
 grep -F 'bash scripts/test-verify-affected.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-verify-compiler-slice.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-verify-runtime-slice.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
@@ -148,6 +154,9 @@ grep -F 'CLASP_TEST_ISOLATED_XDG_CACHE' "$test_root/scripts/test-native-claspc-s
 grep -F 'test-native-runtime-smoke: ok' "$test_root/scripts/test-native-runtime-smoke.sh" >/dev/null
 grep -F 'test_native_interpreter.c' "$test_root/scripts/test-native-runtime-smoke.sh" >/dev/null
 grep -F 'interpreted_call[main]=Hello from Clasp' "$test_root/scripts/test-native-runtime-smoke.sh" >/dev/null
+grep -F 'test-verify-all-smoke: ok' "$test_root/scripts/test-verify-all-smoke.sh" >/dev/null
+grep -F 'CLASP_VERIFY_USE_CURRENT_SHELL=1' "$test_root/scripts/test-verify-all-smoke.sh" >/dev/null
+grep -F 'bash scripts/test-verify-all.sh' "$test_root/scripts/test-verify-all-smoke.sh" >/dev/null
 grep -F 'setup_exhaustive_native_cases()' "$test_root/scripts/test-native-claspc.sh" >/dev/null
 grep -F 'CLASP_NATIVE_CLASPC_EXHAUSTIVE' "$test_root/scripts/test-native-claspc.sh" >/dev/null
 grep -F 'ensure-goal-manager-binary.sh' "$test_root/scripts/test-native-claspc.sh" >/dev/null

@@ -104,7 +104,7 @@ bash examples/agent-metadata/scripts/verify.sh
 bash examples/agent-task-scenario/scripts/verify.sh
 bash scripts/test-js-process-runtime.sh
 bash scripts/test-js-emitter-determinism.sh
-bash scripts/test-verify-all.sh
+bash scripts/test-verify-all-smoke.sh
 bash scripts/test-verify-affected.sh
 bash scripts/test-verify-compiler-slice.sh
 bash scripts/test-verify-runtime-slice.sh
@@ -121,7 +121,7 @@ bash scripts/test-promoted-source-export-cache.sh
 bash examples/agent-metadata/scripts/verify.sh
 bash examples/agent-task-scenario/scripts/verify.sh
 bash scripts/test-js-emitter-determinism.sh
-bash scripts/test-verify-all.sh
+bash scripts/test-verify-all-smoke.sh
 bash scripts/test-verify-affected.sh
 bash scripts/test-verify-compiler-slice.sh
 bash scripts/test-verify-runtime-slice.sh

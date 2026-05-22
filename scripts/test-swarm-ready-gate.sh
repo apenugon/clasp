@@ -23,7 +23,7 @@ reject_pattern() {
   fi
 }
 
-bash -n "$project_root/scripts/test-native-claspc.sh" "$project_root/scripts/test-native-claspc-smoke.sh" "$project_root/scripts/test-native-runtime-smoke.sh"
+bash -n "$project_root/scripts/test-native-claspc.sh" "$project_root/scripts/test-native-claspc-smoke.sh" "$project_root/scripts/test-native-runtime-smoke.sh" "$project_root/scripts/test-verify-all-smoke.sh"
 bash -n "$project_root/scripts/test-goal-manager-planner-report-decode.sh"
 bash -n "$project_root/examples/swarm-kernel/scripts/verify.sh"
 node "$project_root/scripts/check-promoted-native-image-exports.mjs" >/dev/null
@@ -187,8 +187,10 @@ require_pattern "scripts/test-native-claspc-smoke.sh" 'test-native-claspc-smoke:
 require_pattern "scripts/test-native-runtime-smoke.sh" 'test-native-runtime-smoke: ok'
 require_pattern "scripts/verify-fast.sh" 'bash scripts/test-native-claspc-smoke.sh'
 require_pattern "scripts/verify-fast.sh" 'bash scripts/test-native-runtime-smoke.sh'
+require_pattern "scripts/verify-fast.sh" 'bash scripts/test-verify-all-smoke.sh'
 reject_pattern "scripts/verify-fast.sh" 'bash scripts/test-native-claspc.sh'
 reject_pattern "scripts/verify-fast.sh" 'bash scripts/test-native-runtime.sh'
+reject_pattern "scripts/verify-fast.sh" 'bash scripts/test-verify-all.sh'
 require_pattern "scripts/test-native-claspc.sh" 'swarm_loop_builder_running_output'
 require_pattern "scripts/test-native-claspc.sh" 'record-ergonomics-app'
 require_pattern "scripts/test-native-claspc.sh" 'polymorphism-app'
