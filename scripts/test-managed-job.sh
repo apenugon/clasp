@@ -19,6 +19,17 @@ trap cleanup EXIT
 
 chmod +x "$project_root/scripts/run-managed-job.sh" "$project_root/scripts/stop-managed-job.sh"
 
+wait_for_file() {
+  local path="$1"
+  for _ in $(seq 1 50); do
+    if [[ -f "$path" ]]; then
+      return 0
+    fi
+    sleep 0.1
+  done
+  return 1
+}
+
 session_has_members() {
   local sid="$1"
   ps -eo sid= | awk -v want="$sid" '{ gsub(/[[:space:]]/, "", $1); if ($1 == want) found = 1 } END { exit found ? 0 : 1 }'
@@ -39,6 +50,35 @@ session_has_nonroot_group() {
       END { exit found ? 0 : 1 }
     '
 }
+
+complete_job_dir="$(
+  "$project_root/scripts/run-managed-job.sh" \
+    --jobs-root "$jobs_root" \
+    --job-id complete-smoke \
+    -- bash -c 'printf complete-output; printf complete-error >&2; sleep 0.2; exit 0'
+)"
+[[ "$complete_job_dir" == "$jobs_root/complete-smoke" ]]
+complete_pid="$(tr -d '[:space:]' <"$complete_job_dir/pid")"
+wait_for_file "$complete_job_dir/exit-status"
+[[ "$(cat "$complete_job_dir/exit-status")" == "0" ]]
+[[ "$(cat "$complete_job_dir/status")" == "completed" ]]
+[[ "$(cat "$complete_job_dir/stdout.log")" == "complete-output" ]]
+[[ "$(cat "$complete_job_dir/stderr.log")" == "complete-error" ]]
+if kill -0 "$complete_pid" >/dev/null 2>&1; then
+  printf 'completed managed job root process still alive: %s\n' "$complete_pid" >&2
+  exit 1
+fi
+
+failed_job_dir="$(
+  "$project_root/scripts/run-managed-job.sh" \
+    --jobs-root "$jobs_root" \
+    --job-id failed-smoke \
+    -- bash -c 'sleep 0.2; exit 7'
+)"
+[[ "$failed_job_dir" == "$jobs_root/failed-smoke" ]]
+wait_for_file "$failed_job_dir/exit-status"
+[[ "$(cat "$failed_job_dir/exit-status")" == "7" ]]
+[[ "$(cat "$failed_job_dir/status")" == "failed" ]]
 
 job_dir="$(
   "$project_root/scripts/run-managed-job.sh" \

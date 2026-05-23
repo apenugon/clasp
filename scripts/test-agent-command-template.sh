@@ -4,9 +4,34 @@ set -euo pipefail
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tmp_root="${CLASP_TEST_TMPDIR:-${TMPDIR:-/tmp}}"
 timeout_secs="${CLASP_AGENT_COMMAND_TEMPLATE_TIMEOUT_SECS:-150}"
+run_feedback_template="${CLASP_AGENT_COMMAND_TEMPLATE_FEEDBACK:-1}"
+run_native_template="${CLASP_AGENT_COMMAND_TEMPLATE_NATIVE:-0}"
 
 if ! [[ "$timeout_secs" =~ ^[0-9]+$ ]] || (( timeout_secs < 1 )); then
   printf 'CLASP_AGENT_COMMAND_TEMPLATE_TIMEOUT_SECS must be a positive integer\n' >&2
+  exit 1
+fi
+
+case "$run_feedback_template" in
+  0|1)
+    ;;
+  *)
+    printf 'CLASP_AGENT_COMMAND_TEMPLATE_FEEDBACK must be 0 or 1\n' >&2
+    exit 1
+    ;;
+esac
+
+case "$run_native_template" in
+  0|1)
+    ;;
+  *)
+    printf 'CLASP_AGENT_COMMAND_TEMPLATE_NATIVE must be 0 or 1\n' >&2
+    exit 1
+    ;;
+esac
+
+if [[ "$run_feedback_template" == "0" && "$run_native_template" == "0" ]]; then
+  printf 'at least one agent command template scenario must be enabled\n' >&2
   exit 1
 fi
 
@@ -14,11 +39,16 @@ mkdir -p "$tmp_root"
 test_root="$(mktemp -d "$tmp_root/test-agent-command-template.XXXXXX")"
 state_root="$test_root/state"
 workspace_root="$test_root/workspace"
+native_state_root="$test_root/native-state"
+native_workspace_root="$test_root/native-workspace"
 task_file="$test_root/task.md"
 fake_agent="$test_root/generic-agent"
 output_path="$test_root/output.txt"
 status_path="$test_root/status.json"
+native_output_path="$test_root/native-output.json"
+native_status_path="$test_root/native-status.json"
 agent_log="$test_root/agent-invocations.jsonl"
+native_agent_log="$test_root/native-agent-invocations.jsonl"
 
 cleanup() {
   if [[ "${CLASP_TEST_KEEP_TMP:-}" == "1" ]]; then
@@ -41,6 +71,7 @@ set -euo pipefail
 role=""
 report_path=""
 prompt_path=""
+prompt=""
 workspace_root="."
 schema_path=""
 
@@ -56,6 +87,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --prompt-path)
       prompt_path="${2:-}"
+      shift 2
+      ;;
+    --prompt)
+      prompt="${2:-}"
       shift 2
       ;;
     --workspace)
@@ -76,12 +111,20 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "$role" || -z "$report_path" || -z "$prompt_path" ]]; then
+if [[ -z "$role" || -z "$report_path" ]]; then
   printf 'missing required generic-agent arguments\n' >&2
   exit 65
 fi
 
-prompt="$(cat "$prompt_path")"
+if [[ -n "$prompt_path" ]]; then
+  prompt="$(cat "$prompt_path")"
+fi
+
+if [[ -z "$prompt" ]]; then
+  printf 'missing required generic-agent prompt\n' >&2
+  exit 65
+fi
+
 mkdir -p "$(dirname "$report_path")" "$workspace_root"
 printf '{"role":%s,"reportPath":%s,"promptPath":%s,"schemaPath":%s}\n' \
   "$(node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "$role")" \
@@ -93,7 +136,7 @@ printf '{"role":%s,"reportPath":%s,"promptPath":%s,"schemaPath":%s}\n' \
 case "$role" in
   builder)
     if [[ "$prompt" != *"builder subagent"* ]]; then
-      printf 'builder prompt was not supplied through prompt_path\n' >&2
+      printf 'builder prompt was not supplied\n' >&2
       exit 66
     fi
     printf 'generic-agent-template-ok\n' >"$workspace_root/generic-agent.txt"
@@ -103,7 +146,7 @@ JSON
     ;;
   verifier)
     if [[ "$prompt" != *"verifier subagent"* ]]; then
-      printf 'verifier prompt was not supplied through prompt_path\n' >&2
+      printf 'verifier prompt was not supplied\n' >&2
       exit 67
     fi
     if [[ "$(cat "$workspace_root/generic-agent.txt")" != "generic-agent-template-ok" ]]; then
@@ -155,30 +198,50 @@ process.stdout.write(JSON.stringify([
 NODE
 )"
 
+native_agent_command_json="$(
+  node - <<'NODE'
+process.stdout.write(JSON.stringify([
+  "{agent_bin}",
+  "--role",
+  "{role}",
+  "--schema",
+  "{schema_path}",
+  "--report",
+  "{report_path}",
+  "--prompt",
+  "{prompt}",
+  "--workspace",
+  "{workspace_root}",
+  "--model",
+  "{model}",
+  "--reasoning",
+  "{reasoning}",
+  "--sandbox",
+  "{sandbox}"
+]));
+NODE
+)"
+
 grep -F 'CLASP_LOOP_AGENT_COMMAND_JSON' "$project_root/examples/feedback-loop/Main.clasp" >/dev/null
 grep -F 'CLASP_LOOP_AGENT_COMMAND_JSON' "$project_root/examples/swarm-native/FeedbackLoop.clasp" >/dev/null
 grep -F 'CLASP_MANAGER_PLANNER_AGENT_COMMAND_JSON' "$project_root/examples/swarm-native/GoalManagerConfig.clasp" >/dev/null
 grep -F 'plannerAgentCommandArgs' "$project_root/examples/swarm-native/GoalManagerBootstrapPlanner.clasp" >/dev/null
 grep -F 'CLASP_LOOP_AGENT_COMMAND_JSON' "$project_root/examples/swarm-native/GoalManagerServiceMain.clasp" >/dev/null
 
-CLASP_LOOP_AGENT_BIN_JSON="$agent_bin_json" \
-  CLASP_LOOP_AGENT_COMMAND_JSON="$agent_command_json" \
-  timeout "$timeout_secs" "$claspc_bin" --json check "$project_root/examples/feedback-loop/Main.clasp" |
-  grep -F '"status":"ok"' >/dev/null
+if [[ "$run_feedback_template" == "1" ]]; then
+  mkdir -p "$workspace_root"
+  CLASP_LOOP_AGENT_BIN_JSON="$agent_bin_json" \
+    CLASP_LOOP_AGENT_COMMAND_JSON="$agent_command_json" \
+    CLASP_LOOP_TASK_FILE_JSON="$(node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "$task_file")" \
+    CLASP_LOOP_WORKSPACE_JSON="$(node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "$workspace_root")" \
+    CLASP_LOOP_MAX_ATTEMPTS_JSON='1' \
+    CLASP_TEST_AGENT_LOG="$agent_log" \
+    timeout "$timeout_secs" "$claspc_bin" run "$project_root/examples/feedback-loop/Main.clasp" -- "$state_root" >"$output_path"
 
-mkdir -p "$workspace_root"
-CLASP_LOOP_AGENT_BIN_JSON="$agent_bin_json" \
-  CLASP_LOOP_AGENT_COMMAND_JSON="$agent_command_json" \
-  CLASP_LOOP_TASK_FILE_JSON="$(node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "$task_file")" \
-  CLASP_LOOP_WORKSPACE_JSON="$(node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "$workspace_root")" \
-  CLASP_LOOP_MAX_ATTEMPTS_JSON='1' \
-  CLASP_TEST_AGENT_LOG="$agent_log" \
-  timeout "$timeout_secs" "$claspc_bin" run "$project_root/examples/feedback-loop/Main.clasp" -- "$state_root" >"$output_path"
+  CLASP_LOOP_COMMAND=status \
+    timeout "$timeout_secs" "$claspc_bin" run "$project_root/examples/feedback-loop/Main.clasp" -- "$state_root" >"$status_path"
 
-CLASP_LOOP_COMMAND=status \
-  timeout "$timeout_secs" "$claspc_bin" run "$project_root/examples/feedback-loop/Main.clasp" -- "$state_root" >"$status_path"
-
-node - "$output_path" "$status_path" "$agent_log" "$workspace_root/generic-agent.txt" <<'NODE'
+  node - "$output_path" "$status_path" "$agent_log" "$workspace_root/generic-agent.txt" <<'NODE'
 const fs = require("node:fs");
 const [outputPath, statusPath, agentLog, workspaceArtifact] = process.argv.slice(2);
 
@@ -205,5 +268,56 @@ for (const invocation of invocations) {
   assert(invocation.promptPath.endsWith(".md"), "generic template should receive durable prompt path");
 }
 NODE
+fi
+
+if [[ "$run_native_template" == "1" ]]; then
+  mkdir -p "$native_workspace_root"
+  CLASP_LOOP_AGENT_BIN_JSON="$agent_bin_json" \
+    CLASP_LOOP_AGENT_COMMAND_JSON="$native_agent_command_json" \
+    CLASP_LOOP_TASK_FILE_JSON="$(node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "$task_file")" \
+    CLASP_LOOP_WORKSPACE_JSON="$(node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "$native_workspace_root")" \
+    CLASP_LOOP_MAX_ATTEMPTS_JSON='1' \
+    CLASP_TEST_AGENT_LOG="$native_agent_log" \
+    timeout "$timeout_secs" "$claspc_bin" run "$project_root/examples/swarm-native/FeedbackLoop.clasp" -- "$native_state_root" >"$native_output_path"
+
+  CLASP_LOOP_COMMAND=status \
+    timeout "$timeout_secs" "$claspc_bin" run "$project_root/examples/swarm-native/FeedbackLoop.clasp" -- "$native_state_root" >"$native_status_path"
+
+  node - "$native_output_path" "$native_status_path" "$native_agent_log" "$native_workspace_root/generic-agent.txt" <<'NODE'
+const fs = require("node:fs");
+const [outputPath, statusPath, agentLog, workspaceArtifact] = process.argv.slice(2);
+
+function assert(condition, message) {
+  if (!condition) throw new Error(message);
+}
+
+const output = JSON.parse(fs.readFileSync(outputPath, "utf8"));
+const status = JSON.parse(fs.readFileSync(statusPath, "utf8"));
+const artifact = fs.readFileSync(workspaceArtifact, "utf8").trim();
+const invocations = fs
+  .readFileSync(agentLog, "utf8")
+  .trim()
+  .split(/\n/)
+  .filter(Boolean)
+  .map((line) => JSON.parse(line));
+
+assert(output.state?.phase === "completed", `native phase ${output.state?.phase}`);
+assert(output.state?.verdict === "pass" && output.state?.final === true, "native loop should finish with a pass");
+assert(output.objectiveProjectedStatus === "completed", `native projected ${output.objectiveProjectedStatus}`);
+assert(output.taskCount === 2, `native task count ${output.taskCount}`);
+assert(output.approvalCount === 1, `native approval count ${output.approvalCount}`);
+assert(output.mergeGateSatisfied === true, "native merge gate should be satisfied");
+assert(status.state?.phase === "completed", `native status phase ${status.state?.phase}`);
+assert(status.state?.verdict === "pass" && status.state?.final === true, "native status should persist a passing final status");
+assert(artifact === "generic-agent-template-ok", "native generic builder should update the workspace");
+assert(invocations.map((entry) => entry.role).join(",") === "builder,verifier", "native generic agent should run builder then verifier");
+for (const invocation of invocations) {
+  assert(!invocation.reportPath.includes("codex"), "native generic template should not need Codex-named report paths");
+  assert(invocation.promptPath === "", "native generic template should receive an inline prompt");
+}
+NODE
+
+  printf 'native-provider-neutral-agent-template-ok\n'
+fi
 
 printf 'agent-command-template-ok\n'

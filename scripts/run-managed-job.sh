@@ -10,7 +10,8 @@ usage() {
 usage: scripts/run-managed-job.sh [--job-id <id>] [--jobs-root <dir>] -- <command> [args...]
 
 Launches a command in an isolated session/process group and records metadata
-that scripts/stop-managed-job.sh validates before stopping it.
+that scripts/stop-managed-job.sh validates before stopping it. Completed jobs
+record exit-status and update status to completed or failed.
 EOF
 }
 
@@ -71,12 +72,34 @@ for arg in "${command[@]:1}"; do
   printf ' %q' "$arg" >>"$command_path"
 done
 printf '\n' >>"$command_path"
+printf 'started\n' >"$job_dir/status"
 
 cd "$project_root"
 setsid env \
   CLASP_MANAGED_JOB_ID="$job_id" \
   CLASP_MANAGED_JOB_ROOT="$jobs_root" \
-  "${command[@]}" \
+  bash -c '
+    set +e
+
+    finish_managed_job() {
+      local status="$1"
+      local job_dir="$CLASP_MANAGED_JOB_ROOT/$CLASP_MANAGED_JOB_ID"
+
+      printf "%s\n" "$status" >"$job_dir/exit-status"
+      if [[ "$status" == "0" ]]; then
+        printf "completed\n" >"$job_dir/status"
+      else
+        printf "failed\n" >"$job_dir/status"
+      fi
+      exit "$status"
+    }
+
+    trap "finish_managed_job 130" INT
+    trap "finish_managed_job 143" TERM
+
+    "$@"
+    finish_managed_job "$?"
+  ' managed-job-runner "${command[@]}" \
   >"$stdout_path" 2>"$stderr_path" &
 pid="$!"
 
@@ -108,9 +131,6 @@ fi
 {
   date -u +%Y-%m-%dT%H:%M:%SZ
 } >"$job_dir/started-at"
-{
-  printf 'started\n'
-} >"$job_dir/status"
 
 disown "$pid" >/dev/null 2>&1 || true
 printf '%s\n' "$job_dir"

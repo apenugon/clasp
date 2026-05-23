@@ -154,7 +154,7 @@ loopSpec =
   attemptSpec
     swarmStateRoot
     objectiveId
-    "Run the Codex builder/verifier loop directly from ordinary Clasp code on the native swarm substrate."
+    "Run the configured builder/verifier agent loop directly from ordinary Clasp code on the native swarm substrate."
     40
     40
     stateRootPath
@@ -205,7 +205,7 @@ defaultVerifierPolicyText = textJoin "\n" [
 
 capabilityChecklistText : Str
 capabilityChecklistText = textJoin "\n" [
-  "- ordinary_program_execution: the live builder/verifier loop runs as a normal Clasp program via claspc run, invokes Codex directly from Clasp, and persists durable final state/status in ordinary runtime storage.",
+  "- ordinary_program_execution: the live builder/verifier loop runs as a normal Clasp program via claspc run, invokes a configured agent backend from Clasp (Codex by default), and persists durable final state/status in ordinary runtime storage.",
   "- durable_native_substrate: objective/run/task/event/artifact persistence, DAG edges, projected status, leases, approvals, merge-policy state, tool/process execution, and monitoring/state inspection are durably available.",
   "- clasp_native_control_api: ordinary Clasp programs can use the orchestration substrate directly without requiring shell wrapper orchestration or external claspc swarm subprocesses as the primary model.",
   "- orchestration_viability: builder/verifier/planner-style programs are realistically implementable in Clasp itself without obvious missing runtime/control-plane substrate.",

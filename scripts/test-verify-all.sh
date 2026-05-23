@@ -201,6 +201,7 @@ grep -F 'bash scripts/test-monitored-workflow.sh' "$test_root/scripts/verify-all
 grep -F 'bash scripts/test-codex-loop-program.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash examples/agent-loop-scenario/scripts/verify.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-agent-command-template.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'CLASP_AGENT_COMMAND_TEMPLATE_FEEDBACK=0 CLASP_AGENT_COMMAND_TEMPLATE_NATIVE=1 bash scripts/test-agent-command-template.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash examples/browser-counter/scripts/verify.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-host-runtime.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-safe-workspace.sh' "$test_root/scripts/verify-all.sh" >/dev/null
