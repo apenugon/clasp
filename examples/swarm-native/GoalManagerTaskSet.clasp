@@ -19,7 +19,7 @@ taskFailed : SwarmTask -> Bool
 taskFailed task = task.status == "failed"
 
 taskInObjective : SwarmTask -> Bool
-taskInObjective task = task.objectiveId == objectiveId
+taskInObjective task = task.objectiveId == effectiveObjectiveId
 
 textSearchStep : TextSearch -> Str -> TextSearch
 textSearchStep search value =

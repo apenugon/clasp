@@ -2434,7 +2434,7 @@ goal_manager_ensure_stderr="$test_root_abs/ensure-goal-manager-native.stderr"
 if ! XDG_CACHE_HOME="$goal_manager_build_xdg_cache_home" \
     CLASP_GOAL_MANAGER_CACHE_DIR="$goal_manager_build_cache_dir" \
     CLASP_GOAL_MANAGER_CLASPC_BIN="$claspc_bin" \
-    CLASP_GOAL_MANAGER_SOURCE="$project_root/examples/swarm-native/GoalManager.clasp" \
+    CLASP_GOAL_MANAGER_SOURCE="$project_root/examples/swarm-native/GoalManager.wrapper.clasp" \
     CLASP_GOAL_MANAGER_COMPILE_TIMEOUT_SECS=0 \
     CLASP_GOAL_MANAGER_ALLOW_STALE_ON_COMPILE_FAILURE=0 \
     "$project_root/scripts/ensure-goal-manager-binary.sh" \

@@ -47,6 +47,7 @@ bash scripts/test-monitored-loop.sh
 bash scripts/test-monitored-step.sh
 bash scripts/test-monitored-run-log.sh
 bash scripts/test-safe-subprocess.sh
+bash scripts/test-managed-job.sh
 bash scripts/test-monitored-workflow.sh
 bash scripts/test-codex-loop-program.sh
 bash examples/agent-loop-scenario/scripts/verify.sh
@@ -87,6 +88,7 @@ bash scripts/test-verify-compiler-slice.sh
 bash scripts/test-verify-runtime-slice.sh
 bash scripts/test-promoted-source-export-cache.sh
 bash scripts/test-record-update-parity.sh
+bash scripts/test-managed-job.sh
 bash examples/agent-metadata/scripts/verify.sh
 bash examples/agent-task-scenario/scripts/verify.sh
 bash examples/agent-loop-scenario/scripts/verify.sh

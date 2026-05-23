@@ -33,15 +33,15 @@
       "outputPath": "src/stage1.hello.native.image.json"
     },
     {
-      "source": "examples/swarm-native/GoalManager.clasp",
+      "source": "examples/swarm-native/GoalManager.wrapper.clasp",
       "exportName": "nativeImageProjectText",
-      "cacheKey": "7c1a06b02de5ce72.cache",
+      "cacheKey": "ef3d0269ec1f11d8.cache",
       "outputPath": "src/stage1.goal-manager.native.image.json"
     },
     {
       "source": "examples/swarm-native/TaskWorkspaceRuntimeHarness.clasp",
       "exportName": "nativeImageProjectText",
-      "cacheKey": "a8ad0a8ad868a03b.cache",
+      "cacheKey": "7a618cc887ad22d0.cache",
       "outputPath": "src/stage1.task-workspace-runtime-harness.native.image.json"
     }
   ]

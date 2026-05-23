@@ -16,11 +16,13 @@ parallel_marker="$test_root/parallel.txt"
 sequential_marker="$test_root/sequential.txt"
 
 grep -F 'bash scripts/test-verify-all-smoke.sh' "$project_root/scripts/verify-fast.sh" >/dev/null
+grep -F 'bash scripts/test-managed-job.sh' "$project_root/scripts/verify-fast.sh" >/dev/null
 if grep -F 'bash scripts/test-verify-all.sh' "$project_root/scripts/verify-fast.sh" >/dev/null 2>&1; then
   printf 'verify-fast should use test-verify-all-smoke, not exhaustive test-verify-all\n' >&2
   exit 1
 fi
 grep -F 'bash scripts/test-verify-all.sh' "$project_root/scripts/verify-all.sh" >/dev/null
+grep -F 'bash scripts/test-managed-job.sh' "$project_root/scripts/verify-all.sh" >/dev/null
 
 env \
   -u CLASP_VERIFY_IN_PROGRESS \

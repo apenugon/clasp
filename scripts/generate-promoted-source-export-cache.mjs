@@ -2,6 +2,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const projectRoot = path.resolve(path.join(path.dirname(fileURLToPath(import.meta.url)), ".."));
@@ -21,7 +22,7 @@ const defaultNativeImageEntries = [
     outputPath: "src/stage1.hello.native.image.json",
   },
   {
-    source: "examples/swarm-native/GoalManager.clasp",
+    source: "examples/swarm-native/GoalManager.wrapper.clasp",
     exportName: "nativeImageProjectText",
     outputPath: "src/stage1.goal-manager.native.image.json",
   },
@@ -42,12 +43,17 @@ function parseArgs(argv) {
     check: false,
     nativeImageEntries: [...defaultNativeImageEntries],
     outputPath: defaultOutputPath,
+    refreshNativeImages: false,
     sources: [...defaultSources],
   };
   for (let index = 2; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--check") {
       options.check = true;
+    } else if (arg === "--refresh-native-images") {
+      options.refreshNativeImages = true;
+    } else if (arg === "--skip-native-image-refresh") {
+      options.refreshNativeImages = false;
     } else if (arg === "--output") {
       index += 1;
       if (!argv[index]) fail("missing path after --output");
@@ -155,7 +161,7 @@ function importPathFor(root, importName) {
   return path.join(root, `${importName.replaceAll(".", path.sep)}.clasp`);
 }
 
-function buildProjectBundle(entrySourcePath) {
+function collectProjectBundleSourcePaths(entrySourcePath) {
   const { resolved } = normalizeSourcePath(entrySourcePath);
   const root = path.dirname(resolved);
   const seen = new Set();
@@ -165,8 +171,8 @@ function buildProjectBundle(entrySourcePath) {
     const canonical = fs.realpathSync(sourcePath);
     if (seen.has(canonical)) return;
     seen.add(canonical);
+    ordered.push(canonical);
     const source = fs.readFileSync(canonical, "utf8");
-    ordered.push(source);
     for (const importName of parseImports(source)) {
       const importPath = importPathFor(root, importName);
       if (!fs.existsSync(importPath)) fail(`missing import ${importName} from ${entrySourcePath}`);
@@ -175,10 +181,16 @@ function buildProjectBundle(entrySourcePath) {
   }
 
   visit(resolved);
-  return ordered.join(projectBundleSeparator);
+  return ordered;
 }
 
-function nativeImageEntryPayload(entry) {
+function buildProjectBundle(entrySourcePath) {
+  return collectProjectBundleSourcePaths(entrySourcePath)
+    .map((sourcePath) => fs.readFileSync(sourcePath, "utf8"))
+    .join(projectBundleSeparator);
+}
+
+function nativeImageEntryCacheMetadata(entry) {
   const { resolved: outputResolved, relative: outputRelative } = normalizeSourcePath(entry.outputPath);
   if (!fs.existsSync(outputResolved)) {
     fail(`native image output path is missing: ${entry.outputPath}`);
@@ -199,6 +211,72 @@ function nativeImageEntryPayload(entry) {
     cacheKey: `${fnvParts([fs.readFileSync(compilerImagePath), entry.exportName, bundle])}.cache`,
     outputPath: outputRelative,
   };
+}
+
+function nativeImageEntryPayload(entry) {
+  return nativeImageEntryCacheMetadata(entry);
+}
+
+function resolveClaspcBin() {
+  if (process.env.CLASPC_BIN) return process.env.CLASPC_BIN;
+  return execFileSync(path.join(projectRoot, "scripts/resolve-claspc.sh"), {
+    cwd: projectRoot,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "inherit"],
+  }).trim();
+}
+
+function sourceExportCacheEntryMatches(entry, sourceExportCachePath) {
+  if (!fs.existsSync(sourceExportCachePath)) return false;
+  let cache;
+  try {
+    cache = JSON.parse(fs.readFileSync(sourceExportCachePath, "utf8"));
+  } catch (_error) {
+    return false;
+  }
+  if (!Array.isArray(cache.entries)) return false;
+  const expected = nativeImageEntryCacheMetadata(entry);
+  return cache.entries.some((candidate) =>
+    candidate &&
+    candidate.source === expected.source &&
+    candidate.exportName === expected.exportName &&
+    candidate.cacheKey === expected.cacheKey &&
+    candidate.outputPath === expected.outputPath
+  );
+}
+
+function nativeImageEntryNeedsRefresh(entry, sourceExportCachePath) {
+  const { resolved: outputResolved } = normalizeSourcePath(entry.outputPath);
+  if (!fs.existsSync(outputResolved)) return true;
+  if (!sourceExportCacheEntryMatches(entry, sourceExportCachePath)) return true;
+  const outputMtimeMs = fs.statSync(outputResolved).mtimeMs;
+  return collectProjectBundleSourcePaths(entry.source).some(
+    (sourcePath) => fs.statSync(sourcePath).mtimeMs > outputMtimeMs + 1
+  );
+}
+
+function refreshNativeImageEntries(nativeImageEntries, sourceExportCachePath) {
+  if (nativeImageEntries.length === 0) return;
+  const claspcBin = resolveClaspcBin();
+  for (const entry of nativeImageEntries) {
+    if (!nativeImageEntryNeedsRefresh(entry, sourceExportCachePath)) continue;
+    const { relative: sourceRelative } = normalizeSourcePath(entry.source);
+    const { relative: outputRelative } = normalizeSourcePath(entry.outputPath);
+    execFileSync(claspcBin, ["native-image", sourceRelative, "-o", outputRelative], {
+      cwd: projectRoot,
+      env: {
+        ...process.env,
+        CLASP_PROJECT_ROOT: projectRoot,
+        CLASP_NATIVE_BUNDLE_JOBS: process.env.CLASP_NATIVE_BUNDLE_JOBS || "8",
+        CLASP_NATIVE_IMAGE_SECTION_JOBS: process.env.CLASP_NATIVE_IMAGE_SECTION_JOBS || "8",
+        CLASP_NATIVE_IMAGE_MONOLITHIC_DECL_THRESHOLD:
+          process.env.CLASP_NATIVE_IMAGE_MONOLITHIC_DECL_THRESHOLD || "999999",
+        CLASP_NATIVE_RELAXED_BUILD_PLAN_CACHE: process.env.CLASP_NATIVE_RELAXED_BUILD_PLAN_CACHE || "1",
+        CLASP_NATIVE_DISABLE_PROMOTED_SOURCE_EXPORT_CACHE: "1",
+      },
+      stdio: "inherit",
+    });
+  }
 }
 
 function generatePayload(sourcePaths, nativeImageEntries) {
@@ -229,6 +307,9 @@ function main() {
   const uniqueSources = [...new Set(options.sources)];
   if (uniqueSources.length === 0 && options.nativeImageEntries.length === 0) {
     fail("at least one source or native image entry is required");
+  }
+  if (!options.check && options.refreshNativeImages) {
+    refreshNativeImageEntries(options.nativeImageEntries, options.outputPath);
   }
   const payload = `${JSON.stringify(generatePayload(uniqueSources, options.nativeImageEntries), null, 2)}\n`;
   if (options.check) {

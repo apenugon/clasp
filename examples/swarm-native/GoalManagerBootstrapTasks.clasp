@@ -20,15 +20,15 @@ ensureObjective : Str
 ensureObjective =
   match objectives swarmStateRoot {
     Ok values ->
-      if textListHas objectiveId (map objectiveIdOf values) then
+      if textListHas effectiveObjectiveId (map objectiveIdOf values) then
         ""
       else
-        match objectiveCreate swarmStateRoot objectiveId goalText objectiveTaskBudget objectiveRunBudget {
+        match objectiveCreate swarmStateRoot effectiveObjectiveId goalText objectiveTaskBudget objectiveRunBudget {
           Ok created -> "",
           Err message -> ignoreAlreadyExistsTaskBootstrap message
         },
     Err message ->
-      match objectiveCreate swarmStateRoot objectiveId goalText objectiveTaskBudget objectiveRunBudget {
+      match objectiveCreate swarmStateRoot effectiveObjectiveId goalText objectiveTaskBudget objectiveRunBudget {
         Ok created -> "",
         Err createMessage -> ignoreAlreadyExistsTaskBootstrap createMessage
       }

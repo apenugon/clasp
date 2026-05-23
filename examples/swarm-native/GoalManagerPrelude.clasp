@@ -13,7 +13,7 @@ materializeTaskId wave taskIdValue =
     textConcat ["wave-", encode wave, "-", taskIdValue]
 
 objectiveRef : ObjectiveHandle
-objectiveRef = objectiveHandle swarmStateRoot objectiveId
+objectiveRef = objectiveHandle swarmStateRoot effectiveObjectiveId
 
 plannerHandleForWave : Int -> TaskHandle
 plannerHandleForWave wave = taskHandle swarmStateRoot (plannerTaskIdForWave wave) actorName

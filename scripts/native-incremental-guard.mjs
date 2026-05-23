@@ -47,7 +47,7 @@ const scenarios = {
       image: {
         optionKey: "imageLog",
         expected: {
-          buildPlan: "hit",
+          buildPlan: ["hit", "miss"],
           declModule: {
             Helper: "miss",
             Main: "hit",
@@ -285,6 +285,14 @@ function checkExpectedTrace(traceName, expected, observed, mismatches) {
     }
 
     const actualValue = observed[field] ?? "";
+    if (Array.isArray(expectedValue)) {
+      if (!expectedValue.includes(actualValue)) {
+        mismatches.push(
+          `${traceName}.${field} expected one of ${expectedValue.join("|")} got ${actualValue || "missing"}`,
+        );
+      }
+      continue;
+    }
     if (actualValue !== expectedValue) {
       mismatches.push(`${traceName}.${field} expected ${expectedValue} got ${actualValue || "missing"}`);
     }

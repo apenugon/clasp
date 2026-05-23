@@ -95,19 +95,19 @@ const helloImage = JSON.parse(fs.readFileSync(path.join(projectRoot, "src/stage1
 if (helloImage.format !== "clasp-native-image-v1" || helloImage.module !== "Main") {
   throw new Error("hello promoted native image has an unexpected shape");
 }
-const goalManagerEntry = cache.entries.find((candidate) => candidate.source === "examples/swarm-native/GoalManager.clasp");
+const goalManagerEntry = cache.entries.find((candidate) => candidate.source === "examples/swarm-native/GoalManager.wrapper.clasp");
 if (!goalManagerEntry) {
-  throw new Error("missing promoted GoalManager native image entry");
+  throw new Error("missing promoted GoalManager wrapper native image entry");
 }
 if (goalManagerEntry.exportName !== "nativeImageProjectText") {
-  throw new Error("GoalManager promoted entry should seed nativeImageProjectText");
+  throw new Error("GoalManager wrapper promoted entry should seed nativeImageProjectText");
 }
 if (goalManagerEntry.outputPath !== "src/stage1.goal-manager.native.image.json") {
-  throw new Error("GoalManager promoted entry should use the native image output path");
+  throw new Error("GoalManager wrapper promoted entry should use the native image output path");
 }
 const image = JSON.parse(fs.readFileSync(path.join(projectRoot, "src/stage1.goal-manager.native.image.json"), "utf8"));
 if (image.format !== "clasp-native-image-v1") {
-  throw new Error("GoalManager promoted native image has an unexpected format");
+  throw new Error("GoalManager wrapper promoted native image has an unexpected format");
 }
 const harnessEntry = cache.entries.find((candidate) => candidate.source === "examples/swarm-native/TaskWorkspaceRuntimeHarness.clasp");
 if (!harnessEntry) {
@@ -152,7 +152,7 @@ fi
 (
   cd "$project_root"
   timeout "$timeout_secs" env XDG_CACHE_HOME="$test_root/goal-manager-cache" CLASP_PROJECT_ROOT="$project_root" CLASP_NATIVE_TRACE_CACHE=1 \
-    "$claspc_bin" compile examples/swarm-native/GoalManager.clasp -o "$goal_manager_binary" \
+    "$claspc_bin" compile examples/swarm-native/GoalManager.wrapper.clasp -o "$goal_manager_binary" \
     >/dev/null 2>"$goal_manager_log"
 )
 

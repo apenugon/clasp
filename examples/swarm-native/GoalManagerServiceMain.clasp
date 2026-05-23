@@ -87,7 +87,7 @@ managerServicePassthroughEnvArgs =
 managerServiceEnvArgs =
   append [
     textConcat ["CLASP_MANAGER_GOAL_JSON=", encode goalText],
-    textConcat ["CLASP_MANAGER_OBJECTIVE_ID_JSON=", encode objectiveId],
+    textConcat ["CLASP_MANAGER_OBJECTIVE_ID_JSON=", encode effectiveObjectiveId],
     textConcat ["CLASP_MANAGER_PROGRAM_JSON=", encode managerProgramPath],
     textConcat ["CLASP_MANAGER_PROJECT_ROOT_JSON=", encode managerProjectRoot],
     textConcat ["CLASP_MANAGER_CHILD_LOOP_JSON=", encode childLoopProgramPath],

@@ -57,6 +57,9 @@ cp "$project_root/scripts/test-monitored-loop.sh" "$test_root/scripts/test-monit
 cp "$project_root/scripts/test-monitored-step.sh" "$test_root/scripts/test-monitored-step.sh"
 cp "$project_root/scripts/test-monitored-run-log.sh" "$test_root/scripts/test-monitored-run-log.sh"
 cp "$project_root/scripts/test-safe-subprocess.sh" "$test_root/scripts/test-safe-subprocess.sh"
+cp "$project_root/scripts/run-managed-job.sh" "$test_root/scripts/run-managed-job.sh"
+cp "$project_root/scripts/stop-managed-job.sh" "$test_root/scripts/stop-managed-job.sh"
+cp "$project_root/scripts/test-managed-job.sh" "$test_root/scripts/test-managed-job.sh"
 cp "$project_root/scripts/test-monitored-workflow.sh" "$test_root/scripts/test-monitored-workflow.sh"
 cp "$project_root/scripts/test-codex-loop-program.sh" "$test_root/scripts/test-codex-loop-program.sh"
 cp "$project_root/scripts/test-host-runtime.sh" "$test_root/scripts/test-host-runtime.sh"
@@ -93,6 +96,7 @@ grep -F 'bash scripts/test-source-run-cache.sh' "$test_root/scripts/verify-fast.
 grep -F 'bash scripts/test-promoted-source-export-cache.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-native-claspc-smoke.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-native-runtime-smoke.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
+grep -F 'bash scripts/test-managed-job.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 if grep -F 'bash scripts/test-native-runtime.sh' "$test_root/scripts/verify-fast.sh" >/dev/null 2>&1; then
   printf 'fast verification should use native runtime smoke, not broad native runtime\n' >&2
   exit 1
@@ -191,6 +195,7 @@ grep -F 'bash scripts/test-swarm-native-feedback-loop.sh' "$test_root/scripts/ve
 grep -F 'bash scripts/test-monitored-step.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-monitored-run-log.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-safe-subprocess.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'bash scripts/test-managed-job.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-monitored-workflow.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-codex-loop-program.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash examples/agent-loop-scenario/scripts/verify.sh' "$test_root/scripts/verify-all.sh" >/dev/null
@@ -361,7 +366,7 @@ cat > "$goal_manager_stale_alias.metadata.json" <<'JSON'
 {
   "schemaVersion": 1,
   "kind": "clasp-goal-manager-binary",
-  "source": "examples/swarm-native/GoalManager.clasp",
+  "source": "examples/swarm-native/GoalManager.wrapper.clasp",
   "cacheKey": "stale-fixture"
 }
 JSON
@@ -466,9 +471,9 @@ cmp -s "$goal_manager_binary_one" "$goal_manager_alias"
 [[ -f "$goal_manager_alias.metadata.json" ]]
 cmp -s "$goal_manager_binary_one.metadata.json" "$goal_manager_alias.metadata.json"
 grep -F '"kind": "clasp-goal-manager-binary"' "$goal_manager_binary_one.metadata.json" >/dev/null
-grep -F '"source": "examples/swarm-native/GoalManager.clasp"' "$goal_manager_binary_one.metadata.json" >/dev/null
-grep -F "compile-source=$test_root/examples/swarm-native/GoalManager.clasp" "$goal_manager_fast_log" >/dev/null
-"$goal_manager_alias" | grep -F "compiled-source=$test_root/examples/swarm-native/GoalManager.clasp" >/dev/null
+grep -F '"source": "examples/swarm-native/GoalManager.wrapper.clasp"' "$goal_manager_binary_one.metadata.json" >/dev/null
+grep -F "compile-source=$test_root/examples/swarm-native/GoalManager.wrapper.clasp" "$goal_manager_fast_log" >/dev/null
+"$goal_manager_alias" | grep -F "compiled-source=$test_root/examples/swarm-native/GoalManager.wrapper.clasp" >/dev/null
 [[ "$(grep -c '^compile-source=' "$goal_manager_fast_log")" == "1" ]]
 [[ -f "$(dirname "$goal_manager_binary_one")/compile.lock" ]]
 [[ ! -e "$goal_manager_cache/compile.lock" ]]

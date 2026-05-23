@@ -415,10 +415,13 @@ grep -F '"status":"error"' "$large_selfhost_invalid_output" >/dev/null
 grep -F 'keepNoRenderedText' "$large_selfhost_invalid_output" >/dev/null
 grep -F '[claspc-cache] module-summary decl-validation module=Compiler.Ast changed=keepNoRenderedText' "$large_selfhost_invalid_log" >/dev/null
 
-CLASPC_BIN="$claspc_bin" bash "$project_root/scripts/measure-native-incremental.sh" \
+if ! CLASPC_BIN="$claspc_bin" bash "$project_root/scripts/measure-native-incremental.sh" \
   --scenario selfhost-body-change \
   --report "$selfhost_incremental_report" \
-  --assert >/dev/null
+  --assert >/dev/null; then
+  cat "$selfhost_incremental_report" >&2
+  exit 1
+fi
 node - "$selfhost_incremental_report" <<'EOF'
 const fs = require("node:fs");
 
@@ -435,7 +438,8 @@ if (JSON.stringify(report.changedModules) !== JSON.stringify(["Helper"])) {
 if (report.observedCacheBehavior.image?.sourceExport?.nativeImageProjectText !== "miss") {
   throw new Error("expected nativeImageProjectText source-export miss");
 }
-if (report.expectedCacheBehavior.image?.buildPlan !== "hit") {
+const expectedBuildPlan = report.expectedCacheBehavior.image?.buildPlan;
+if (!Array.isArray(expectedBuildPlan) || !expectedBuildPlan.includes("hit") || !expectedBuildPlan.includes("miss")) {
   throw new Error("expected selfhost report to include build-plan cache expectation");
 }
 if (typeof report.advisoryTimings.checkBodyChange?.realSeconds !== "number") {

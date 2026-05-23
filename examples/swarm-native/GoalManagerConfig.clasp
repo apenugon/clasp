@@ -68,15 +68,67 @@ goalText =
 objectiveIdFromStatusOr : Str -> Str
 objectiveIdFromStatusOr fallback =
   match readFile (pathJoin [stateRootPath, "status.json"]) {
-    Ok raw ->
-      let stored = (decode ManagerState raw).objectiveId in
-      if stored == "" then
-        fallback
-      else
-        stored,
+    Ok raw -> objectiveIdFromStatusRawOr raw fallback,
     Err message ->
       fallback
   }
+
+configFirstTextOrEmpty : [Str] -> Str
+configFirstTextOrEmpty values = {
+  let mut first = "";
+  let mut found = false;
+  for value in values {
+    if found then
+      found
+    else {
+      first = value;
+      found = true;
+      found
+    }
+  };
+  first
+}
+
+configSecondTextOrEmpty : [Str] -> Str
+configSecondTextOrEmpty values = {
+  let mut second = "";
+  let mut index = 0;
+  for value in values {
+    if index == 0 then {
+      index = 1;
+      index
+    } else if index == 1 then {
+      second = value;
+      index = 2;
+      index
+    } else
+      index
+  };
+  second
+}
+
+objectiveIdFromStatusRawWithMarker : Str -> Str -> Str
+objectiveIdFromStatusRawWithMarker raw marker = {
+  let afterMarker = configSecondTextOrEmpty (textSplit raw marker);
+  if afterMarker == "" then
+    ""
+  else
+    configFirstTextOrEmpty (textSplit afterMarker "\"")
+}
+
+objectiveIdFromStatusRawOr : Str -> Str -> Str
+objectiveIdFromStatusRawOr raw fallback = {
+  let compact = objectiveIdFromStatusRawWithMarker raw "\"objectiveId\":\"" in
+  if compact != "" then
+    compact
+  else {
+    let spaced = objectiveIdFromStatusRawWithMarker raw "\"objectiveId\": \"" in
+    if spaced != "" then
+      spaced
+    else
+      fallback
+  }
+}
 
 objectiveId : Str
 objectiveId =
@@ -85,8 +137,11 @@ objectiveId =
     Err message -> objectiveIdFromStatusOr "improve-clasp"
   }
 
+effectiveObjectiveId : Str
+effectiveObjectiveId = objectiveIdFromStatusOr objectiveId
+
 managerProgramPath : Str
-managerProgramPath = readEnvText "CLASP_MANAGER_PROGRAM_JSON" "examples/swarm-native/GoalManager.clasp"
+managerProgramPath = readEnvText "CLASP_MANAGER_PROGRAM_JSON" "examples/swarm-native/GoalManager.wrapper.clasp"
 
 workspaceRoot : Str
 workspaceRoot = readEnvText "CLASP_LOOP_WORKSPACE_JSON" "."

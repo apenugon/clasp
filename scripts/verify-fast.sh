@@ -95,6 +95,7 @@ bash scripts/test-source-run-cache.sh
 bash scripts/test-promoted-source-export-cache.sh
 bash scripts/test-native-runtime-smoke.sh
 bash scripts/test-native-claspc-smoke.sh
+bash scripts/test-managed-job.sh
 '
 fast_sequential_verify_commands=$'
 bash scripts/verify-compiler-slice.sh all
@@ -117,6 +118,7 @@ bash src/scripts/verify.sh
 bash scripts/test-native-claspc-diagnostics.sh
 bash scripts/test-native-runtime-smoke.sh
 bash scripts/test-native-claspc-smoke.sh
+bash scripts/test-managed-job.sh
 bash scripts/test-promoted-source-export-cache.sh
 bash examples/agent-metadata/scripts/verify.sh
 bash examples/agent-task-scenario/scripts/verify.sh

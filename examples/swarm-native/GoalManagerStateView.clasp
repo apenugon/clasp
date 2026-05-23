@@ -19,7 +19,7 @@ managerStateFor phase verdict completed activeTaskId plannedTaskIds wave benchma
     phase = phase,
     verdict = verdict,
     completed = completed,
-    objectiveId = objectiveId,
+    objectiveId = effectiveObjectiveId,
     plannerTaskId = plannerTaskIdForWave wave,
     activeTaskId = activeTaskId,
     plannedTaskIds = plannedTaskIds,

@@ -263,10 +263,10 @@ plannerCommandFor wave benchmarkSummary =
 
 ensureObjective : Str
 ensureObjective =
-  if textListHas objectiveId (map objectiveIdOf (match objectives swarmStateRoot { Ok values -> values, Err message -> [] })) then
+  if textListHas effectiveObjectiveId (map objectiveIdOf (match objectives swarmStateRoot { Ok values -> values, Err message -> [] })) then
     ""
   else
-    match objectiveCreate swarmStateRoot objectiveId goalText objectiveTaskBudget objectiveRunBudget {
+    match objectiveCreate swarmStateRoot effectiveObjectiveId goalText objectiveTaskBudget objectiveRunBudget {
       Ok created -> "",
       Err message -> ignoreAlreadyExistsPlannerBootstrap message
     }

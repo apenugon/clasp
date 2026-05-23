@@ -47,7 +47,7 @@ focusedSelectionFeedbackLoopCommands = [
 
 focusedSelectionControlPlaneCommands : [Str]
 focusedSelectionControlPlaneCommands = [
-  "$(scripts/resolve-claspc.sh) --json check examples/swarm-native/GoalManager.clasp",
+  "$(scripts/resolve-claspc.sh) --json check examples/swarm-native/GoalManager.wrapper.clasp",
   "bash scripts/test-goal-manager-fast.sh",
   "bash scripts/test-swarm-ready-gate.sh"
 ]

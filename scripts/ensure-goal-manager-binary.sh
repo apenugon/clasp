@@ -8,10 +8,10 @@ goal_manager_split_entry_source="$project_root/examples/swarm-native/GoalManager
 goal_manager_swarm_source_dir="$project_root/examples/swarm-native"
 
 select_default_goal_manager_source() {
-  if [[ -f "$goal_manager_flat_source" ]]; then
-    printf '%s\n' "$goal_manager_flat_source"
-  elif [[ -f "$goal_manager_wrapper_source" ]]; then
+  if [[ -f "$goal_manager_wrapper_source" ]]; then
     printf '%s\n' "$goal_manager_wrapper_source"
+  elif [[ -f "$goal_manager_flat_source" ]]; then
+    printf '%s\n' "$goal_manager_flat_source"
   elif [[ -f "$goal_manager_split_entry_source" ]]; then
     printf '%s\n' "$goal_manager_split_entry_source"
   else
@@ -74,6 +74,7 @@ emit_goal_manager_build_mode_key() {
   emit_optional_build_mode CLASP_NATIVE_IMAGE_MONOLITHIC_BUNDLE_BYTES_THRESHOLD
   emit_optional_build_mode CLASP_NATIVE_DISABLE_EXPORT_HOST
   emit_optional_build_mode CLASP_NATIVE_DISABLE_PROMOTED_MODULE_SUMMARY_CACHE
+  emit_optional_build_mode CLASP_NATIVE_DISABLE_PROMOTED_SOURCE_EXPORT_CACHE
   printf 'goal-manager-build-mode\tCLASP_NATIVE_RELAXED_BUILD_PLAN_CACHE\t%s\n' "$goal_manager_relaxed_build_plan_cache"
 }
 
@@ -195,6 +196,25 @@ emit_goal_manager_source_dependency_hashes() {
   fi
 }
 
+emit_goal_manager_promoted_native_image_hash() {
+  local canonical_source
+  local canonical_promoted_source
+  local image_path
+
+  canonical_source="$(canonical_existing_path "$goal_manager_source")"
+  if [[ ! -f "$goal_manager_wrapper_source" ]]; then
+    printf '<none>\n'
+    return 0
+  fi
+  canonical_promoted_source="$(canonical_existing_path "$goal_manager_wrapper_source")"
+  image_path="$project_root/src/stage1.goal-manager.native.image.json"
+  if [[ "$canonical_source" == "$canonical_promoted_source" && -f "$image_path" ]]; then
+    emit_goal_manager_file_cache_hash "$image_path"
+  else
+    printf '<none>\n'
+  fi
+}
+
 compute_goal_manager_cache_key() {
   {
     printf 'goal-manager-source\t%s\n' "$(goal_manager_cache_path_id "$goal_manager_source")"
@@ -202,6 +222,8 @@ compute_goal_manager_cache_key() {
     emit_goal_manager_file_cache_hash "$goal_manager_source"
     printf 'goal-manager-source-dependencies\t'
     emit_goal_manager_source_dependency_hashes
+    printf 'goal-manager-promoted-native-image\t'
+    emit_goal_manager_promoted_native_image_hash
     printf 'claspc-content\t'
     sha256sum "$claspc_bin" | awk '{print $1}'
     emit_goal_manager_build_mode_key

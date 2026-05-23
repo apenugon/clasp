@@ -280,13 +280,13 @@ const NATIVE_IMAGE_FALLBACK_PLAN_EXPORTS: [(&str, &str); 7] = [
     ("constructor_decls", NATIVE_IMAGE_CONSTRUCTOR_DECLS_EXPORT),
     ("decl_names", NATIVE_IMAGE_DECL_NAMES_EXPORT),
 ];
-const NATIVE_IMAGE_CACHE_VERSION: &str = "native-image-cache-v5";
-const NATIVE_IMAGE_BUILD_PLAN_CACHE_VERSION: &str = "native-image-build-plan-cache-v5";
+const NATIVE_IMAGE_CACHE_VERSION: &str = "native-image-cache-v6";
+const NATIVE_IMAGE_BUILD_PLAN_CACHE_VERSION: &str = "native-image-build-plan-cache-v6";
 const NATIVE_IMAGE_DECL_MODULE_CACHE_VERSION: &str = "native-image-decl-module-cache-v1";
-const MODULE_SUMMARY_CACHE_VERSION: &str = "module-summary-cache-v2";
-const SOURCE_EXPORT_CACHE_VERSION: &str = "source-export-cache-v1";
+const MODULE_SUMMARY_CACHE_VERSION: &str = "module-summary-cache-v3";
+const SOURCE_EXPORT_CACHE_VERSION: &str = "source-export-cache-v2";
 const RUN_BINARY_CACHE_VERSION: &str = "run-binary-cache-v2";
-const DEFAULT_NATIVE_IMAGE_SECTION_JOBS: usize = 2;
+const DEFAULT_NATIVE_IMAGE_SECTION_JOBS: usize = 8;
 const DEFAULT_NATIVE_IMAGE_MONOLITHIC_DECL_THRESHOLD: usize = 4096;
 const DEFAULT_SHARED_CACHE_ROOT: &str = "/tmp/clasp-nix-cache";
 

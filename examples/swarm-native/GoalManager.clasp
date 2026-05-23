@@ -404,15 +404,33 @@ goalText =
 objectiveIdFromStatusOr : Str -> Str
 objectiveIdFromStatusOr fallback =
   match readFile (pathJoin [stateRootPath, "status.json"]) {
-    Ok raw ->
-      let stored = (decode ManagerState raw).objectiveId in
-      if stored == "" then
-        fallback
-      else
-        stored,
+    Ok raw -> objectiveIdFromStatusRawOr raw fallback,
     Err message ->
       fallback
   }
+
+objectiveIdFromStatusRawWithMarker : Str -> Str -> Str
+objectiveIdFromStatusRawWithMarker raw marker = {
+  let afterMarker = secondTextOrEmpty (textSplit raw marker);
+  if afterMarker == "" then
+    ""
+  else
+    firstTextOrEmpty (textSplit afterMarker "\"")
+}
+
+objectiveIdFromStatusRawOr : Str -> Str -> Str
+objectiveIdFromStatusRawOr raw fallback = {
+  let compact = objectiveIdFromStatusRawWithMarker raw "\"objectiveId\":\"" in
+  if compact != "" then
+    compact
+  else {
+    let spaced = objectiveIdFromStatusRawWithMarker raw "\"objectiveId\": \"" in
+    if spaced != "" then
+      spaced
+    else
+      fallback
+  }
+}
 
 objectiveId : Str
 objectiveId =
@@ -420,6 +438,9 @@ objectiveId =
     Ok raw -> if raw == "" then objectiveIdFromStatusOr "improve-clasp" else decode Str raw,
     Err message -> objectiveIdFromStatusOr "improve-clasp"
   }
+
+effectiveObjectiveId : Str
+effectiveObjectiveId = objectiveIdFromStatusOr objectiveId
 
 managerProgramPath : Str
 managerProgramPath = readEnvText "CLASP_MANAGER_PROGRAM_JSON" "examples/swarm-native/GoalManager.clasp"
@@ -729,7 +750,7 @@ materializeTaskId wave taskIdValue =
     textConcat ["wave-", encode wave, "-", taskIdValue]
 
 objectiveRef : ObjectiveHandle
-objectiveRef = objectiveHandle swarmStateRoot objectiveId
+objectiveRef = objectiveHandle swarmStateRoot effectiveObjectiveId
 
 plannerHandleForWave : Int -> TaskHandle
 plannerHandleForWave wave = taskHandle swarmStateRoot (plannerTaskIdForWave wave) actorName
@@ -3349,7 +3370,7 @@ emptyManagerState =
     phase = "needs-planner",
     verdict = "pending",
     completed = false,
-    objectiveId = objectiveId,
+    objectiveId = effectiveObjectiveId,
     plannerTaskId = plannerTaskIdForWave 1,
     activeTaskId = "",
     plannedTaskIds = emptyTexts,
@@ -3774,7 +3795,7 @@ taskFailed : SwarmTask -> Bool
 taskFailed task = task.status == "failed"
 
 taskInObjective : SwarmTask -> Bool
-taskInObjective task = task.objectiveId == objectiveId
+taskInObjective task = task.objectiveId == effectiveObjectiveId
 
 textSearchStep : TextSearch -> Str -> TextSearch
 textSearchStep search value =
@@ -4975,6 +4996,33 @@ managerWorkspaceManifestText createdAtMs =
     "}"
   ]
 
+managerWorkspaceGitBoundaryScript : Str
+managerWorkspaceGitBoundaryScript = textJoin "\n" [
+  "set -euo pipefail",
+  "root=\"$1\"",
+  "if [ ! -d \"$root\" ]; then",
+  "  printf 'missing manager workspace root: %s\n' \"$root\" >&2",
+  "  exit 2",
+  "fi",
+  "mkdir -p \"$root/.git\"",
+  "rm -f \"$root/.git/index.lock\"",
+  "printf 'manager workspace boundary only\n' >\"$root/.git/CLASP_BOUNDARY\""
+]
+
+ensureManagerWorkspaceGitBoundary : Str
+ensureManagerWorkspaceGitBoundary =
+  match runCommand "." ["bash", "-c", managerWorkspaceGitBoundaryScript, "manager-workspace-git-boundary", resolvedWorkspaceRoot] {
+    Err message ->
+      message,
+    Ok process ->
+      if process.exitCode == 0 then
+        ""
+      else if process.stderr != "" then
+        process.stderr
+      else
+        process.stdout
+  }
+
 createManagerWorkspaceSnapshot : Str
 createManagerWorkspaceSnapshot = {
   let copied =
@@ -5003,7 +5051,7 @@ createManagerWorkspaceSnapshot = {
       if manifestError != "" then
         textConcat ["workspace-manifest-error:", manifestError]
       else {
-        let gitError = initializeWorkspaceGitRepo resolvedWorkspaceRoot in
+        let gitError = ensureManagerWorkspaceGitBoundary in
         if gitError != "" then
           textConcat ["workspace-git-init-error:", gitError]
         else
@@ -5280,7 +5328,7 @@ plannerCommandFor wave benchmarkSummary =
       ]
       (plannerCodexArgsFor wave benchmarkSummary))
 ensureObjective : Str
-ensureObjective = match objectiveCreate swarmStateRoot objectiveId goalText objectiveTaskBudget objectiveRunBudget {
+ensureObjective = match objectiveCreate swarmStateRoot effectiveObjectiveId goalText objectiveTaskBudget objectiveRunBudget {
   Ok created -> "",
   Err message -> message
 }
@@ -5502,7 +5550,7 @@ managerStateFor phase verdict completed activeTaskId plannedTaskIds wave benchma
     phase = phase,
     verdict = verdict,
     completed = completed,
-    objectiveId = objectiveId,
+    objectiveId = effectiveObjectiveId,
     plannerTaskId = plannerTaskIdForWave wave,
     activeTaskId = activeTaskId,
     plannedTaskIds = plannedTaskIds,
@@ -7436,7 +7484,7 @@ managerServiceConfigArgs =
     textConcat ["CLASP_MANAGER_READY_PATH_JSON=", encode serviceReadyPath],
     textConcat ["CLASP_MANAGER_READY_TEXT_JSON=", encode managerReadyText],
     textConcat ["CLASP_MANAGER_GOAL_JSON=", encode goalText],
-    textConcat ["CLASP_MANAGER_OBJECTIVE_ID_JSON=", encode objectiveId],
+    textConcat ["CLASP_MANAGER_OBJECTIVE_ID_JSON=", encode effectiveObjectiveId],
     textConcat ["CLASP_MANAGER_PLANNER_POLICY_JSON=", encode plannerPolicyText],
     textConcat ["CLASP_MANAGER_PROGRAM_JSON=", encode managerProgramPath],
     textConcat ["CLASP_LOOP_WORKSPACE_JSON=", encode workspaceRoot],

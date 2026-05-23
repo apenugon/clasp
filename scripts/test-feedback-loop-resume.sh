@@ -293,7 +293,7 @@ if [[ "${CLASP_TEST_EXPECT_DERIVED_GOAL_MANAGER_HELPER_COMMANDS:-0}" == "1" ]]; 
     printf 'verifier prompt did not mark GoalManager helper commands as diff-derived\n' >&2
     exit 90
   fi
-  if [[ "$prompt" != *'$(scripts/resolve-claspc.sh) --json check examples/swarm-native/GoalManager.clasp'* || "$prompt" != *"bash scripts/test-goal-manager-fast.sh"* ]]; then
+  if [[ "$prompt" != *'$(scripts/resolve-claspc.sh) --json check examples/swarm-native/GoalManager.wrapper.clasp'* || "$prompt" != *"bash scripts/test-goal-manager-fast.sh"* ]]; then
     printf 'verifier prompt did not select GoalManager control-plane checks from the helper diff\n' >&2
     exit 91
   fi
@@ -717,7 +717,7 @@ grep -F '"source":"diff-derived"' "$derived_goal_helper_state_root/focused-verif
 grep -F 'control_plane' "$derived_goal_helper_state_root/focused-verify-1.json" >/dev/null
 grep -F '"fallbackReason":""' "$derived_goal_helper_state_root/focused-verify-1.json" >/dev/null
 grep -F 'bash scripts/test-goal-manager-fast.sh' "$derived_goal_helper_state_root/focused-verify-1.json" >/dev/null
-grep -F '$(scripts/resolve-claspc.sh) --json check examples/swarm-native/GoalManager.clasp' "$derived_goal_helper_state_root/focused-verify-1.json" >/dev/null
+grep -F '$(scripts/resolve-claspc.sh) --json check examples/swarm-native/GoalManager.wrapper.clasp' "$derived_goal_helper_state_root/focused-verify-1.json" >/dev/null
 if grep -F 'unknown_path' "$derived_goal_helper_state_root/focused-verify-1.json" >/dev/null; then
   printf 'GoalManager helper focused diff was misclassified as unknown\n' >&2
   exit 1

@@ -127,6 +127,33 @@ managerWorkspaceManifestText createdAtMs =
     "}"
   ]
 
+managerWorkspaceGitBoundaryScript : Str
+managerWorkspaceGitBoundaryScript = textJoin "\n" [
+  "set -euo pipefail",
+  "root=\"$1\"",
+  "if [ ! -d \"$root\" ]; then",
+  "  printf 'missing manager workspace root: %s\n' \"$root\" >&2",
+  "  exit 2",
+  "fi",
+  "mkdir -p \"$root/.git\"",
+  "rm -f \"$root/.git/index.lock\"",
+  "printf 'manager workspace boundary only\n' >\"$root/.git/CLASP_BOUNDARY\""
+]
+
+ensureManagerWorkspaceGitBoundary : Str
+ensureManagerWorkspaceGitBoundary =
+  match runCommand "." ["bash", "-c", managerWorkspaceGitBoundaryScript, "manager-workspace-git-boundary", resolvedWorkspaceRoot] {
+    Err message ->
+      message,
+    Ok process ->
+      if process.exitCode == 0 then
+        ""
+      else if process.stderr != "" then
+        process.stderr
+      else
+        process.stdout
+  }
+
 createManagerWorkspaceSnapshot : Str
 createManagerWorkspaceSnapshot = {
   let copied =
@@ -155,7 +182,7 @@ createManagerWorkspaceSnapshot = {
       if manifestError != "" then
         textConcat ["workspace-manifest-error:", manifestError]
       else {
-        let gitError = initializeWorkspaceGitRepo resolvedWorkspaceRoot in
+        let gitError = ensureManagerWorkspaceGitBoundary in
         if gitError != "" then
           textConcat ["workspace-git-init-error:", gitError]
         else

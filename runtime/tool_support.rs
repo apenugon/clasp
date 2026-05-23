@@ -780,6 +780,49 @@ fn read_cached_project_bundle(entry_path: &Path) -> Result<Option<CachedProjectB
 
     let bundle = fs::read_to_string(&bundle_path)
         .map_err(|err| format!("failed to read cached project bundle `{}`: {err}", bundle_path.display()))?;
+    let modules = match cached_project_bundle_modules(&bundle, &cached_manifest.module_paths) {
+        Ok(modules) => modules,
+        Err(err) => {
+            trace_native_cache(&format!(
+                "bundle miss entry={} reason=invalid-bundle payload={} error={}",
+                entry_path.display(),
+                bundle_path.display(),
+                err
+            ));
+            return Ok(None);
+        }
+    };
+    if modules.len() != cached_manifest.module_paths.len() {
+        trace_native_cache(&format!(
+            "bundle miss entry={} reason=module-count-mismatch payload={}",
+            entry_path.display(),
+            bundle_path.display()
+        ));
+        return Ok(None);
+    }
+    for module in &modules {
+        let module_path = PathBuf::from(&module.canonical_path);
+        let current_signature = match project_module_cache_signature(&module_path) {
+            Ok(signature) => signature,
+            Err(err) => {
+                trace_native_cache(&format!(
+                    "bundle miss entry={} reason=missing-module-source module={} error={}",
+                    entry_path.display(),
+                    module_path.display(),
+                    err
+                ));
+                return Ok(None);
+            }
+        };
+        if current_signature != module.source_fingerprint {
+            trace_native_cache(&format!(
+                "bundle miss entry={} reason=bundle-payload-stale module={}",
+                entry_path.display(),
+                module_path.display()
+            ));
+            return Ok(None);
+        }
+    }
     trace_native_cache(&format!(
         "bundle hit entry={} manifest={} bundle={}",
         entry_path.display(),
@@ -1885,7 +1928,7 @@ mod tests {
     }
 
     #[test]
-    fn build_project_bundle_reuses_cached_bundle_when_sources_are_unchanged() {
+    fn build_project_bundle_rejects_stale_cached_bundle_payload() {
         let _env_lock = super::TEST_ENV_LOCK.lock().expect("lock test env");
         let root = unique_test_root("bundle-cache");
         let cache_root = unique_test_root("bundle-cache-store");
@@ -1919,8 +1962,9 @@ mod tests {
         .expect("overwrite cached bundle");
 
         let cached =
-            build_project_bundle_with_jobs(entry.to_str().expect("utf8 path"), 4).expect("reuse cached bundle");
-        assert!(cached.contains("greeting = \"cached\""));
+            build_project_bundle_with_jobs(entry.to_str().expect("utf8 path"), 4).expect("rebuild stale cached bundle");
+        assert!(!cached.contains("greeting = \"cached\""));
+        assert!(cached.contains("greeting = \"hi\""));
 
         std::env::remove_var("XDG_CACHE_HOME");
         let _ = fs::remove_dir_all(cache_root);
