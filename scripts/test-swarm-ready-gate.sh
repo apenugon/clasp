@@ -23,15 +23,20 @@ reject_pattern() {
   fi
 }
 
-bash -n "$project_root/scripts/test-native-claspc.sh" "$project_root/scripts/test-native-claspc-smoke.sh" "$project_root/scripts/test-native-runtime-smoke.sh" "$project_root/scripts/test-verify-all-smoke.sh"
+bash -n "$project_root/scripts/test-native-claspc.sh" "$project_root/scripts/test-native-claspc-smoke.sh" "$project_root/scripts/test-native-runtime-smoke.sh" "$project_root/scripts/test-verify-all-smoke.sh" "$project_root/scripts/test-agent-command-template.sh"
 bash -n "$project_root/scripts/test-goal-manager-planner-report-decode.sh"
 bash -n "$project_root/examples/swarm-kernel/scripts/verify.sh"
 node "$project_root/scripts/check-promoted-native-image-exports.mjs" >/dev/null
 
-require_pattern "examples/feedback-loop/Main.clasp" 'codexModel = readEnvText "CLASP_LOOP_CODEX_MODEL_JSON" "gpt-5.5"'
-require_pattern "examples/feedback-loop/Main.clasp" 'codexReasoning = readEnvText "CLASP_LOOP_CODEX_REASONING_JSON" "xhigh"'
-require_pattern "examples/swarm-native/GoalManagerConfig.clasp" 'codexModel = readEnvText "CLASP_LOOP_CODEX_MODEL_JSON" "gpt-5.5"'
-require_pattern "examples/swarm-native/GoalManagerConfig.clasp" 'codexReasoning = readEnvText "CLASP_LOOP_CODEX_REASONING_JSON" "xhigh"'
+require_pattern "examples/feedback-loop/Main.clasp" 'codexModel = readEnvText "CLASP_LOOP_CODEX_MODEL_JSON" (readEnvText "CLASP_LOOP_AGENT_MODEL_JSON" "gpt-5.5")'
+require_pattern "examples/feedback-loop/Main.clasp" 'codexReasoning = readEnvText "CLASP_LOOP_CODEX_REASONING_JSON" (readEnvText "CLASP_LOOP_AGENT_REASONING_JSON" "xhigh")'
+require_pattern "examples/feedback-loop/Main.clasp" 'agentCommandTemplate = readEnvCommandTextList "CLASP_LOOP_AGENT_COMMAND_JSON" emptyTexts'
+require_pattern "examples/feedback-loop/Main.clasp" 'renderAgentCommand role schemaPath reportPath promptPath'
+require_pattern "examples/swarm-native/GoalManagerConfig.clasp" 'codexModel = readEnvText "CLASP_LOOP_CODEX_MODEL_JSON" (readEnvText "CLASP_LOOP_AGENT_MODEL_JSON" "gpt-5.5")'
+require_pattern "examples/swarm-native/GoalManagerConfig.clasp" 'codexReasoning = readEnvText "CLASP_LOOP_CODEX_REASONING_JSON" (readEnvText "CLASP_LOOP_AGENT_REASONING_JSON" "xhigh")'
+require_pattern "examples/swarm-native/GoalManagerConfig.clasp" 'plannerAgentCommandTemplate = readEnvTextList "CLASP_MANAGER_PLANNER_AGENT_COMMAND_JSON" agentCommandTemplate'
+require_pattern "examples/swarm-native/GoalManagerBootstrapPlanner.clasp" 'plannerAgentCommandArgs'
+require_pattern "scripts/test-agent-command-template.sh" 'agent-command-template-ok'
 require_pattern "examples/feedback-loop/Main.clasp" 'watchModeEnabled'
 require_pattern "examples/feedback-loop/Main.clasp" '"builder-running"'
 require_pattern "examples/feedback-loop/Main.clasp" '"verifier-running"'

@@ -157,7 +157,7 @@ taskWorkspaceBaseRoot =
     (pathJoin ["/tmp", textConcat ["clasp-goal-manager-workspaces-", textFingerprint64Hex stateRootPath]])
 
 codexBin : Str
-codexBin = readEnvText "CLASP_LOOP_CODEX_BIN_JSON" "codex"
+codexBin = readEnvText "CLASP_LOOP_CODEX_BIN_JSON" (readEnvText "CLASP_LOOP_AGENT_BIN_JSON" "codex")
 
 managerClaspcBin : Str
 managerClaspcBin = readEnvText "CLASP_MANAGER_CLASPC_BIN_JSON" "claspc"
@@ -172,13 +172,31 @@ plannerSchemaPath : Str
 plannerSchemaPath = readEnvText "CLASP_MANAGER_PLANNER_SCHEMA_JSON" "agents/schemas/planner-report.schema.json"
 
 codexModel : Str
-codexModel = readEnvText "CLASP_LOOP_CODEX_MODEL_JSON" "gpt-5.5"
+codexModel = readEnvText "CLASP_LOOP_CODEX_MODEL_JSON" (readEnvText "CLASP_LOOP_AGENT_MODEL_JSON" "gpt-5.5")
 
 codexReasoning : Str
-codexReasoning = readEnvText "CLASP_LOOP_CODEX_REASONING_JSON" "xhigh"
+codexReasoning = readEnvText "CLASP_LOOP_CODEX_REASONING_JSON" (readEnvText "CLASP_LOOP_AGENT_REASONING_JSON" "xhigh")
 
 codexSandbox : Str
-codexSandbox = readEnvText "CLASP_LOOP_CODEX_SANDBOX_JSON" "danger-full-access"
+codexSandbox = readEnvText "CLASP_LOOP_CODEX_SANDBOX_JSON" (readEnvText "CLASP_LOOP_AGENT_SANDBOX_JSON" "danger-full-access")
+
+agentBin : Str
+agentBin = readEnvText "CLASP_LOOP_AGENT_BIN_JSON" codexBin
+
+agentModel : Str
+agentModel = readEnvText "CLASP_LOOP_AGENT_MODEL_JSON" codexModel
+
+agentReasoning : Str
+agentReasoning = readEnvText "CLASP_LOOP_AGENT_REASONING_JSON" codexReasoning
+
+agentSandbox : Str
+agentSandbox = readEnvText "CLASP_LOOP_AGENT_SANDBOX_JSON" codexSandbox
+
+agentCommandTemplate : [Str]
+agentCommandTemplate = readEnvTextList "CLASP_LOOP_AGENT_COMMAND_JSON" emptyTexts
+
+plannerAgentCommandTemplate : [Str]
+plannerAgentCommandTemplate = readEnvTextList "CLASP_MANAGER_PLANNER_AGENT_COMMAND_JSON" agentCommandTemplate
 
 childLoopWatchPollMs : Int
 childLoopWatchPollMs = match envVar "CLASP_LOOP_WATCH_POLL_MS_JSON" {

@@ -132,16 +132,31 @@ verifierSchemaPath : Str
 verifierSchemaPath = readEnvText "CLASP_LOOP_VERIFIER_SCHEMA_JSON" "agents/schemas/verifier-report.schema.json"
 
 codexBin : Str
-codexBin = readEnvText "CLASP_LOOP_CODEX_BIN_JSON" "codex"
+codexBin = readEnvText "CLASP_LOOP_CODEX_BIN_JSON" (readEnvText "CLASP_LOOP_AGENT_BIN_JSON" "codex")
 
 codexModel : Str
-codexModel = readEnvText "CLASP_LOOP_CODEX_MODEL_JSON" "gpt-5.5"
+codexModel = readEnvText "CLASP_LOOP_CODEX_MODEL_JSON" (readEnvText "CLASP_LOOP_AGENT_MODEL_JSON" "gpt-5.5")
 
 codexReasoning : Str
-codexReasoning = readEnvText "CLASP_LOOP_CODEX_REASONING_JSON" "xhigh"
+codexReasoning = readEnvText "CLASP_LOOP_CODEX_REASONING_JSON" (readEnvText "CLASP_LOOP_AGENT_REASONING_JSON" "xhigh")
 
 codexSandbox : Str
-codexSandbox = readEnvText "CLASP_LOOP_CODEX_SANDBOX_JSON" "danger-full-access"
+codexSandbox = readEnvText "CLASP_LOOP_CODEX_SANDBOX_JSON" (readEnvText "CLASP_LOOP_AGENT_SANDBOX_JSON" "danger-full-access")
+
+agentBin : Str
+agentBin = readEnvText "CLASP_LOOP_AGENT_BIN_JSON" codexBin
+
+agentModel : Str
+agentModel = readEnvText "CLASP_LOOP_AGENT_MODEL_JSON" codexModel
+
+agentReasoning : Str
+agentReasoning = readEnvText "CLASP_LOOP_AGENT_REASONING_JSON" codexReasoning
+
+agentSandbox : Str
+agentSandbox = readEnvText "CLASP_LOOP_AGENT_SANDBOX_JSON" codexSandbox
+
+agentCommandTemplate : [Str]
+agentCommandTemplate = readEnvCommandTextList "CLASP_LOOP_AGENT_COMMAND_JSON" emptyTexts
 
 watchPollMs : Int
 watchPollMs = readEnvInt "CLASP_LOOP_WATCH_POLL_MS_JSON" 1000
@@ -1085,7 +1100,7 @@ incrementAttempt value =
     value
 
 codexReasoningConfig : Str
-codexReasoningConfig = textConcat ["model_reasoning_effort=\"", codexReasoning, "\""]
+codexReasoningConfig = textConcat ["model_reasoning_effort=\"", agentReasoning, "\""]
 
 codexPromptStdinShell : Str
 codexPromptStdinShell =
@@ -1096,31 +1111,67 @@ codexPromptStdinShell =
     "exec \"$@\" - < \"$prompt_path\""
   ]
 
-codexCommand : Str -> Str -> Str -> [Str]
-codexCommand schemaPath reportPath promptPath = [
+templateReplace : Str -> Str -> Str -> Str
+templateReplace value needle replacement = textJoin replacement (textSplit value needle)
+
+renderAgentCommandArg : Str -> Str -> Str -> Str -> Str -> Str
+renderAgentCommandArg role schemaPath reportPath promptPath value = {
+  let rendered0 = templateReplace value "{role}" role in
+  let rendered1 = templateReplace rendered0 "{schema_path}" schemaPath in
+  let rendered2 = templateReplace rendered1 "{report_path}" reportPath in
+  let rendered3 = templateReplace rendered2 "{prompt_path}" promptPath in
+  let rendered4 = templateReplace rendered3 "{workspace_root}" workspaceRoot in
+  let rendered5 = templateReplace rendered4 "{agent_bin}" agentBin in
+  let rendered6 = templateReplace rendered5 "{model}" agentModel in
+  let rendered7 = templateReplace rendered6 "{reasoning}" agentReasoning in
+  templateReplace rendered7 "{sandbox}" agentSandbox
+}
+
+renderAgentCommand : Str -> Str -> Str -> Str -> [Str]
+renderAgentCommand role schemaPath reportPath promptPath = {
+  let mut rendered = emptyTexts;
+  for arg in agentCommandTemplate {
+    rendered = append rendered [renderAgentCommandArg role schemaPath reportPath promptPath arg];
+    rendered
+  };
+  rendered
+}
+
+codexCommandDefault : Str -> Str -> Str -> [Str]
+codexCommandDefault schemaPath reportPath promptPath = [
   "bash",
   "-lc",
   codexPromptStdinShell,
   "clasp-feedback-loop-codex-stdin",
   promptPath,
-  codexBin,
+  agentBin,
   "exec",
   "--json",
   "--cd",
   workspaceRoot,
   "-m",
-  codexModel,
+  agentModel,
   "-c",
   codexReasoningConfig,
   "--skip-git-repo-check",
   "--sandbox",
-  codexSandbox,
+  agentSandbox,
   "--ephemeral",
   "--output-schema",
   schemaPath,
   "-o",
   reportPath
 ]
+
+agentCommand : Str -> Str -> Str -> Str -> [Str]
+agentCommand role schemaPath reportPath promptPath =
+  if length agentCommandTemplate > 0 then
+    renderAgentCommand role schemaPath reportPath promptPath
+  else
+    codexCommandDefault schemaPath reportPath promptPath
+
+codexCommand : Str -> Str -> Str -> [Str]
+codexCommand schemaPath reportPath promptPath = agentCommand "agent" schemaPath reportPath promptPath
 
 loopCodexCommand : Str -> Str -> [Str]
 loopCodexCommand reportPath promptPath = [
@@ -1450,7 +1501,7 @@ verifierShellCommand attempt =
       ],
       "clasp-feedback-loop-verifier"
     ]
-    (codexCommand verifierSchemaPath (verifierReportPath attempt) (verifierPromptPath attempt))
+    (agentCommand "verifier" verifierSchemaPath (verifierReportPath attempt) (verifierPromptPath attempt))
 
 markBaselineReady : ProcessResult
 markBaselineReady =
@@ -1781,13 +1832,13 @@ runBuilderPhase attempt =
             if watchModeEnabled then
               ensureStepReport
                 builderStep
-                (codexCommand builderSchemaPath builderStep.reportPath (builderPromptPath attempt))
+                (agentCommand "builder" builderSchemaPath builderStep.reportPath (builderPromptPath attempt))
                 (loopState attempt "builder-launching" "pending" false attempt 0 true false "" false)
                 (loopState attempt "builder-running" "pending" false attempt 0 true false "" false)
             else
               runStepDirect
                 builderStep
-                (codexCommand builderSchemaPath builderStep.reportPath (builderPromptPath attempt))
+                (agentCommand "builder" builderSchemaPath builderStep.reportPath (builderPromptPath attempt))
                 (loopState attempt "builder-launching" "pending" false attempt 0 true false "" false)
                 (loopState attempt "builder-running" "pending" false attempt 0 true false "" false) in
           if fileExists builderStep.reportPath then

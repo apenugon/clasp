@@ -64,6 +64,12 @@ readEnvText name fallback = match envVar name {
   Err message -> fallback
 }
 
+readEnvTextList : Str -> [Str] -> [Str]
+readEnvTextList name fallback = match envVar name {
+  Ok raw -> if raw == "" then fallback else decode [Str] raw,
+  Err message -> fallback
+}
+
 taskFile : Str
 taskFile = readEnvText "CLASP_LOOP_TASK_FILE_JSON" "agents/tasks/0012-autonomous-swarm-confidence.md"
 
@@ -71,7 +77,7 @@ workspaceRoot : Str
 workspaceRoot = readEnvText "CLASP_LOOP_WORKSPACE_JSON" "."
 
 codexBin : Str
-codexBin = readEnvText "CLASP_LOOP_CODEX_BIN_JSON" "codex"
+codexBin = readEnvText "CLASP_LOOP_CODEX_BIN_JSON" (readEnvText "CLASP_LOOP_AGENT_BIN_JSON" "codex")
 
 builderSchemaPath : Str
 builderSchemaPath = readEnvText "CLASP_LOOP_BUILDER_SCHEMA_JSON" "agents/schemas/builder-report.schema.json"
@@ -80,13 +86,28 @@ verifierSchemaPath : Str
 verifierSchemaPath = readEnvText "CLASP_LOOP_VERIFIER_SCHEMA_JSON" "agents/schemas/verifier-report.schema.json"
 
 codexModel : Str
-codexModel = readEnvText "CLASP_LOOP_CODEX_MODEL_JSON" "gpt-5.5"
+codexModel = readEnvText "CLASP_LOOP_CODEX_MODEL_JSON" (readEnvText "CLASP_LOOP_AGENT_MODEL_JSON" "gpt-5.5")
 
 codexReasoning : Str
-codexReasoning = readEnvText "CLASP_LOOP_CODEX_REASONING_JSON" "xhigh"
+codexReasoning = readEnvText "CLASP_LOOP_CODEX_REASONING_JSON" (readEnvText "CLASP_LOOP_AGENT_REASONING_JSON" "xhigh")
 
 codexSandbox : Str
-codexSandbox = readEnvText "CLASP_LOOP_CODEX_SANDBOX_JSON" "danger-full-access"
+codexSandbox = readEnvText "CLASP_LOOP_CODEX_SANDBOX_JSON" (readEnvText "CLASP_LOOP_AGENT_SANDBOX_JSON" "danger-full-access")
+
+agentBin : Str
+agentBin = readEnvText "CLASP_LOOP_AGENT_BIN_JSON" codexBin
+
+agentModel : Str
+agentModel = readEnvText "CLASP_LOOP_AGENT_MODEL_JSON" codexModel
+
+agentReasoning : Str
+agentReasoning = readEnvText "CLASP_LOOP_AGENT_REASONING_JSON" codexReasoning
+
+agentSandbox : Str
+agentSandbox = readEnvText "CLASP_LOOP_AGENT_SANDBOX_JSON" codexSandbox
+
+agentCommandTemplate : [Str]
+agentCommandTemplate = readEnvTextList "CLASP_LOOP_AGENT_COMMAND_JSON" emptyTexts
 
 maxAttempts : Int
 maxAttempts = match envVar "CLASP_LOOP_MAX_ATTEMPTS_JSON" {
@@ -431,22 +452,48 @@ statusOutput : Str
 statusOutput = encode (statusView readLoopState)
 
 codexReasoningConfig : Str
-codexReasoningConfig = textConcat ["model_reasoning_effort=\"", codexReasoning, "\""]
+codexReasoningConfig = textConcat ["model_reasoning_effort=\"", agentReasoning, "\""]
 
-codexCommand : Str -> Str -> Str -> [Str]
-codexCommand schemaPath reportPath prompt = [
-  codexBin,
+templateReplace : Str -> Str -> Str -> Str
+templateReplace value needle replacement = textJoin replacement (textSplit value needle)
+
+renderAgentCommandArg : Str -> Str -> Str -> Str -> Str -> Str
+renderAgentCommandArg role schemaPath reportPath prompt value = {
+  let rendered0 = templateReplace value "{role}" role in
+  let rendered1 = templateReplace rendered0 "{schema_path}" schemaPath in
+  let rendered2 = templateReplace rendered1 "{report_path}" reportPath in
+  let rendered3 = templateReplace rendered2 "{prompt}" prompt in
+  let rendered4 = templateReplace rendered3 "{workspace_root}" workspaceRoot in
+  let rendered5 = templateReplace rendered4 "{agent_bin}" agentBin in
+  let rendered6 = templateReplace rendered5 "{model}" agentModel in
+  let rendered7 = templateReplace rendered6 "{reasoning}" agentReasoning in
+  templateReplace rendered7 "{sandbox}" agentSandbox
+}
+
+renderAgentCommand : Str -> Str -> Str -> Str -> [Str]
+renderAgentCommand role schemaPath reportPath prompt = {
+  let mut rendered = emptyTexts;
+  for arg in agentCommandTemplate {
+    rendered = append rendered [renderAgentCommandArg role schemaPath reportPath prompt arg];
+    rendered
+  };
+  rendered
+}
+
+codexCommandDefault : Str -> Str -> Str -> [Str]
+codexCommandDefault schemaPath reportPath prompt = [
+  agentBin,
   "exec",
   "--json",
   "--cd",
   workspaceRoot,
   "-m",
-  codexModel,
+  agentModel,
   "-c",
   codexReasoningConfig,
   "--skip-git-repo-check",
   "--sandbox",
-  codexSandbox,
+  agentSandbox,
   "--ephemeral",
   "--output-schema",
   schemaPath,
@@ -455,11 +502,21 @@ codexCommand schemaPath reportPath prompt = [
   prompt
 ]
 
+agentCommand : Str -> Str -> Str -> Str -> [Str]
+agentCommand role schemaPath reportPath prompt =
+  if length agentCommandTemplate > 0 then
+    renderAgentCommand role schemaPath reportPath prompt
+  else
+    codexCommandDefault schemaPath reportPath prompt
+
+codexCommand : Str -> Str -> Str -> [Str]
+codexCommand schemaPath reportPath prompt = agentCommand "agent" schemaPath reportPath prompt
+
 builderCommand : Int -> SwarmCommand
-builderCommand attempt = commandSpec "." (codexCommand builderSchemaPath (builderReportPath attempt) (builderPrompt attempt))
+builderCommand attempt = commandSpec "." (agentCommand "builder" builderSchemaPath (builderReportPath attempt) (builderPrompt attempt))
 
 verifierCommand : Int -> SwarmCommand
-verifierCommand attempt = commandSpec "." (codexCommand verifierSchemaPath (verifierReportPath attempt) (verifierPrompt attempt))
+verifierCommand attempt = commandSpec "." (agentCommand "verifier" verifierSchemaPath (verifierReportPath attempt) (verifierPrompt attempt))
 
 ensureLoopReady : Str
 ensureLoopReady =

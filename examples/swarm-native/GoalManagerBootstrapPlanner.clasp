@@ -11,8 +11,8 @@ plannerPromptPathForWave : Int -> Str
 plannerPromptPathForWave wave =
   pathJoin [stateRootPath, textConcat ["planner-", encode wave, ".prompt.txt"]]
 
-codexCommand : Str -> Str -> Str -> [Str]
-codexCommand schemaPath reportPath promptPath = [
+codexCommandDefault : Str -> Str -> Str -> [Str]
+codexCommandDefault schemaPath reportPath promptPath = [
   "bash",
   "-c",
   textJoin "\n" [
@@ -22,24 +22,34 @@ codexCommand schemaPath reportPath promptPath = [
   ],
   "planner-stdin",
   promptPath,
-  codexBin,
+  agentBin,
   "exec",
   "--json",
   "--cd",
   resolvedWorkspaceRoot,
   "-m",
-  codexModel,
+  agentModel,
   "-c",
   codexReasoningConfig,
   "--skip-git-repo-check",
   "--sandbox",
-  codexSandbox,
+  agentSandbox,
   "--ephemeral",
   "--output-schema",
   schemaPath,
   "-o",
   reportPath
 ]
+
+plannerAgentCommandArgs : Str -> Str -> Str -> [Str]
+plannerAgentCommandArgs schemaPath reportPath promptPath =
+  if length plannerAgentCommandTemplate > 0 then
+    renderAgentCommand plannerAgentCommandTemplate "planner" schemaPath reportPath promptPath resolvedWorkspaceRoot
+  else
+    codexCommandDefault schemaPath reportPath promptPath
+
+codexCommand : Str -> Str -> Str -> [Str]
+codexCommand schemaPath reportPath promptPath = plannerAgentCommandArgs schemaPath reportPath promptPath
 
 plannerBenchmarkContextFor : Int -> Str -> Str
 plannerBenchmarkContextFor wave benchmarkSummary =
@@ -104,23 +114,4 @@ plannerCommandFor : Int -> Str -> SwarmCommand
 plannerCommandFor wave benchmarkSummary =
   commandSpec
     managerProjectRoot
-    [
-      codexBin,
-      "exec",
-      "--json",
-      "--cd",
-      resolvedWorkspaceRoot,
-      "-m",
-      codexModel,
-      "-c",
-      codexReasoningConfig,
-      "--skip-git-repo-check",
-      "--sandbox",
-      codexSandbox,
-      "--ephemeral",
-      "--output-schema",
-      resolvedPlannerSchemaPath,
-      "-o",
-      plannerReportPathFor wave,
-      plannerPromptPathForWave wave
-    ]
+    (plannerAgentCommandArgs resolvedPlannerSchemaPath (plannerReportPathFor wave) (plannerPromptPathForWave wave))

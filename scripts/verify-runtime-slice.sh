@@ -16,7 +16,7 @@ Slices:
                 Includes the monitored run-log helper that persists status JSON and JSONL events.
   workflow      Ordinary Clasp monitored workflow with durable status/events.
   codex-loop    Ordinary Clasp program invoking codex exec directly.
-  agent-loop    Ordinary Clasp builder/verifier loop using safe workspace and subprocess APIs.
+  agent-loop    Ordinary Clasp builder/verifier loop using safe workspace, subprocess APIs, and generic agent command templates.
   workspace     Root-bounded workspace file API from ordinary Clasp code.
   managed-loop  Native control-plane managed builder/verifier loop.
   swarm-feedback-loop
@@ -74,6 +74,7 @@ scripts_for_slice() {
       ;;
     agent-loop)
       printf '%s\n' "examples/agent-loop-scenario/scripts/verify.sh"
+      printf '%s\n' "scripts/test-agent-command-template.sh"
       ;;
     workspace)
       printf '%s\n' "scripts/test-safe-workspace.sh"

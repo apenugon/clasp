@@ -312,34 +312,7 @@ runPlanner = {
               let plannerCommand =
                 commandSpec
                   managerProjectRoot
-                  [
-                    "bash",
-                    "-c",
-                    textJoin "\n" [
-                      "prompt_path=\"$1\"",
-                      "shift",
-                      "exec \"$@\" - < \"$prompt_path\""
-                    ],
-                    "planner-direct",
-                    plannerPromptPath,
-                    codexBin,
-                    "exec",
-                    "--json",
-                    "--cd",
-                    resolvedWorkspaceRoot,
-                    "-m",
-                    codexModel,
-                    "-c",
-                    codexReasoningConfig,
-                    "--skip-git-repo-check",
-                    "--sandbox",
-                    codexSandbox,
-                    "--ephemeral",
-                    "--output-schema",
-                    resolvedPlannerSchemaPath,
-                    "-o",
-                    plannerReportPathFor wave
-                  ] in
+                  (plannerAgentCommandArgs resolvedPlannerSchemaPath (plannerReportPathFor wave) plannerPromptPath) in
               let commandTrace = appendManagerTrace (textConcat ["planner-wave-", encode wave, ":command-ready"]) in
               if commandTrace != "" then
                 plannerFailure "manager trace write failed" commandTrace

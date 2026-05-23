@@ -53,6 +53,7 @@ make_fake_harness scripts/test-safe-subprocess.sh
 make_fake_harness scripts/test-monitored-workflow.sh
 make_fake_harness scripts/test-codex-loop-program.sh
 make_fake_harness examples/agent-loop-scenario/scripts/verify.sh
+make_fake_harness scripts/test-agent-command-template.sh
 make_fake_harness scripts/test-safe-workspace.sh
 make_fake_harness scripts/test-swarm-native-managed-loop.sh
 make_fake_harness scripts/test-swarm-native-feedback-loop.sh
@@ -107,6 +108,7 @@ grep -F 'scripts/test-safe-subprocess.sh' "$all_log" >/dev/null
 grep -F 'scripts/test-monitored-workflow.sh' "$all_log" >/dev/null
 grep -F 'scripts/test-codex-loop-program.sh' "$all_log" >/dev/null
 grep -F 'examples/agent-loop-scenario/scripts/verify.sh' "$all_log" >/dev/null
+grep -F 'scripts/test-agent-command-template.sh' "$all_log" >/dev/null
 grep -F 'scripts/test-safe-workspace.sh' "$all_log" >/dev/null
 grep -F 'scripts/test-swarm-native-managed-loop.sh' "$all_log" >/dev/null
 grep -F 'scripts/test-swarm-native-feedback-loop.sh' "$all_log" >/dev/null
@@ -131,6 +133,7 @@ grep -F 'scripts/test-safe-subprocess.sh' "$default_log" >/dev/null
 grep -F 'scripts/test-monitored-workflow.sh' "$default_log" >/dev/null
 grep -F 'scripts/test-codex-loop-program.sh' "$default_log" >/dev/null
 grep -F 'examples/agent-loop-scenario/scripts/verify.sh' "$default_log" >/dev/null
+grep -F 'scripts/test-agent-command-template.sh' "$default_log" >/dev/null
 grep -F 'scripts/test-safe-workspace.sh' "$default_log" >/dev/null
 if grep -F 'test-swarm-native-managed-loop.sh' "$default_log" >/dev/null; then
   printf 'default runtime slice should stay below the managed-loop control-plane scenario\n' >&2

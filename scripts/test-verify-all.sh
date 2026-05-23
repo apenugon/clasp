@@ -62,6 +62,7 @@ cp "$project_root/scripts/stop-managed-job.sh" "$test_root/scripts/stop-managed-
 cp "$project_root/scripts/test-managed-job.sh" "$test_root/scripts/test-managed-job.sh"
 cp "$project_root/scripts/test-monitored-workflow.sh" "$test_root/scripts/test-monitored-workflow.sh"
 cp "$project_root/scripts/test-codex-loop-program.sh" "$test_root/scripts/test-codex-loop-program.sh"
+cp "$project_root/scripts/test-agent-command-template.sh" "$test_root/scripts/test-agent-command-template.sh"
 cp "$project_root/scripts/test-host-runtime.sh" "$test_root/scripts/test-host-runtime.sh"
 cp "$project_root/scripts/test-safe-workspace.sh" "$test_root/scripts/test-safe-workspace.sh"
 cp "$project_root/scripts/test-goal-manager-child-loop-monitor.sh" "$test_root/scripts/test-goal-manager-child-loop-monitor.sh"
@@ -199,6 +200,7 @@ grep -F 'bash scripts/test-managed-job.sh' "$test_root/scripts/verify-all.sh" >/
 grep -F 'bash scripts/test-monitored-workflow.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-codex-loop-program.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash examples/agent-loop-scenario/scripts/verify.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'bash scripts/test-agent-command-template.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash examples/browser-counter/scripts/verify.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-host-runtime.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-safe-workspace.sh' "$test_root/scripts/verify-all.sh" >/dev/null
@@ -249,6 +251,7 @@ grep -F 'scripts/test-monitored-workflow.sh' "$test_root/scripts/test-verify-run
 grep -F 'scripts/test-monitored-run-log.sh' "$test_root/scripts/test-verify-runtime-slice.sh" >/dev/null
 grep -F 'scripts/test-safe-subprocess.sh' "$test_root/scripts/test-verify-runtime-slice.sh" >/dev/null
 grep -F 'examples/agent-loop-scenario/scripts/verify.sh' "$test_root/scripts/test-verify-runtime-slice.sh" >/dev/null
+grep -F 'scripts/test-agent-command-template.sh' "$test_root/scripts/test-verify-runtime-slice.sh" >/dev/null
 grep -F 'scripts/test-swarm-native-managed-loop.sh' "$test_root/scripts/test-verify-runtime-slice.sh" >/dev/null
 grep -F 'scripts/test-swarm-native-feedback-loop.sh' "$test_root/scripts/test-verify-runtime-slice.sh" >/dev/null
 grep -F 'CLASP_VERIFY_CHANGED_FILES' "$test_root/scripts/verify-affected.mjs" >/dev/null
