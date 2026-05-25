@@ -10,6 +10,72 @@ main_branch="${CLASP_SWARM_MAIN_BRANCH:-main}"
 source_ref="${CLASP_SWARM_SOURCE_REF:-HEAD}"
 allow_dirty="${CLASP_SWARM_ALLOW_DIRTY:-0}"
 batch_filter="${CLASP_SWARM_BATCH:-}"
+max_running_lanes="${CLASP_SWARM_MAX_RUNNING_LANES:-2}"
+lane_memory_mb="${CLASP_SWARM_LANE_MEMORY_MB:-12288}"
+min_available_memory_mb="${CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB:-8192}"
+
+validate_non_negative_integer() {
+  local name="$1"
+  local value="$2"
+
+  if ! [[ "$value" =~ ^[0-9]+$ ]]; then
+    printf '%s must be a non-negative integer; got %s\n' "$name" "$value" >&2
+    exit 2
+  fi
+}
+
+available_memory_mb() {
+  awk '/MemAvailable:/ { printf "%d\n", int($2 / 1024); found = 1 } END { if (!found) print 0 }' /proc/meminfo 2>/dev/null || printf '0\n'
+}
+
+lane_runtime_is_running() {
+  local runtime_root="$1"
+  local job_file="$runtime_root/job"
+  local pid_file="$runtime_root/pid"
+  local job_dir=""
+  local pid=""
+  local status=""
+
+  if [[ -f "$job_file" ]]; then
+    job_dir="$(sed -n '1p' "$job_file")"
+    if [[ -f "$job_dir/pid" && -f "$job_dir/status" ]]; then
+      pid="$(tr -d '[:space:]' <"$job_dir/pid")"
+      status="$(sed -n '1p' "$job_dir/status")"
+      if [[ "$status" != "completed" && "$status" != "failed" && "$status" != "stopped" ]] &&
+         kill -0 "$pid" >/dev/null 2>&1; then
+        return 0
+      fi
+    fi
+  elif [[ -f "$pid_file" ]]; then
+    pid="$(tr -d '[:space:]' <"$pid_file")"
+    if [[ -n "$pid" ]] && kill -0 "$pid" >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
+running_lane_count_for_wave() {
+  local count=0
+  local lane_dir=""
+  local lane_name=""
+  local runtime_root=""
+
+  while IFS= read -r lane_dir; do
+    lane_name="$(clasp_swarm_lane_name "$lane_dir")"
+    runtime_root="$project_root/.clasp-swarm/$wave_name/$lane_name"
+    if lane_runtime_is_running "$runtime_root"; then
+      count=$((count + 1))
+    fi
+  done < <(clasp_swarm_lane_dirs "$wave_name" "$project_root")
+
+  printf '%s\n' "$count"
+}
+
+validate_non_negative_integer "CLASP_SWARM_MAX_RUNNING_LANES" "$max_running_lanes"
+validate_non_negative_integer "CLASP_SWARM_LANE_MEMORY_MB" "$lane_memory_mb"
+validate_non_negative_integer "CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB" "$min_available_memory_mb"
 
 if [[ "${1:-}" == "--list-lanes" ]]; then
   wave_name="${2:-$(clasp_swarm_default_wave)}"
@@ -68,6 +134,8 @@ fi
 
 clasp_swarm_reconcile_main_and_trunk "$project_root" "$main_branch" "$trunk_branch" >/dev/null
 
+running_lanes="$(running_lane_count_for_wave)"
+
 while IFS= read -r lane_dir; do
   if [[ -n "$batch_filter" ]]; then
     lane_has_batch=0
@@ -94,6 +162,9 @@ while IFS= read -r lane_dir; do
   log_file="$runtime_root/lane.log"
   pid_file="$runtime_root/pid"
   job_file="$runtime_root/job"
+  completed_root="$runtime_root/completed"
+  blocked_root="$runtime_root/blocked"
+  global_completed_root="$project_root/.clasp-swarm/completed"
 
   mkdir -p "$runtime_root"
 
@@ -118,9 +189,50 @@ while IFS= read -r lane_dir; do
     rm -f "$pid_file"
   fi
 
+  selected_task="$(
+    clasp_swarm_select_next_ready_task \
+      "$lane_dir" \
+      "$completed_root" \
+      "$global_completed_root" \
+      "$blocked_root" \
+      "$batch_filter" || true
+  )"
+  if [[ -z "$selected_task" ]]; then
+    echo "lane $lane_name has no pending tasks"
+    continue
+  fi
+  if [[ "$selected_task" == __WAIT__:* ]]; then
+    echo "lane $lane_name has no ready tasks; dependencies are not complete"
+    continue
+  fi
+  if [[ "$selected_task" == __BLOCKED__:* ]]; then
+    echo "lane $lane_name is blocked; not starting"
+    continue
+  fi
+
+  if (( max_running_lanes > 0 && running_lanes >= max_running_lanes )); then
+    echo "resource guard: not starting lane=$lane_name; running_lanes=$running_lanes max_running_lanes=$max_running_lanes"
+    continue
+  fi
+
+  if (( min_available_memory_mb > 0 )); then
+    mem_available_mb="$(available_memory_mb)"
+    if (( mem_available_mb < min_available_memory_mb )); then
+      echo "resource guard: not starting lane=$lane_name; available_memory_mb=$mem_available_mb min_available_memory_mb=$min_available_memory_mb"
+      continue
+    fi
+  fi
+
+  managed_job_args=(
+    "$project_root/scripts/run-managed-job.sh"
+    --jobs-root "$runtime_root/jobs"
+  )
+  if (( lane_memory_mb > 0 )); then
+    managed_job_args+=(--memory-mb "$lane_memory_mb")
+  fi
+
   job_dir="$(
-    "$project_root/scripts/run-managed-job.sh" \
-      --jobs-root "$runtime_root/jobs" \
+    "${managed_job_args[@]}" \
       -- bash -c 'log_file="$1"; shift; exec "$@" >>"$log_file" 2>&1' \
         managed-swarm-lane "$log_file" \
         env CLASP_SWARM_BATCH="$batch_filter" \
@@ -129,6 +241,7 @@ while IFS= read -r lane_dir; do
   pid="$(tr -d '[:space:]' <"$job_dir/pid")"
   printf '%s\n' "$job_dir" > "$job_file"
   printf '%s\n' "$pid" > "$pid_file"
+  running_lanes=$((running_lanes + 1))
   if [[ -n "$batch_filter" ]]; then
     echo "started lane=$lane_name batch=$batch_filter pid=$pid job=$job_dir log=$log_file"
   else

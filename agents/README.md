@@ -41,4 +41,9 @@ bash scripts/clasp-swarm-status.sh wave1
 bash scripts/clasp-swarm-stop.sh wave1
 ```
 
+By default, `clasp-swarm-start.sh` starts at most two running lanes and launches
+each lane through the managed job memory guard. Use
+`CLASP_SWARM_MAX_RUNNING_LANES`, `CLASP_SWARM_LANE_MEMORY_MB`, and
+`CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB` to tune larger machines deliberately.
+
 Task files are ordered lexicographically and should stay small enough to be completed in a single focused change.

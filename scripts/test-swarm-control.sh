@@ -896,6 +896,9 @@ project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 printf '%s\n' "$task_id" >> "$project_root/builder-events.log"
 printf '%s\n' "$task_id" > "$workspace/$task_id.txt"
+if [[ -n "${CLASP_SWARM_TEST_BUILDER_SLEEP_SECS:-}" ]]; then
+  sleep "$CLASP_SWARM_TEST_BUILDER_SLEEP_SECS"
+fi
 
 cat > "$report_json" <<JSON
 {
@@ -1100,6 +1103,10 @@ grep -F --quiet 'sandbox_mode="${CLASP_SWARM_CODEX_SANDBOX:-workspace-write}"' "
 grep -F --quiet -- '--sandbox "$sandbox_mode"' "$project_root/scripts/clasp-verifier.sh"
 grep -F --quiet 'builder_timeout_seconds="${CLASP_SWARM_BUILDER_TIMEOUT_SECONDS:-0}"' "$project_root/scripts/clasp-swarm-lane.sh"
 grep -F --quiet 'if [[ -z "$timeout_seconds" || "$timeout_seconds" == "0" ]]; then' "$project_root/scripts/clasp-swarm-lane.sh"
+grep -F --quiet 'max_running_lanes="${CLASP_SWARM_MAX_RUNNING_LANES:-2}"' "$project_root/scripts/clasp-swarm-start.sh"
+grep -F --quiet 'lane_memory_mb="${CLASP_SWARM_LANE_MEMORY_MB:-12288}"' "$project_root/scripts/clasp-swarm-start.sh"
+grep -F --quiet 'min_available_memory_mb="${CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB:-8192}"' "$project_root/scripts/clasp-swarm-start.sh"
+grep -F --quiet 'resource guard: not starting lane=$lane_name' "$project_root/scripts/clasp-swarm-start.sh"
 grep -F --quiet 'force_signal_args=(--force-signal)' "$project_root/scripts/clasp-swarm-stop.sh"
 grep -F --quiet '"${force_signal_args[@]}" --jobs-root' "$project_root/scripts/clasp-swarm-stop.sh"
 ! grep -F --quiet -- '--dangerously-bypass-approvals-and-sandbox' "$project_root/scripts/clasp-verifier.sh"
@@ -1951,6 +1958,68 @@ bash -lc "
   done
 
   [[ -f BA-003-follow-up.txt ]]
+" >/dev/null
+
+swarm_resource_cap_test_root="$(mktemp -d)"
+swarm_resource_cap_project_root="$(make_batch_start_test_project "$swarm_resource_cap_test_root")"
+
+bash -lc "
+  set -euo pipefail
+  cd '$swarm_resource_cap_project_root'
+
+  output=\$(CLASP_SWARM_ALLOW_DIRTY=1 CLASP_SWARM_MAX_RUNNING_LANES=1 CLASP_SWARM_TEST_BUILDER_SLEEP_SECS=2 bash scripts/clasp-swarm-start.sh --batch foundation test-wave)
+  [[ \"\$output\" == *'started lane=01-foundation-a'* ]]
+  [[ \"\$output\" == *'resource guard: not starting lane=02-foundation-b; running_lanes=1 max_running_lanes=1'* ]]
+  [[ ! -f .clasp-swarm/test-wave/02-foundation-b/job ]]
+
+  first_job=\$(sed -n '1p' .clasp-swarm/test-wave/01-foundation-a/job)
+  [[ \$(cat \"\$first_job/memory-mb\") == '12288' ]]
+
+  deadline=\$((SECONDS + 20))
+  while [[ -f .clasp-swarm/test-wave/01-foundation-a/pid ]]; do
+    if (( SECONDS >= deadline )); then
+      echo 'timed out waiting for capped foundation lane to finish' >&2
+      exit 1
+    fi
+    sleep 0.2
+  done
+
+  output=\$(CLASP_SWARM_ALLOW_DIRTY=1 CLASP_SWARM_MAX_RUNNING_LANES=1 bash scripts/clasp-swarm-start.sh --batch foundation test-wave)
+  [[ \"\$output\" == *'started lane=02-foundation-b'* ]]
+
+  deadline=\$((SECONDS + 20))
+  while [[ -f .clasp-swarm/test-wave/02-foundation-b/pid ]]; do
+    if (( SECONDS >= deadline )); then
+      echo 'timed out waiting for second capped foundation lane to finish' >&2
+      exit 1
+    fi
+    sleep 0.2
+  done
+
+  [[ -f BA-001-foundation-a.txt ]]
+  [[ -f BA-002-foundation-b.txt ]]
+" >/dev/null
+
+swarm_memory_guard_test_root="$(mktemp -d)"
+swarm_memory_guard_project_root="$(make_batch_start_test_project "$swarm_memory_guard_test_root")"
+
+bash -lc "
+  set -euo pipefail
+  cd '$swarm_memory_guard_project_root'
+
+  set +e
+  invalid_output=\$(CLASP_SWARM_ALLOW_DIRTY=1 CLASP_SWARM_MAX_RUNNING_LANES=not-a-number bash scripts/clasp-swarm-start.sh --batch foundation test-wave 2>&1)
+  invalid_status=\$?
+  set -e
+  [[ \"\$invalid_status\" -ne 0 ]]
+  [[ \"\$invalid_output\" == *'CLASP_SWARM_MAX_RUNNING_LANES must be a non-negative integer'* ]]
+
+  output=\$(CLASP_SWARM_ALLOW_DIRTY=1 CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB=999999999 bash scripts/clasp-swarm-start.sh --batch foundation test-wave)
+  [[ \"\$output\" == *'resource guard: not starting lane=01-foundation-a; available_memory_mb='* ]]
+  [[ \"\$output\" == *'min_available_memory_mb=999999999'* ]]
+  [[ ! -f .clasp-swarm/test-wave/01-foundation-a/job ]]
+  [[ ! -f .clasp-swarm/test-wave/02-foundation-b/job ]]
+  [[ ! -f builder-events.log ]]
 " >/dev/null
 
 prompt_test_root="$(mktemp -d)"
