@@ -157,6 +157,7 @@ require_pattern "scripts/stop-managed-job.sh" 'refusing to stop unmarked session
 require_pattern "scripts/test-managed-job.sh" 'complete-smoke'
 require_pattern "scripts/test-managed-job.sh" 'forged-unmarked-session'
 require_pattern "scripts/test-managed-job.sh" 'memory-watch-smoke'
+require_pattern "scripts/test-managed-job.sh" 'memory-env-no-inherit'
 require_pattern "scripts/clasp-codex-loop-start.sh" 'run-managed-job.sh'
 require_pattern "scripts/clasp-codex-loop-stop.sh" 'stop-managed-job.sh'
 require_pattern "scripts/clasp-codex-loop-stop.sh" 'refusing to signal without managed-job metadata'

@@ -4,7 +4,7 @@ set -euo pipefail
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 jobs_root="${CLASP_MANAGED_JOB_ROOT:-$project_root/.clasp-loops/jobs}"
 job_id=""
-memory_mb="${CLASP_MANAGED_JOB_MEMORY_MB:-}"
+memory_mb=""
 
 usage() {
   cat <<'EOF' >&2

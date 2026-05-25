@@ -88,6 +88,18 @@ wait_for_file "$failed_job_dir/exit-status"
 [[ "$(cat "$failed_job_dir/exit-status")" == "7" ]]
 [[ "$(cat "$failed_job_dir/status")" == "failed" ]]
 
+no_inherit_job_dir="$(
+  CLASP_MANAGED_JOB_MEMORY_MB=64 \
+    "$project_root/scripts/run-managed-job.sh" \
+      --jobs-root "$jobs_root" \
+      --job-id memory-env-no-inherit \
+      -- bash -c 'sleep 0.2; exit 0'
+)"
+[[ "$no_inherit_job_dir" == "$jobs_root/memory-env-no-inherit" ]]
+wait_for_file "$no_inherit_job_dir/exit-status"
+[[ "$(cat "$no_inherit_job_dir/exit-status")" == "0" ]]
+[[ ! -f "$no_inherit_job_dir/memory-mb" ]]
+
 if command -v cc >/dev/null 2>&1; then
   cat >"$test_root/hold-memory.c" <<'EOF'
 #include <stdlib.h>
