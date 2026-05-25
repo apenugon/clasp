@@ -5,27 +5,32 @@ project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$project_root/scripts/clasp-swarm-common.sh"
 
 wave_name="${1:-$(clasp_swarm_default_wave)}"
-shutdown_wait_seconds="${CLASP_SWARM_STOP_WAIT_SECONDS:-10}"
-
-kill_descendants() {
-  local parent_pid="$1"
-  local child_pid=""
-
-  if ! command -v pgrep >/dev/null 2>&1; then
-    return 0
-  fi
-
-  while IFS= read -r child_pid; do
-    [[ -n "$child_pid" ]] || continue
-    kill_descendants "$child_pid"
-    kill "$child_pid" >/dev/null 2>&1 || true
-  done < <(pgrep -P "$parent_pid" || true)
-}
 
 while IFS= read -r lane_dir; do
   lane_name="$(clasp_swarm_lane_name "$lane_dir")"
   runtime_root="$project_root/.clasp-swarm/$wave_name/$lane_name"
   pid_file="$runtime_root/pid"
+  job_file="$runtime_root/job"
+
+  if [[ -f "$job_file" ]]; then
+    job_dir="$(sed -n '1p' "$job_file")"
+    pid=""
+    if [[ -f "$job_dir/pid" ]]; then
+      pid="$(tr -d '[:space:]' <"$job_dir/pid")"
+    fi
+    if "$project_root/scripts/stop-managed-job.sh" --jobs-root "$runtime_root/jobs" "$job_dir"; then
+      if [[ -n "$pid" ]]; then
+        echo "stopped lane=$lane_name pid=$pid"
+      else
+        echo "stopped lane=$lane_name"
+      fi
+      rm -f "$pid_file" "$job_file"
+    else
+      echo "failed to stop lane=$lane_name via managed job metadata" >&2
+      exit 1
+    fi
+    continue
+  fi
 
   if [[ ! -f "$pid_file" ]]; then
     echo "lane $lane_name is not running"
@@ -35,20 +40,8 @@ while IFS= read -r lane_dir; do
   pid="$(cat "$pid_file")"
 
   if kill -0 "$pid" >/dev/null 2>&1; then
-    kill_descendants "$pid"
-    kill "$pid"
-    deadline=$((SECONDS + shutdown_wait_seconds))
-
-    while kill -0 "$pid" >/dev/null 2>&1; do
-      if (( SECONDS >= deadline )); then
-        kill_descendants "$pid"
-        kill -9 "$pid" >/dev/null 2>&1 || true
-        break
-      fi
-      sleep 0.2
-    done
-
-    echo "stopped lane=$lane_name pid=$pid"
+    echo "lane $lane_name has unmanaged pid $pid; refusing to signal without managed-job metadata" >&2
+    exit 1
   else
     echo "lane $lane_name had stale pid $pid"
   fi

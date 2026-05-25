@@ -875,6 +875,8 @@ make_batch_start_test_project() {
     "$project_root/scripts/clasp-swarm-start.sh" \
     "$project_root/scripts/clasp-swarm-stop.sh" \
     "$project_root/scripts/clasp-swarm-status.sh" \
+    "$project_root/scripts/run-managed-job.sh" \
+    "$project_root/scripts/stop-managed-job.sh" \
     "$project_root/scripts/clasp-swarm-validate-task.mjs" \
     "$project_dir/scripts/"
   cp "$project_root/agents/swarm/task.schema.json" "$project_dir/agents/swarm/task.schema.json"
@@ -948,6 +950,8 @@ EOF
     "$project_dir/scripts/clasp-swarm-start.sh" \
     "$project_dir/scripts/clasp-swarm-status.sh" \
     "$project_dir/scripts/clasp-swarm-stop.sh" \
+    "$project_dir/scripts/run-managed-job.sh" \
+    "$project_dir/scripts/stop-managed-job.sh" \
     "$project_dir/scripts/clasp-swarm-validate-task.mjs" \
     "$project_dir/scripts/clasp-verifier.sh" \
     "$project_dir/scripts/verify-all.sh"

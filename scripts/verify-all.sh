@@ -53,6 +53,7 @@ bash scripts/test-codex-loop-program.sh
 bash examples/agent-loop-scenario/scripts/verify.sh
 bash scripts/test-agent-command-template.sh
 CLASP_AGENT_COMMAND_TEMPLATE_FEEDBACK=0 CLASP_AGENT_COMMAND_TEMPLATE_NATIVE=1 bash scripts/test-agent-command-template.sh
+bash scripts/test-goal-manager-agent-command-template.sh
 bash scripts/test-js-process-runtime.sh
 bash scripts/test-js-emitter-determinism.sh
 bash examples/browser-counter/scripts/verify.sh

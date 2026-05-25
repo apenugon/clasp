@@ -6,8 +6,13 @@ tmp_root="${CLASP_TEST_TMPDIR:-${TMPDIR:-/tmp}}"
 mkdir -p "$tmp_root"
 test_root="$(mktemp -d "$tmp_root/test-managed-job.XXXXXX")"
 jobs_root="$test_root/jobs"
+unrelated_session_pid=""
 
 cleanup() {
+  if [[ -n "${unrelated_session_pid:-}" ]]; then
+    kill "$unrelated_session_pid" >/dev/null 2>&1 || true
+    wait "$unrelated_session_pid" >/dev/null 2>&1 || true
+  fi
   if [[ "${CLASP_TEST_KEEP_TMP:-}" == "1" ]]; then
     printf 'kept test root: %s\n' "$test_root" >&2
   else
@@ -64,6 +69,9 @@ wait_for_file "$complete_job_dir/exit-status"
 [[ "$(cat "$complete_job_dir/status")" == "completed" ]]
 [[ "$(cat "$complete_job_dir/stdout.log")" == "complete-output" ]]
 [[ "$(cat "$complete_job_dir/stderr.log")" == "complete-error" ]]
+"$project_root/scripts/stop-managed-job.sh" --jobs-root "$jobs_root" complete-smoke >"$test_root/completed-stop.out"
+grep -F 'managed-job-stop: completed complete-smoke' "$test_root/completed-stop.out" >/dev/null
+[[ "$(cat "$complete_job_dir/status")" == "completed" ]]
 if kill -0 "$complete_pid" >/dev/null 2>&1; then
   printf 'completed managed job root process still alive: %s\n' "$complete_pid" >&2
   exit 1
@@ -91,6 +99,8 @@ job_dir="$(
 [[ -f "$job_dir/pid" ]]
 [[ -f "$job_dir/pgid" ]]
 [[ -f "$job_dir/sid" ]]
+[[ -f "$job_dir/token" ]]
+[[ -f "$job_dir/stop-request-path" ]]
 [[ -f "$job_dir/command.txt" ]]
 
 pid="$(tr -d '[:space:]' <"$job_dir/pid")"
@@ -179,7 +189,7 @@ if kill -0 "$orphan_pid" >/dev/null 2>&1 || ! session_has_members "$orphan_sid";
   exit 1
 fi
 
-"$project_root/scripts/stop-managed-job.sh" --jobs-root "$jobs_root" stop-root-exited-session >"$test_root/orphan-stop.out" 2>"$test_root/orphan-stop.err"
+"$project_root/scripts/stop-managed-job.sh" --force-signal --jobs-root "$jobs_root" stop-root-exited-session >"$test_root/orphan-stop.out" 2>"$test_root/orphan-stop.err"
 grep -F 'root exited; stopping remaining isolated session members' "$test_root/orphan-stop.err" >/dev/null
 if session_has_members "$orphan_sid"; then
   printf 'managed job root-exited session still has members after stop\n' >&2
@@ -194,7 +204,7 @@ printf '%s\n' "$$" >"$forged_dir/pid"
 printf '%s\n' "$self_pgid" >"$forged_dir/pgid"
 printf '%s\n' "$self_sid" >"$forged_dir/sid"
 printf '%s\n' "$project_root" >"$forged_dir/cwd"
-if "$project_root/scripts/stop-managed-job.sh" --jobs-root "$jobs_root" forged-current-group >"$test_root/forged.out" 2>"$test_root/forged.err"; then
+if "$project_root/scripts/stop-managed-job.sh" --force-signal --jobs-root "$jobs_root" forged-current-group >"$test_root/forged.out" 2>"$test_root/forged.err"; then
   printf 'stop-managed-job unexpectedly accepted current process group metadata\n' >&2
   exit 1
 fi
@@ -206,10 +216,34 @@ printf '999999\n' >"$forged_outside_dir/pid"
 printf '999999\n' >"$forged_outside_dir/pgid"
 printf '999999\n' >"$forged_outside_dir/sid"
 printf '/tmp\n' >"$forged_outside_dir/cwd"
-if "$project_root/scripts/stop-managed-job.sh" --jobs-root "$jobs_root" forged-outside-root >"$test_root/outside.out" 2>"$test_root/outside.err"; then
+if "$project_root/scripts/stop-managed-job.sh" --force-signal --jobs-root "$jobs_root" forged-outside-root >"$test_root/outside.out" 2>"$test_root/outside.err"; then
   printf 'stop-managed-job unexpectedly accepted outside-root metadata\n' >&2
   exit 1
 fi
 grep -F 'refusing job cwd outside project root' "$test_root/outside.err" >/dev/null
+
+setsid bash -c 'while true; do sleep 1; done' &
+unrelated_session_pid="$!"
+sleep 0.1
+unrelated_sid="$(ps -o sid= -p "$unrelated_session_pid" | tr -d '[:space:]')"
+unrelated_pgid="$(ps -o pgid= -p "$unrelated_session_pid" | tr -d '[:space:]')"
+[[ -n "$unrelated_sid" && -n "$unrelated_pgid" ]]
+
+forged_unmarked_dir="$jobs_root/forged-unmarked-session"
+mkdir -p "$forged_unmarked_dir"
+printf '999999\n' >"$forged_unmarked_dir/pid"
+printf '%s\n' "$unrelated_pgid" >"$forged_unmarked_dir/pgid"
+printf '%s\n' "$unrelated_sid" >"$forged_unmarked_dir/sid"
+printf '%s\n' "$project_root" >"$forged_unmarked_dir/cwd"
+printf 'not-the-session-token\n' >"$forged_unmarked_dir/token"
+if "$project_root/scripts/stop-managed-job.sh" --force-signal --jobs-root "$jobs_root" forged-unmarked-session >"$test_root/unmarked.out" 2>"$test_root/unmarked.err"; then
+  printf 'stop-managed-job unexpectedly accepted an unmarked foreign session\n' >&2
+  exit 1
+fi
+grep -F 'refusing to stop unmarked session members' "$test_root/unmarked.err" >/dev/null
+kill -0 "$unrelated_session_pid" >/dev/null
+kill "$unrelated_session_pid" >/dev/null 2>&1 || true
+wait "$unrelated_session_pid" >/dev/null 2>&1 || true
+unrelated_session_pid=""
 
 printf 'managed-job-ok\n'

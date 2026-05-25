@@ -93,28 +93,45 @@ while IFS= read -r lane_dir; do
   runtime_root="$project_root/.clasp-swarm/$wave_name/$lane_name"
   log_file="$runtime_root/lane.log"
   pid_file="$runtime_root/pid"
+  job_file="$runtime_root/job"
 
   mkdir -p "$runtime_root"
 
-  if [[ -f "$pid_file" ]]; then
+  if [[ -f "$job_file" ]]; then
+    job_dir="$(sed -n '1p' "$job_file")"
+    if [[ -f "$job_dir/pid" && -f "$job_dir/status" ]]; then
+      pid="$(tr -d '[:space:]' <"$job_dir/pid")"
+      status="$(sed -n '1p' "$job_dir/status")"
+      if [[ "$status" != "completed" && "$status" != "failed" && "$status" != "stopped" ]] &&
+         kill -0 "$pid" >/dev/null 2>&1; then
+        echo "lane $lane_name already running with managed job pid $pid"
+        continue
+      fi
+    fi
+    rm -f "$job_file" "$pid_file"
+  elif [[ -f "$pid_file" ]]; then
     pid="$(cat "$pid_file")"
     if kill -0 "$pid" >/dev/null 2>&1; then
-      echo "lane $lane_name already running with pid $pid"
+      echo "lane $lane_name already running with unmanaged pid $pid; refusing to overwrite raw pid state"
       continue
     fi
     rm -f "$pid_file"
   fi
 
-  pid="$(
-    clasp_swarm_spawn_detached \
-      "$log_file" \
-      env CLASP_SWARM_BATCH="$batch_filter" \
-      bash -lc "exec bash \"$project_root/scripts/clasp-swarm-lane.sh\" \"$lane_dir\""
+  job_dir="$(
+    "$project_root/scripts/run-managed-job.sh" \
+      --jobs-root "$runtime_root/jobs" \
+      -- bash -c 'log_file="$1"; shift; exec "$@" >>"$log_file" 2>&1' \
+        managed-swarm-lane "$log_file" \
+        env CLASP_SWARM_BATCH="$batch_filter" \
+        bash "$project_root/scripts/clasp-swarm-lane.sh" "$lane_dir"
   )"
+  pid="$(tr -d '[:space:]' <"$job_dir/pid")"
+  printf '%s\n' "$job_dir" > "$job_file"
   printf '%s\n' "$pid" > "$pid_file"
   if [[ -n "$batch_filter" ]]; then
-    echo "started lane=$lane_name batch=$batch_filter pid=$pid log=$log_file"
+    echo "started lane=$lane_name batch=$batch_filter pid=$pid job=$job_dir log=$log_file"
   else
-    echo "started lane=$lane_name pid=$pid log=$log_file"
+    echo "started lane=$lane_name pid=$pid job=$job_dir log=$log_file"
   fi
 done < <(clasp_swarm_lane_dirs "$wave_name" "$project_root")

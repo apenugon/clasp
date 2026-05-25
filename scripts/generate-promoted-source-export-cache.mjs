@@ -41,6 +41,7 @@ function fail(message) {
 function parseArgs(argv) {
   const options = {
     check: false,
+    forceNativeImageRefresh: false,
     nativeImageEntries: [...defaultNativeImageEntries],
     outputPath: defaultOutputPath,
     refreshNativeImages: false,
@@ -52,8 +53,12 @@ function parseArgs(argv) {
       options.check = true;
     } else if (arg === "--refresh-native-images") {
       options.refreshNativeImages = true;
+    } else if (arg === "--force-native-image-refresh") {
+      options.refreshNativeImages = true;
+      options.forceNativeImageRefresh = true;
     } else if (arg === "--skip-native-image-refresh") {
       options.refreshNativeImages = false;
+      options.forceNativeImageRefresh = false;
     } else if (arg === "--output") {
       index += 1;
       if (!argv[index]) fail("missing path after --output");
@@ -255,25 +260,31 @@ function nativeImageEntryNeedsRefresh(entry, sourceExportCachePath) {
   );
 }
 
-function refreshNativeImageEntries(nativeImageEntries, sourceExportCachePath) {
+function refreshNativeImageEntries(nativeImageEntries, sourceExportCachePath, forceRefresh) {
   if (nativeImageEntries.length === 0) return;
   const claspcBin = resolveClaspcBin();
   for (const entry of nativeImageEntries) {
-    if (!nativeImageEntryNeedsRefresh(entry, sourceExportCachePath)) continue;
+    if (!forceRefresh && !nativeImageEntryNeedsRefresh(entry, sourceExportCachePath)) continue;
     const { relative: sourceRelative } = normalizeSourcePath(entry.source);
     const { relative: outputRelative } = normalizeSourcePath(entry.outputPath);
+    const env = {
+      ...process.env,
+      CLASP_PROJECT_ROOT: projectRoot,
+      CLASP_NATIVE_BUNDLE_JOBS: process.env.CLASP_NATIVE_BUNDLE_JOBS || "8",
+      CLASP_NATIVE_IMAGE_SECTION_JOBS: process.env.CLASP_NATIVE_IMAGE_SECTION_JOBS || "1",
+      CLASP_NATIVE_IMAGE_MONOLITHIC_DECL_THRESHOLD:
+        process.env.CLASP_NATIVE_IMAGE_MONOLITHIC_DECL_THRESHOLD || "999999",
+      CLASP_NATIVE_RELAXED_BUILD_PLAN_CACHE: process.env.CLASP_NATIVE_RELAXED_BUILD_PLAN_CACHE || "0",
+      CLASP_NATIVE_DISABLE_NATIVE_IMAGE_CACHE: "1",
+      CLASP_NATIVE_DISABLE_SOURCE_EXPORT_CACHE: "1",
+      CLASP_NATIVE_DISABLE_PROMOTED_SOURCE_EXPORT_CACHE: "1",
+    };
+    if (process.env.CLASP_NATIVE_DISABLE_EXPORT_HOST !== "0") {
+      env.CLASP_NATIVE_DISABLE_EXPORT_HOST = process.env.CLASP_NATIVE_DISABLE_EXPORT_HOST || "1";
+    }
     execFileSync(claspcBin, ["native-image", sourceRelative, "-o", outputRelative], {
       cwd: projectRoot,
-      env: {
-        ...process.env,
-        CLASP_PROJECT_ROOT: projectRoot,
-        CLASP_NATIVE_BUNDLE_JOBS: process.env.CLASP_NATIVE_BUNDLE_JOBS || "8",
-        CLASP_NATIVE_IMAGE_SECTION_JOBS: process.env.CLASP_NATIVE_IMAGE_SECTION_JOBS || "8",
-        CLASP_NATIVE_IMAGE_MONOLITHIC_DECL_THRESHOLD:
-          process.env.CLASP_NATIVE_IMAGE_MONOLITHIC_DECL_THRESHOLD || "999999",
-        CLASP_NATIVE_RELAXED_BUILD_PLAN_CACHE: process.env.CLASP_NATIVE_RELAXED_BUILD_PLAN_CACHE || "1",
-        CLASP_NATIVE_DISABLE_PROMOTED_SOURCE_EXPORT_CACHE: "1",
-      },
+      env,
       stdio: "inherit",
     });
   }
@@ -309,7 +320,11 @@ function main() {
     fail("at least one source or native image entry is required");
   }
   if (!options.check && options.refreshNativeImages) {
-    refreshNativeImageEntries(options.nativeImageEntries, options.outputPath);
+    refreshNativeImageEntries(
+      options.nativeImageEntries,
+      options.outputPath,
+      options.forceNativeImageRefresh
+    );
   }
   const payload = `${JSON.stringify(generatePayload(uniqueSources, options.nativeImageEntries), null, 2)}\n`;
   if (options.check) {

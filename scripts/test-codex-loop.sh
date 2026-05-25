@@ -36,6 +36,8 @@ cp \
   "$project_root/scripts/clasp-codex-loop-start.sh" \
   "$project_root/scripts/clasp-codex-loop-status.sh" \
   "$project_root/scripts/clasp-codex-loop-stop.sh" \
+  "$project_root/scripts/run-managed-job.sh" \
+  "$project_root/scripts/stop-managed-job.sh" \
   "$project_root/scripts/resolve-claspc.sh" \
   "$project_root/scripts/clasp-swarm-common.sh" \
   "$project_root/scripts/clasp-verifier.sh" \
@@ -51,6 +53,8 @@ chmod +x \
   "$project_dir/scripts/clasp-codex-loop-start.sh" \
   "$project_dir/scripts/clasp-codex-loop-status.sh" \
   "$project_dir/scripts/clasp-codex-loop-stop.sh" \
+  "$project_dir/scripts/run-managed-job.sh" \
+  "$project_dir/scripts/stop-managed-job.sh" \
   "$project_dir/scripts/resolve-claspc.sh" \
   "$project_dir/scripts/clasp-verifier.sh"
 
@@ -492,13 +496,16 @@ start_output="$(
   bash scripts/clasp-codex-loop-start.sh task.md "$workspace_dir" "$runtime_dir_5"
 )"
 printf '%s\n' "$start_output" | grep -F 'started codex loop pid=' >/dev/null
+printf '%s\n' "$start_output" | grep -F 'job=' >/dev/null
 status_output="$(
   cd "$project_dir" && \
   bash scripts/clasp-codex-loop-status.sh task.md "$workspace_dir" "$runtime_dir_5"
 )"
 printf '%s\n' "$status_output" | grep -F 'status: running' >/dev/null
+printf '%s\n' "$status_output" | grep -F 'job:' >/dev/null
 printf '%s\n' "$status_output" | grep -F "runtime: $runtime_dir_5" >/dev/null
 pid_5="$(cat "$runtime_dir_5/loop.pid")"
+[[ -f "$runtime_dir_5/loop.job" ]]
 kill -0 "$pid_5" >/dev/null 2>&1
 for _ in $(seq 1 100); do
   if [[ -f "$runtime_dir_5/lifecycle.log" ]] && grep -F 'loop-start:task.md' "$runtime_dir_5/lifecycle.log" >/dev/null 2>&1; then
@@ -518,3 +525,15 @@ if kill -0 "$pid_5" >/dev/null 2>&1; then
   echo "detached codex loop should have stopped" >&2
   exit 1
 fi
+
+runtime_dir_6="$project_dir/runtime-unmanaged-stop-refusal"
+mkdir -p "$runtime_dir_6"
+printf '%s\n' "$$" > "$runtime_dir_6/loop.pid"
+if (
+  cd "$project_dir" && \
+  bash scripts/clasp-codex-loop-stop.sh task.md "$workspace_dir" "$runtime_dir_6"
+) >"$test_root/unmanaged-stop.out" 2>"$test_root/unmanaged-stop.err"; then
+  echo "codex loop stop should refuse unmanaged live pid files" >&2
+  exit 1
+fi
+grep -F 'refusing to signal without managed-job metadata' "$test_root/unmanaged-stop.err" >/dev/null

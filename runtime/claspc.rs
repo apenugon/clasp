@@ -5326,6 +5326,104 @@ keep = "stable"
     }
 
     #[test]
+    fn native_image_build_plan_cache_respects_disable_env() {
+        let _env_lock = super::tool_support::TEST_ENV_LOCK.lock().expect("lock test env");
+        let cache_root = unique_test_root("native-build-plan-cache-disable");
+        let previous_disable =
+            std::env::var_os("CLASP_NATIVE_DISABLE_NATIVE_IMAGE_BUILD_PLAN_CACHE");
+        std::env::set_var("XDG_CACHE_HOME", &cache_root);
+        std::env::remove_var("CLASP_NATIVE_DISABLE_NATIVE_IMAGE_BUILD_PLAN_CACHE");
+
+        let image_path = cache_root.join("compiler.native.image.json");
+        fs::create_dir_all(&cache_root).expect("create cache root");
+        fs::write(&image_path, "image-bytes").expect("write image");
+        let build = ProjectBundleBuild {
+            bundle: "bundle-text".to_owned(),
+            modules: Vec::new(),
+        };
+        let decl_plan = NativeImageDeclModulePlan {
+            context_fingerprint: "context".to_owned(),
+            modules: Vec::new(),
+        };
+        super::write_cached_native_image_build_plan(
+            image_path.to_str().expect("utf8 path"),
+            &build,
+            "plan-text",
+            &decl_plan,
+        );
+
+        assert!(super::read_cached_native_image_build_plan(
+            image_path.to_str().expect("utf8 path"),
+            &build,
+        )
+        .is_some());
+        std::env::set_var("CLASP_NATIVE_DISABLE_NATIVE_IMAGE_BUILD_PLAN_CACHE", "1");
+        assert!(super::read_cached_native_image_build_plan(
+            image_path.to_str().expect("utf8 path"),
+            &build,
+        )
+        .is_none());
+
+        match previous_disable {
+            Some(value) => {
+                std::env::set_var("CLASP_NATIVE_DISABLE_NATIVE_IMAGE_BUILD_PLAN_CACHE", value)
+            }
+            None => std::env::remove_var("CLASP_NATIVE_DISABLE_NATIVE_IMAGE_BUILD_PLAN_CACHE"),
+        }
+        std::env::remove_var("XDG_CACHE_HOME");
+        let _ = fs::remove_dir_all(cache_root);
+    }
+
+    #[test]
+    fn native_image_decl_module_cache_respects_disable_env() {
+        let _env_lock = super::tool_support::TEST_ENV_LOCK.lock().expect("lock test env");
+        let cache_root = unique_test_root("native-decl-module-cache-disable");
+        let previous_disable =
+            std::env::var_os("CLASP_NATIVE_DISABLE_NATIVE_IMAGE_DECL_MODULE_CACHE");
+        std::env::set_var("XDG_CACHE_HOME", &cache_root);
+        std::env::remove_var("CLASP_NATIVE_DISABLE_NATIVE_IMAGE_DECL_MODULE_CACHE");
+
+        let image_path = cache_root.join("compiler.native.image.json");
+        fs::create_dir_all(&cache_root).expect("create cache root");
+        fs::write(&image_path, "image-bytes").expect("write image");
+        super::write_cached_native_image_decl_module(
+            image_path.to_str().expect("utf8 path"),
+            "context",
+            "Main",
+            "module-fingerprint",
+            "[{\"kind\":\"global\",\"name\":\"main\"}]",
+        );
+
+        assert_eq!(
+            super::read_cached_native_image_decl_module(
+                image_path.to_str().expect("utf8 path"),
+                "context",
+                "Main",
+                "module-fingerprint",
+            )
+            .as_deref(),
+            Some("[{\"kind\":\"global\",\"name\":\"main\"}]"),
+        );
+        std::env::set_var("CLASP_NATIVE_DISABLE_NATIVE_IMAGE_DECL_MODULE_CACHE", "1");
+        assert!(super::read_cached_native_image_decl_module(
+            image_path.to_str().expect("utf8 path"),
+            "context",
+            "Main",
+            "module-fingerprint",
+        )
+        .is_none());
+
+        match previous_disable {
+            Some(value) => {
+                std::env::set_var("CLASP_NATIVE_DISABLE_NATIVE_IMAGE_DECL_MODULE_CACHE", value)
+            }
+            None => std::env::remove_var("CLASP_NATIVE_DISABLE_NATIVE_IMAGE_DECL_MODULE_CACHE"),
+        }
+        std::env::remove_var("XDG_CACHE_HOME");
+        let _ = fs::remove_dir_all(cache_root);
+    }
+
+    #[test]
     fn source_export_cache_roundtrips_for_same_image_export_and_bundle() {
         let _env_lock = super::tool_support::TEST_ENV_LOCK.lock().expect("lock test env");
         let cache_root = unique_test_root("source-export-cache");
@@ -6428,6 +6526,9 @@ fn read_promoted_source_export(
 }
 
 fn read_cached_native_image(image_path: &str, bundle: &str) -> Option<Vec<u8>> {
+    if env::var("CLASP_NATIVE_DISABLE_NATIVE_IMAGE_CACHE").is_ok() {
+        return None;
+    }
     let cache_path = native_image_cache_path(image_path, bundle)?;
     match fs::read(&cache_path) {
         Ok(bytes) => {
@@ -6447,6 +6548,9 @@ fn read_cached_native_image_decl_module(
     module_name: &str,
     module_source_fingerprint: &str,
 ) -> Option<String> {
+    if env::var("CLASP_NATIVE_DISABLE_NATIVE_IMAGE_DECL_MODULE_CACHE").is_ok() {
+        return None;
+    }
     let cache_path = native_image_decl_module_cache_path(
         image_path,
         context_fingerprint,
@@ -6509,6 +6613,9 @@ fn read_cached_native_image_build_plan(
     image_path: &str,
     bundle_build: &ProjectBundleBuild,
 ) -> Option<NativeImageBuildPlanCacheEntry> {
+    if env::var("CLASP_NATIVE_DISABLE_NATIVE_IMAGE_BUILD_PLAN_CACHE").is_ok() {
+        return None;
+    }
     let cache_path = native_image_build_plan_cache_path(image_path, bundle_build)?;
     let cache_text = match fs::read_to_string(&cache_path) {
         Ok(text) => {
@@ -6524,6 +6631,9 @@ fn read_cached_native_image_build_plan(
 }
 
 fn read_cached_source_export(image_path: &str, export_name: &str, bundle: &str) -> Option<Vec<u8>> {
+    if env::var("CLASP_NATIVE_DISABLE_SOURCE_EXPORT_CACHE").is_ok() {
+        return None;
+    }
     let cache_path = source_export_cache_path(image_path, export_name, bundle)?;
     match fs::read(&cache_path) {
         Ok(bytes) => {
