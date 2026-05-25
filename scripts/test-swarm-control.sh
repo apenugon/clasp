@@ -424,6 +424,7 @@ EOF
     git init -b main >/dev/null
     git config user.name 'Swarm Test'
     git config user.email 'swarm-test@example.com'
+    printf '.clasp-swarm/\n' > .gitignore
     printf 'base\n' > feature.txt
     printf 'remove-this\n' > remove-me.txt
     git add .
@@ -565,6 +566,7 @@ EOF
     git init -b main >/dev/null
     git config user.name 'Swarm Test'
     git config user.email 'swarm-test@example.com'
+    printf '.clasp-swarm/\n' > .gitignore
     printf 'base\n' > feature.txt
     git add .
     git commit -m 'base snapshot' >/dev/null
@@ -1098,6 +1100,8 @@ grep -F --quiet 'sandbox_mode="${CLASP_SWARM_CODEX_SANDBOX:-workspace-write}"' "
 grep -F --quiet -- '--sandbox "$sandbox_mode"' "$project_root/scripts/clasp-verifier.sh"
 grep -F --quiet 'builder_timeout_seconds="${CLASP_SWARM_BUILDER_TIMEOUT_SECONDS:-0}"' "$project_root/scripts/clasp-swarm-lane.sh"
 grep -F --quiet 'if [[ -z "$timeout_seconds" || "$timeout_seconds" == "0" ]]; then' "$project_root/scripts/clasp-swarm-lane.sh"
+grep -F --quiet 'force_signal_args=(--force-signal)' "$project_root/scripts/clasp-swarm-stop.sh"
+grep -F --quiet '"${force_signal_args[@]}" --jobs-root' "$project_root/scripts/clasp-swarm-stop.sh"
 ! grep -F --quiet -- '--dangerously-bypass-approvals-and-sandbox' "$project_root/scripts/clasp-verifier.sh"
 
 bash -lc "

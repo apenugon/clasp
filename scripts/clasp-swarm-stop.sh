@@ -4,7 +4,47 @@ set -euo pipefail
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$project_root/scripts/clasp-swarm-common.sh"
 
-wave_name="${1:-$(clasp_swarm_default_wave)}"
+usage() {
+  cat <<'EOF' >&2
+usage: scripts/clasp-swarm-stop.sh [--force-signal] [wave]
+
+By default this requests cooperative managed-job stops. --force-signal passes
+through to stop-managed-job.sh, which only signals marked managed-job session
+members after validating the job metadata.
+EOF
+}
+
+wave_name=""
+force_signal_args=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --force-signal)
+      force_signal_args=(--force-signal)
+      shift
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    -*)
+      usage
+      exit 2
+      ;;
+    *)
+      if [[ -n "$wave_name" ]]; then
+        usage
+        exit 2
+      fi
+      wave_name="$1"
+      shift
+      ;;
+  esac
+done
+
+if [[ -z "$wave_name" ]]; then
+  wave_name="$(clasp_swarm_default_wave)"
+fi
 
 while IFS= read -r lane_dir; do
   lane_name="$(clasp_swarm_lane_name "$lane_dir")"
@@ -18,7 +58,7 @@ while IFS= read -r lane_dir; do
     if [[ -f "$job_dir/pid" ]]; then
       pid="$(tr -d '[:space:]' <"$job_dir/pid")"
     fi
-    if "$project_root/scripts/stop-managed-job.sh" --jobs-root "$runtime_root/jobs" "$job_dir"; then
+    if "$project_root/scripts/stop-managed-job.sh" "${force_signal_args[@]}" --jobs-root "$runtime_root/jobs" "$job_dir"; then
       if [[ -n "$pid" ]]; then
         echo "stopped lane=$lane_name pid=$pid"
       else

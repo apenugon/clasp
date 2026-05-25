@@ -581,10 +581,18 @@ cleanup_run_worktrees() {
 
 repo_paths_for_root() {
   local root_path="$1"
+  local root_top_level=""
+  local canonical_root=""
+  local canonical_top_level=""
 
-  if git -C "$root_path" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    git -C "$root_path" ls-files --cached --others --exclude-standard
-    return 0
+  if root_top_level="$(git -C "$root_path" rev-parse --show-toplevel 2>/dev/null)"; then
+    canonical_root="$(canonicalize_dir_path "$root_path")"
+    canonical_top_level="$(canonicalize_dir_path "$root_top_level")"
+
+    if [[ "$canonical_root" == "$canonical_top_level" ]]; then
+      git -C "$root_path" ls-files --cached --others --exclude-standard
+      return 0
+    fi
   fi
 
   if [[ ! -d "$root_path" ]]; then
