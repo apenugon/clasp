@@ -88,6 +88,50 @@ wait_for_file "$failed_job_dir/exit-status"
 [[ "$(cat "$failed_job_dir/exit-status")" == "7" ]]
 [[ "$(cat "$failed_job_dir/status")" == "failed" ]]
 
+if command -v cc >/dev/null 2>&1; then
+  cat >"$test_root/hold-memory.c" <<'EOF'
+#include <stdlib.h>
+#include <unistd.h>
+
+int main(int argc, char **argv) {
+  size_t mb = argc > 1 ? strtoull(argv[1], 0, 10) : 64;
+  size_t bytes = mb * 1024 * 1024;
+  char *data = (char *)malloc(bytes);
+  if (data == NULL) return 2;
+  for (size_t i = 0; i < bytes; i += 4096) data[i] = (char)(i & 255);
+  sleep(30);
+  return data[0];
+}
+EOF
+  cc -O1 -o "$test_root/hold-memory" "$test_root/hold-memory.c"
+
+  memory_job_dir="$(
+    "$project_root/scripts/run-managed-job.sh" \
+      --jobs-root "$jobs_root" \
+      --job-id memory-watch-smoke \
+      --memory-mb 128 \
+      -- bash -c '"$1" 96 & "$1" 96 & wait' _ "$test_root/hold-memory"
+  )"
+  [[ "$memory_job_dir" == "$jobs_root/memory-watch-smoke" ]]
+  memory_sid="$(tr -d '[:space:]' <"$memory_job_dir/sid")"
+  wait_for_file "$memory_job_dir/exit-status"
+  [[ "$(cat "$memory_job_dir/exit-status")" == "137" ]]
+  [[ "$(cat "$memory_job_dir/status")" == "failed" ]]
+  grep -F 'limit_mb=128' "$memory_job_dir/memory-exceeded" >/dev/null
+  grep -F 'rss_kb=' "$memory_job_dir/memory-exceeded" >/dev/null
+  for _ in $(seq 1 50); do
+    if ! session_has_members "$memory_sid"; then
+      break
+    fi
+    sleep 0.1
+  done
+  if session_has_members "$memory_sid"; then
+    printf 'memory-limited managed job still has session members\n' >&2
+    ps -eo pid,ppid,pgid,sid,rss,comm,args | awk -v sid="$memory_sid" '$4 == sid { print }' >&2
+    exit 1
+  fi
+fi
+
 job_dir="$(
   "$project_root/scripts/run-managed-job.sh" \
     --jobs-root "$jobs_root" \

@@ -104,6 +104,7 @@ setsid env \
   bash -c '
     set +e
     watcher_pid=""
+    memory_watcher_pid=""
 
     trim_spaces() {
       tr -d "[:space:]"
@@ -127,12 +128,19 @@ setsid env \
         '"'"'
     }
 
+    internal_watcher_pid() {
+      local candidate_pid="$1"
+
+      [[ -n "${watcher_pid:-}" && "$candidate_pid" == "$watcher_pid" ]] ||
+        [[ -n "${memory_watcher_pid:-}" && "$candidate_pid" == "$memory_watcher_pid" ]]
+    }
+
     session_has_stoppable_members() {
       local sid="$1"
       local candidate_pid
       while IFS= read -r candidate_pid; do
         if [[ -n "$candidate_pid" && "$candidate_pid" != "$$" && "$candidate_pid" != "$BASHPID" ]]; then
-          if [[ -z "${watcher_pid:-}" || "$candidate_pid" != "$watcher_pid" ]]; then
+          if ! internal_watcher_pid "$candidate_pid"; then
             return 0
           fi
         fi
@@ -146,11 +154,30 @@ setsid env \
       local candidate_pid
       while IFS= read -r candidate_pid; do
         if [[ -n "$candidate_pid" && "$candidate_pid" =~ ^[0-9]+$ && "$candidate_pid" != "$$" && "$candidate_pid" != "$BASHPID" ]]; then
-          if [[ -z "${watcher_pid:-}" || "$candidate_pid" != "$watcher_pid" ]]; then
+          if ! internal_watcher_pid "$candidate_pid"; then
             kill "-$signal" "$candidate_pid" >/dev/null 2>&1 || true
           fi
         fi
       done < <(session_member_pids "$sid")
+    }
+
+    session_rss_kb() {
+      local sid="$1"
+      ps -eo pid=,sid=,rss= |
+        awk -v want="$sid" -v parent_pid="$$" -v current_pid="$BASHPID" -v stop_watcher="${watcher_pid:-}" -v memory_watcher="${memory_watcher_pid:-}" '"'"'
+          {
+            pid = $1
+            sid = $2
+            rss = $3
+            gsub(/[[:space:]]/, "", pid)
+            gsub(/[[:space:]]/, "", sid)
+            gsub(/[[:space:]]/, "", rss)
+            if (sid != want || pid == "" || rss == "") next
+            if (pid == parent_pid || pid == current_pid || pid == stop_watcher || pid == memory_watcher) next
+            sum += rss
+          }
+          END { printf "%d\n", sum }
+        '"'"'
     }
 
     watch_stop_request() {
@@ -174,6 +201,41 @@ setsid env \
       done
     }
 
+    watch_memory_limit() {
+      local sid="$1"
+      local memory_limit_kb="$((CLASP_MANAGED_JOB_MEMORY_MB * 1024))"
+      local job_dir="$CLASP_MANAGED_JOB_ROOT/$CLASP_MANAGED_JOB_ID"
+      local memory_exceeded_path="$job_dir/memory-exceeded"
+      local rss_kb=""
+
+      while true; do
+        if ! session_has_stoppable_members "$sid"; then
+          return 0
+        fi
+
+        rss_kb="$(session_rss_kb "$sid")"
+        if [[ "$rss_kb" =~ ^[0-9]+$ ]] && (( rss_kb > memory_limit_kb )); then
+          {
+            printf "limit_mb=%s\n" "$CLASP_MANAGED_JOB_MEMORY_MB"
+            printf "rss_kb=%s\n" "$rss_kb"
+            date -u +"detected_at=%Y-%m-%dT%H:%M:%SZ"
+          } >"$memory_exceeded_path"
+          printf "memory-exceeded\n" >"$job_dir/status"
+          signal_session_members TERM "$sid"
+          for _ in $(seq 1 50); do
+            if ! session_has_stoppable_members "$sid"; then
+              return 0
+            fi
+            sleep 0.1
+          done
+          signal_session_members KILL "$sid"
+          return 0
+        fi
+
+        sleep 0.5
+      done
+    }
+
     finish_managed_job() {
       local status="$1"
       local job_dir="$CLASP_MANAGED_JOB_ROOT/$CLASP_MANAGED_JOB_ID"
@@ -181,6 +243,13 @@ setsid env \
       if [[ -n "${watcher_pid:-}" ]]; then
         kill "$watcher_pid" >/dev/null 2>&1 || true
         wait "$watcher_pid" >/dev/null 2>&1 || true
+      fi
+      if [[ -n "${memory_watcher_pid:-}" ]]; then
+        kill "$memory_watcher_pid" >/dev/null 2>&1 || true
+        wait "$memory_watcher_pid" >/dev/null 2>&1 || true
+      fi
+      if [[ -f "$job_dir/memory-exceeded" && "$status" != "0" ]]; then
+        status="137"
       fi
       printf "%s\n" "$status" >"$job_dir/exit-status"
       if [[ -f "$CLASP_MANAGED_JOB_STOP_REQUEST" ]]; then
@@ -205,6 +274,10 @@ setsid env \
     managed_sid="$(current_sid)"
     watch_stop_request "$managed_sid" &
     watcher_pid="$!"
+    if [[ -n "${CLASP_MANAGED_JOB_MEMORY_MB:-}" ]]; then
+      watch_memory_limit "$managed_sid" &
+      memory_watcher_pid="$!"
+    fi
 
     wait "$child_pid"
     finish_managed_job "$?"
