@@ -43,7 +43,7 @@ main_branch="${CLASP_SWARM_MAIN_BRANCH:-main}"
 source_ref="${CLASP_SWARM_SOURCE_REF:-HEAD}"
 branch_prefix="${CLASP_SWARM_BRANCH_PREFIX:-agents/swarm}"
 retry_limit="${CLASP_SWARM_RETRY_LIMIT:-3}"
-builder_timeout_seconds="${CLASP_SWARM_BUILDER_TIMEOUT_SECONDS:-900}"
+builder_timeout_seconds="${CLASP_SWARM_BUILDER_TIMEOUT_SECONDS:-0}"
 verifier_timeout_seconds="${CLASP_SWARM_VERIFIER_TIMEOUT_SECONDS:-7200}"
 merge_timeout_seconds="${CLASP_SWARM_MERGE_TIMEOUT_SECONDS:-900}"
 dependency_poll_seconds="${CLASP_SWARM_DEPENDENCY_POLL_SECONDS:-20}"
@@ -73,6 +73,11 @@ trap cleanup EXIT
 run_with_timeout() {
   local timeout_seconds="$1"
   shift
+
+  if [[ -z "$timeout_seconds" || "$timeout_seconds" == "0" ]]; then
+    bash -c 'exec 9>&-; exec "$@"' _ "$@"
+    return 0
+  fi
 
   if command -v timeout >/dev/null 2>&1; then
     bash -c 'exec 9>&-; exec timeout --signal=TERM --kill-after=30s "${1}s" "${@:2}"' _ \

@@ -1096,6 +1096,8 @@ grep -F --quiet -- '--sandbox "$sandbox_mode"' "$project_root/scripts/clasp-buil
 ! grep -F --quiet -- '--dangerously-bypass-approvals-and-sandbox' "$project_root/scripts/clasp-builder.sh"
 grep -F --quiet 'sandbox_mode="${CLASP_SWARM_CODEX_SANDBOX:-workspace-write}"' "$project_root/scripts/clasp-verifier.sh"
 grep -F --quiet -- '--sandbox "$sandbox_mode"' "$project_root/scripts/clasp-verifier.sh"
+grep -F --quiet 'builder_timeout_seconds="${CLASP_SWARM_BUILDER_TIMEOUT_SECONDS:-0}"' "$project_root/scripts/clasp-swarm-lane.sh"
+grep -F --quiet 'if [[ -z "$timeout_seconds" || "$timeout_seconds" == "0" ]]; then' "$project_root/scripts/clasp-swarm-lane.sh"
 ! grep -F --quiet -- '--dangerously-bypass-approvals-and-sandbox' "$project_root/scripts/clasp-verifier.sh"
 
 bash -lc "
