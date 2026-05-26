@@ -11,9 +11,14 @@ source_ref="${CLASP_SWARM_SOURCE_REF:-HEAD}"
 allow_dirty="${CLASP_SWARM_ALLOW_DIRTY:-0}"
 batch_filter="${CLASP_SWARM_BATCH:-}"
 max_running_lanes="${CLASP_SWARM_MAX_RUNNING_LANES:-1}"
-lane_memory_mb="${CLASP_SWARM_LANE_MEMORY_MB:-12288}"
-min_available_memory_mb="${CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB:-24576}"
+lane_memory_mb="${CLASP_SWARM_LANE_MEMORY_MB:-10240}"
+min_available_memory_mb="${CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB:-32768}"
 native_jobs_max="${CLASP_SWARM_NATIVE_JOBS_MAX:-1}"
+native_bundle_jobs="${CLASP_SWARM_NATIVE_BUNDLE_JOBS:-1}"
+native_image_section_jobs="${CLASP_SWARM_NATIVE_IMAGE_SECTION_JOBS:-1}"
+native_image_section_jobs_max="${CLASP_SWARM_NATIVE_IMAGE_SECTION_JOBS_MAX:-1}"
+native_image_module_decl_fresh_process="${CLASP_SWARM_NATIVE_IMAGE_MODULE_DECL_FRESH_PROCESS:-1}"
+native_export_host_idle_timeout_secs="${CLASP_SWARM_NATIVE_EXPORT_HOST_IDLE_TIMEOUT_SECS:-30}"
 
 validate_non_negative_integer() {
   local name="$1"
@@ -78,6 +83,11 @@ validate_non_negative_integer "CLASP_SWARM_MAX_RUNNING_LANES" "$max_running_lane
 validate_non_negative_integer "CLASP_SWARM_LANE_MEMORY_MB" "$lane_memory_mb"
 validate_non_negative_integer "CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB" "$min_available_memory_mb"
 validate_non_negative_integer "CLASP_SWARM_NATIVE_JOBS_MAX" "$native_jobs_max"
+validate_non_negative_integer "CLASP_SWARM_NATIVE_BUNDLE_JOBS" "$native_bundle_jobs"
+validate_non_negative_integer "CLASP_SWARM_NATIVE_IMAGE_SECTION_JOBS" "$native_image_section_jobs"
+validate_non_negative_integer "CLASP_SWARM_NATIVE_IMAGE_SECTION_JOBS_MAX" "$native_image_section_jobs_max"
+validate_non_negative_integer "CLASP_SWARM_NATIVE_IMAGE_MODULE_DECL_FRESH_PROCESS" "$native_image_module_decl_fresh_process"
+validate_non_negative_integer "CLASP_SWARM_NATIVE_EXPORT_HOST_IDLE_TIMEOUT_SECS" "$native_export_host_idle_timeout_secs"
 
 if [[ "${1:-}" == "--list-lanes" ]]; then
   wave_name="${2:-$(clasp_swarm_default_wave)}"
@@ -247,6 +257,11 @@ while IFS= read -r lane_dir; do
         managed-swarm-lane "$log_file" \
         env CLASP_SWARM_BATCH="$batch_filter" \
         CLASP_NATIVE_JOBS_MAX="$native_jobs_max" \
+        CLASP_NATIVE_BUNDLE_JOBS="$native_bundle_jobs" \
+        CLASP_NATIVE_IMAGE_SECTION_JOBS="$native_image_section_jobs" \
+        CLASP_NATIVE_IMAGE_SECTION_JOBS_MAX="$native_image_section_jobs_max" \
+        CLASP_NATIVE_IMAGE_MODULE_DECL_FRESH_PROCESS="$native_image_module_decl_fresh_process" \
+        CLASP_NATIVE_EXPORT_HOST_IDLE_TIMEOUT_SECS="$native_export_host_idle_timeout_secs" \
         bash "$project_root/scripts/clasp-swarm-lane.sh" "$lane_dir"
   )"
   pid="$(tr -d '[:space:]' <"$job_dir/pid")"

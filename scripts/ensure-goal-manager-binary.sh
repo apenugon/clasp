@@ -27,7 +27,7 @@ compile_timeout_secs="${CLASP_GOAL_MANAGER_COMPILE_TIMEOUT_SECS:-180}"
 compile_attempts="${CLASP_GOAL_MANAGER_COMPILE_ATTEMPTS:-2}"
 compile_managed_mode="${CLASP_GOAL_MANAGER_COMPILE_MANAGED:-auto}"
 compile_memory_mb="${CLASP_GOAL_MANAGER_COMPILE_MEMORY_MB:-8192}"
-compile_min_available_memory_mb="${CLASP_GOAL_MANAGER_COMPILE_MIN_AVAILABLE_MEMORY_MB:-8192}"
+compile_min_available_memory_mb="${CLASP_GOAL_MANAGER_COMPILE_MIN_AVAILABLE_MEMORY_MB:-32768}"
 allow_stale_on_compile_failure="${CLASP_GOAL_MANAGER_ALLOW_STALE_ON_COMPILE_FAILURE:-1}"
 allow_unmanaged_stale="${CLASP_GOAL_MANAGER_ALLOW_UNMANAGED_STALE:-0}"
 stale_smoke_timeout_secs="${CLASP_GOAL_MANAGER_STALE_SMOKE_TIMEOUT_SECS:-5}"
@@ -44,7 +44,7 @@ usage: ensure-goal-manager-binary.sh [--alias <path>]...
 Environment:
   CLASP_GOAL_MANAGER_COMPILE_MANAGED=0       Disable managed-job memory guard around cache-miss compiles.
   CLASP_GOAL_MANAGER_COMPILE_MEMORY_MB=8192  Hard memory cap for managed cache-miss compiles.
-  CLASP_GOAL_MANAGER_COMPILE_MIN_AVAILABLE_MEMORY_MB=8192
+  CLASP_GOAL_MANAGER_COMPILE_MIN_AVAILABLE_MEMORY_MB=32768
                                                Host memory reserve that stops managed compiles early.
   CLASP_GOAL_MANAGER_ALLOW_UNMANAGED_STALE=1  Permit stale fallback to executables without helper metadata after smoke validation.
 EOF
@@ -286,7 +286,7 @@ normalize_goal_manager_compile_guards() {
     compile_memory_mb=8192
   fi
   if ! [[ "$compile_min_available_memory_mb" =~ ^[0-9]+$ ]]; then
-    compile_min_available_memory_mb=8192
+    compile_min_available_memory_mb=32768
   fi
 }
 

@@ -85,10 +85,10 @@ The repository-wide minimum gate is:
 bash scripts/verify-all.sh
 ```
 
-`verify-all` runs under the managed memory guard by default, including a host
-memory reserve, capped native job fanout, and a capped top-level parallel job
-count. Use `CLASP_VERIFY_MANAGED=0` only for harness tests that need to inspect
-the unwrapped script behavior.
+`verify-all` runs under the managed memory guard by default, including a 16 GiB
+job cap, a 32 GiB host memory reserve, serial native image/export settings, and
+a single top-level parallel job. Use `CLASP_VERIFY_MANAGED=0` only for harness
+tests that need to inspect the unwrapped script behavior.
 
 For builder iteration before the final gate, use the documented fast entrypoint:
 

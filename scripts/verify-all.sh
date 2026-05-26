@@ -29,10 +29,10 @@ verify_report_first_failed_exit_status=""
 declare -a verify_report_commands=()
 streamed_log_offset=0
 verify_managed_mode="${CLASP_VERIFY_MANAGED:-auto}"
-verify_managed_memory_mb="${CLASP_VERIFY_MANAGED_MEMORY_MB:-24576}"
-verify_managed_min_available_memory_mb="${CLASP_VERIFY_MANAGED_MIN_AVAILABLE_MEMORY_MB:-24576}"
+verify_managed_memory_mb="${CLASP_VERIFY_MANAGED_MEMORY_MB:-16384}"
+verify_managed_min_available_memory_mb="${CLASP_VERIFY_MANAGED_MIN_AVAILABLE_MEMORY_MB:-32768}"
 verify_managed_poll_secs="${CLASP_VERIFY_MANAGED_POLL_SECS:-1}"
-verify_max_parallel_jobs="${CLASP_VERIFY_MAX_PARALLEL_JOBS:-2}"
+verify_max_parallel_jobs="${CLASP_VERIFY_MAX_PARALLEL_JOBS:-1}"
 if ! [[ "$verify_lock_timeout_secs" =~ ^[0-9]+$ ]]; then
   verify_lock_timeout_secs=0
 fi
@@ -180,7 +180,12 @@ run_managed_verification() {
       -- env \
         CLASP_VERIFY_MANAGED_REENTRY=1 \
         CLASP_NATIVE_JOBS_MAX="${CLASP_NATIVE_JOBS_MAX:-1}" \
-        CLASP_VERIFY_PARALLEL_JOBS="${CLASP_VERIFY_PARALLEL_JOBS:-2}" \
+        CLASP_NATIVE_BUNDLE_JOBS="${CLASP_NATIVE_BUNDLE_JOBS:-1}" \
+        CLASP_NATIVE_IMAGE_SECTION_JOBS="${CLASP_NATIVE_IMAGE_SECTION_JOBS:-1}" \
+        CLASP_NATIVE_IMAGE_SECTION_JOBS_MAX="${CLASP_NATIVE_IMAGE_SECTION_JOBS_MAX:-1}" \
+        CLASP_NATIVE_IMAGE_MODULE_DECL_FRESH_PROCESS="${CLASP_NATIVE_IMAGE_MODULE_DECL_FRESH_PROCESS:-1}" \
+        CLASP_NATIVE_EXPORT_HOST_IDLE_TIMEOUT_SECS="${CLASP_NATIVE_EXPORT_HOST_IDLE_TIMEOUT_SECS:-30}" \
+        CLASP_VERIFY_PARALLEL_JOBS="${CLASP_VERIFY_PARALLEL_JOBS:-1}" \
         bash "$project_root/scripts/verify-all.sh"
   )"
   printf '%s: managed verification job: %s memory_mb=%s min_available_memory_mb=%s\n' \
@@ -525,6 +530,11 @@ else
 fi
 
 export CLASP_NATIVE_JOBS_MAX="${CLASP_NATIVE_JOBS_MAX:-1}"
+export CLASP_NATIVE_BUNDLE_JOBS="${CLASP_NATIVE_BUNDLE_JOBS:-1}"
+export CLASP_NATIVE_IMAGE_SECTION_JOBS="${CLASP_NATIVE_IMAGE_SECTION_JOBS:-1}"
+export CLASP_NATIVE_IMAGE_SECTION_JOBS_MAX="${CLASP_NATIVE_IMAGE_SECTION_JOBS_MAX:-1}"
+export CLASP_NATIVE_IMAGE_MODULE_DECL_FRESH_PROCESS="${CLASP_NATIVE_IMAGE_MODULE_DECL_FRESH_PROCESS:-1}"
+export CLASP_NATIVE_EXPORT_HOST_IDLE_TIMEOUT_SECS="${CLASP_NATIVE_EXPORT_HOST_IDLE_TIMEOUT_SECS:-30}"
 
 mkdir -p "$verify_tmp_root"
 export TMPDIR="$verify_tmp_root"
@@ -536,8 +546,8 @@ default_parallel_jobs() {
   if ! [[ "$cpu_count" =~ ^[0-9]+$ ]] || (( cpu_count < 1 )); then
     cpu_count=4
   fi
-  if (( cpu_count > 2 )); then
-    cpu_count=2
+  if (( cpu_count > 1 )); then
+    cpu_count=1
   fi
   printf '%s\n' "$cpu_count"
 }

@@ -6,8 +6,8 @@ runtime_root="$project_root/.clasp-agents"
 log_file="$runtime_root/logs/autopilot.log"
 pid_file="$runtime_root/autopilot.pid"
 job_file="$runtime_root/autopilot.job"
-memory_mb="${CLASP_AUTOPILOT_MEMORY_MB:-12288}"
-min_available_memory_mb="${CLASP_AUTOPILOT_MIN_AVAILABLE_MEMORY_MB:-24576}"
+memory_mb="${CLASP_AUTOPILOT_MEMORY_MB:-10240}"
+min_available_memory_mb="${CLASP_AUTOPILOT_MIN_AVAILABLE_MEMORY_MB:-32768}"
 
 mkdir -p "$runtime_root/logs"
 
@@ -60,7 +60,14 @@ job_dir="$(
   "${managed_job_args[@]}" \
     -- bash -c 'log_file="$1"; shift; exec "$@" >>"$log_file" 2>&1' \
       managed-autopilot "$log_file" \
-      bash "$project_root/scripts/clasp-autopilot.sh"
+      env \
+        CLASP_NATIVE_JOBS_MAX="${CLASP_NATIVE_JOBS_MAX:-1}" \
+        CLASP_NATIVE_BUNDLE_JOBS="${CLASP_NATIVE_BUNDLE_JOBS:-1}" \
+        CLASP_NATIVE_IMAGE_SECTION_JOBS="${CLASP_NATIVE_IMAGE_SECTION_JOBS:-1}" \
+        CLASP_NATIVE_IMAGE_SECTION_JOBS_MAX="${CLASP_NATIVE_IMAGE_SECTION_JOBS_MAX:-1}" \
+        CLASP_NATIVE_IMAGE_MODULE_DECL_FRESH_PROCESS="${CLASP_NATIVE_IMAGE_MODULE_DECL_FRESH_PROCESS:-1}" \
+        CLASP_NATIVE_EXPORT_HOST_IDLE_TIMEOUT_SECS="${CLASP_NATIVE_EXPORT_HOST_IDLE_TIMEOUT_SECS:-30}" \
+        bash "$project_root/scripts/clasp-autopilot.sh"
 )"
 pid="$(tr -d '[:space:]' <"$job_dir/pid")"
 printf '%s\n' "$job_dir" > "$job_file"

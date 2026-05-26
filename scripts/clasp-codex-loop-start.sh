@@ -18,8 +18,8 @@ runtime_dir="$(mkdir -p "$runtime_dir" && cd "$runtime_dir" && pwd)"
 pid_file="$runtime_dir/loop.pid"
 job_file="$runtime_dir/loop.job"
 log_file="$runtime_dir/loop.log"
-memory_mb="${CLASP_CODEX_LOOP_MEMORY_MB:-12288}"
-min_available_memory_mb="${CLASP_CODEX_LOOP_MIN_AVAILABLE_MEMORY_MB:-24576}"
+memory_mb="${CLASP_CODEX_LOOP_MEMORY_MB:-10240}"
+min_available_memory_mb="${CLASP_CODEX_LOOP_MIN_AVAILABLE_MEMORY_MB:-32768}"
 
 source "$project_root/scripts/clasp-swarm-common.sh"
 
@@ -72,7 +72,14 @@ job_dir="$(
   "${managed_job_args[@]}" \
     -- bash -c 'log_file="$1"; shift; exec "$@" >>"$log_file" 2>&1' \
       managed-codex-loop "$log_file" \
-      bash "$project_root/scripts/clasp-codex-loop.sh" "$task_file" "$workspace" "$runtime_dir"
+      env \
+        CLASP_NATIVE_JOBS_MAX="${CLASP_NATIVE_JOBS_MAX:-1}" \
+        CLASP_NATIVE_BUNDLE_JOBS="${CLASP_NATIVE_BUNDLE_JOBS:-1}" \
+        CLASP_NATIVE_IMAGE_SECTION_JOBS="${CLASP_NATIVE_IMAGE_SECTION_JOBS:-1}" \
+        CLASP_NATIVE_IMAGE_SECTION_JOBS_MAX="${CLASP_NATIVE_IMAGE_SECTION_JOBS_MAX:-1}" \
+        CLASP_NATIVE_IMAGE_MODULE_DECL_FRESH_PROCESS="${CLASP_NATIVE_IMAGE_MODULE_DECL_FRESH_PROCESS:-1}" \
+        CLASP_NATIVE_EXPORT_HOST_IDLE_TIMEOUT_SECS="${CLASP_NATIVE_EXPORT_HOST_IDLE_TIMEOUT_SECS:-30}" \
+        bash "$project_root/scripts/clasp-codex-loop.sh" "$task_file" "$workspace" "$runtime_dir"
 )"
 pid="$(tr -d '[:space:]' <"$job_dir/pid")"
 printf '%s\n' "$job_dir" > "$job_file"
