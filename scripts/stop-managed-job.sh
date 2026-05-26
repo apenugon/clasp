@@ -13,8 +13,9 @@ usage: scripts/stop-managed-job.sh [--jobs-root <dir>] <job-id-or-dir>
        scripts/stop-managed-job.sh --force-signal [--jobs-root <dir>] <job-id-or-dir>
 
 By default this requests a cooperative stop by writing the job stop-request file;
-it does not send process signals from the caller. --force-signal is an
-emergency path for marked managed-job sessions only.
+it also cleans up remaining processes carrying the exact managed-job marker.
+--force-signal is an emergency path for validated sessions and marked managed
+job processes only.
 EOF
 }
 
@@ -101,6 +102,18 @@ marked_session_pids() {
   done < <(session_pids "$sid")
 }
 
+marked_job_pids() {
+  local candidate_pid
+
+  while IFS= read -r candidate_pid; do
+    candidate_pid="${candidate_pid//[[:space:]]/}"
+    if [[ -n "$candidate_pid" && "$candidate_pid" != "$$" && "$candidate_pid" =~ ^[0-9]+$ ]] &&
+      process_has_marker "$candidate_pid" "$job_id" "$jobs_root" "$token"; then
+      printf '%s\n' "$candidate_pid"
+    fi
+  done < <(ps -eo pid=)
+}
+
 marked_session_has_members() {
   local sid="$1"
   local candidate_pid
@@ -111,6 +124,17 @@ marked_session_has_members() {
       return 0
     fi
   done < <(session_pids "$sid")
+  return 1
+}
+
+marked_job_has_members() {
+  local candidate_pid
+
+  while IFS= read -r candidate_pid; do
+    if [[ -n "$candidate_pid" ]]; then
+      return 0
+    fi
+  done < <(marked_job_pids)
   return 1
 }
 
@@ -128,6 +152,20 @@ signal_marked_session_pids() {
   return "$sent"
 }
 
+signal_marked_job_pids() {
+  local signal="$1"
+  local sent=1
+  local candidate_pid
+
+  while IFS= read -r candidate_pid; do
+    if [[ -n "$candidate_pid" && "$candidate_pid" =~ ^[0-9]+$ && "$candidate_pid" != "$$" ]]; then
+      kill "-$signal" "$candidate_pid" >/dev/null 2>&1 || true
+      sent=0
+    fi
+  done < <(marked_job_pids)
+  return "$sent"
+}
+
 signal_validated_session_pids() {
   local signal="$1"
   local sent=1
@@ -140,6 +178,19 @@ signal_validated_session_pids() {
     fi
   done < <(session_pids "$sid")
   return "$sent"
+}
+
+signal_validated_job_pids() {
+  local signal="$1"
+  local sent=1
+
+  signal_validated_session_pids "$signal" && sent=0 || true
+  signal_marked_job_pids "$signal" && sent=0 || true
+  return "$sent"
+}
+
+job_has_members() {
+  session_has_members "$sid" || marked_job_has_members
 }
 
 while [[ $# -gt 0 ]]; do
@@ -229,6 +280,33 @@ case "$cwd" in
     ;;
 esac
 
+stop_remaining_marked_job_pids() {
+  if ! marked_job_has_members; then
+    return 0
+  fi
+
+  signal_marked_job_pids TERM || true
+  for _ in $(seq 1 50); do
+    if ! marked_job_has_members; then
+      return 0
+    fi
+    sleep 0.1
+  done
+
+  if [[ "$kill_after_secs" =~ ^[0-9]+$ && "$kill_after_secs" != "0" ]]; then
+    signal_marked_job_pids KILL || true
+  fi
+
+  for _ in $(seq 1 20); do
+    if ! marked_job_has_members; then
+      return 0
+    fi
+    sleep 0.1
+  done
+
+  return 1
+}
+
 request_cooperative_stop() {
   local stop_path="$job_dir/stop-request"
   if [[ -f "$job_dir/status" ]]; then
@@ -236,6 +314,10 @@ request_cooperative_stop() {
     current_status="$(sed -n '1p' "$job_dir/status")"
     case "$current_status" in
       completed|failed|stopped)
+        stop_remaining_marked_job_pids || {
+          printf 'managed-job-stop: marked job members still live after cleanup for %s\n' "$job_id" >&2
+          exit 1
+        }
         printf 'managed-job-stop: %s %s\n' "$current_status" "$job_id"
         exit 0
         ;;
@@ -264,6 +346,10 @@ request_cooperative_stop() {
       status="$(sed -n '1p' "$job_dir/status")"
       case "$status" in
         completed|failed|stopped)
+          stop_remaining_marked_job_pids || {
+            printf 'managed-job-stop: marked job members still live after cleanup for %s\n' "$job_id" >&2
+            exit 1
+          }
           printf 'managed-job-stop: %s %s\n' "$status" "$job_id"
           exit 0
           ;;
@@ -298,22 +384,22 @@ if [[ "$root_is_live" == "1" ]]; then
     printf 'managed-job-stop: live process is missing managed-job marker env for %s\n' "$job_id" >&2
     exit 1
   fi
-elif ! session_has_members "$sid"; then
+elif ! job_has_members; then
   printf 'stopped\n' >"$job_dir/status"
   printf 'managed-job-stop: job already exited: %s\n' "$job_id" >&2
   exit 0
-elif ! marked_session_has_members "$sid"; then
+elif ! marked_session_has_members "$sid" && ! marked_job_has_members; then
   printf 'managed-job-stop: refusing to stop unmarked session members for %s\n' "$job_id" >&2
   exit 1
 else
-  printf 'managed-job-stop: root exited; stopping remaining isolated session members for %s\n' "$job_id" >&2
+  printf 'managed-job-stop: root exited; stopping remaining isolated session members or marked job members for %s\n' "$job_id" >&2
 fi
 
 printf 'stopping\n' >"$job_dir/status"
-signal_validated_session_pids TERM || true
+signal_validated_job_pids TERM || true
 
 for _ in $(seq 1 50); do
-  if ! session_has_members "$sid"; then
+  if ! job_has_members; then
     printf 'stopped\n' >"$job_dir/status"
     printf 'managed-job-stop: stopped %s\n' "$job_id"
     exit 0
@@ -322,11 +408,11 @@ for _ in $(seq 1 50); do
 done
 
 if [[ "$kill_after_secs" =~ ^[0-9]+$ && "$kill_after_secs" != "0" ]]; then
-  signal_validated_session_pids KILL || true
+  signal_validated_job_pids KILL || true
 fi
 
 for _ in $(seq 1 20); do
-  if ! session_has_members "$sid"; then
+  if ! job_has_members; then
     printf 'stopped\n' >"$job_dir/status"
     printf 'managed-job-stop: stopped %s\n' "$job_id"
     exit 0
@@ -334,5 +420,5 @@ for _ in $(seq 1 20); do
   sleep 0.1
 done
 
-printf 'managed-job-stop: session still has members after stop: %s\n' "$job_id" >&2
+printf 'managed-job-stop: session or marked job members still live after stop: %s\n' "$job_id" >&2
 exit 1

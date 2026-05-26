@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+report_test_failure() {
+  local status=$?
+  printf "test-swarm-control: failed at line %s: %s\n" "$1" "$2" >&2
+  exit "$status"
+}
+
+trap 'report_test_failure "$LINENO" "$BASH_COMMAND"' ERR
+
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export CLASP_VERIFY_IN_PROGRESS=1
 export CLASP_VERIFY_ACTIVE_ROOT="$project_root"
@@ -1125,10 +1133,10 @@ bash -lc "
   [[ \$(node '$project_root/scripts/clasp-swarm-validate-task.mjs' --print-field taskId '$project_root/agents/swarm/full/01-swarm-infra/SW-001-replace-the-current-coarse-agents-tasks-backlog-with-a-granular-task-manifest-template-and-task-schema.md') == 'SW-001-replace-the-current-coarse-agents-tasks-backlog-with-a-granular-task-manifest-template-and-task-schema' ]]
   [[ \$(node '$project_root/scripts/clasp-swarm-validate-task.mjs' --print-field taskKey '$project_root/agents/swarm/full/01-swarm-infra/SW-001-replace-the-current-coarse-agents-tasks-backlog-with-a-granular-task-manifest-template-and-task-schema.md') == 'SW-001' ]]
   [[ \$(node '$project_root/scripts/clasp-swarm-validate-task.mjs' --print-field batchLabel '$project_root/agents/swarm/full/01-swarm-infra/SW-001-replace-the-current-coarse-agents-tasks-backlog-with-a-granular-task-manifest-template-and-task-schema.md') == '' ]]
-  [[ \$(node '$project_root/scripts/clasp-swarm-validate-task.mjs' --print-field batchLabel '$project_root/agents/swarm/full/01-swarm-infra/SW-002-add-tests-for-autopilot-queue-behavior-especially-blocked-task-handling-workaround-generation-and-restart-behavior.md') == 'swarm-infra-foundation' ]]
-  [[ \$(node '$project_root/scripts/clasp-swarm-validate-task.mjs' --print-field dependencies '$project_root/agents/swarm/full/01-swarm-infra/SW-003-add-prompt-building-tests-so-builder-verifier-scripts-cannot-regress-into-shell-interpolation-or-oversized-prompt-failures.md') == 'SW-001' ]]
-  [[ \$(node '$project_root/scripts/clasp-swarm-validate-task.mjs' --print-field dependencyLabels '$project_root/agents/swarm/full/01-swarm-infra/SW-005-add-a-merge-gate-that-copies-only-verified-workspace-changes-into-the-accepted-snapshot.md') == 'swarm-infra-foundation' ]]
-  [[ \$(bash '$project_root/scripts/clasp-swarm-start.sh' --list-batches full) == *'swarm-infra-foundation'* ]]
+  [[ \$(node '$project_root/scripts/clasp-swarm-validate-task.mjs' --print-field batchLabel '$project_root/agents/swarm/full/01-swarm-infra/SW-002-add-tests-for-autopilot-queue-behavior-especially-blocked-task-handling-workaround-generation-and-restart-behavior.md') == '' ]]
+  [[ \$(node '$project_root/scripts/clasp-swarm-validate-task.mjs' --print-field dependencies '$project_root/agents/swarm/full/01-swarm-infra/SW-003-add-prompt-building-tests-so-builder-verifier-scripts-cannot-regress-into-shell-interpolation-or-oversized-prompt-failures.md') == 'SW-002' ]]
+  [[ \$(node '$project_root/scripts/clasp-swarm-validate-task.mjs' --print-field dependencyLabels '$project_root/agents/swarm/full/01-swarm-infra/SW-005-add-a-merge-gate-that-copies-only-verified-workspace-changes-into-the-accepted-snapshot.md') == '' ]]
+  [[ -z \$(bash '$project_root/scripts/clasp-swarm-start.sh' --list-batches full) ]]
   clasp_swarm_retry_limit_is_bounded '2'
   ! clasp_swarm_retry_limit_is_bounded '0'
   ! clasp_swarm_retry_limit_is_bounded '-1'
@@ -1906,10 +1914,12 @@ cat > "$invalid_lane_root/ZZ-004-invalid-manifest.md" <<'EOF'
 Missing title and the required structured sections.
 EOF
 
+trap - ERR
 set +e
 invalid_output="$(bash "$project_root/scripts/clasp-swarm-lane.sh" --list-tasks "$invalid_lane_root" 2>&1)"
 invalid_status="$?"
 set -e
+trap 'report_test_failure "$LINENO" "$BASH_COMMAND"' ERR
 
 if [[ "$invalid_status" -eq 0 ]]; then
   echo "expected invalid manifest listing to fail" >&2
@@ -1932,7 +1942,7 @@ bash -lc "
   batches=\$(bash scripts/clasp-swarm-start.sh --list-batches test-wave)
   [[ \"\$batches\" == *'foundation'* ]]
 
-  output=\$(CLASP_SWARM_ALLOW_DIRTY=1 bash scripts/clasp-swarm-start.sh --batch foundation test-wave)
+  output=\$(CLASP_SWARM_ALLOW_DIRTY=1 CLASP_SWARM_MAX_RUNNING_LANES=2 bash scripts/clasp-swarm-start.sh --batch foundation test-wave)
   [[ \"\$output\" == *'batch=foundation'* ]]
   [[ \"\$output\" == *'lane=01-foundation-a'* ]]
   [[ \"\$output\" == *'lane=02-foundation-b'* ]]

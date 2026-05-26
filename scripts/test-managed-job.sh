@@ -7,8 +7,13 @@ mkdir -p "$tmp_root"
 test_root="$(mktemp -d "$tmp_root/test-managed-job.XXXXXX")"
 jobs_root="$test_root/jobs"
 unrelated_session_pid=""
+marked_orphan_pid=""
 
 cleanup() {
+  if [[ -n "${marked_orphan_pid:-}" ]]; then
+    kill "$marked_orphan_pid" >/dev/null 2>&1 || true
+    wait "$marked_orphan_pid" >/dev/null 2>&1 || true
+  fi
   if [[ -n "${unrelated_session_pid:-}" ]]; then
     kill "$unrelated_session_pid" >/dev/null 2>&1 || true
     wait "$unrelated_session_pid" >/dev/null 2>&1 || true
@@ -103,6 +108,37 @@ if kill -0 "$complete_pid" >/dev/null 2>&1; then
   exit 1
 fi
 
+marked_orphan_pid_file="$test_root/marked-orphan.pid"
+marked_orphan_job_dir="$(
+  "$project_root/scripts/run-managed-job.sh" \
+    --jobs-root "$jobs_root" \
+    --job-id marked-orphan-cleanup \
+    -- bash -c 'setsid bash -c '"'"'printf "%s\n" "$BASHPID" >"$1"; while true; do sleep 1; done'"'"' _ "$1" & sleep 0.3; exit 0' _ "$marked_orphan_pid_file"
+)"
+[[ "$marked_orphan_job_dir" == "$jobs_root/marked-orphan-cleanup" ]]
+wait_for_file "$marked_orphan_job_dir/exit-status"
+wait_for_file "$marked_orphan_pid_file"
+[[ "$(cat "$marked_orphan_job_dir/exit-status")" == "0" ]]
+[[ "$(cat "$marked_orphan_job_dir/status")" == "completed" ]]
+marked_orphan_pid="$(tr -d '[:space:]' <"$marked_orphan_pid_file")"
+marked_orphan_sid="$(ps -o sid= -p "$marked_orphan_pid" | tr -d '[:space:]')"
+marked_orphan_root_sid="$(tr -d '[:space:]' <"$marked_orphan_job_dir/sid")"
+[[ -n "$marked_orphan_sid" && "$marked_orphan_sid" != "$marked_orphan_root_sid" ]]
+kill -0 "$marked_orphan_pid" >/dev/null
+"$project_root/scripts/stop-managed-job.sh" --jobs-root "$jobs_root" marked-orphan-cleanup >"$test_root/marked-orphan-stop.out"
+grep -F 'managed-job-stop: completed marked-orphan-cleanup' "$test_root/marked-orphan-stop.out" >/dev/null
+for _ in $(seq 1 50); do
+  if ! kill -0 "$marked_orphan_pid" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 0.1
+done
+if kill -0 "$marked_orphan_pid" >/dev/null 2>&1; then
+  printf 'marked managed orphan survived completed-job cleanup: %s\n' "$marked_orphan_pid" >&2
+  exit 1
+fi
+marked_orphan_pid=""
+
 failed_job_dir="$(
   "$project_root/scripts/run-managed-job.sh" \
     --jobs-root "$jobs_root" \
@@ -186,7 +222,8 @@ EOF
   cc -O1 -o "$test_root/hold-memory" "$test_root/hold-memory.c"
 
   memory_job_dir="$(
-    "$project_root/scripts/run-managed-job.sh" \
+    CLASP_MANAGED_JOB_USE_SYSTEMD_SCOPE=never \
+      "$project_root/scripts/run-managed-job.sh" \
       --jobs-root "$jobs_root" \
       --job-id memory-watch-smoke \
       --memory-mb 128 \

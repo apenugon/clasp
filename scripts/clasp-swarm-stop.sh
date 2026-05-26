@@ -9,8 +9,8 @@ usage() {
 usage: scripts/clasp-swarm-stop.sh [--force-signal] [wave]
 
 By default this requests cooperative managed-job stops. --force-signal passes
-through to stop-managed-job.sh, which only signals marked managed-job session
-members after validating the job metadata.
+through to stop-managed-job.sh, which only signals validated session members
+and exact marked managed-job processes after validating the job metadata.
 EOF
 }
 

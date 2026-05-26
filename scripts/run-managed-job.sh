@@ -160,6 +160,30 @@ setsid env \
         [[ -n "${memory_watcher_pid:-}" && "$candidate_pid" == "$memory_watcher_pid" ]]
     }
 
+    process_has_marker() {
+      local candidate_pid="$1"
+
+      if [[ ! -r "/proc/$candidate_pid/environ" ]]; then
+        return 1
+      fi
+      local environ
+      environ="$({ tr "\0" "\n" <"/proc/$candidate_pid/environ"; } 2>/dev/null)" || return 1
+      grep -Fx "CLASP_MANAGED_JOB_ID=$CLASP_MANAGED_JOB_ID" <<<"$environ" >/dev/null &&
+        grep -Fx "CLASP_MANAGED_JOB_ROOT=$CLASP_MANAGED_JOB_ROOT" <<<"$environ" >/dev/null &&
+        grep -Fx "CLASP_MANAGED_JOB_TOKEN=$CLASP_MANAGED_JOB_TOKEN" <<<"$environ" >/dev/null
+    }
+
+    marked_job_pids() {
+      local candidate_pid
+      while IFS= read -r candidate_pid; do
+        candidate_pid="${candidate_pid//[[:space:]]/}"
+        if [[ -n "$candidate_pid" && "$candidate_pid" =~ ^[0-9]+$ ]] &&
+          process_has_marker "$candidate_pid"; then
+          printf "%s\n" "$candidate_pid"
+        fi
+      done < <(ps -eo pid=)
+    }
+
     session_has_stoppable_members() {
       local sid="$1"
       local candidate_pid
@@ -170,6 +194,27 @@ setsid env \
           fi
         fi
       done < <(session_member_pids "$sid")
+      return 1
+    }
+
+    job_member_pids() {
+      local sid="$1"
+      {
+        session_member_pids "$sid"
+        marked_job_pids
+      } | awk '"'"'NF && !seen[$1]++ { print $1 }'"'"'
+    }
+
+    job_has_stoppable_members() {
+      local sid="$1"
+      local candidate_pid
+      while IFS= read -r candidate_pid; do
+        if [[ -n "$candidate_pid" && "$candidate_pid" != "$$" && "$candidate_pid" != "$BASHPID" ]]; then
+          if ! internal_watcher_pid "$candidate_pid"; then
+            return 0
+          fi
+        fi
+      done < <(job_member_pids "$sid")
       return 1
     }
 
@@ -184,6 +229,19 @@ setsid env \
           fi
         fi
       done < <(session_member_pids "$sid")
+    }
+
+    signal_job_members() {
+      local signal="$1"
+      local sid="$2"
+      local candidate_pid
+      while IFS= read -r candidate_pid; do
+        if [[ -n "$candidate_pid" && "$candidate_pid" =~ ^[0-9]+$ && "$candidate_pid" != "$$" && "$candidate_pid" != "$BASHPID" ]]; then
+          if ! internal_watcher_pid "$candidate_pid"; then
+            kill "-$signal" "$candidate_pid" >/dev/null 2>&1 || true
+          fi
+        fi
+      done < <(job_member_pids "$sid")
     }
 
     session_rss_kb() {
@@ -205,6 +263,28 @@ setsid env \
         '"'"'
     }
 
+    job_rss_kb() {
+      local sid="$1"
+      local candidate_pid
+      local rss_kb
+      local sum=0
+
+      while IFS= read -r candidate_pid; do
+        if [[ -z "$candidate_pid" || "$candidate_pid" == "$$" || "$candidate_pid" == "$BASHPID" ]]; then
+          continue
+        fi
+        if internal_watcher_pid "$candidate_pid"; then
+          continue
+        fi
+        rss_kb="$(ps -o rss= -p "$candidate_pid" 2>/dev/null | tr -d "[:space:]")"
+        if [[ "$rss_kb" =~ ^[0-9]+$ ]]; then
+          sum=$((sum + rss_kb))
+        fi
+      done < <(job_member_pids "$sid")
+
+      printf "%d\n" "$sum"
+    }
+
     host_available_memory_mb() {
       awk '"'"'/MemAvailable:/ { printf "%d\n", int($2 / 1024); found = 1 } END { if (!found) print 0 }'"'"' /proc/meminfo 2>/dev/null || printf "0\n"
     }
@@ -215,14 +295,14 @@ setsid env \
       while true; do
         if [[ -f "$stop_file" ]]; then
           printf "stopping\n" >"$job_dir/status"
-          signal_session_members TERM "$sid"
+          signal_job_members TERM "$sid"
           for _ in $(seq 1 50); do
-            if ! session_has_stoppable_members "$sid"; then
+            if ! job_has_stoppable_members "$sid"; then
               return 0
             fi
             sleep 0.1
           done
-          signal_session_members KILL "$sid"
+          signal_job_members KILL "$sid"
           return 0
         fi
         sleep 0.2
@@ -244,12 +324,12 @@ setsid env \
       sleep 0.1
 
       while true; do
-        if ! session_has_stoppable_members "$sid"; then
+        if ! job_has_stoppable_members "$sid"; then
           return 0
         fi
 
         if [[ -n "$memory_limit_kb" ]]; then
-          rss_kb="$(session_rss_kb "$sid")"
+          rss_kb="$(job_rss_kb "$sid")"
         fi
         if [[ -n "$memory_limit_kb" && "$rss_kb" =~ ^[0-9]+$ ]] && (( rss_kb > memory_limit_kb )); then
           {
@@ -259,14 +339,14 @@ setsid env \
             date -u +"detected_at=%Y-%m-%dT%H:%M:%SZ"
           } >"$memory_exceeded_path"
           printf "memory-exceeded\n" >"$job_dir/status"
-          signal_session_members TERM "$sid"
+          signal_job_members TERM "$sid"
           for _ in $(seq 1 50); do
-            if ! session_has_stoppable_members "$sid"; then
+            if ! job_has_stoppable_members "$sid"; then
               return 0
             fi
             sleep 0.1
           done
-          signal_session_members KILL "$sid"
+          signal_job_members KILL "$sid"
           return 0
         fi
 
@@ -280,14 +360,14 @@ setsid env \
               date -u +"detected_at=%Y-%m-%dT%H:%M:%SZ"
             } >"$memory_exceeded_path"
             printf "memory-exceeded\n" >"$job_dir/status"
-            signal_session_members TERM "$sid"
+            signal_job_members TERM "$sid"
             for _ in $(seq 1 50); do
-              if ! session_has_stoppable_members "$sid"; then
+              if ! job_has_stoppable_members "$sid"; then
                 return 0
               fi
               sleep 0.1
             done
-            signal_session_members KILL "$sid"
+            signal_job_members KILL "$sid"
             return 0
           fi
         fi
