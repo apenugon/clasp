@@ -275,6 +275,8 @@ The readiness benchmark is now an ordinary Clasp runtime probe instead of a shel
 
 The ordinary Clasp managed loop now records each failed builder/verifier attempt into native swarm memory and builds its status report from `taskContextPack`, so a standalone loop carries forward prior failure classifications, failed verifier names, trace references, and artifact paths without a Codex-specific wrapper.
 
+Native watched processes now launch monitored child commands in an isolated process group when the host supports `setsid`, carry a runtime watch token in the heartbeat, and cancel the verified process group on timeout. This prevents monitored builders or verifiers from leaving nested subprocesses alive after a standalone Clasp loop stops an attempt.
+
 The modular GoalManager default planner path is shell-free as well: it still writes the durable planner prompt artifact for inspection, but passes the prompt directly to the configured agent command instead of wrapping Codex in a `bash -c` stdin shim. Agent templates can consume either `{prompt}` or `{prompt_path}`.
 
 GoalManager cache-miss compiles are now expected to run under the managed-job memory guard by default. A missing or stale binary should fail inside a bounded cgroup and fall back only through the explicit stale-binary path; it should not be able to consume unbounded VM memory while rebuilding the native manager image. The default guard keeps an 8 GiB compile cap but now reserves 32 GiB of host memory before continuing. The large GoalManager image is intentionally outside the promoted source-export cache refresh path; promoting it made ordinary verification depend on a 30 GiB-class native-image build.

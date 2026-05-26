@@ -7791,6 +7791,8 @@ now_ms() {
 started_at_ms="$(now_ms)"
 command_json="$(json_command_array "$@")"
 cancel_path="${heartbeat_path}.cancel"
+watch_token="${CLASP_RT_WATCH_TOKEN:-}"
+process_group_id=0
 
 write_heartbeat() {
   local running="$1"
@@ -7828,8 +7830,10 @@ write_heartbeat() {
   else
     status="stopped"
   fi
-  printf '{"pid":%s,"status":"%s","running":%s,"completed":%s,"exitCode":%s,"timedOut":%s,"error":"%s","command":%s,"stdoutPath":"%s","stderrPath":"%s","heartbeatPath":"%s","startedAtMs":%s,"endedAtMs":%s,"durationMs":%s,"updatedAtMs":%s}' \
+  printf '{"pid":%s,"processGroupId":%s,"watchToken":"%s","status":"%s","running":%s,"completed":%s,"exitCode":%s,"timedOut":%s,"error":"%s","command":%s,"stdoutPath":"%s","stderrPath":"%s","heartbeatPath":"%s","startedAtMs":%s,"endedAtMs":%s,"durationMs":%s,"updatedAtMs":%s}' \
     "$child_pid" \
+    "$process_group_id" \
+    "$(json_escape "$watch_token")" \
     "$status" \
     "$running" \
     "$completed" \
@@ -7855,8 +7859,14 @@ if command -v awk >/dev/null 2>&1; then
   poll_sleep="$(awk -v ms="$poll_ms" 'BEGIN { if (ms < 50) ms = 50; printf "%.3f", ms / 1000 }')"
 fi
 
-"$@" </dev/null >"$stdout_path" 2>"$stderr_path" &
-child_pid=$!
+if command -v setsid >/dev/null 2>&1; then
+  CLASP_RT_WATCH_HEARTBEAT="$heartbeat_path" CLASP_RT_WATCH_TOKEN="$watch_token" setsid "$@" </dev/null >"$stdout_path" 2>"$stderr_path" &
+  child_pid=$!
+  process_group_id="$child_pid"
+else
+  CLASP_RT_WATCH_HEARTBEAT="$heartbeat_path" CLASP_RT_WATCH_TOKEN="$watch_token" "$@" </dev/null >"$stdout_path" 2>"$stderr_path" &
+  child_pid=$!
+fi
 write_heartbeat true false -1
 
 (
@@ -7892,6 +7902,12 @@ fn spawn_watched_process_monitor_json(
     ensure_parent_dir(stderr_path)?;
     ensure_parent_dir(heartbeat_path)?;
 
+    let watch_token = format!(
+        "{}-{}-{}",
+        runtime_time_unix_ms(),
+        std::process::id(),
+        heartbeat_path.len()
+    );
     let mut command = ProcessCommand::new("bash");
     command
         .arg("-c")
@@ -7909,6 +7925,9 @@ fn spawn_watched_process_monitor_json(
     for (key, value) in extra_env {
         command.env(key, value);
     }
+    command
+        .env("CLASP_RT_WATCH_HEARTBEAT", heartbeat_path)
+        .env("CLASP_RT_WATCH_TOKEN", &watch_token);
 
     let mut monitor = command.spawn().map_err(|err| err.to_string())?;
     let monitor_pid = monitor.id();
@@ -7992,6 +8011,29 @@ fn watched_process_exists(pid: u32) -> bool {
     state != "Z" && state != "X"
 }
 
+fn watched_process_has_marker(pid: u32, heartbeat_path: &str, watch_token: &str) -> bool {
+    if heartbeat_path.is_empty() || watch_token.is_empty() {
+        return false;
+    }
+    let environ_path = format!("/proc/{pid}/environ");
+    let Ok(environ_bytes) = fs::read(environ_path) else {
+        return false;
+    };
+    let heartbeat_marker = format!("CLASP_RT_WATCH_HEARTBEAT={heartbeat_path}");
+    let token_marker = format!("CLASP_RT_WATCH_TOKEN={watch_token}");
+    let mut has_heartbeat = false;
+    let mut has_token = false;
+    for entry in environ_bytes.split(|byte| *byte == 0) {
+        if entry == heartbeat_marker.as_bytes() {
+            has_heartbeat = true;
+        }
+        if entry == token_marker.as_bytes() {
+            has_token = true;
+        }
+    }
+    has_heartbeat && has_token
+}
+
 fn terminate_watched_process_pid(pid: u32) {
     if pid == 0 {
         return;
@@ -8002,6 +8044,28 @@ fn terminate_watched_process_pid(pid: u32) {
         let _ = kill(pid_value, SIGTERM);
         thread::sleep(Duration::from_millis(50));
         let _ = kill(pid_value, SIGKILL);
+    }
+}
+
+fn terminate_watched_process_tree(
+    pid: u32,
+    process_group_id: u32,
+    heartbeat_path: &str,
+    watch_token: &str,
+) {
+    let has_marker = !watch_token.is_empty()
+        && watched_process_has_marker(pid, heartbeat_path, watch_token);
+    #[cfg(unix)]
+    {
+        if process_group_id > 0 && process_group_id == pid && has_marker {
+            signal_process_group(process_group_id, SIGTERM);
+            thread::sleep(Duration::from_millis(50));
+            signal_process_group(process_group_id, SIGKILL);
+        }
+    }
+
+    if watch_token.is_empty() || has_marker {
+        terminate_watched_process_pid(pid);
     }
 }
 
@@ -8049,7 +8113,16 @@ fn cancel_watched_process_json(heartbeat_path: &str) -> Result<String, String> {
         .and_then(serde_json::Value::as_i64)
         .unwrap_or(0)
         .max(0) as u32;
-    terminate_watched_process_pid(pid);
+    let process_group_id = payload
+        .get("processGroupId")
+        .and_then(serde_json::Value::as_i64)
+        .unwrap_or(0)
+        .max(0) as u32;
+    let watch_token = payload
+        .get("watchToken")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    terminate_watched_process_tree(pid, process_group_id, heartbeat_path, watch_token);
 
     for _ in 0..40 {
         thread::sleep(Duration::from_millis(25));
@@ -13061,6 +13134,108 @@ mod tests {
             assert!(
                 !watched_process_exists(child_pid),
                 "expected watched process to stop after cancel"
+            );
+
+            release_header(null_mut(), cwd as *mut ClaspRtHeader);
+            release_header(null_mut(), stdout_rt as *mut ClaspRtHeader);
+            release_header(null_mut(), stderr_rt as *mut ClaspRtHeader);
+            release_header(null_mut(), heartbeat_rt as *mut ClaspRtHeader);
+            release_header(null_mut(), poll_ms);
+            release_header(null_mut(), command);
+            release_header(null_mut(), spawned as *mut ClaspRtHeader);
+            release_header(null_mut(), cancelled as *mut ClaspRtHeader);
+            let _ = std::fs::remove_dir_all(temp_root);
+        }
+    }
+
+    #[test]
+    fn cancel_watched_process_json_stops_nested_process_group() {
+        unsafe {
+            let temp_root = std::env::temp_dir().join(format!(
+                "clasp-cancel-watch-group-timeout-{}",
+                std::process::id()
+            ));
+            std::fs::create_dir_all(&temp_root).expect("expected cancel group temp root");
+            let script_path = temp_root.join("loop-with-child.sh");
+            let nested_pid_path = temp_root.join("nested.pid");
+            let stdout_path = temp_root.join("stdout.log");
+            let stderr_path = temp_root.join("stderr.log");
+            let heartbeat_path = temp_root.join("heartbeat.json");
+            std::fs::write(
+                &script_path,
+                format!(
+                    "#!/bin/sh\nprintf started\n(sh -c 'printf \"%s\\n\" \"$$\" > \"$1\"; while :; do sleep 1; done' _ '{}') &\nwhile :; do sleep 1; done\n",
+                    nested_pid_path.display()
+                ),
+            )
+            .expect("expected cancel group test script write");
+            let mut permissions = std::fs::metadata(&script_path)
+                .expect("expected cancel group test script metadata")
+                .permissions();
+            std::os::unix::fs::PermissionsExt::set_mode(&mut permissions, 0o755);
+            std::fs::set_permissions(&script_path, permissions)
+                .expect("expected cancel group test script permissions");
+
+            let cwd = build_runtime_string(temp_root.to_string_lossy().as_bytes());
+            let stdout_rt = build_runtime_string(stdout_path.to_string_lossy().as_bytes());
+            let stderr_rt = build_runtime_string(stderr_path.to_string_lossy().as_bytes());
+            let heartbeat_rt = build_runtime_string(heartbeat_path.to_string_lossy().as_bytes());
+            let poll_ms = build_runtime_int(50) as *mut ClaspRtHeader;
+            let command = build_runtime_list_value(vec![
+                build_runtime_string(script_path.to_string_lossy().as_bytes()) as *mut ClaspRtHeader,
+            ]) as *mut ClaspRtHeader;
+
+            let spawned = clasp_rt_spawn_command_json(cwd, stdout_rt, stderr_rt, heartbeat_rt, poll_ms, command);
+            assert!((*spawned).is_ok);
+            let spawned_payload = String::from_utf8_lossy(string_bytes((*spawned).value)).into_owned();
+            let spawned_json: serde_json::Value =
+                serde_json::from_str(&spawned_payload).expect("expected valid spawned group heartbeat");
+            let child_pid = spawned_json["pid"].as_i64().expect("expected child pid") as u32;
+            let process_group_id = spawned_json["processGroupId"]
+                .as_i64()
+                .expect("expected process group id") as u32;
+            assert_eq!(process_group_id, child_pid);
+            assert!(
+                spawned_json["watchToken"].as_str().unwrap_or_default().len() > 0,
+                "expected watched process token"
+            );
+
+            let mut nested_pid = 0u32;
+            for _ in 0..50 {
+                if let Ok(text) = std::fs::read_to_string(&nested_pid_path) {
+                    nested_pid = text.trim().parse::<u32>().unwrap_or(0);
+                    if nested_pid > 0 {
+                        break;
+                    }
+                }
+                thread::sleep(Duration::from_millis(20));
+            }
+            assert!(watched_process_exists(child_pid), "expected watched process before group cancel");
+            assert!(nested_pid > 0, "expected nested process pid");
+            assert!(
+                watched_process_exists(nested_pid),
+                "expected nested process before group cancel"
+            );
+
+            let cancelled = clasp_rt_cancel_watched_process_json(heartbeat_rt);
+            assert!((*cancelled).is_ok);
+
+            thread::sleep(Duration::from_millis(150));
+            let child_alive_after_cancel = watched_process_exists(child_pid);
+            let nested_alive_after_cancel = watched_process_exists(nested_pid);
+            if child_alive_after_cancel {
+                terminate_watched_process_pid(child_pid);
+            }
+            if nested_alive_after_cancel {
+                terminate_watched_process_pid(nested_pid);
+            }
+            assert!(
+                !child_alive_after_cancel,
+                "expected watched process to stop after group cancel"
+            );
+            assert!(
+                !nested_alive_after_cancel,
+                "expected nested process to stop after group cancel"
             );
 
             release_header(null_mut(), cwd as *mut ClaspRtHeader);
