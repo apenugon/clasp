@@ -390,6 +390,33 @@ clasp_swarm_assert_prompt_size() {
   fi
 }
 
+clasp_swarm_allow_unmanaged_agent_runtime() {
+  case "${CLASP_ALLOW_UNMANAGED_AGENT_RUNTIME:-}" in
+    1|true|yes)
+      return 0
+      ;;
+  esac
+
+  [[ -n "${CLASP_TEST_CODEX_MODE:-}" ]]
+}
+
+clasp_swarm_require_managed_agent_runtime() {
+  local label="$1"
+  local managed_launcher="$2"
+
+  if [[ -n "${CLASP_MANAGED_JOB_ID:-}" ]]; then
+    return 0
+  fi
+  if clasp_swarm_allow_unmanaged_agent_runtime; then
+    return 0
+  fi
+
+  printf '%s refuses to launch agent work outside the managed-job memory guard.\n' "$label" >&2
+  printf 'Use %s or wrap the command with scripts/run-managed-job.sh.\n' "$managed_launcher" >&2
+  printf 'Set CLASP_ALLOW_UNMANAGED_AGENT_RUNTIME=1 only for lightweight tests or fixtures.\n' >&2
+  return 1
+}
+
 clasp_swarm_spawn_detached() {
   local log_file="$1"
   shift

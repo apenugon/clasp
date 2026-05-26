@@ -12,6 +12,7 @@ trap 'report_test_failure "$LINENO" "$BASH_COMMAND"' ERR
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export CLASP_VERIFY_IN_PROGRESS=1
 export CLASP_VERIFY_ACTIVE_ROOT="$project_root"
+export CLASP_ALLOW_UNMANAGED_AGENT_RUNTIME=1
 runs_root=""
 markers_root=""
 repo_root=""
@@ -189,6 +190,7 @@ make_autopilot_test_project() {
   local project_dir="$target_root/repo"
 
   mkdir -p "$project_dir/scripts" "$project_dir/tools" "$project_dir/agents/tasks" "$project_dir/verifier-state"
+  cp "$project_root/scripts/clasp-swarm-common.sh" "$project_dir/scripts/clasp-swarm-common.sh"
   cp "$project_root/scripts/clasp-autopilot.sh" "$project_dir/scripts/clasp-autopilot.sh"
   cp "$project_root/scripts/clasp-codex-loop.sh" "$project_dir/scripts/clasp-codex-loop.sh"
   printf '%s\n' "$scenario" > "$project_dir/scenario"

@@ -143,6 +143,20 @@ exit 1
 EOF
 chmod +x "$project_dir/tools/codex"
 
+if (
+  cd "$project_dir"
+  PATH="$project_dir/tools:$PATH" \
+    env -u CLASP_MANAGED_JOB_ID -u CLASP_ALLOW_UNMANAGED_AGENT_RUNTIME \
+    bash scripts/clasp-codex-loop.sh task.md "$workspace_dir" "$runtime_dir-unmanaged"
+) >"$test_root/unmanaged-loop.out" 2>"$test_root/unmanaged-loop.err"; then
+  echo "direct codex loop should refuse unmanaged agent work" >&2
+  exit 1
+fi
+grep -F 'clasp-codex-loop.sh refuses to launch agent work outside the managed-job memory guard.' "$test_root/unmanaged-loop.err" >/dev/null
+grep -F 'scripts/clasp-codex-loop-start.sh' "$test_root/unmanaged-loop.err" >/dev/null
+
+export CLASP_ALLOW_UNMANAGED_AGENT_RUNTIME=1
+
 (
   cd "$project_dir"
   PATH="$project_dir/tools:$PATH" \

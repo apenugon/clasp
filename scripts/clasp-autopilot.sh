@@ -2,6 +2,8 @@
 set -euo pipefail
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$project_root/scripts/clasp-swarm-common.sh"
+
 runtime_root="$project_root/.clasp-agents"
 tasks_root="$project_root/agents/tasks"
 external_root="$(cd "$project_root/.." && pwd)"
@@ -369,6 +371,10 @@ if [[ "${1:-}" == "--list" ]]; then
   list_tasks
   exit 0
 fi
+
+clasp_swarm_require_managed_agent_runtime \
+  "clasp-autopilot.sh" \
+  "scripts/clasp-autopilot-start.sh"
 
 exec 9>"$lock_file"
 if ! flock -n 9; then

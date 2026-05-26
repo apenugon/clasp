@@ -52,5 +52,9 @@ fans out into multiple large children is stopped before it can exhaust the VM. U
 `CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB` to tune larger machines deliberately.
 The standalone codex-loop and autopilot launchers use the same managed-job
 memory guard by default.
+Raw agent entrypoints such as `clasp-codex-loop.sh`, `clasp-autopilot.sh`,
+`clasp-builder.sh`, and `clasp-verifier.sh` refuse unmanaged real agent work;
+use the `*-start.sh` launchers, wrap with `scripts/run-managed-job.sh`, or set
+`CLASP_ALLOW_UNMANAGED_AGENT_RUNTIME=1` only for lightweight tests and fixtures.
 
 Task files are ordered lexicographically and should stay small enough to be completed in a single focused change.

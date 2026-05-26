@@ -10,6 +10,12 @@ task_file="$1"
 workspace_input="$2"
 runtime_dir_input="${3:-}"
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$project_root/scripts/clasp-swarm-common.sh"
+
+clasp_swarm_require_managed_agent_runtime \
+  "clasp-codex-loop.sh" \
+  "scripts/clasp-codex-loop-start.sh"
+
 workspace="$(cd "$workspace_input" && pwd)"
 task_id="$(basename "$task_file" .md)"
 runtime_dir="${runtime_dir_input:-$workspace/.clasp-codex-loop/$task_id}"

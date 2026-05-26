@@ -15,6 +15,12 @@ model="${CODEX_MODEL:-gpt-5.5}"
 reasoning_effort="${CODEX_REASONING_EFFORT:-xhigh}"
 sandbox_mode="${CLASP_SWARM_CODEX_SANDBOX:-danger-full-access}"
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$project_root/scripts/clasp-swarm-common.sh"
+
+clasp_swarm_require_managed_agent_runtime \
+  "clasp-verifier.sh" \
+  "scripts/clasp-codex-loop-start.sh"
+
 schema_file="$project_root/agents/schemas/verifier-report.schema.json"
 prompt_file="$(mktemp "${TMPDIR:-/tmp}/clasp-verifier-prompt.XXXXXX")"
 shared_codex_home="${CODEX_HOME:-$HOME/.codex}"
@@ -24,7 +30,6 @@ sandbox_runtime_home="$(mktemp -d "${TMPDIR:-/tmp}/clasp-codex-runtime-home.XXXX
 codex_sandbox_args=()
 
 source "$project_root/scripts/clasp-codex-home.sh"
-source "$project_root/scripts/clasp-swarm-common.sh"
 
 cleanup() {
   rm -f "$prompt_file"
