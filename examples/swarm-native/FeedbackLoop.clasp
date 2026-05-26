@@ -260,6 +260,127 @@ verifierPolicySection = textJoin "\n" [
   readPolicyText verifierPolicyPath defaultVerifierPolicyText
 ]
 
+promptBoolText : Bool -> Str
+promptBoolText value = if value then "true" else "false"
+
+memorySearchPromptLine : SwarmMemorySearchResult -> Str
+memorySearchPromptLine item =
+  textConcat [
+    "- score=",
+    encode item.score,
+    " key=",
+    item.memory.key,
+    " actor=",
+    item.memory.actor,
+    " value=",
+    item.memory.value,
+    " matched=",
+    item.matchedText
+  ]
+
+runTracePromptLine : VerificationTraceEntry -> Str
+runTracePromptLine entry =
+  textConcat [
+    "- verifier=",
+    entry.verifierName,
+    " status=",
+    entry.status,
+    " exit=",
+    encode entry.exitCode,
+    " timedOut=",
+    promptBoolText entry.timedOut,
+    " class=",
+    entry.failedVerifierClassification,
+    " stdout=",
+    entry.stdoutArtifactPath,
+    " stderr=",
+    entry.stderrArtifactPath
+  ]
+
+promptListSection : Str -> [Str] -> Str
+promptListSection title values =
+  if length values == 0 then
+    textJoin "\n" [title, "- none"]
+  else
+    textJoin "\n" [title, textJoin "\n" values]
+
+memorySearchPromptSection : Str -> [SwarmMemorySearchResult] -> Str
+memorySearchPromptSection title matches =
+  promptListSection title (map memorySearchPromptLine matches)
+
+runTracePromptSection : Str -> [VerificationTraceEntry] -> Str
+runTracePromptSection title trace =
+  promptListSection title (map runTracePromptLine trace)
+
+renderContextPackPrompt : SwarmContextPack -> Str
+renderContextPackPrompt pack =
+  textJoin "\n" [
+    "Swarm context pack:",
+    textConcat [
+      "task: ",
+      pack.task.taskId,
+      " status=",
+      pack.task.status,
+      " ready=",
+      promptBoolText pack.task.ready,
+      " attempts=",
+      encode pack.task.attempts
+    ],
+    textConcat [
+      "objective: ",
+      pack.task.objectiveId,
+      " manager-action=",
+      pack.managerAction.action,
+      " manager-task=",
+      pack.managerAction.taskId,
+      " manager-task-status=",
+      pack.managerAction.taskStatus
+    ],
+    textConcat ["ready tasks: ", textJoin ", " pack.readyTaskIds],
+    textConcat [
+      "mailbox: runs=",
+      encode pack.mailboxSummary.runCount,
+      " artifacts=",
+      encode pack.mailboxSummary.artifactCount,
+      " memory=",
+      encode pack.mailboxSummary.memoryCount,
+      " latest-run=",
+      pack.mailboxSummary.latestRunName,
+      "/",
+      pack.mailboxSummary.latestRunStatus,
+      " latest-verifier=",
+      pack.mailboxSummary.latestVerifier,
+      "/",
+      pack.mailboxSummary.latestVerifierStatus
+    ],
+    memorySearchPromptSection "task memory matches:" pack.taskMemoryMatches,
+    memorySearchPromptSection "objective memory matches:" pack.objectiveMemoryMatches,
+    runTracePromptSection "run trace:" pack.runTrace,
+    promptListSection "artifact kinds:" pack.artifactKinds,
+    promptListSection "artifact paths:" pack.artifactPaths
+  ]
+
+taskContextPromptSection : TaskHandle -> Str -> Int -> Str
+taskContextPromptSection handle query limit =
+  match taskContextPack handle query limit {
+    Ok pack -> renderContextPackPrompt pack,
+    Err message -> textConcat ["Swarm context pack unavailable: ", message]
+  }
+
+contextPackQuery : Str
+contextPackQuery = "autonomous swarm verifier feedback capability evidence"
+
+contextPackLimit : Int
+contextPackLimit = 8
+
+builderContextSection : Int -> Str
+builderContextSection attempt =
+  taskContextPromptSection (builderHandle attempt) contextPackQuery contextPackLimit
+
+verifierContextSection : Int -> Str
+verifierContextSection attempt =
+  taskContextPromptSection (verifierHandle attempt) contextPackQuery contextPackLimit
+
 builderPrompt : Int -> Str
 builderPrompt attempt = textJoin "\n" [
   "You are the builder subagent for the Clasp repository.",
@@ -272,6 +393,7 @@ builderPrompt attempt = textJoin "\n" [
   "Prefer closing at least one whole failing capability category this attempt, not just one complaint line.",
   builderPolicySection,
   builderFeedbackSection,
+  builderContextSection attempt,
   "Return JSON matching the provided output schema.",
   "Include the required feedback object in your final JSON.",
   textConcat ["Attempt: ", encode attempt]
@@ -284,6 +406,7 @@ verifierPrompt attempt = textJoin "\n" [
   textConcat ["Read the task file at ", taskFile, "."],
   "Evaluate the whole repository against the autonomous swarm confidence goal and required capability categories.",
   verifierPolicySection,
+  verifierContextSection attempt,
   textConcat ["Attempt: ", encode attempt]
 ]
 
@@ -320,6 +443,31 @@ writeFeedback : VerifierReport -> Str
 writeFeedback report = match writeFile feedbackPath (encode report) {
   Ok written -> "",
   Err message -> message
+}
+
+verifierReportMemoryValue : Int -> VerifierReport -> Str
+verifierReportMemoryValue attempt report =
+  textJoin "\n" [
+    textConcat ["attempt=", encode attempt, " verdict=", report.verdict],
+    report.summary,
+    textJoin "\n" report.findings,
+    textJoin "\n" report.follow_up
+  ]
+
+rememberVerifierFeedback : Int -> VerifierReport -> Str
+rememberVerifierFeedback attempt report =
+  match memoryPut swarmStateRoot objectiveId "" actorName "verifier-feedback" (verifierReportMemoryValue attempt report) {
+    Ok memoryValue -> "",
+    Err message -> message
+  }
+
+writeFeedbackAndMemory : Int -> VerifierReport -> Str
+writeFeedbackAndMemory attempt report = {
+  let feedbackError = writeFeedback report in
+  if feedbackError != "" then
+    feedbackError
+  else
+    rememberVerifierFeedback attempt report
 }
 
 writePromptFile : Str -> Str -> Str
@@ -561,7 +709,7 @@ ensureAttemptTasks attempt =
 
 finalizeWithReport : Int -> Str -> Bool -> VerifierReport -> Str
 finalizeWithReport attempt verdict completed report = {
-  let feedbackError = writeFeedback report in
+  let feedbackError = writeFeedbackAndMemory attempt report in
   if feedbackError != "" then
     textConcat ["feedback-error:", feedbackError]
   else {
@@ -577,7 +725,7 @@ finalizeWithReport attempt verdict completed report = {
 
 continueAfterFailure : Int -> VerifierReport -> Str
 continueAfterFailure attempt report = {
-  let feedbackError = writeFeedback report in
+  let feedbackError = writeFeedbackAndMemory attempt report in
   if feedbackError != "" then
     textConcat ["feedback-error:", feedbackError]
   else {

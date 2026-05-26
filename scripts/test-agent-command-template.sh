@@ -399,7 +399,13 @@ assert(firstVerifier.verdict === "fail", `first local verifier verdict ${firstVe
 assert(secondVerifier.verdict === "pass", `second local verifier verdict ${secondVerifier.verdict}`);
 assert(secondBuilderPrompt.includes("Verifier feedback from the previous attempt:"), "second builder prompt should be persisted for prompt-path agents");
 assert(secondBuilderPrompt.includes("force-close-category"), "second builder prompt should include persisted verifier feedback");
+assert(secondBuilderPrompt.includes("Swarm context pack:"), "second builder prompt should include native context pack evidence");
+assert(secondBuilderPrompt.includes("task: builder-2"), "second builder prompt should identify the builder task context");
+assert(secondBuilderPrompt.includes("verifier-feedback"), "second builder prompt should include persisted verifier feedback memory");
 assert(secondVerifierPrompt.includes("verifier subagent"), "second verifier prompt should be persisted for prompt-path agents");
+assert(secondVerifierPrompt.includes("Swarm context pack:"), "second verifier prompt should include native context pack evidence");
+assert(secondVerifierPrompt.includes("task: verifier-2"), "second verifier prompt should identify the verifier task context");
+assert(secondVerifierPrompt.includes("run trace:"), "second verifier prompt should include run trace context");
 assert(
   secondVerifier.capability_statuses?.some((entry) => entry.name === "clasp_native_agent_backend" && entry.status === "pass"),
   "local verifier should prove the Clasp-native agent backend capability",

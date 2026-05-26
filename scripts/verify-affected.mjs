@@ -256,6 +256,7 @@ const COMMANDS = {
   swarmReady: "bash scripts/test-swarm-ready-gate.sh",
   swarmMemory: "bash scripts/test-swarm-memory.sh",
   swarmContextPack: "bash scripts/test-swarm-context-pack.sh",
+  agentCommandTemplate: "bash scripts/test-agent-command-template.sh",
   monitoredLoop: "bash scripts/test-monitored-loop.sh",
   monitoredStep: "bash scripts/test-monitored-step.sh",
   monitoredRunLog: "bash scripts/test-monitored-run-log.sh",
@@ -1236,6 +1237,25 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
         file,
       );
       addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "swarm-ready gate harness", file);
+    }
+
+    if (file === "scripts/test-agent-command-template.sh") {
+      matched = true;
+      reason(file, "agent-command-template-harness", "agent command template harness uses shell syntax plus focused local agent prompt coverage");
+      addSelected(
+        selectedByCommand,
+        `bash-syntax:${file}`,
+        `bash -n ${shellQuote(file)}`,
+        "agent command template shell syntax",
+        file,
+      );
+      addSelected(
+        selectedByCommand,
+        "agent-command-template",
+        COMMANDS.agentCommandTemplate,
+        "agent command template harness",
+        file,
+      );
     }
 
     if (file === "scripts/test-feedback-loop-resume.sh") {

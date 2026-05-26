@@ -484,6 +484,14 @@ switch (scenario) {
     assert(logHas("scripts/test-goal-manager-fast.sh"), "fake GoalManager fast command should execute");
     assert(logHas("scripts/test-swarm-ready-gate.sh"), "fake swarm-ready command should execute");
     break;
+  case "agent-command-template-script":
+    assert(report.changedFiles.includes("scripts/test-agent-command-template.sh"), "agent command template harness should be present");
+    assert(hasCommand("bash -n 'scripts/test-agent-command-template.sh'"), "agent command template harness should run shell syntax check");
+    assert(hasCommand("bash scripts/test-agent-command-template.sh"), "agent command template harness should run focused prompt coverage");
+    assert(report.selectedCommands.filter((command) => command.command === "bash scripts/test-agent-command-template.sh").length === 1, "agent command template command should be deduplicated");
+    assert(report.usedVerifyFastFallback === false, "known agent command template harness should not use verify-fast fallback");
+    assert(logHas("scripts/test-agent-command-template.sh"), "fake agent command template command should execute");
+    break;
   case "goal-manager-binary-helper":
     assert(report.changedFiles.includes("scripts/ensure-goal-manager-binary.sh"), "GoalManager binary helper should be present");
     assert(hasCommand("bash -n 'scripts/ensure-goal-manager-binary.sh'"), "GoalManager binary helper should run shell syntax check");
@@ -783,6 +791,12 @@ goal_manager_log="$test_root/goal-manager.log"
 CLASP_TEST_FAKE_COMMAND_LOG="$goal_manager_log" \
   run_verify_affected --changed-file scripts/test-goal-manager-fast.sh --changed-file scripts/test-swarm-ready-gate.sh > "$goal_manager_report"
 assert_report "$goal_manager_report" "$goal_manager_log" goal-manager-fast-script
+
+agent_command_template_report="$test_root/agent-command-template-report.json"
+agent_command_template_log="$test_root/agent-command-template.log"
+CLASP_TEST_FAKE_COMMAND_LOG="$agent_command_template_log" \
+  run_verify_affected --changed-file scripts/test-agent-command-template.sh > "$agent_command_template_report"
+assert_report "$agent_command_template_report" "$agent_command_template_log" agent-command-template-script
 
 goal_manager_binary_helper_report="$test_root/goal-manager-binary-helper-report.json"
 goal_manager_binary_helper_log="$test_root/goal-manager-binary-helper.log"
