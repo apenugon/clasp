@@ -102,52 +102,63 @@ plannerTask =
     role = "generic-agent-proof",
     detail = "Run a child loop without requiring Codex as the swarm agent backend.",
     dependencies = emptyTexts,
-    taskPrompt = "Verify the manager passes generic agent command templates into child loops.",
-    coordinationFocus = ["provider-neutral-agent", "child-loop-env"]
+    taskPrompt = "Verify the manager passes generic agent command templates into child loops using the native planner context pack evidence.",
+    coordinationFocus = ["provider-neutral-agent", "child-loop-env", "native-context-pack"]
   }
 
 plannerReport : PlannerReport
 plannerReport =
   PlannerReport {
     objectiveSummary = "Prove the manager can plan with a Clasp-native non-Codex backend.",
-    strategy = "Use one child loop task while preserving provider-neutral child agent command configuration.",
+    strategy = "Use the native planner context pack plus one child loop task while preserving provider-neutral child agent command configuration.",
     tasks = [plannerTask],
-    testsRun = ["clasp-local-planner-template"],
+    testsRun = ["clasp-local-planner-template", "clasp-local-planner-context-pack"],
     residualRisks = emptyTexts
   }
+
+promptHasPlannerContextPack : Str -> Bool
+promptHasPlannerContextPack prompt =
+  if textIncludes prompt "Planner context pack:" then
+    textIncludes prompt "task: planner-1"
+  else
+    false
 
 runPlanner : Str -> Str -> Str -> Str -> Str -> Str
 runPlanner reportPath promptPath schemaPath workspaceRoot fallbackLogPath = {
   let prompt = readTextOr promptPath "" in
   if textIncludes prompt "planner subagent" then
-    if textIncludes prompt "Plan 1-1 bounded tasks with explicit dependencies and task prompts." then {
-      let reportDirError = ensureDirOrMessage (pathDirname reportPath) in
-      if reportDirError != "" then
-        reportDirError
-      else {
-        let workspaceError = ensureDirOrMessage workspaceRoot in
-        if workspaceError != "" then
-          workspaceError
+    if promptHasPlannerContextPack prompt then {
+      if textIncludes prompt "Plan 1-1 bounded tasks with explicit dependencies and task prompts." then {
+        let reportDirError = ensureDirOrMessage (pathDirname reportPath) in
+        if reportDirError != "" then
+          reportDirError
         else {
-          let logError =
-            logPlannerInvocation
-              fallbackLogPath
-              (PlannerInvocation {
-                backend = "clasp-local-planner",
-                role = "planner",
-                reportPath = reportPath,
-                promptPath = promptPath,
-                schemaPath = schemaPath,
-                workspaceRoot = workspaceRoot
-              }) in
-          if logError != "" then
-            logError
-          else
-            writeTextOrMessage reportPath (encode plannerReport)
+          let workspaceError = ensureDirOrMessage workspaceRoot in
+          if workspaceError != "" then
+            workspaceError
+          else {
+            let logError =
+              logPlannerInvocation
+                fallbackLogPath
+                (PlannerInvocation {
+                  backend = "clasp-local-planner",
+                  role = "planner",
+                  reportPath = reportPath,
+                  promptPath = promptPath,
+                  schemaPath = schemaPath,
+                  workspaceRoot = workspaceRoot
+                }) in
+            if logError != "" then
+              logError
+            else
+              writeTextOrMessage reportPath (encode plannerReport)
+          }
         }
-      }
-    } else
-      "planner-error:missing task budget contract"
+      } else
+        "planner-error:missing task budget contract"
+    }
+    else
+      "planner-error:missing native context pack"
   else
     "planner-error:missing planner prompt"
 }

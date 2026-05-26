@@ -337,6 +337,9 @@ assert(status.plannedTaskIds.includes("provider-neutral-child"), "manager should
 assert(status.completedTaskIds.includes("provider-neutral-child"), "planned child task should complete");
 assert(status.objectiveProjectedStatus === "completed", `objective projected ${status.objectiveProjectedStatus}`);
 assert(planner.tasks.length === 1 && planner.tasks[0].taskId === "provider-neutral-child", "planner report should come from generic planner");
+assert(planner.tasks[0].taskPrompt.includes("native planner context pack"), "Clasp planner task should consume native context pack evidence");
+assert(planner.tasks[0].coordinationFocus.includes("native-context-pack"), "Clasp planner task should tag native context-pack coordination");
+assert(planner.testsRun.includes("clasp-local-planner-context-pack"), "Clasp planner report should record context-pack coverage");
 assert(feedback.verdict === "pass", `feedback verdict ${feedback.verdict}`);
 assert(agentInvocations.length === 1, `expected one generic planner invocation, saw ${agentInvocations.length}`);
 assert(agentInvocations[0].role === "planner", "generic agent should be used for planner role");

@@ -47,6 +47,7 @@ cp "$project_root/scripts/test-verify-compiler-slice.sh" "$project_copy/scripts/
 cp "$project_root/scripts/verify-runtime-slice.sh" "$project_copy/scripts/verify-runtime-slice.sh"
 cp "$project_root/scripts/test-verify-runtime-slice.sh" "$project_copy/scripts/test-verify-runtime-slice.sh"
 cp "$project_root/scripts/test-js-emitter-determinism.sh" "$project_copy/scripts/test-js-emitter-determinism.sh"
+cp "$project_root/scripts/test-goal-manager-fixture-manager.mjs" "$project_copy/scripts/test-goal-manager-fixture-manager.mjs"
 touch "$project_copy/examples/safe-workspace/Main.clasp"
 touch "$project_copy/examples/safe-workspace/Workspace.clasp"
 touch "$project_copy/examples/safe-subprocess/Main.clasp"
@@ -344,8 +345,10 @@ switch (scenario) {
     assert(report.changedFiles.includes("examples/swarm-native/LocalPlanner.clasp"), "LocalPlanner source should be present");
     assert(report.changedFiles.includes("scripts/test-goal-manager-agent-command-template.sh"), "provider-neutral planner harness should be present");
     assert(report.changedFiles.includes("scripts/test-goal-manager-default-planner-command.sh"), "default planner harness should be present");
+    assert(report.changedFiles.includes("scripts/test-goal-manager-fixture-manager.mjs"), "GoalManager fixture manager should be present");
     assert(hasCommand("bash -n 'scripts/test-goal-manager-agent-command-template.sh'"), "provider-neutral planner harness should run shell syntax check");
     assert(hasCommand("bash -n 'scripts/test-goal-manager-default-planner-command.sh'"), "default planner harness should run shell syntax check");
+    assert(hasCommand("node --check 'scripts/test-goal-manager-fixture-manager.mjs'"), "fixture manager should run node syntax check");
     assert(hasCommand("bash scripts/test-goal-manager-agent-command-template.sh"), "planner prompt route should run provider-neutral planner coverage");
     assert(hasCommand("bash scripts/test-goal-manager-default-planner-command.sh"), "planner prompt route should run default planner command coverage");
     assert(hasCommand("bash scripts/test-swarm-ready-gate.sh"), "planner prompt route should keep structural swarm-ready coverage");
@@ -851,7 +854,8 @@ CLASP_TEST_FAKE_COMMAND_LOG="$goal_manager_planner_prompt_log" \
     --changed-file examples/swarm-native/GoalManagerBootstrapPlanner.clasp \
     --changed-file examples/swarm-native/LocalPlanner.clasp \
     --changed-file scripts/test-goal-manager-agent-command-template.sh \
-    --changed-file scripts/test-goal-manager-default-planner-command.sh > "$goal_manager_planner_prompt_report"
+    --changed-file scripts/test-goal-manager-default-planner-command.sh \
+    --changed-file scripts/test-goal-manager-fixture-manager.mjs > "$goal_manager_planner_prompt_report"
 assert_report "$goal_manager_planner_prompt_report" "$goal_manager_planner_prompt_log" goal-manager-planner-prompt
 
 goal_manager_binary_helper_report="$test_root/goal-manager-binary-helper-report.json"

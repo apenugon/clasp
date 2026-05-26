@@ -808,7 +808,8 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
       file === "examples/swarm-native/GoalManagerBootstrapPlanner.clasp" ||
       file === "examples/swarm-native/LocalPlanner.clasp" ||
       file === "scripts/test-goal-manager-agent-command-template.sh" ||
-      file === "scripts/test-goal-manager-default-planner-command.sh";
+      file === "scripts/test-goal-manager-default-planner-command.sh" ||
+      file === "scripts/test-goal-manager-fixture-manager.mjs";
 
     if (file.startsWith("src/") && !isPromotedSourceExportCache && !isSourceNativeVerifyScript) {
       matched = true;
@@ -1029,6 +1030,15 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
           `bash-syntax:${file}`,
           `bash -n ${shellQuote(file)}`,
           "GoalManager planner prompt shell syntax",
+          file,
+        );
+      }
+      if (file.endsWith(".mjs")) {
+        addSelected(
+          selectedByCommand,
+          `node-syntax:${file}`,
+          `node --check ${shellQuote(file)}`,
+          "GoalManager planner prompt node syntax",
           file,
         );
       }
