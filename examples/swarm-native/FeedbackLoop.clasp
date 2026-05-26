@@ -70,6 +70,12 @@ readEnvTextList name fallback = match envVar name {
   Err message -> fallback
 }
 
+readEnvInt : Str -> Int -> Int
+readEnvInt name fallback = match envVar name {
+  Ok raw -> if raw == "" then fallback else decode Int raw,
+  Err message -> fallback
+}
+
 taskFile : Str
 taskFile = readEnvText "CLASP_LOOP_TASK_FILE_JSON" "agents/tasks/0012-autonomous-swarm-confidence.md"
 
@@ -110,10 +116,16 @@ agentCommandTemplate : [Str]
 agentCommandTemplate = readEnvTextList "CLASP_LOOP_AGENT_COMMAND_JSON" emptyTexts
 
 maxAttempts : Int
-maxAttempts = match envVar "CLASP_LOOP_MAX_ATTEMPTS_JSON" {
-  Ok raw -> decode Int raw,
-  Err message -> 20
-}
+maxAttempts = readEnvInt "CLASP_LOOP_MAX_ATTEMPTS_JSON" 20
+
+agentTimeoutMs : Int
+agentTimeoutMs = readEnvInt "CLASP_LOOP_AGENT_TIMEOUT_MS_JSON" 0
+
+builderTimeoutMs : Int
+builderTimeoutMs = readEnvInt "CLASP_LOOP_BUILDER_TIMEOUT_MS_JSON" agentTimeoutMs
+
+verifierTimeoutMs : Int
+verifierTimeoutMs = readEnvInt "CLASP_LOOP_VERIFIER_TIMEOUT_MS_JSON" agentTimeoutMs
 
 actorName : Str
 actorName = match envVar "CLASP_SWARM_ACTOR" {
@@ -680,6 +692,36 @@ builderCommand attempt = commandSpec "." (agentCommand "builder" builderSchemaPa
 verifierCommand : Int -> SwarmCommand
 verifierCommand attempt = commandSpec "." (agentCommand "verifier" verifierSchemaPath (verifierReportPath attempt) (verifierPromptPath attempt) (verifierPrompt attempt))
 
+runBuilderCommand : Int -> Result SwarmRun
+runBuilderCommand attempt =
+  if builderTimeoutMs > 0 then
+    toolRunWithTimeout (builderHandle attempt) (builderCommand attempt) builderTimeoutMs
+  else
+    toolRun (builderHandle attempt) (builderCommand attempt)
+
+runVerifierCommand : Int -> Result SwarmRun
+runVerifierCommand attempt =
+  if verifierTimeoutMs > 0 then
+    verifierRunWithTimeout (verifierHandle attempt) "autonomous-confidence" (verifierCommand attempt) verifierTimeoutMs
+  else
+    verifierRun (verifierHandle attempt) "autonomous-confidence" (verifierCommand attempt)
+
+runFailureDetail : Str -> SwarmRun -> Str
+runFailureDetail role run =
+  textConcat [
+    role,
+    " run failed: status=",
+    run.status,
+    " exit=",
+    encode run.exitCode,
+    " timedOut=",
+    promptBoolText run.timedOut,
+    " stdout=",
+    run.stdoutArtifactPath,
+    " stderr=",
+    run.stderrArtifactPath
+  ]
+
 ensureLoopReady : Str
 ensureLoopReady =
   if taskFile == "" then
@@ -791,26 +833,33 @@ runVerifierAttempt attempt = {
         if promptError != "" then
           continueAfterFailure attempt (syntheticFailureReport "verifier prompt write failed" promptError)
         else
-          match verifierRun (verifierHandle attempt) "autonomous-confidence" (verifierCommand attempt) {
+          match runVerifierCommand attempt {
             Err message ->
               continueAfterFailure attempt (syntheticFailureReport "verifier run failed" message),
             Ok runValue ->
-              match complete (verifierHandle attempt) {
+              match finishToolRun (verifierHandle attempt) runValue {
                 Err message ->
-                  continueAfterFailure attempt (syntheticFailureReport "verifier completion failed" message),
-                Ok completedValue ->
-                  if fileExists (verifierReportPath attempt) then {
-                    let report = readVerifierReport attempt in
-                    if report.verdict == "pass" then
-                      finishAfterApproval attempt report
-                    else
-                      continueAfterFailure attempt report
-                  } else
+                  continueAfterFailure attempt (syntheticFailureReport "verifier task status update failed" message),
+                Ok statusValue ->
+                  if runPassed runValue then
+                    if fileExists (verifierReportPath attempt) then {
+                      let report = readVerifierReport attempt in
+                      if report.verdict == "pass" then
+                        finishAfterApproval attempt report
+                      else
+                        continueAfterFailure attempt report
+                    } else
+                      continueAfterFailure
+                        attempt
+                        (syntheticFailureReport
+                          "verifier step failed before producing a durable report"
+                          runValue.stderrArtifactPath)
+                  else
                     continueAfterFailure
                       attempt
                       (syntheticFailureReport
-                        "verifier step failed before producing a durable report"
-                        runValue.stderrArtifactPath)
+                        "verifier run failed"
+                        (runFailureDetail "verifier" runValue))
               }
           }
     }
@@ -840,26 +889,33 @@ runBuilderAttempt attempt = {
             if promptError != "" then
               continueAfterFailure attempt (syntheticFailureReport "builder prompt write failed" promptError)
             else
-              match toolRun (builderHandle attempt) (builderCommand attempt) {
+              match runBuilderCommand attempt {
                 Err message ->
                   continueAfterFailure attempt (syntheticFailureReport "builder run failed" message),
                 Ok runValue ->
-                  match complete (builderHandle attempt) {
+                  match finishToolRun (builderHandle attempt) runValue {
                     Err message ->
-                      continueAfterFailure attempt (syntheticFailureReport "builder completion failed" message),
-                    Ok completedValue ->
-                      if fileExists (builderReportPath attempt) then {
-                        let readyError = verifyTaskReady attempt in
-                        if readyError != "" then
-                          continueAfterFailure attempt (syntheticFailureReport "verifier task did not become ready" readyError)
-                        else
-                          runVerifierAttempt attempt
-                      } else
+                      continueAfterFailure attempt (syntheticFailureReport "builder task status update failed" message),
+                    Ok statusValue ->
+                      if runPassed runValue then
+                        if fileExists (builderReportPath attempt) then {
+                          let readyError = verifyTaskReady attempt in
+                          if readyError != "" then
+                            continueAfterFailure attempt (syntheticFailureReport "verifier task did not become ready" readyError)
+                          else
+                            runVerifierAttempt attempt
+                        } else
+                          continueAfterFailure
+                            attempt
+                            (syntheticFailureReport
+                              "builder step failed before producing a durable report"
+                              runValue.stderrArtifactPath)
+                      else
                         continueAfterFailure
                           attempt
                           (syntheticFailureReport
-                            "builder step failed before producing a durable report"
-                            runValue.stderrArtifactPath)
+                            "builder run failed"
+                            (runFailureDetail "builder" runValue))
                   }
               }
         }

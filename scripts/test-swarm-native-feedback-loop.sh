@@ -27,6 +27,12 @@ tail_output="$test_root_abs/tail.json"
 builder_runs_output="$test_root_abs/builder-runs.json"
 verifier_runs_output="$test_root_abs/verifier-runs.json"
 builder_artifacts_output="$test_root_abs/builder-artifacts.json"
+timeout_state_root="$test_root_abs/timeout-state"
+timeout_workspace_root="$test_root_abs/timeout-workspace"
+timeout_run_output="$test_root_abs/timeout-run-output.json"
+timeout_status_output="$test_root_abs/timeout-status-output.json"
+timeout_builder_status_output="$test_root_abs/timeout-builder-status.json"
+timeout_builder_runs_output="$test_root_abs/timeout-builder-runs.json"
 demo_path="$project_root/examples/swarm-native/FeedbackLoop.clasp"
 
 test_xdg_cache_home="${CLASP_TEST_SHARED_XDG_CACHE_HOME:-$tmp_root/clasp-test-xdg-cache}"
@@ -154,8 +160,12 @@ fi
 
 grep -F 'codexCommand' "$demo_path" >/dev/null
 grep -F '"exec"' "$demo_path" >/dev/null
-grep -F 'toolRun (builderHandle attempt) (builderCommand attempt)' "$demo_path" >/dev/null
-grep -F 'verifierRun (verifierHandle attempt) "autonomous-confidence" (verifierCommand attempt)' "$demo_path" >/dev/null
+grep -F 'CLASP_LOOP_BUILDER_TIMEOUT_MS_JSON' "$demo_path" >/dev/null
+grep -F 'CLASP_LOOP_VERIFIER_TIMEOUT_MS_JSON' "$demo_path" >/dev/null
+grep -F 'toolRunWithTimeout (builderHandle attempt) (builderCommand attempt) builderTimeoutMs' "$demo_path" >/dev/null
+grep -F 'verifierRunWithTimeout (verifierHandle attempt) "autonomous-confidence" (verifierCommand attempt) verifierTimeoutMs' "$demo_path" >/dev/null
+grep -F 'finishToolRun (builderHandle attempt) runValue' "$demo_path" >/dev/null
+grep -F 'finishToolRun (verifierHandle attempt) runValue' "$demo_path" >/dev/null
 
 CLASP_LOOP_CODEX_BIN_JSON="\"$fake_codex\"" \
   timeout "$timeout_secs" "$claspc_bin" --json check "$demo_path" |
@@ -297,6 +307,79 @@ assert(
 );
 
 assertIncludes(builderRunsPath, "builder-2", "builder runs");
+NODE
+
+mkdir -p "$timeout_workspace_root"
+CLASP_LOOP_CODEX_BIN_JSON="\"$fake_codex\"" \
+  CLASP_LOOP_TASK_FILE_JSON="\"$task_file\"" \
+  CLASP_LOOP_WORKSPACE_JSON="\"$timeout_workspace_root\"" \
+  CLASP_LOOP_MAX_ATTEMPTS_JSON='1' \
+  CLASP_LOOP_BUILDER_TIMEOUT_MS_JSON='100' \
+  CLASP_TEST_FAKE_CODEX_SLEEP_SECS='2' \
+  timeout "$timeout_secs" "$claspc_bin" run "$demo_path" -- "$timeout_state_root" >"$timeout_run_output"
+
+CLASP_LOOP_COMMAND=status \
+  timeout "$timeout_secs" "$claspc_bin" run "$demo_path" -- "$timeout_state_root" >"$timeout_status_output"
+timeout "$timeout_secs" "$claspc_bin" --json swarm status "$timeout_state_root" builder-1 >"$timeout_builder_status_output"
+timeout "$timeout_secs" "$claspc_bin" --json swarm runs "$timeout_state_root" builder-1 >"$timeout_builder_runs_output"
+
+node - \
+  "$timeout_run_output" \
+  "$timeout_status_output" \
+  "$timeout_builder_status_output" \
+  "$timeout_builder_runs_output" \
+  "$timeout_state_root/feedback.json" <<'NODE'
+const fs = require("node:fs");
+
+const [
+  runPath,
+  statusPath,
+  builderStatusPath,
+  builderRunsPath,
+  feedbackPath,
+] = process.argv.slice(2);
+
+function readText(path) {
+  return fs.readFileSync(path, "utf8");
+}
+
+function readJson(path) {
+  return JSON.parse(readText(path));
+}
+
+function assert(condition, message) {
+  if (!condition) {
+    throw new Error(message);
+  }
+}
+
+function statusState(view) {
+  return view.state || {};
+}
+
+const run = readJson(runPath);
+const status = readJson(statusPath);
+const builderStatus = readJson(builderStatusPath);
+const builderRuns = readJson(builderRunsPath);
+const feedback = readJson(feedbackPath);
+
+assert(statusState(run).phase === "failed", `timeout run phase ${statusState(run).phase}`);
+assert(statusState(run).verdict === "fail", `timeout run verdict ${statusState(run).verdict}`);
+assert(statusState(run).final === true, "timeout run should be final after one attempt");
+assert(run.feedbackSummary === "builder run failed", `timeout feedback summary ${run.feedbackSummary}`);
+assert(statusState(status).phase === "failed", `timeout status phase ${statusState(status).phase}`);
+assert(status.feedbackSummary === "builder run failed", `timeout status feedback ${status.feedbackSummary}`);
+assert(builderStatus.status === "failed", `builder task status ${builderStatus.status}`);
+assert(builderRuns.length === 1, `builder run count ${builderRuns.length}`);
+assert(builderRuns[0].status === "timed_out", `builder run status ${builderRuns[0].status}`);
+assert(builderRuns[0].timedOut === true, "builder run should record timedOut=true");
+assert(builderRuns[0].exitCode === 124, `builder timeout exit ${builderRuns[0].exitCode}`);
+assert(feedback.verdict === "fail", `timeout feedback verdict ${feedback.verdict}`);
+assert(feedback.summary === "builder run failed", `timeout feedback summary ${feedback.summary}`);
+assert(
+  JSON.stringify(feedback).includes("timedOut=true"),
+  "timeout feedback should include the timed-out run detail",
+);
 NODE
 
 printf 'swarm-native-feedback-loop: ok\n'
