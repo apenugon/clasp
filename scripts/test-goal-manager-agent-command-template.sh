@@ -151,20 +151,32 @@ if [[ "${CLASP_LOOP_AGENT_BIN_JSON:-}" != "${CLASP_TEST_EXPECT_AGENT_BIN_JSON:-}
   printf 'child loop did not receive the generic agent binary\n' >&2
   exit 73
 fi
+if [[ "${CLASP_LOOP_AGENT_MEMORY_MB_JSON:-}" != "2048" ]]; then
+  printf 'child loop did not receive the generic agent memory cap\n' >&2
+  exit 77
+fi
+if [[ "${CLASP_LOOP_BUILDER_MEMORY_MB_JSON:-}" != "1024" ]]; then
+  printf 'child loop did not receive the builder memory cap\n' >&2
+  exit 78
+fi
+if [[ "${CLASP_LOOP_VERIFIER_MEMORY_MB_JSON:-}" != "1536" ]]; then
+  printf 'child loop did not receive the verifier memory cap\n' >&2
+  exit 79
+fi
 if [[ -n "${CLASP_MANAGER_BENCHMARK_COMMAND_JSON:-}" ]]; then
   printf 'child loop inherited manager benchmark command\n' >&2
-  exit 74
+  exit 80
 fi
 
 task_file="$(decode_json_env CLASP_LOOP_TASK_FILE_JSON)"
 workspace_root="$(decode_json_env CLASP_LOOP_WORKSPACE_JSON)"
 if [[ ! -f "$task_file" ]]; then
   printf 'child loop task file missing: %s\n' "$task_file" >&2
-  exit 75
+  exit 81
 fi
 if [[ "$(cat "$task_file")" != *"generic agent command templates"* ]]; then
   printf 'child loop task prompt did not come from generic planner report\n' >&2
-  exit 76
+  exit 82
 fi
 
 mkdir -p "$workspace_root/notes" "$workspace_root/.clasp-test-tmp" "$state_root"
@@ -172,12 +184,15 @@ printf 'provider-neutral-child-ok\n' >"$workspace_root/workspace.txt"
 printf 'provider-neutral-child-ok\n' >"$workspace_root/notes/child-artifact.txt"
 printf 'transient-noise\n' >"$workspace_root/.clasp-test-tmp/noise.txt"
 
-printf '{"stateRoot":%s,"workspaceRoot":%s,"agentCommandJson":%s,"agentBinJson":%s,"codexBinJson":%s}\n' \
+printf '{"stateRoot":%s,"workspaceRoot":%s,"agentCommandJson":%s,"agentBinJson":%s,"codexBinJson":%s,"agentMemoryMb":%s,"builderMemoryMb":%s,"verifierMemoryMb":%s}\n' \
   "$(node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "$state_root")" \
   "$(node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "$workspace_root")" \
   "$(node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "${CLASP_LOOP_AGENT_COMMAND_JSON:-}")" \
   "$(node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "${CLASP_LOOP_AGENT_BIN_JSON:-}")" \
   "$(node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "${CLASP_LOOP_CODEX_BIN_JSON:-}")" \
+  "$(node -e 'process.stdout.write(JSON.stringify(Number(process.argv[1])))' "${CLASP_LOOP_AGENT_MEMORY_MB_JSON:-0}")" \
+  "$(node -e 'process.stdout.write(JSON.stringify(Number(process.argv[1])))' "${CLASP_LOOP_BUILDER_MEMORY_MB_JSON:-0}")" \
+  "$(node -e 'process.stdout.write(JSON.stringify(Number(process.argv[1])))' "${CLASP_LOOP_VERIFIER_MEMORY_MB_JSON:-0}")" \
   >> "${CLASP_TEST_CHILD_ENV_LOG:?}"
 
 cat >"$state_root/state.json" <<'JSON'
@@ -264,6 +279,9 @@ CLASP_LOOP_AGENT_BIN_JSON="$agent_bin_json" \
 CLASP_LOOP_CODEX_BIN_JSON="$codex_bin_json" \
 CLASP_LOOP_AGENT_COMMAND_JSON="$agent_command_json" \
 CLASP_MANAGER_PLANNER_AGENT_COMMAND_JSON="$agent_command_json" \
+CLASP_LOOP_AGENT_MEMORY_MB_JSON='2048' \
+CLASP_LOOP_BUILDER_MEMORY_MB_JSON='1024' \
+CLASP_LOOP_VERIFIER_MEMORY_MB_JSON='1536' \
 CLASP_MANAGER_CLASPC_BIN_JSON="$child_claspc_json" \
 CLASP_MANAGER_PROJECT_ROOT_JSON="$project_root_json" \
 CLASP_LOOP_WORKSPACE_JSON="$workspace_json" \
@@ -347,6 +365,9 @@ assert(agentInvocations[0].backend === "clasp-local-planner", "GoalManager shoul
 assert(childInvocations.length === 1, `expected one child loop invocation, saw ${childInvocations.length}`);
 assert(childInvocations[0].agentCommandJson === expectedAgentCommandJson, "child should receive generic agent command JSON");
 assert(childInvocations[0].agentBinJson === expectedAgentBinJson, "child should receive generic agent binary JSON");
+assert(childInvocations[0].agentMemoryMb === 2048, `agent memory cap ${childInvocations[0].agentMemoryMb}`);
+assert(childInvocations[0].builderMemoryMb === 1024, `builder memory cap ${childInvocations[0].builderMemoryMb}`);
+assert(childInvocations[0].verifierMemoryMb === 1536, `verifier memory cap ${childInvocations[0].verifierMemoryMb}`);
 assert(fs.readFileSync(path.join(workspaceRoot, ".clasp-task-workspaces", "provider-neutral-child", "workspace.txt"), "utf8").trim() === "provider-neutral-child-ok", "child workspace should be written");
 assert(!fs.existsSync(codexMarker), "Codex fallback backend should not be invoked");
 NODE

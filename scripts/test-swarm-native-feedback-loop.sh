@@ -162,8 +162,10 @@ grep -F 'codexCommand' "$demo_path" >/dev/null
 grep -F '"exec"' "$demo_path" >/dev/null
 grep -F 'CLASP_LOOP_BUILDER_TIMEOUT_MS_JSON' "$demo_path" >/dev/null
 grep -F 'CLASP_LOOP_VERIFIER_TIMEOUT_MS_JSON' "$demo_path" >/dev/null
-grep -F 'toolRunWithTimeout (builderHandle attempt) (builderCommand attempt) builderTimeoutMs' "$demo_path" >/dev/null
-grep -F 'verifierRunWithTimeout (verifierHandle attempt) "autonomous-confidence" (verifierCommand attempt) verifierTimeoutMs' "$demo_path" >/dev/null
+grep -F 'CLASP_LOOP_BUILDER_MEMORY_MB_JSON' "$demo_path" >/dev/null
+grep -F 'CLASP_LOOP_VERIFIER_MEMORY_MB_JSON' "$demo_path" >/dev/null
+grep -F 'toolRunWithOptionalLimits (builderHandle attempt) (builderCommand attempt) builderTimeoutMs builderMemoryLimitMb' "$demo_path" >/dev/null
+grep -F 'verifierRunWithOptionalLimits (verifierHandle attempt) "autonomous-confidence" (verifierCommand attempt) verifierTimeoutMs verifierMemoryLimitMb' "$demo_path" >/dev/null
 grep -F 'finishToolRun (builderHandle attempt) runValue' "$demo_path" >/dev/null
 grep -F 'finishToolRun (verifierHandle attempt) runValue' "$demo_path" >/dev/null
 
@@ -315,6 +317,7 @@ CLASP_LOOP_CODEX_BIN_JSON="\"$fake_codex\"" \
   CLASP_LOOP_WORKSPACE_JSON="\"$timeout_workspace_root\"" \
   CLASP_LOOP_MAX_ATTEMPTS_JSON='1' \
   CLASP_LOOP_BUILDER_TIMEOUT_MS_JSON='100' \
+  CLASP_LOOP_BUILDER_MEMORY_MB_JSON='512' \
   CLASP_TEST_FAKE_CODEX_SLEEP_SECS='2' \
   timeout "$timeout_secs" "$claspc_bin" run "$demo_path" -- "$timeout_state_root" >"$timeout_run_output"
 
@@ -374,11 +377,16 @@ assert(builderRuns.length === 1, `builder run count ${builderRuns.length}`);
 assert(builderRuns[0].status === "timed_out", `builder run status ${builderRuns[0].status}`);
 assert(builderRuns[0].timedOut === true, "builder run should record timedOut=true");
 assert(builderRuns[0].exitCode === 124, `builder timeout exit ${builderRuns[0].exitCode}`);
+assert(builderRuns[0].memoryLimitMb === 512, `builder memory limit ${builderRuns[0].memoryLimitMb}`);
 assert(feedback.verdict === "fail", `timeout feedback verdict ${feedback.verdict}`);
 assert(feedback.summary === "builder run failed", `timeout feedback summary ${feedback.summary}`);
 assert(
   JSON.stringify(feedback).includes("timedOut=true"),
   "timeout feedback should include the timed-out run detail",
+);
+assert(
+  JSON.stringify(feedback).includes("memoryLimitMb=512"),
+  "timeout feedback should include the memory-limited run detail",
 );
 NODE
 

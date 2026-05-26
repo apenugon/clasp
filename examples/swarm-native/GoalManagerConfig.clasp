@@ -198,6 +198,15 @@ agentCommandTemplate = readEnvTextList "CLASP_LOOP_AGENT_COMMAND_JSON" emptyText
 plannerAgentCommandTemplate : [Str]
 plannerAgentCommandTemplate = readEnvTextList "CLASP_MANAGER_PLANNER_AGENT_COMMAND_JSON" agentCommandTemplate
 
+agentMemoryLimitMb : Int
+agentMemoryLimitMb = readEnvInt "CLASP_LOOP_AGENT_MEMORY_MB_JSON" 8192
+
+builderMemoryLimitMb : Int
+builderMemoryLimitMb = readEnvInt "CLASP_LOOP_BUILDER_MEMORY_MB_JSON" agentMemoryLimitMb
+
+verifierMemoryLimitMb : Int
+verifierMemoryLimitMb = readEnvInt "CLASP_LOOP_VERIFIER_MEMORY_MB_JSON" agentMemoryLimitMb
+
 childLoopWatchPollMs : Int
 childLoopWatchPollMs = match envVar "CLASP_LOOP_WATCH_POLL_MS_JSON" {
   Ok raw -> decode Int raw,

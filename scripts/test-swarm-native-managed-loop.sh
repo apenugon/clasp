@@ -70,6 +70,9 @@ function checkTrace(actual, expected, label) {
     assert(entry.status === exp.status, `${label} status ${index}`);
     assert(entry.exitCode === exp.exitCode, `${label} exit ${index}`);
     assert(entry.timedOut === false, `${label} timedOut ${index}`);
+    if (typeof exp.memoryLimitMb === "number") {
+      assert(entry.memoryLimitMb === exp.memoryLimitMb, `${label} memory ${index}`);
+    }
     assert(entry.failedVerifierClassification === exp.classification, `${label} classification ${index}`);
     artifactText(entry.stdoutArtifactPath, exp.stdout, `${label} stdout ${entry.verifierName}`);
     artifactText(entry.stderrArtifactPath, "", `${label} stderr ${entry.verifierName}`);
@@ -81,6 +84,8 @@ assert(managed, "missing managed report");
 assert(managed.phase === "completed", `managed phase ${managed.phase}`);
 assert(managed.attempt === 2, `managed attempt ${managed.attempt}`);
 assert(managed.maxAttempts === 2, `managed maxAttempts ${managed.maxAttempts}`);
+assert(managed.builderMemoryLimitMb === 512, `managed builder memory ${managed.builderMemoryLimitMb}`);
+assert(managed.verifierMemoryLimitMb === 512, `managed verifier memory ${managed.verifierMemoryLimitMb}`);
 assert(managed.completed === true, "managed loop should complete");
 assert(managed.exhausted === false, "managed loop should not exhaust attempts");
 assert(managed.requeued === true, "managed loop should requeue after first verifier failure");
@@ -97,16 +102,16 @@ sameList(managed.failedVerificationTraceClassifications, ["exit-code", "none"], 
 checkTrace(
   managed.verificationTrace,
   [
-    { verifierName: "managed-primary", status: "passed", exitCode: 0, classification: "none", stdout: "managed-primary-pass" },
-    { verifierName: "managed-secondary", status: "passed", exitCode: 0, classification: "none", stdout: "managed-secondary-pass" },
+    { verifierName: "managed-primary", status: "passed", exitCode: 0, memoryLimitMb: 512, classification: "none", stdout: "managed-primary-pass" },
+    { verifierName: "managed-secondary", status: "passed", exitCode: 0, memoryLimitMb: 512, classification: "none", stdout: "managed-secondary-pass" },
   ],
   "managed final verification trace",
 );
 checkTrace(
   managed.failedVerificationTrace,
   [
-    { verifierName: "managed-primary", status: "failed", exitCode: 6, classification: "exit-code", stdout: "managed-primary-first-fail" },
-    { verifierName: "managed-secondary", status: "passed", exitCode: 0, classification: "none", stdout: "managed-secondary-pass" },
+    { verifierName: "managed-primary", status: "failed", exitCode: 6, memoryLimitMb: 512, classification: "exit-code", stdout: "managed-primary-first-fail" },
+    { verifierName: "managed-secondary", status: "passed", exitCode: 0, memoryLimitMb: 512, classification: "none", stdout: "managed-secondary-pass" },
   ],
   "managed failed verification trace",
 );
@@ -145,6 +150,8 @@ assert(fs.existsSync(report.statusPath), `status file missing: ${report.statusPa
 const blocked = report.blocked;
 assert(blocked, "missing blocked report");
 assert(blocked.phase === "inspect", `blocked phase ${blocked.phase}`);
+assert(blocked.builderMemoryLimitMb === 0, `blocked builder memory ${blocked.builderMemoryLimitMb}`);
+assert(blocked.verifierMemoryLimitMb === 0, `blocked verifier memory ${blocked.verifierMemoryLimitMb}`);
 assert(blocked.completed === false, "blocked task should not complete");
 assert(blocked.objectiveId === "blocked-loop", `blocked objective ${blocked.objectiveId}`);
 assert(blocked.taskId === "blocked-child", `blocked task ${blocked.taskId}`);
@@ -168,6 +175,8 @@ assert(budget, "missing budget report");
 assert(budget.phase === "builder-failed", `budget phase ${budget.phase}`);
 assert(budget.attempt === 25, `budget attempt ${budget.attempt}`);
 assert(budget.maxAttempts === 25, `budget maxAttempts ${budget.maxAttempts}`);
+assert(budget.builderMemoryLimitMb === 512, `budget builder memory ${budget.builderMemoryLimitMb}`);
+assert(budget.verifierMemoryLimitMb === 512, `budget verifier memory ${budget.verifierMemoryLimitMb}`);
 assert(budget.completed === false, "budget loop should not complete");
 assert(budget.exhausted === true, "budget loop should exhaust attempts");
 assert(budget.requeued === true, "budget loop should requeue before exhaustion");

@@ -152,22 +152,37 @@ if [[ -z "$state_root" ]]; then
   printf 'missing child loop state root\n' >&2
   exit 71
 fi
+if [[ "${CLASP_LOOP_AGENT_MEMORY_MB_JSON:-}" != "3072" ]]; then
+  printf 'child loop did not receive default planner agent memory cap\n' >&2
+  exit 73
+fi
+if [[ "${CLASP_LOOP_BUILDER_MEMORY_MB_JSON:-}" != "2048" ]]; then
+  printf 'child loop did not receive default planner builder memory cap\n' >&2
+  exit 74
+fi
+if [[ "${CLASP_LOOP_VERIFIER_MEMORY_MB_JSON:-}" != "2560" ]]; then
+  printf 'child loop did not receive default planner verifier memory cap\n' >&2
+  exit 75
+fi
 
 task_file="$(decode_json_env CLASP_LOOP_TASK_FILE_JSON)"
 workspace_root="$(decode_json_env CLASP_LOOP_WORKSPACE_JSON)"
 
 if [[ ! -f "$task_file" || "$(cat "$task_file")" != *"shell-free"* ]]; then
   printf 'child loop task prompt did not come from default planner report\n' >&2
-  exit 72
+  exit 76
 fi
 
 mkdir -p "$workspace_root/notes" "$state_root"
 printf 'default-planner-child-ok\n' >"$workspace_root/workspace.txt"
 printf 'default-planner-child-ok\n' >"$workspace_root/notes/child-artifact.txt"
-printf '{"stateRoot":%s,"workspaceRoot":%s,"agentCommandJson":%s}\n' \
+printf '{"stateRoot":%s,"workspaceRoot":%s,"agentCommandJson":%s,"agentMemoryMb":%s,"builderMemoryMb":%s,"verifierMemoryMb":%s}\n' \
   "$(node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "$state_root")" \
   "$(node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "$workspace_root")" \
   "$(node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "${CLASP_LOOP_AGENT_COMMAND_JSON:-}")" \
+  "$(node -e 'process.stdout.write(JSON.stringify(Number(process.argv[1])))' "${CLASP_LOOP_AGENT_MEMORY_MB_JSON:-0}")" \
+  "$(node -e 'process.stdout.write(JSON.stringify(Number(process.argv[1])))' "${CLASP_LOOP_BUILDER_MEMORY_MB_JSON:-0}")" \
+  "$(node -e 'process.stdout.write(JSON.stringify(Number(process.argv[1])))' "${CLASP_LOOP_VERIFIER_MEMORY_MB_JSON:-0}")" \
   >>"${CLASP_TEST_CHILD_LOG:?}"
 
 cat >"$state_root/state.json" <<'JSON'
@@ -217,6 +232,9 @@ goal_json="$(json_string "Prove GoalManager can run the default planner backend 
 mkdir -p "$workspace_root"
 XDG_CACHE_HOME="$test_root_abs/xdg-cache" \
 CLASP_LOOP_CODEX_BIN_JSON="$codex_bin_json" \
+CLASP_LOOP_AGENT_MEMORY_MB_JSON='3072' \
+CLASP_LOOP_BUILDER_MEMORY_MB_JSON='2048' \
+CLASP_LOOP_VERIFIER_MEMORY_MB_JSON='2560' \
 CLASP_MANAGER_CLASPC_BIN_JSON="$child_claspc_json" \
 CLASP_MANAGER_PROJECT_ROOT_JSON="$project_root_json" \
 CLASP_LOOP_WORKSPACE_JSON="$workspace_json" \
@@ -286,6 +304,9 @@ assert(planner.tasks.length === 1 && planner.tasks[0].taskId === "default-planne
 assert(plannerInvocations.length === 1, `expected one fake planner invocation, saw ${plannerInvocations.length}`);
 assert(plannerInvocations[0].promptFromStdin === false, "planner prompt should not come from stdin");
 assert(childInvocations.length === 1, `expected one child loop invocation, saw ${childInvocations.length}`);
+assert(childInvocations[0].agentMemoryMb === 3072, `agent memory cap ${childInvocations[0].agentMemoryMb}`);
+assert(childInvocations[0].builderMemoryMb === 2048, `builder memory cap ${childInvocations[0].builderMemoryMb}`);
+assert(childInvocations[0].verifierMemoryMb === 2560, `verifier memory cap ${childInvocations[0].verifierMemoryMb}`);
 assert(fs.readFileSync(path.join(workspaceRoot, ".clasp-task-workspaces", "default-planner-child", "workspace.txt"), "utf8").trim() === "default-planner-child-ok", "child workspace should be promoted");
 assert(!fs.existsSync(stdinMarker), "default planner should not use stdin marker");
 NODE

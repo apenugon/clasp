@@ -121,11 +121,20 @@ maxAttempts = readEnvInt "CLASP_LOOP_MAX_ATTEMPTS_JSON" 20
 agentTimeoutMs : Int
 agentTimeoutMs = readEnvInt "CLASP_LOOP_AGENT_TIMEOUT_MS_JSON" 0
 
+agentMemoryLimitMb : Int
+agentMemoryLimitMb = readEnvInt "CLASP_LOOP_AGENT_MEMORY_MB_JSON" 8192
+
 builderTimeoutMs : Int
 builderTimeoutMs = readEnvInt "CLASP_LOOP_BUILDER_TIMEOUT_MS_JSON" agentTimeoutMs
 
 verifierTimeoutMs : Int
 verifierTimeoutMs = readEnvInt "CLASP_LOOP_VERIFIER_TIMEOUT_MS_JSON" agentTimeoutMs
+
+builderMemoryLimitMb : Int
+builderMemoryLimitMb = readEnvInt "CLASP_LOOP_BUILDER_MEMORY_MB_JSON" agentMemoryLimitMb
+
+verifierMemoryLimitMb : Int
+verifierMemoryLimitMb = readEnvInt "CLASP_LOOP_VERIFIER_MEMORY_MB_JSON" agentMemoryLimitMb
 
 actorName : Str
 actorName = match envVar "CLASP_SWARM_ACTOR" {
@@ -708,17 +717,11 @@ verifierCommand attempt = commandSpec "." (agentCommand "verifier" verifierSchem
 
 runBuilderCommand : Int -> Result SwarmRun
 runBuilderCommand attempt =
-  if builderTimeoutMs > 0 then
-    toolRunWithTimeout (builderHandle attempt) (builderCommand attempt) builderTimeoutMs
-  else
-    toolRun (builderHandle attempt) (builderCommand attempt)
+  toolRunWithOptionalLimits (builderHandle attempt) (builderCommand attempt) builderTimeoutMs builderMemoryLimitMb
 
 runVerifierCommand : Int -> Result SwarmRun
 runVerifierCommand attempt =
-  if verifierTimeoutMs > 0 then
-    verifierRunWithTimeout (verifierHandle attempt) "autonomous-confidence" (verifierCommand attempt) verifierTimeoutMs
-  else
-    verifierRun (verifierHandle attempt) "autonomous-confidence" (verifierCommand attempt)
+  verifierRunWithOptionalLimits (verifierHandle attempt) "autonomous-confidence" (verifierCommand attempt) verifierTimeoutMs verifierMemoryLimitMb
 
 runFailureDetail : Str -> SwarmRun -> Str
 runFailureDetail role run =
@@ -730,6 +733,8 @@ runFailureDetail role run =
     encode run.exitCode,
     " timedOut=",
     promptBoolText run.timedOut,
+    " memoryLimitMb=",
+    encode run.memoryLimitMb,
     " stdout=",
     run.stdoutArtifactPath,
     " stderr=",

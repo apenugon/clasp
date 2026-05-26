@@ -233,6 +233,8 @@ managedLoopBuildReport spec attempt phase completed exhausted requeueCount failu
               phase = phase,
               attempt = attempt,
               maxAttempts = spec.maxAttempts,
+              builderMemoryLimitMb = spec.builderMemoryLimitMb,
+              verifierMemoryLimitMb = spec.verifierMemoryLimitMb,
               completed = completed,
               exhausted = exhausted,
               requeued = if requeueCount == 0 then false else true,
@@ -278,17 +280,21 @@ managedLoopBuildReport spec attempt phase completed exhausted requeueCount failu
 
 managedLoopRunBuilderStep : ManagedLoopSpec -> Result ToolStepResult
 managedLoopRunBuilderStep spec =
-  if spec.useBuilderTimeout then
-    runToolStepWithTimeout (managedLoopTaskHandle spec) spec.builderCommand spec.builderTimeoutMs spec.mailboxLimit
-  else
-    runToolStep (managedLoopTaskHandle spec) spec.builderCommand spec.mailboxLimit
+  runToolStepWithOptionalLimits
+    (managedLoopTaskHandle spec)
+    spec.builderCommand
+    (if spec.useBuilderTimeout then spec.builderTimeoutMs else 0)
+    spec.builderMemoryLimitMb
+    spec.mailboxLimit
 
 managedLoopRunVerificationPlan : ManagedLoopSpec -> Result VerificationPlanResult
 managedLoopRunVerificationPlan spec =
-  if spec.useVerifierTimeout then
-    executeVerificationPlanWithTimeout (managedLoopTaskHandle spec) spec.verificationPlan spec.verifierTimeoutMs spec.mailboxLimit
-  else
-    executeVerificationPlan (managedLoopTaskHandle spec) spec.verificationPlan spec.mailboxLimit
+  executeVerificationPlanWithOptionalLimits
+    (managedLoopTaskHandle spec)
+    spec.verificationPlan
+    (if spec.useVerifierTimeout then spec.verifierTimeoutMs else 0)
+    spec.verifierMemoryLimitMb
+    spec.mailboxLimit
 
 managedLoopAfterFailedAttempt : ManagedLoopSpec -> Int -> Int -> Str -> ManagedLoopFailureContext -> [VerificationTraceEntry] -> Result ManagedLoopReport
 managedLoopAfterFailedAttempt spec attempt requeueCount phase failureContext verificationTrace = {

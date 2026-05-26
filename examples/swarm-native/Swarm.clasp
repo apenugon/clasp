@@ -242,6 +242,7 @@ record VerificationTraceEntry = {
   status : Str,
   exitCode : Int,
   timedOut : Bool,
+  memoryLimitMb : Int,
   stdoutArtifactPath : Str,
   stderrArtifactPath : Str,
   failedVerifierClassification : Str
@@ -292,6 +293,7 @@ record VerificationPlanExecution = {
   mailboxLimit : Int,
   timeoutMs : Int,
   useTimeout : Bool,
+  memoryLimitMb : Int,
   steps : [VerifierStepResult],
   passed : Bool,
   failedVerifiers : [Str],
@@ -324,9 +326,11 @@ record ManagedLoopSpec = {
   builderCommand : SwarmCommand,
   builderTimeoutMs : Int,
   useBuilderTimeout : Bool,
+  builderMemoryLimitMb : Int,
   verificationPlan : VerificationPlan,
   verifierTimeoutMs : Int,
   useVerifierTimeout : Bool,
+  verifierMemoryLimitMb : Int,
   approvalName : Str,
   mergegateName : Str,
   requiredApprovals : [Str]
@@ -336,6 +340,8 @@ record ManagedLoopReport = {
   phase : Str,
   attempt : Int,
   maxAttempts : Int,
+  builderMemoryLimitMb : Int,
+  verifierMemoryLimitMb : Int,
   completed : Bool,
   exhausted : Bool,
   requeued : Bool,
@@ -681,6 +687,15 @@ toolRunWithLimits : TaskHandle -> SwarmCommand -> Int -> Int -> Result SwarmRun
 toolRunWithLimits handle spec timeoutMs memoryLimitMb =
   runResult (swarmToolRunWithLimitsRaw handle.root.path handle.taskId handle.actor spec.cwd timeoutMs memoryLimitMb spec.command)
 
+toolRunWithOptionalLimits : TaskHandle -> SwarmCommand -> Int -> Int -> Result SwarmRun
+toolRunWithOptionalLimits handle spec timeoutMs memoryLimitMb =
+  if memoryLimitMb > 0 then
+    toolRunWithLimits handle spec timeoutMs memoryLimitMb
+  else if timeoutMs > 0 then
+    toolRunWithTimeout handle spec timeoutMs
+  else
+    toolRun handle spec
+
 verifierRun : TaskHandle -> Str -> SwarmCommand -> Result SwarmRun
 verifierRun handle verifierName spec =
   runResult (swarmVerifierRunRaw handle.root.path handle.taskId handle.actor verifierName spec.cwd spec.command)
@@ -692,6 +707,15 @@ verifierRunWithTimeout handle verifierName spec timeoutMs =
 verifierRunWithLimits : TaskHandle -> Str -> SwarmCommand -> Int -> Int -> Result SwarmRun
 verifierRunWithLimits handle verifierName spec timeoutMs memoryLimitMb =
   runResult (swarmVerifierRunWithLimitsRaw handle.root.path handle.taskId handle.actor verifierName spec.cwd timeoutMs memoryLimitMb spec.command)
+
+verifierRunWithOptionalLimits : TaskHandle -> Str -> SwarmCommand -> Int -> Int -> Result SwarmRun
+verifierRunWithOptionalLimits handle verifierName spec timeoutMs memoryLimitMb =
+  if memoryLimitMb > 0 then
+    verifierRunWithLimits handle verifierName spec timeoutMs memoryLimitMb
+  else if timeoutMs > 0 then
+    verifierRunWithTimeout handle verifierName spec timeoutMs
+  else
+    verifierRun handle verifierName spec
 
 approve : TaskHandle -> Str -> Result SwarmApproval
 approve handle approvalName =
@@ -808,6 +832,7 @@ verificationTraceEntry verifierName run =
     status = textConcat [run.status],
     exitCode = run.exitCode,
     timedOut = run.timedOut,
+    memoryLimitMb = run.memoryLimitMb,
     stdoutArtifactPath = textConcat [run.stdoutArtifactPath],
     stderrArtifactPath = textConcat [run.stderrArtifactPath],
     failedVerifierClassification = textConcat [verificationTraceFailureClassification run]
@@ -998,6 +1023,44 @@ runToolStepWithTimeout handle spec timeoutMs mailboxLimit =
       toolStepResultError message
   }
 
+runToolStepWithLimits : TaskHandle -> SwarmCommand -> Int -> Int -> Int -> Result ToolStepResult
+runToolStepWithLimits handle spec timeoutMs memoryLimitMb mailboxLimit =
+  match lease handle {
+    Ok leaseValue ->
+      match toolRunWithLimits handle spec timeoutMs memoryLimitMb {
+        Ok runValue ->
+          match finishToolRun handle runValue {
+            Ok statusValue ->
+              match taskMailbox handle mailboxLimit {
+                Ok mailboxValue ->
+                  Ok (ToolStepResult {
+                    lease = leaseValue,
+                    run = runValue,
+                    status = statusValue,
+                    mailbox = mailboxValue
+                  }),
+                Err message ->
+                  toolStepResultError message
+              },
+            Err message ->
+              toolStepResultError message
+          },
+        Err message ->
+          toolStepResultError message
+      },
+    Err message ->
+      toolStepResultError message
+  }
+
+runToolStepWithOptionalLimits : TaskHandle -> SwarmCommand -> Int -> Int -> Int -> Result ToolStepResult
+runToolStepWithOptionalLimits handle spec timeoutMs memoryLimitMb mailboxLimit =
+  if memoryLimitMb > 0 then
+    runToolStepWithLimits handle spec timeoutMs memoryLimitMb mailboxLimit
+  else if timeoutMs > 0 then
+    runToolStepWithTimeout handle spec timeoutMs mailboxLimit
+  else
+    runToolStep handle spec mailboxLimit
+
 runVerifierStep : TaskHandle -> Str -> SwarmCommand -> Int -> Result VerifierStepResult
 runVerifierStep handle verifierName spec mailboxLimit =
   match verifierRun handle verifierName spec {
@@ -1032,6 +1095,32 @@ runVerifierStepWithTimeout handle verifierName spec timeoutMs mailboxLimit =
       verifierStepResultError message
   }
 
+runVerifierStepWithLimits : TaskHandle -> Str -> SwarmCommand -> Int -> Int -> Int -> Result VerifierStepResult
+runVerifierStepWithLimits handle verifierName spec timeoutMs memoryLimitMb mailboxLimit =
+  match verifierRunWithLimits handle verifierName spec timeoutMs memoryLimitMb {
+    Ok runValue ->
+      match taskMailbox handle mailboxLimit {
+        Ok mailboxValue ->
+          Ok (VerifierStepResult {
+            run = runValue,
+            mailbox = mailboxValue
+          }),
+        Err message ->
+          verifierStepResultError message
+      },
+    Err message ->
+      verifierStepResultError message
+  }
+
+runVerifierStepWithOptionalLimits : TaskHandle -> Str -> SwarmCommand -> Int -> Int -> Int -> Result VerifierStepResult
+runVerifierStepWithOptionalLimits handle verifierName spec timeoutMs memoryLimitMb mailboxLimit =
+  if memoryLimitMb > 0 then
+    runVerifierStepWithLimits handle verifierName spec timeoutMs memoryLimitMb mailboxLimit
+  else if timeoutMs > 0 then
+    runVerifierStepWithTimeout handle verifierName spec timeoutMs mailboxLimit
+  else
+    runVerifierStep handle verifierName spec mailboxLimit
+
 emptyVerifierStepResults : [VerifierStepResult]
 emptyVerifierStepResults = []
 
@@ -1041,13 +1130,14 @@ emptyVerifierNames = []
 emptyVerificationTraceEntries : [VerificationTraceEntry]
 emptyVerificationTraceEntries = []
 
-emptyVerificationPlanExecution : TaskHandle -> Int -> Int -> Bool -> VerificationPlanExecution
-emptyVerificationPlanExecution handle mailboxLimit timeoutMs useTimeout =
+emptyVerificationPlanExecution : TaskHandle -> Int -> Int -> Bool -> Int -> VerificationPlanExecution
+emptyVerificationPlanExecution handle mailboxLimit timeoutMs useTimeout memoryLimitMb =
   VerificationPlanExecution {
     handle = handle,
     mailboxLimit = mailboxLimit,
     timeoutMs = timeoutMs,
     useTimeout = useTimeout,
+    memoryLimitMb = memoryLimitMb,
     steps = emptyVerifierStepResults,
     passed = true,
     failedVerifiers = emptyVerifierNames,
@@ -1062,6 +1152,7 @@ verificationPlanExecutionError state message =
     mailboxLimit = state.mailboxLimit,
     timeoutMs = state.timeoutMs,
     useTimeout = state.useTimeout,
+    memoryLimitMb = state.memoryLimitMb,
     steps = state.steps,
     passed = state.passed,
     failedVerifiers = state.failedVerifiers,
@@ -1076,6 +1167,7 @@ verificationPlanExecutionAppend state verifierName step =
     mailboxLimit = state.mailboxLimit,
     timeoutMs = state.timeoutMs,
     useTimeout = state.useTimeout,
+    memoryLimitMb = state.memoryLimitMb,
     steps = append state.steps [step],
     passed = if runPassed step.run then state.passed else false,
     failedVerifiers = if runPassed step.run then state.failedVerifiers else append state.failedVerifiers [verifierName],
@@ -1085,7 +1177,9 @@ verificationPlanExecutionAppend state verifierName step =
 
 verificationPlanRunStep : VerificationPlanExecution -> VerificationCommand -> Result VerifierStepResult
 verificationPlanRunStep state command =
-  if state.useTimeout then
+  if state.memoryLimitMb > 0 then
+    runVerifierStepWithLimits state.handle command.verifierName command.command state.timeoutMs state.memoryLimitMb state.mailboxLimit
+  else if state.useTimeout then
     runVerifierStepWithTimeout state.handle command.verifierName command.command state.timeoutMs state.mailboxLimit
   else
     runVerifierStep state.handle command.verifierName command.command state.mailboxLimit
@@ -1104,7 +1198,7 @@ verificationPlanExecutionStep state command =
 
 executeVerificationPlan : TaskHandle -> VerificationPlan -> Int -> Result VerificationPlanResult
 executeVerificationPlan handle plan mailboxLimit =
-  let execution = fold verificationPlanExecutionStep (emptyVerificationPlanExecution handle mailboxLimit 0 false) plan.commands in
+  let execution = fold verificationPlanExecutionStep (emptyVerificationPlanExecution handle mailboxLimit 0 false 0) plan.commands in
   if execution.error != "" then
     verificationPlanResultError execution.error
   else
@@ -1125,7 +1219,7 @@ executeVerificationPlan handle plan mailboxLimit =
 
 executeVerificationPlanWithTimeout : TaskHandle -> VerificationPlan -> Int -> Int -> Result VerificationPlanResult
 executeVerificationPlanWithTimeout handle plan timeoutMs mailboxLimit =
-  let execution = fold verificationPlanExecutionStep (emptyVerificationPlanExecution handle mailboxLimit timeoutMs true) plan.commands in
+  let execution = fold verificationPlanExecutionStep (emptyVerificationPlanExecution handle mailboxLimit timeoutMs true 0) plan.commands in
   if execution.error != "" then
     verificationPlanResultError execution.error
   else
@@ -1143,6 +1237,37 @@ executeVerificationPlanWithTimeout handle plan timeoutMs mailboxLimit =
       Err message ->
         verificationPlanResultError message
     }
+
+executeVerificationPlanWithLimits : TaskHandle -> VerificationPlan -> Int -> Int -> Int -> Result VerificationPlanResult
+executeVerificationPlanWithLimits handle plan timeoutMs memoryLimitMb mailboxLimit =
+  let useTimeout = timeoutMs > 0 in
+  let execution = fold verificationPlanExecutionStep (emptyVerificationPlanExecution handle mailboxLimit timeoutMs useTimeout memoryLimitMb) plan.commands in
+  if execution.error != "" then
+    verificationPlanResultError execution.error
+  else
+    match taskMailbox handle mailboxLimit {
+      Ok mailboxValue ->
+        Ok (VerificationPlanResult {
+          plan = plan,
+          steps = execution.steps,
+          passed = execution.passed,
+          failedVerifiers = execution.failedVerifiers,
+          trace = execution.trace,
+          mailbox = mailboxValue,
+          mailboxSummary = verificationPlanMailboxSummary mailboxValue
+        }),
+      Err message ->
+        verificationPlanResultError message
+    }
+
+executeVerificationPlanWithOptionalLimits : TaskHandle -> VerificationPlan -> Int -> Int -> Int -> Result VerificationPlanResult
+executeVerificationPlanWithOptionalLimits handle plan timeoutMs memoryLimitMb mailboxLimit =
+  if memoryLimitMb > 0 then
+    executeVerificationPlanWithLimits handle plan timeoutMs memoryLimitMb mailboxLimit
+  else if timeoutMs > 0 then
+    executeVerificationPlanWithTimeout handle plan timeoutMs mailboxLimit
+  else
+    executeVerificationPlan handle plan mailboxLimit
 
 policySetForVerificationPlan : TaskHandle -> Str -> [Str] -> VerificationPlan -> Result SwarmPolicy
 policySetForVerificationPlan handle mergegateName requiredApprovals plan =
