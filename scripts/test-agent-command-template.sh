@@ -395,8 +395,15 @@ assert(status.state?.phase === "completed", `local status phase ${status.state?.
 assert(status.previousVerifierFeedback?.present === true, "local status should persist previous verifier feedback");
 assert(workspaceText === "fixed-after-feedback\n", "local Clasp builder should consume verifier feedback");
 assert(secondBuilder.feedback?.summary === "local Clasp builder backend completed", "second builder report should come from LocalAgent.clasp");
+assert(secondBuilder.tests_run?.includes("clasp-local-agent-context-pack"), "local builder should record context-pack coverage");
+assert(
+  secondBuilder.feedback?.ergonomics?.includes("local builder consumed the native swarm context pack"),
+  "local builder feedback should mention native context pack consumption",
+);
 assert(firstVerifier.verdict === "fail", `first local verifier verdict ${firstVerifier.verdict}`);
+assert(firstVerifier.tests_run?.includes("clasp-local-agent-context-pack"), "first local verifier should record context-pack coverage");
 assert(secondVerifier.verdict === "pass", `second local verifier verdict ${secondVerifier.verdict}`);
+assert(secondVerifier.tests_run?.includes("clasp-local-agent-context-pack"), "second local verifier should record context-pack coverage");
 assert(secondBuilderPrompt.includes("Verifier feedback from the previous attempt:"), "second builder prompt should be persisted for prompt-path agents");
 assert(secondBuilderPrompt.includes("force-close-category"), "second builder prompt should include persisted verifier feedback");
 assert(secondBuilderPrompt.includes("Swarm context pack:"), "second builder prompt should include native context pack evidence");
@@ -409,6 +416,12 @@ assert(secondVerifierPrompt.includes("run trace:"), "second verifier prompt shou
 assert(
   secondVerifier.capability_statuses?.some((entry) => entry.name === "clasp_native_agent_backend" && entry.status === "pass"),
   "local verifier should prove the Clasp-native agent backend capability",
+);
+assert(
+  secondVerifier.capability_statuses?.some((entry) =>
+    entry.evidence?.includes("local Clasp agent consumed native builder and verifier context packs")
+  ),
+  "local verifier should report native context-pack consumption evidence",
 );
 NODE
 

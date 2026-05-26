@@ -101,12 +101,15 @@ writeBuilderReport reportPath content =
       (BuilderReport {
         summary = textConcat ["local Clasp builder wrote ", content],
         files_touched = ["workspace.txt", "notes/child-artifact.txt"],
-        tests_run = ["clasp-local-agent"],
+        tests_run = ["clasp-local-agent", "clasp-local-agent-context-pack"],
         residual_risks = emptyTexts,
         feedback =
           BuilderFeedback {
             summary = "local Clasp builder backend completed",
-            ergonomics = ["ordinary Clasp program can act as a swarm agent backend"],
+            ergonomics = [
+              "ordinary Clasp program can act as a swarm agent backend",
+              "local builder consumed the native swarm context pack"
+            ],
             follow_ups = emptyTexts,
             warnings = emptyTexts
           }
@@ -117,7 +120,10 @@ passingCapability unused =
   CapabilityStatus {
     name = "clasp_native_agent_backend",
     status = "pass",
-    evidence = ["builder and verifier reports were produced by examples/swarm-native/LocalAgent.clasp"],
+    evidence = [
+      "builder and verifier reports were produced by examples/swarm-native/LocalAgent.clasp",
+      "local Clasp agent consumed native builder and verifier context packs"
+    ],
     blocking_gaps = emptyTexts,
     required_closure = emptyTexts
   }
@@ -135,77 +141,99 @@ failingCapability unused =
 writeVerifierReport : Str -> VerifierReport -> Str
 writeVerifierReport reportPath report = writeTextOrMessage reportPath (encode report)
 
+promptHasBuilderContextPack : Str -> Bool
+promptHasBuilderContextPack prompt =
+  if textIncludes prompt "Swarm context pack:" then
+    textIncludes prompt "task: builder-"
+  else
+    false
+
+promptHasVerifierContextPack : Str -> Bool
+promptHasVerifierContextPack prompt =
+  if textIncludes prompt "Swarm context pack:" then
+    textIncludes prompt "task: verifier-"
+  else
+    false
+
 runBuilder : Str -> Str -> Str -> Str -> Str
 runBuilder reportPath workspaceRoot reportRoot prompt = {
   let workspaceTextPath = pathJoin [workspaceRoot, "workspace.txt"] in
   let workspaceArtifactPath = pathJoin [workspaceRoot, "notes", "child-artifact.txt"] in
-  let rootError = ensureDirOrMessage workspaceRoot in
-  if rootError != "" then
-    rootError
+  if promptHasBuilderContextPack prompt == false then
+    "local-agent-error:missing builder context pack"
   else {
-    let notesError = ensureDirOrMessage (pathJoin [workspaceRoot, "notes"]) in
-    if notesError != "" then
-      notesError
+    let rootError = ensureDirOrMessage workspaceRoot in
+    if rootError != "" then
+      rootError
     else {
-      let reportError = ensureDirOrMessage reportRoot in
-      if reportError != "" then
-        reportError
+      let notesError = ensureDirOrMessage (pathJoin [workspaceRoot, "notes"]) in
+      if notesError != "" then
+        notesError
       else {
-        let content =
-          if textIncludes prompt "Verifier feedback from the previous attempt:" then
-            if textIncludes prompt "force-close-category" then
-              "fixed-after-feedback"
-            else
-              "first-attempt"
-          else
-            "first-attempt" in
-        let workspaceError = writeTextOrMessage workspaceTextPath (textConcat [content, "\n"]) in
-        if workspaceError != "" then
-          workspaceError
+        let reportError = ensureDirOrMessage reportRoot in
+        if reportError != "" then
+          reportError
         else {
-          let artifactError = writeTextOrMessage workspaceArtifactPath (textConcat [content, "\n"]) in
-          if artifactError != "" then artifactError else writeBuilderReport reportPath content
+          let content =
+            if textIncludes prompt "Verifier feedback from the previous attempt:" then
+              if textIncludes prompt "force-close-category" then
+                "fixed-after-feedback"
+              else
+                "first-attempt"
+            else
+              "first-attempt" in
+          let workspaceError = writeTextOrMessage workspaceTextPath (textConcat [content, "\n"]) in
+          if workspaceError != "" then
+            workspaceError
+          else {
+            let artifactError = writeTextOrMessage workspaceArtifactPath (textConcat [content, "\n"]) in
+            if artifactError != "" then artifactError else writeBuilderReport reportPath content
+          }
         }
       }
     }
   }
 }
 
-runVerifier : Str -> Str -> Str -> Str
-runVerifier reportPath workspaceRoot reportRoot = {
+runVerifier : Str -> Str -> Str -> Str -> Str
+runVerifier reportPath workspaceRoot reportRoot prompt = {
   let workspaceTextPath = pathJoin [workspaceRoot, "workspace.txt"] in
   let builderPolicyPath = pathJoin [reportRoot, "builder-policy.md"] in
-  let reportError = ensureDirOrMessage reportRoot in
-  if reportError != "" then
-    reportError
+  if promptHasVerifierContextPack prompt == false then
+    "local-agent-error:missing verifier context pack"
   else {
-    let content = readTextOr workspaceTextPath "" in
-    if content == "fixed-after-feedback\n" then
-      writeVerifierReport
-        reportPath
-        (VerifierReport {
-          verdict = "pass",
-          summary = "local Clasp verifier passed",
-          findings = emptyTexts,
-          tests_run = ["clasp-local-agent"],
-          follow_up = emptyTexts,
-          capability_statuses = [passingCapability ""]
-        })
+    let reportError = ensureDirOrMessage reportRoot in
+    if reportError != "" then
+      reportError
     else {
-      let policyError = writeTextOrMessage builderPolicyPath "force-close-category\n" in
-      if policyError != "" then
-        policyError
-      else
+      let content = readTextOr workspaceTextPath "" in
+      if content == "fixed-after-feedback\n" then
         writeVerifierReport
           reportPath
           (VerifierReport {
-            verdict = "fail",
-            summary = "local Clasp verifier requested feedback retry",
-            findings = ["workspace.txt still has first-attempt content"],
-            tests_run = ["clasp-local-agent"],
-            follow_up = ["Close the clasp_native_agent_backend category by consuming verifier feedback."],
-            capability_statuses = [failingCapability ""]
+            verdict = "pass",
+            summary = "local Clasp verifier passed",
+            findings = emptyTexts,
+            tests_run = ["clasp-local-agent", "clasp-local-agent-context-pack"],
+            follow_up = emptyTexts,
+            capability_statuses = [passingCapability ""]
           })
+      else {
+        let policyError = writeTextOrMessage builderPolicyPath "force-close-category\n" in
+        if policyError != "" then
+          policyError
+        else
+          writeVerifierReport
+            reportPath
+            (VerifierReport {
+              verdict = "fail",
+              summary = "local Clasp verifier requested feedback retry",
+              findings = ["workspace.txt still has first-attempt content"],
+              tests_run = ["clasp-local-agent", "clasp-local-agent-context-pack"],
+              follow_up = ["Close the clasp_native_agent_backend category by consuming verifier feedback."],
+              capability_statuses = [failingCapability ""]
+            })
+      }
     }
   }
 }
@@ -220,7 +248,7 @@ main = {
   if currentRole == "builder" then
     runBuilder currentReportPath currentWorkspaceRoot currentReportRoot currentPrompt
   else if currentRole == "verifier" then
-    runVerifier currentReportPath currentWorkspaceRoot currentReportRoot
+    runVerifier currentReportPath currentWorkspaceRoot currentReportRoot currentPrompt
   else
     textConcat ["unknown-role:", currentRole]
 }
