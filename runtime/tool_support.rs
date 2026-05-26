@@ -309,17 +309,26 @@ fn module_import_path(root: &Path, import_name: &str) -> PathBuf {
     root.join(relative).with_extension("clasp")
 }
 
-fn default_bundle_jobs() -> usize {
-    env::var("CLASP_NATIVE_BUNDLE_JOBS")
+pub(crate) fn positive_env_usize(name: &str) -> Option<usize> {
+    env::var(name)
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
         .filter(|value| *value > 0)
-        .unwrap_or_else(|| {
-            thread::available_parallelism()
-                .map(|value| value.get())
-                .unwrap_or(4)
-                .min(8)
-        })
+}
+
+pub(crate) fn clamp_native_jobs(requested: usize, specific_max_env: &str) -> usize {
+    let max_jobs = positive_env_usize(specific_max_env).or_else(|| positive_env_usize("CLASP_NATIVE_JOBS_MAX"));
+    max_jobs.map(|max| requested.min(max)).unwrap_or(requested).max(1)
+}
+
+fn default_bundle_jobs() -> usize {
+    let requested = positive_env_usize("CLASP_NATIVE_BUNDLE_JOBS").unwrap_or_else(|| {
+        thread::available_parallelism()
+            .map(|value| value.get())
+            .unwrap_or(4)
+            .min(8)
+    });
+    clamp_native_jobs(requested, "CLASP_NATIVE_BUNDLE_JOBS_MAX")
 }
 
 fn load_project_module(root: &Path, path: PathBuf) -> Result<ProjectModuleInfo, String> {
@@ -1886,6 +1895,38 @@ mod tests {
         assert_eq!(serial, parallel);
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn default_bundle_jobs_is_clamped_by_native_jobs_max() {
+        let _env_lock = super::TEST_ENV_LOCK.lock().expect("lock test env");
+        let previous_jobs = std::env::var_os("CLASP_NATIVE_BUNDLE_JOBS");
+        let previous_specific_max = std::env::var_os("CLASP_NATIVE_BUNDLE_JOBS_MAX");
+        let previous_common_max = std::env::var_os("CLASP_NATIVE_JOBS_MAX");
+
+        std::env::set_var("CLASP_NATIVE_BUNDLE_JOBS", "8");
+        std::env::set_var("CLASP_NATIVE_JOBS_MAX", "3");
+        std::env::remove_var("CLASP_NATIVE_BUNDLE_JOBS_MAX");
+        assert_eq!(super::default_bundle_jobs(), 3);
+
+        std::env::set_var("CLASP_NATIVE_BUNDLE_JOBS_MAX", "2");
+        assert_eq!(super::default_bundle_jobs(), 2);
+
+        std::env::set_var("CLASP_NATIVE_BUNDLE_JOBS_MAX", "not-a-number");
+        assert_eq!(super::default_bundle_jobs(), 3);
+
+        match previous_jobs {
+            Some(value) => std::env::set_var("CLASP_NATIVE_BUNDLE_JOBS", value),
+            None => std::env::remove_var("CLASP_NATIVE_BUNDLE_JOBS"),
+        }
+        match previous_specific_max {
+            Some(value) => std::env::set_var("CLASP_NATIVE_BUNDLE_JOBS_MAX", value),
+            None => std::env::remove_var("CLASP_NATIVE_BUNDLE_JOBS_MAX"),
+        }
+        match previous_common_max {
+            Some(value) => std::env::set_var("CLASP_NATIVE_JOBS_MAX", value),
+            None => std::env::remove_var("CLASP_NATIVE_JOBS_MAX"),
+        }
     }
 
     #[test]

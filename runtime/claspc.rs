@@ -1599,16 +1599,14 @@ fn fail_compiler_message(
 }
 
 fn default_native_image_jobs() -> usize {
-    env::var("CLASP_NATIVE_IMAGE_SECTION_JOBS")
-        .ok()
-        .and_then(|value| value.parse::<usize>().ok())
-        .filter(|value| *value > 0)
-        .unwrap_or_else(|| {
+    let requested =
+        tool_support::positive_env_usize("CLASP_NATIVE_IMAGE_SECTION_JOBS").unwrap_or_else(|| {
             thread::available_parallelism()
                 .map(|value| value.get())
                 .unwrap_or(DEFAULT_NATIVE_IMAGE_SECTION_JOBS)
                 .min(DEFAULT_NATIVE_IMAGE_SECTION_JOBS)
-        })
+        });
+    tool_support::clamp_native_jobs(requested, "CLASP_NATIVE_IMAGE_SECTION_JOBS_MAX")
 }
 
 fn monolithic_decl_threshold() -> usize {
@@ -5472,7 +5470,11 @@ keep = "stable"
     fn native_image_jobs_default_is_memory_safe_but_overridable() {
         let _env_lock = super::tool_support::TEST_ENV_LOCK.lock().expect("lock test env");
         let previous_jobs = std::env::var_os("CLASP_NATIVE_IMAGE_SECTION_JOBS");
+        let previous_specific_max = std::env::var_os("CLASP_NATIVE_IMAGE_SECTION_JOBS_MAX");
+        let previous_common_max = std::env::var_os("CLASP_NATIVE_JOBS_MAX");
         std::env::remove_var("CLASP_NATIVE_IMAGE_SECTION_JOBS");
+        std::env::remove_var("CLASP_NATIVE_IMAGE_SECTION_JOBS_MAX");
+        std::env::remove_var("CLASP_NATIVE_JOBS_MAX");
 
         let default_jobs = super::default_native_image_jobs();
         assert!(default_jobs > 0);
@@ -5481,9 +5483,26 @@ keep = "stable"
         std::env::set_var("CLASP_NATIVE_IMAGE_SECTION_JOBS", "5");
         assert_eq!(super::default_native_image_jobs(), 5);
 
+        std::env::set_var("CLASP_NATIVE_JOBS_MAX", "3");
+        assert_eq!(super::default_native_image_jobs(), 3);
+
+        std::env::set_var("CLASP_NATIVE_IMAGE_SECTION_JOBS_MAX", "2");
+        assert_eq!(super::default_native_image_jobs(), 2);
+
+        std::env::set_var("CLASP_NATIVE_IMAGE_SECTION_JOBS_MAX", "not-a-number");
+        assert_eq!(super::default_native_image_jobs(), 3);
+
         match previous_jobs {
             Some(value) => std::env::set_var("CLASP_NATIVE_IMAGE_SECTION_JOBS", value),
             None => std::env::remove_var("CLASP_NATIVE_IMAGE_SECTION_JOBS"),
+        }
+        match previous_specific_max {
+            Some(value) => std::env::set_var("CLASP_NATIVE_IMAGE_SECTION_JOBS_MAX", value),
+            None => std::env::remove_var("CLASP_NATIVE_IMAGE_SECTION_JOBS_MAX"),
+        }
+        match previous_common_max {
+            Some(value) => std::env::set_var("CLASP_NATIVE_JOBS_MAX", value),
+            None => std::env::remove_var("CLASP_NATIVE_JOBS_MAX"),
         }
     }
 

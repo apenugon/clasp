@@ -895,6 +895,7 @@ task_id="$(basename "$task_file" .md)"
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 printf '%s\n' "$task_id" >> "$project_root/builder-events.log"
+printf '%s CLASP_NATIVE_JOBS_MAX=%s\n' "$task_id" "${CLASP_NATIVE_JOBS_MAX:-}" >> "$project_root/builder-env.log"
 printf '%s\n' "$task_id" > "$workspace/$task_id.txt"
 if [[ -n "${CLASP_SWARM_TEST_BUILDER_SLEEP_SECS:-}" ]]; then
   sleep "$CLASP_SWARM_TEST_BUILDER_SLEEP_SECS"
@@ -1106,8 +1107,10 @@ grep -F --quiet 'if [[ -z "$timeout_seconds" || "$timeout_seconds" == "0" ]]; th
 grep -F --quiet 'max_running_lanes="${CLASP_SWARM_MAX_RUNNING_LANES:-2}"' "$project_root/scripts/clasp-swarm-start.sh"
 grep -F --quiet 'lane_memory_mb="${CLASP_SWARM_LANE_MEMORY_MB:-12288}"' "$project_root/scripts/clasp-swarm-start.sh"
 grep -F --quiet 'min_available_memory_mb="${CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB:-16384}"' "$project_root/scripts/clasp-swarm-start.sh"
+grep -F --quiet 'native_jobs_max="${CLASP_SWARM_NATIVE_JOBS_MAX:-2}"' "$project_root/scripts/clasp-swarm-start.sh"
 grep -F --quiet 'required_available_memory_mb=$((required_available_memory_mb + (lane_memory_mb * (running_lanes + 1))))' "$project_root/scripts/clasp-swarm-start.sh"
 grep -F --quiet 'managed_job_args+=(--min-available-memory-mb "$min_available_memory_mb")' "$project_root/scripts/clasp-swarm-start.sh"
+grep -F --quiet 'CLASP_NATIVE_JOBS_MAX="$native_jobs_max"' "$project_root/scripts/clasp-swarm-start.sh"
 grep -F --quiet 'resource guard: not starting lane=$lane_name' "$project_root/scripts/clasp-swarm-start.sh"
 grep -F --quiet 'force_signal_args=(--force-signal)' "$project_root/scripts/clasp-swarm-stop.sh"
 grep -F --quiet '"${force_signal_args[@]}" --jobs-root' "$project_root/scripts/clasp-swarm-stop.sh"
@@ -2000,6 +2003,8 @@ bash -lc "
 
   [[ -f BA-001-foundation-a.txt ]]
   [[ -f BA-002-foundation-b.txt ]]
+  grep -F 'BA-001-foundation-a CLASP_NATIVE_JOBS_MAX=2' builder-env.log >/dev/null
+  grep -F 'BA-002-foundation-b CLASP_NATIVE_JOBS_MAX=2' builder-env.log >/dev/null
 " >/dev/null
 
 swarm_memory_guard_test_root="$(mktemp -d)"

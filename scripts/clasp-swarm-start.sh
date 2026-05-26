@@ -13,6 +13,7 @@ batch_filter="${CLASP_SWARM_BATCH:-}"
 max_running_lanes="${CLASP_SWARM_MAX_RUNNING_LANES:-2}"
 lane_memory_mb="${CLASP_SWARM_LANE_MEMORY_MB:-12288}"
 min_available_memory_mb="${CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB:-16384}"
+native_jobs_max="${CLASP_SWARM_NATIVE_JOBS_MAX:-2}"
 
 validate_non_negative_integer() {
   local name="$1"
@@ -76,6 +77,7 @@ running_lane_count_for_wave() {
 validate_non_negative_integer "CLASP_SWARM_MAX_RUNNING_LANES" "$max_running_lanes"
 validate_non_negative_integer "CLASP_SWARM_LANE_MEMORY_MB" "$lane_memory_mb"
 validate_non_negative_integer "CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB" "$min_available_memory_mb"
+validate_non_negative_integer "CLASP_SWARM_NATIVE_JOBS_MAX" "$native_jobs_max"
 
 if [[ "${1:-}" == "--list-lanes" ]]; then
   wave_name="${2:-$(clasp_swarm_default_wave)}"
@@ -244,6 +246,7 @@ while IFS= read -r lane_dir; do
       -- bash -c 'log_file="$1"; shift; exec "$@" >>"$log_file" 2>&1' \
         managed-swarm-lane "$log_file" \
         env CLASP_SWARM_BATCH="$batch_filter" \
+        CLASP_NATIVE_JOBS_MAX="$native_jobs_max" \
         bash "$project_root/scripts/clasp-swarm-lane.sh" "$lane_dir"
   )"
   pid="$(tr -d '[:space:]' <"$job_dir/pid")"
