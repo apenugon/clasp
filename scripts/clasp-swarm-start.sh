@@ -235,6 +235,9 @@ while IFS= read -r lane_dir; do
   if (( lane_memory_mb > 0 )); then
     managed_job_args+=(--memory-mb "$lane_memory_mb")
   fi
+  if (( min_available_memory_mb > 0 )); then
+    managed_job_args+=(--min-available-memory-mb "$min_available_memory_mb")
+  fi
 
   job_dir="$(
     "${managed_job_args[@]}" \

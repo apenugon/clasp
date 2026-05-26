@@ -128,6 +128,7 @@ wait_for_file "$core_limit_job_dir/exit-status"
 
 no_inherit_job_dir="$(
   CLASP_MANAGED_JOB_MEMORY_MB=64 \
+  CLASP_MANAGED_JOB_MIN_AVAILABLE_MEMORY_MB=64 \
     "$project_root/scripts/run-managed-job.sh" \
       --jobs-root "$jobs_root" \
       --job-id memory-env-no-inherit \
@@ -137,6 +138,35 @@ no_inherit_job_dir="$(
 wait_for_file "$no_inherit_job_dir/exit-status"
 [[ "$(cat "$no_inherit_job_dir/exit-status")" == "0" ]]
 [[ ! -f "$no_inherit_job_dir/memory-mb" ]]
+[[ ! -f "$no_inherit_job_dir/min-available-memory-mb" ]]
+
+host_reserve_job_dir="$(
+  "$project_root/scripts/run-managed-job.sh" \
+    --jobs-root "$jobs_root" \
+    --job-id host-reserve-smoke \
+    --min-available-memory-mb 999999999 \
+    -- bash -c 'while true; do sleep 1; done'
+)"
+[[ "$host_reserve_job_dir" == "$jobs_root/host-reserve-smoke" ]]
+host_reserve_sid="$(tr -d '[:space:]' <"$host_reserve_job_dir/sid")"
+wait_for_file "$host_reserve_job_dir/exit-status"
+[[ "$(cat "$host_reserve_job_dir/exit-status")" == "137" ]]
+[[ "$(cat "$host_reserve_job_dir/status")" == "failed" ]]
+[[ "$(cat "$host_reserve_job_dir/min-available-memory-mb")" == "999999999" ]]
+grep -F 'min_available_memory_mb=999999999' "$host_reserve_job_dir/memory-exceeded" >/dev/null
+grep -F 'available_memory_mb=' "$host_reserve_job_dir/memory-exceeded" >/dev/null
+grep -F 'reason=host-available-memory-reserve' "$host_reserve_job_dir/memory-exceeded" >/dev/null
+for _ in $(seq 1 50); do
+  if ! session_has_members "$host_reserve_sid"; then
+    break
+  fi
+  sleep 0.1
+done
+if session_has_members "$host_reserve_sid"; then
+  printf 'host-reserve managed job still has session members\n' >&2
+  ps -eo pid,ppid,pgid,sid,rss,comm,args | awk -v sid="$host_reserve_sid" '$4 == sid { print }' >&2
+  exit 1
+fi
 
 if command -v cc >/dev/null 2>&1; then
   cat >"$test_root/hold-memory.c" <<'EOF'

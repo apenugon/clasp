@@ -5,10 +5,11 @@ project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 jobs_root="${CLASP_MANAGED_JOB_ROOT:-$project_root/.clasp-loops/jobs}"
 job_id=""
 memory_mb=""
+min_available_memory_mb=""
 
 usage() {
   cat <<'EOF' >&2
-usage: scripts/run-managed-job.sh [--job-id <id>] [--jobs-root <dir>] [--memory-mb <mb>] -- <command> [args...]
+usage: scripts/run-managed-job.sh [--job-id <id>] [--jobs-root <dir>] [--memory-mb <mb>] [--min-available-memory-mb <mb>] -- <command> [args...]
 
 Launches a command in an isolated session/process group and records metadata
 that scripts/stop-managed-job.sh validates before stopping it. Completed jobs
@@ -20,6 +21,10 @@ around the workload. The detached runner stays outside the cgroup so it can
 still record metadata if the workload is killed by the kernel memory limit.
 Managed jobs also disable core dumps so memory-limit failures cannot spend
 minutes writing multi-gigabyte crash artifacts.
+
+When --min-available-memory-mb is set, the runner also watches host
+MemAvailable and stops the managed session before the whole VM enters kernel
+OOM territory.
 
 By default, stop-managed-job requests cooperative stop by writing a stop-request
 file. The detached runner owns any child signalling inside the managed session.
@@ -42,6 +47,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --memory-mb)
       memory_mb="${2:-}"
+      shift 2
+      ;;
+    --min-available-memory-mb)
+      min_available_memory_mb="${2:-}"
       shift 2
       ;;
     --)
@@ -72,6 +81,10 @@ if [[ -n "$memory_mb" ]] && ! [[ "$memory_mb" =~ ^[0-9]+$ && "$memory_mb" -gt 0 
   printf 'managed-job: invalid memory limit: %s\n' "$memory_mb" >&2
   exit 2
 fi
+if [[ -n "$min_available_memory_mb" ]] && ! [[ "$min_available_memory_mb" =~ ^[0-9]+$ && "$min_available_memory_mb" -gt 0 ]]; then
+  printf 'managed-job: invalid minimum available memory: %s\n' "$min_available_memory_mb" >&2
+  exit 2
+fi
 
 mkdir -p "$jobs_root"
 jobs_root="$(cd "$jobs_root" && pwd -P)"
@@ -99,6 +112,9 @@ printf '%s\n' "$stop_request_path" >"$job_dir/stop-request-path"
 if [[ -n "$memory_mb" ]]; then
   printf '%s\n' "$memory_mb" >"$job_dir/memory-mb"
 fi
+if [[ -n "$min_available_memory_mb" ]]; then
+  printf '%s\n' "$min_available_memory_mb" >"$job_dir/min-available-memory-mb"
+fi
 printf 'started\n' >"$job_dir/status"
 
 cd "$project_root"
@@ -108,6 +124,7 @@ setsid env \
   CLASP_MANAGED_JOB_TOKEN="$job_token" \
   CLASP_MANAGED_JOB_STOP_REQUEST="$stop_request_path" \
   CLASP_MANAGED_JOB_MEMORY_MB="$memory_mb" \
+  CLASP_MANAGED_JOB_MIN_AVAILABLE_MEMORY_MB="$min_available_memory_mb" \
   bash -c '
     set +e
     watcher_pid=""
@@ -188,6 +205,10 @@ setsid env \
         '"'"'
     }
 
+    host_available_memory_mb() {
+      awk '"'"'/MemAvailable:/ { printf "%d\n", int($2 / 1024); found = 1 } END { if (!found) print 0 }'"'"' /proc/meminfo 2>/dev/null || printf "0\n"
+    }
+
     watch_stop_request() {
       local sid="$1"
       local stop_file="$CLASP_MANAGED_JOB_STOP_REQUEST"
@@ -210,20 +231,31 @@ setsid env \
 
     watch_memory_limit() {
       local sid="$1"
-      local memory_limit_kb="$((CLASP_MANAGED_JOB_MEMORY_MB * 1024))"
+      local memory_limit_kb=""
+      if [[ -n "${CLASP_MANAGED_JOB_MEMORY_MB:-}" ]]; then
+        memory_limit_kb="$((CLASP_MANAGED_JOB_MEMORY_MB * 1024))"
+      fi
+      local min_available_memory_mb="${CLASP_MANAGED_JOB_MIN_AVAILABLE_MEMORY_MB:-}"
       local memory_exceeded_path="$job_dir/memory-exceeded"
       local rss_kb=""
+      local available_memory_mb=""
+
+      # Let the parent launcher record pid/pgid/sid before an immediate guard trip.
+      sleep 0.1
 
       while true; do
         if ! session_has_stoppable_members "$sid"; then
           return 0
         fi
 
-        rss_kb="$(session_rss_kb "$sid")"
-        if [[ "$rss_kb" =~ ^[0-9]+$ ]] && (( rss_kb > memory_limit_kb )); then
+        if [[ -n "$memory_limit_kb" ]]; then
+          rss_kb="$(session_rss_kb "$sid")"
+        fi
+        if [[ -n "$memory_limit_kb" && "$rss_kb" =~ ^[0-9]+$ ]] && (( rss_kb > memory_limit_kb )); then
           {
             printf "limit_mb=%s\n" "$CLASP_MANAGED_JOB_MEMORY_MB"
             printf "rss_kb=%s\n" "$rss_kb"
+            printf "reason=session-rss-limit\n"
             date -u +"detected_at=%Y-%m-%dT%H:%M:%SZ"
           } >"$memory_exceeded_path"
           printf "memory-exceeded\n" >"$job_dir/status"
@@ -236,6 +268,28 @@ setsid env \
           done
           signal_session_members KILL "$sid"
           return 0
+        fi
+
+        if [[ "$min_available_memory_mb" =~ ^[0-9]+$ && "$min_available_memory_mb" -gt 0 ]]; then
+          available_memory_mb="$(host_available_memory_mb)"
+          if [[ "$available_memory_mb" =~ ^[0-9]+$ ]] && (( available_memory_mb < min_available_memory_mb )); then
+            {
+              printf "min_available_memory_mb=%s\n" "$min_available_memory_mb"
+              printf "available_memory_mb=%s\n" "$available_memory_mb"
+              printf "reason=host-available-memory-reserve\n"
+              date -u +"detected_at=%Y-%m-%dT%H:%M:%SZ"
+            } >"$memory_exceeded_path"
+            printf "memory-exceeded\n" >"$job_dir/status"
+            signal_session_members TERM "$sid"
+            for _ in $(seq 1 50); do
+              if ! session_has_stoppable_members "$sid"; then
+                return 0
+              fi
+              sleep 0.1
+            done
+            signal_session_members KILL "$sid"
+            return 0
+          fi
         fi
 
         sleep 0.5
@@ -254,6 +308,10 @@ setsid env \
 
     start_workload() {
       if should_use_systemd_memory_scope; then
+        local memory_high_mb="$((CLASP_MANAGED_JOB_MEMORY_MB * 9 / 10))"
+        if (( memory_high_mb < 1 )); then
+          memory_high_mb=1
+        fi
         printf "systemd-scope\n" >"$job_dir/memory-enforcer"
         systemd-run \
           --user \
@@ -261,6 +319,7 @@ setsid env \
           --quiet \
           --collect \
           -p MemoryAccounting=yes \
+          -p "MemoryHigh=${memory_high_mb}M" \
           -p "MemoryMax=${CLASP_MANAGED_JOB_MEMORY_MB}M" \
           "$@" &
       else
@@ -319,7 +378,7 @@ setsid env \
     managed_sid="$(current_sid)"
     watch_stop_request "$managed_sid" &
     watcher_pid="$!"
-    if [[ -n "${CLASP_MANAGED_JOB_MEMORY_MB:-}" ]]; then
+    if [[ -n "${CLASP_MANAGED_JOB_MEMORY_MB:-}" || -n "${CLASP_MANAGED_JOB_MIN_AVAILABLE_MEMORY_MB:-}" ]]; then
       watch_memory_limit "$managed_sid" &
       memory_watcher_pid="$!"
     fi

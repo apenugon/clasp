@@ -1107,6 +1107,7 @@ grep -F --quiet 'max_running_lanes="${CLASP_SWARM_MAX_RUNNING_LANES:-2}"' "$proj
 grep -F --quiet 'lane_memory_mb="${CLASP_SWARM_LANE_MEMORY_MB:-12288}"' "$project_root/scripts/clasp-swarm-start.sh"
 grep -F --quiet 'min_available_memory_mb="${CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB:-16384}"' "$project_root/scripts/clasp-swarm-start.sh"
 grep -F --quiet 'required_available_memory_mb=$((required_available_memory_mb + (lane_memory_mb * (running_lanes + 1))))' "$project_root/scripts/clasp-swarm-start.sh"
+grep -F --quiet 'managed_job_args+=(--min-available-memory-mb "$min_available_memory_mb")' "$project_root/scripts/clasp-swarm-start.sh"
 grep -F --quiet 'resource guard: not starting lane=$lane_name' "$project_root/scripts/clasp-swarm-start.sh"
 grep -F --quiet 'force_signal_args=(--force-signal)' "$project_root/scripts/clasp-swarm-stop.sh"
 grep -F --quiet '"${force_signal_args[@]}" --jobs-root' "$project_root/scripts/clasp-swarm-stop.sh"
