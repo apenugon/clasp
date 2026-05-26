@@ -10,6 +10,7 @@ unset CLASP_VERIFY_IN_PROGRESS
 unset CLASP_VERIFY_ACTIVE_ROOT
 unset CLASP_VERIFY_LOCK_HELD
 unset CLASP_VERIFY_LABEL
+unset CLASP_VERIFY_MANAGED_REENTRY
 unset CLASP_VERIFY_TOPLEVEL_REENTRY
 unset CLASP_VERIFY_USE_CURRENT_SHELL
 unset CLASP_VERIFY_LOCK_TIMEOUT_SECS
@@ -17,6 +18,7 @@ unset CLASP_VERIFY_ON_LOCK_TIMEOUT
 unset CLASP_VERIFY_REPORT_JSON
 unset CLASP_CLASPC
 unset CLASPC_BIN
+export CLASP_VERIFY_MANAGED=0
 
 if [[ ! -d "$tmp_root" || ! -w "$tmp_root" ]]; then
   tmp_root="/tmp"
@@ -190,6 +192,10 @@ grep -F 'bash scripts/test-promoted-source-export-cache.sh' "$test_root/scripts/
 grep -F 'bash scripts/test-codex-loop.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-record-update-parity.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'CLASP_VERIFY_REPORT_JSON' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'CLASP_VERIFY_MANAGED_MEMORY_MB' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'CLASP_VERIFY_MAX_PARALLEL_JOBS' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'run-managed-job.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'CLASP_NATIVE_JOBS_MAX="${CLASP_NATIVE_JOBS_MAX:-1}"' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F '"finalVerdict"' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F '"firstFailedCommand"' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'command failed (exit %s)' "$test_root/scripts/verify-all.sh" >/dev/null
@@ -669,6 +675,36 @@ explicit_lock_file="$expected_lock_path"
 mkdir -p "$writable_cache_root"
 fallback_commands=$'printf fallback-ok > '"$fallback_capture"$'\nprintf %s "$CLASP_VERIFY_EFFECTIVE_LOCK_FILE" > '"$lock_capture"$'\nprintf %s "$TMPDIR" > '"$tmpdir_capture"
 
+managed_capture="$test_root/managed.txt"
+managed_stdout="$test_root/managed.stdout"
+managed_stderr="$test_root/managed.stderr"
+rm -rf "$test_root/.clasp-verify"
+PATH="$test_root/bin:$PATH" \
+IN_NIX_SHELL= \
+XDG_CACHE_HOME= \
+CLASP_TEST_NIX_ENV_CAPTURE="$env_capture" \
+CLASP_VERIFY_MANAGED=auto \
+CLASP_VERIFY_MANAGED_MEMORY_MB=256 \
+CLASP_VERIFY_MANAGED_MIN_AVAILABLE_MEMORY_MB=1 \
+CLASP_VERIFY_FALLBACK_COMMANDS=$'sleep 0.2\nprintf managed-ok > '"$managed_capture" \
+CLASP_VERIFY_LOCK_FILE="$explicit_lock_file" \
+env \
+  -u CLASP_MANAGED_JOB_ID \
+  -u CLASP_MANAGED_JOB_ROOT \
+  -u CLASP_MANAGED_JOB_TOKEN \
+  -u CLASP_MANAGED_JOB_STOP_REQUEST \
+  -u CLASP_MANAGED_JOB_MEMORY_MB \
+  -u CLASP_MANAGED_JOB_MIN_AVAILABLE_MEMORY_MB \
+  "$bash_bin" "$test_root/scripts/verify-all.sh" >"$managed_stdout" 2>"$managed_stderr"
+
+[[ "$(< "$managed_capture")" == "managed-ok" ]]
+grep -F 'verify-all: managed verification job:' "$managed_stderr" >/dev/null
+managed_job_root="$(find "$test_root/.clasp-verify/jobs" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+[[ -n "$managed_job_root" ]]
+[[ "$(< "$managed_job_root/status")" == "completed" ]]
+[[ "$(< "$managed_job_root/memory-mb")" == "256" ]]
+[[ "$(< "$managed_job_root/min-available-memory-mb")" == "1" ]]
+
 PATH="$test_root/bin:$PATH" \
 IN_NIX_SHELL= \
 XDG_CACHE_HOME= \
@@ -848,6 +884,21 @@ CLASP_VERIFY_LOCK_FILE="$explicit_lock_file" \
 [[ "$(< "$parallel_capture_one")" == "parallel-one" ]]
 [[ "$(< "$parallel_capture_two")" == "parallel-two" ]]
 [[ "$(< "$sequential_capture")" == "sequential-ok" ]]
+
+parallel_limit_lock="$test_root/parallel-limit.lock"
+parallel_limit_capture="$test_root/parallel-limit.txt"
+rm -rf "$parallel_limit_lock"
+rm -f "$parallel_limit_capture"
+parallel_limit_commands=$'mkdir '"$parallel_limit_lock"$' || { printf race > '"$parallel_limit_capture"$'; exit 1; }; sleep 0.2; rmdir '"$parallel_limit_lock"$'; printf one >> '"$parallel_limit_capture"$'\nmkdir '"$parallel_limit_lock"$' || { printf race > '"$parallel_limit_capture"$'; exit 1; }; sleep 0.2; rmdir '"$parallel_limit_lock"$'; printf two >> '"$parallel_limit_capture"
+IN_NIX_SHELL= \
+CLASP_VERIFY_USE_CURRENT_SHELL=1 \
+CLASP_VERIFY_PARALLEL_JOBS=4 \
+CLASP_VERIFY_MAX_PARALLEL_JOBS=1 \
+CLASP_VERIFY_PARALLEL_COMMANDS="$parallel_limit_commands" \
+CLASP_VERIFY_SEQUENTIAL_COMMANDS='' \
+CLASP_VERIFY_LOCK_FILE="$explicit_lock_file" \
+"$bash_bin" "$test_root/scripts/verify-all.sh" >/dev/null
+[[ "$(< "$parallel_limit_capture")" == "onetwo" ]]
 
 report_success="$test_root/report-success.json"
 report_success_parallel_one="$test_root/report-parallel-one.txt"

@@ -23,6 +23,9 @@ if grep -F 'bash scripts/test-verify-all.sh' "$project_root/scripts/verify-fast.
 fi
 grep -F 'bash scripts/test-verify-all.sh' "$project_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-managed-job.sh' "$project_root/scripts/verify-all.sh" >/dev/null
+grep -F 'CLASP_VERIFY_MANAGED_MEMORY_MB' "$project_root/scripts/verify-all.sh" >/dev/null
+grep -F 'CLASP_VERIFY_MAX_PARALLEL_JOBS' "$project_root/scripts/verify-all.sh" >/dev/null
+grep -F 'run-managed-job.sh' "$project_root/scripts/verify-all.sh" >/dev/null
 
 env \
   -u CLASP_VERIFY_IN_PROGRESS \

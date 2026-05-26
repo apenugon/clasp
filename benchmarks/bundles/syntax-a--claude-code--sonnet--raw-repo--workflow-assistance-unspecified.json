@@ -47,8 +47,8 @@
   "files": [
     {
       "path": "AGENTS.md",
-      "size": 1860,
-      "sha256": "260a1c2a3081bca90b1b77dbe751cb6c70a499bc3edf28891a0750adcb84a740"
+      "size": 2020,
+      "sha256": "addc9b6121f4ace3e72a1104a87daeaab0789f8d513c986cd62f26af555677d0"
     },
     {
       "path": "benchmarks/README.md",

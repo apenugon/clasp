@@ -27,8 +27,28 @@ verify_report_first_failed_group=""
 verify_report_first_failed_command=""
 verify_report_first_failed_exit_status=""
 declare -a verify_report_commands=()
+streamed_log_offset=0
+verify_managed_mode="${CLASP_VERIFY_MANAGED:-auto}"
+verify_managed_memory_mb="${CLASP_VERIFY_MANAGED_MEMORY_MB:-24576}"
+verify_managed_min_available_memory_mb="${CLASP_VERIFY_MANAGED_MIN_AVAILABLE_MEMORY_MB:-24576}"
+verify_managed_poll_secs="${CLASP_VERIFY_MANAGED_POLL_SECS:-1}"
+verify_max_parallel_jobs="${CLASP_VERIFY_MAX_PARALLEL_JOBS:-2}"
 if ! [[ "$verify_lock_timeout_secs" =~ ^[0-9]+$ ]]; then
   verify_lock_timeout_secs=0
+fi
+if ! [[ "$verify_managed_memory_mb" =~ ^[0-9]+$ ]]; then
+  printf '%s: CLASP_VERIFY_MANAGED_MEMORY_MB must be a non-negative integer; got %s\n' "$verify_label" "$verify_managed_memory_mb" >&2
+  exit 2
+fi
+if ! [[ "$verify_managed_min_available_memory_mb" =~ ^[0-9]+$ ]]; then
+  printf '%s: CLASP_VERIFY_MANAGED_MIN_AVAILABLE_MEMORY_MB must be a non-negative integer; got %s\n' "$verify_label" "$verify_managed_min_available_memory_mb" >&2
+  exit 2
+fi
+if ! [[ "$verify_managed_poll_secs" =~ ^[0-9]+$ && "$verify_managed_poll_secs" -gt 0 ]]; then
+  verify_managed_poll_secs=1
+fi
+if ! [[ "$verify_max_parallel_jobs" =~ ^[0-9]+$ ]] || (( verify_max_parallel_jobs < 1 )); then
+  verify_max_parallel_jobs=2
 fi
 full_parallel_verify_commands=$'
 bash scripts/test-codex-loop.sh
@@ -98,6 +118,111 @@ bash examples/agent-task-scenario/scripts/verify.sh
 bash examples/agent-loop-scenario/scripts/verify.sh
 bash scripts/test-task-manifest.sh
 '
+
+managed_verification_enabled() {
+  case "$verify_managed_mode" in
+    0|false|FALSE|False|no|NO|No|off|OFF|Off|never|NEVER|Never)
+      return 1
+      ;;
+  esac
+
+  [[ "${CLASP_VERIFY_MANAGED_REENTRY:-0}" != "1" ]] || return 1
+  [[ -z "${CLASP_MANAGED_JOB_ID:-}" ]] || return 1
+  [[ "${CLASP_VERIFY_USE_CURRENT_SHELL:-0}" != "1" ]] || return 1
+  [[ -x "$project_root/scripts/run-managed-job.sh" ]] || return 1
+  return 0
+}
+
+stream_managed_log_growth() {
+  local path="$1"
+  local offset="$2"
+  local target_fd="$3"
+  local size="0"
+
+  if [[ ! -f "$path" ]]; then
+    streamed_log_offset="$offset"
+    return 0
+  fi
+
+  size="$(wc -c <"$path" | tr -d '[:space:]')"
+  if [[ "$size" =~ ^[0-9]+$ ]] && (( size > offset )); then
+    if [[ "$target_fd" == "2" ]]; then
+      tail -c +"$((offset + 1))" "$path" >&2 || true
+    else
+      tail -c +"$((offset + 1))" "$path" || true
+    fi
+    offset="$size"
+  fi
+
+  streamed_log_offset="$offset"
+}
+
+run_managed_verification() {
+  local jobs_root="$project_root/.clasp-verify/jobs"
+  local job_dir=""
+  local stdout_offset=0
+  local stderr_offset=0
+  local status=""
+  local exit_status=1
+  local managed_args=("$project_root/scripts/run-managed-job.sh" --jobs-root "$jobs_root")
+
+  if (( verify_managed_memory_mb > 0 )); then
+    managed_args+=(--memory-mb "$verify_managed_memory_mb")
+  fi
+  if (( verify_managed_min_available_memory_mb > 0 )); then
+    managed_args+=(--min-available-memory-mb "$verify_managed_min_available_memory_mb")
+  fi
+
+  job_dir="$(
+    "${managed_args[@]}" \
+      -- env \
+        CLASP_VERIFY_MANAGED_REENTRY=1 \
+        CLASP_NATIVE_JOBS_MAX="${CLASP_NATIVE_JOBS_MAX:-1}" \
+        CLASP_VERIFY_PARALLEL_JOBS="${CLASP_VERIFY_PARALLEL_JOBS:-2}" \
+        bash "$project_root/scripts/verify-all.sh"
+  )"
+  printf '%s: managed verification job: %s memory_mb=%s min_available_memory_mb=%s\n' \
+    "$verify_label" "$job_dir" "$verify_managed_memory_mb" "$verify_managed_min_available_memory_mb" >&2
+
+  while true; do
+    stream_managed_log_growth "$job_dir/stdout.log" "$stdout_offset" 1
+    stdout_offset="$streamed_log_offset"
+    stream_managed_log_growth "$job_dir/stderr.log" "$stderr_offset" 2
+    stderr_offset="$streamed_log_offset"
+    status="$(sed -n '1p' "$job_dir/status" 2>/dev/null || printf 'missing')"
+    case "$status" in
+      completed|failed|stopped)
+        break
+        ;;
+    esac
+    sleep "$verify_managed_poll_secs"
+  done
+
+  stream_managed_log_growth "$job_dir/stdout.log" "$stdout_offset" 1
+  stdout_offset="$streamed_log_offset"
+  stream_managed_log_growth "$job_dir/stderr.log" "$stderr_offset" 2
+  stderr_offset="$streamed_log_offset"
+
+  if [[ -f "$job_dir/exit-status" ]]; then
+    exit_status="$(tr -d '[:space:]' <"$job_dir/exit-status")"
+  elif [[ "$status" == "completed" ]]; then
+    exit_status=0
+  fi
+  if ! [[ "$exit_status" =~ ^[0-9]+$ ]]; then
+    exit_status=1
+  fi
+
+  if [[ -f "$job_dir/memory-exceeded" ]]; then
+    printf '%s: managed verification memory guard tripped:\n' "$verify_label" >&2
+    sed 's/^/  /' "$job_dir/memory-exceeded" >&2 || true
+  fi
+
+  exit "$exit_status"
+}
+
+if managed_verification_enabled; then
+  run_managed_verification
+fi
 
 default_verify_lock_file() {
   local git_common_dir=""
@@ -397,6 +522,8 @@ else
   export NIX_CONFIG="${nix_config_features}"
 fi
 
+export CLASP_NATIVE_JOBS_MAX="${CLASP_NATIVE_JOBS_MAX:-1}"
+
 mkdir -p "$verify_tmp_root"
 export TMPDIR="$verify_tmp_root"
 
@@ -407,10 +534,22 @@ default_parallel_jobs() {
   if ! [[ "$cpu_count" =~ ^[0-9]+$ ]] || (( cpu_count < 1 )); then
     cpu_count=4
   fi
-  if (( cpu_count > 4 )); then
-    cpu_count=4
+  if (( cpu_count > 2 )); then
+    cpu_count=2
   fi
   printf '%s\n' "$cpu_count"
+}
+
+bounded_parallel_jobs() {
+  local requested="$1"
+
+  if ! [[ "$requested" =~ ^[0-9]+$ ]] || (( requested < 1 )); then
+    requested="$(default_parallel_jobs)"
+  fi
+  if (( requested > verify_max_parallel_jobs )); then
+    requested="$verify_max_parallel_jobs"
+  fi
+  printf '%s\n' "$requested"
 }
 
 run_project_command() {
@@ -607,6 +746,7 @@ run_verify_commands() {
   local parallel_commands="${CLASP_VERIFY_PARALLEL_COMMANDS-$full_parallel_verify_commands}"
   local sequential_commands="${CLASP_VERIFY_SEQUENTIAL_COMMANDS-$full_sequential_verify_commands}"
 
+  parallel_jobs="$(bounded_parallel_jobs "$parallel_jobs")"
   run_parallel_commands "$parallel_commands" "$parallel_jobs"
   run_command_block "$sequential_commands" "sequential" "sequential"
 }

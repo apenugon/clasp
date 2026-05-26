@@ -8,7 +8,7 @@ This repository is building `Clasp`, an AI-oriented programming language with a 
 - Prefer the files named in the task before scanning the wider repo.
 - Keep changes small, local, and test-backed.
 - Do not rely on Git metadata being available in copied workspaces.
-- Run `bash scripts/verify-all.sh` before claiming a task is done.
+- Run `bash scripts/verify-all.sh` before claiming a task is done. It self-runs under the managed memory guard by default and caps top-level verification fanout; do not bypass that guard except when testing the harness itself.
 
 ## Compiler Shape
 

@@ -31,6 +31,9 @@ Forwarded affected-mode options:
 Environment:
   CLASP_VERIFY_REPORT_JSON      Write a timing/report JSON for the fast bundle.
   CLASP_VERIFY_PARALLEL_JOBS    Override parallel job count used by verify-all.
+  CLASP_VERIFY_MAX_PARALLEL_JOBS
+                                Cap verify-all's effective parallel job count.
+  CLASP_VERIFY_MANAGED          Set to 0 to bypass verify-all's managed memory guard.
   CLASP_CLASPC or CLASPC_BIN    Ignored when resolving this checkout's claspc.
 EOF
 }
