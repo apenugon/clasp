@@ -23,7 +23,7 @@ reject_pattern() {
   fi
 }
 
-bash -n "$project_root/scripts/test-native-claspc.sh" "$project_root/scripts/test-native-claspc-smoke.sh" "$project_root/scripts/test-int-builtins.sh" "$project_root/scripts/test-dict-builtins.sh" "$project_root/scripts/test-native-runtime-smoke.sh" "$project_root/scripts/test-verify-all-smoke.sh" "$project_root/scripts/test-agent-command-template.sh" "$project_root/scripts/test-goal-manager-agent-command-template.sh" "$project_root/scripts/test-goal-manager-default-planner-command.sh"
+bash -n "$project_root/scripts/test-native-claspc.sh" "$project_root/scripts/test-native-claspc-smoke.sh" "$project_root/scripts/test-int-builtins.sh" "$project_root/scripts/test-dict-builtins.sh" "$project_root/scripts/test-native-runtime-smoke.sh" "$project_root/scripts/test-verify-all-smoke.sh" "$project_root/scripts/test-agent-command-template.sh" "$project_root/scripts/test-goal-manager-agent-command-template.sh" "$project_root/scripts/test-goal-manager-default-planner-command.sh" "$project_root/benchmarks/test-benchmark-prep-cache.sh"
 bash -n "$project_root/scripts/test-goal-manager-planner-report-decode.sh"
 bash -n "$project_root/examples/swarm-kernel/scripts/verify.sh"
 node "$project_root/scripts/check-promoted-native-image-exports.mjs" >/dev/null
@@ -50,6 +50,11 @@ require_pattern "scripts/verify-all.sh" 'CLASP_AGENT_COMMAND_TEMPLATE_FEEDBACK=0
 require_pattern "scripts/verify-all.sh" 'bash scripts/test-goal-manager-agent-command-template.sh'
 require_pattern "scripts/verify-all.sh" 'bash scripts/test-goal-manager-default-planner-command.sh'
 require_pattern "scripts/verify-all.sh" 'bash scripts/test-dict-builtins.sh'
+require_pattern "scripts/verify-all.sh" 'bash benchmarks/test-benchmark-prep-cache.sh'
+require_pattern "scripts/verify-fast.sh" 'bash benchmarks/test-benchmark-prep-cache.sh'
+require_pattern "scripts/verify-affected.mjs" 'node --check benchmarks/run-benchmark.mjs'
+require_pattern "scripts/verify-affected.mjs" 'bash benchmarks/test-benchmark-prep-cache.sh'
+require_pattern "benchmarks/test-benchmark-prep-cache.sh" 'test-benchmark-prep-cache: ok'
 require_pattern "scripts/test-goal-manager-agent-command-template.sh" 'goal-manager-agent-command-template-ok'
 require_pattern "scripts/test-goal-manager-agent-command-template.sh" 'ensure-goal-manager-binary.sh'
 require_pattern "scripts/test-goal-manager-agent-command-template.sh" 'CLASP_GOAL_MANAGER_COMPILE_MEMORY_MB'

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { cp, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { readdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import os from "node:os";
@@ -529,8 +529,170 @@ async function prepareWorkspace(task, workspace, env) {
   }
 
   if (task.language === "clasp") {
-    await generateClaspBenchmarkPrep(task, workspace, env);
+    const cacheHit = await restoreClaspBenchmarkPrepFromCache(task, workspace, env);
+    if (!cacheHit) {
+      await generateClaspBenchmarkPrep(task, workspace, env);
+      await saveClaspBenchmarkPrepToCache(task, workspace, env);
+    }
   }
+}
+
+async function restoreClaspBenchmarkPrepFromCache(task, workspace, env) {
+  const plan = await claspBenchmarkPrepCachePlan(task, workspace, env);
+  if (!plan.enabled) {
+    return false;
+  }
+
+  const manifestPath = path.join(plan.cacheDir, "manifest.json");
+  const prepSource = path.join(plan.cacheDir, "benchmark-prep");
+  const guideSource = path.join(plan.cacheDir, "LANGUAGE_GUIDE.md");
+
+  if (
+    !(await fileExists(manifestPath)) ||
+    !(await fileExists(prepSource)) ||
+    !(await fileExists(guideSource))
+  ) {
+    traceBenchmarkPrepCache("miss", plan);
+    return false;
+  }
+
+  try {
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    if (manifest.key !== plan.key || manifest.version !== claspBenchmarkPrepCacheVersion()) {
+      traceBenchmarkPrepCache("stale", plan);
+      return false;
+    }
+
+    await rm(path.join(workspace, "benchmark-prep"), { recursive: true, force: true });
+    await cp(prepSource, path.join(workspace, "benchmark-prep"), {
+      recursive: true,
+      force: true
+    });
+    await cp(guideSource, path.join(workspace, "LANGUAGE_GUIDE.md"), { force: true });
+    traceBenchmarkPrepCache("hit", plan);
+    return true;
+  } catch {
+    traceBenchmarkPrepCache("invalid", plan);
+    return false;
+  }
+}
+
+async function saveClaspBenchmarkPrepToCache(task, workspace, env) {
+  const plan = await claspBenchmarkPrepCachePlan(task, workspace, env);
+  if (!plan.enabled) {
+    return;
+  }
+
+  const prepSource = path.join(workspace, "benchmark-prep");
+  const guideSource = path.join(workspace, "LANGUAGE_GUIDE.md");
+  if (!(await fileExists(prepSource)) || !(await fileExists(guideSource))) {
+    return;
+  }
+
+  await mkdir(plan.root, { recursive: true });
+  const tempDir = await mkdtemp(path.join(plan.root, ".write-"));
+  try {
+    await cp(prepSource, path.join(tempDir, "benchmark-prep"), {
+      recursive: true,
+      force: true
+    });
+    await cp(guideSource, path.join(tempDir, "LANGUAGE_GUIDE.md"), { force: true });
+    await writeFile(
+      path.join(tempDir, "manifest.json"),
+      JSON.stringify({
+        version: claspBenchmarkPrepCacheVersion(),
+        key: plan.key,
+        taskId: task.id,
+        createdAt: new Date().toISOString()
+      }, null, 2) + "\n",
+      "utf8"
+    );
+    await rm(plan.cacheDir, { recursive: true, force: true });
+    await rename(tempDir, plan.cacheDir);
+    traceBenchmarkPrepCache("saved", plan);
+  } catch (error) {
+    await rm(tempDir, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+async function claspBenchmarkPrepCachePlan(task, workspace, env) {
+  const root = path.resolve(
+    process.env.CLASP_BENCHMARK_PREP_CACHE_ROOT ??
+      path.join("/tmp", "clasp-benchmark-prep-cache-v1")
+  );
+  const enabled =
+    claspBenchmarkPrepCacheEnabled() &&
+    task.language === "clasp" &&
+    Array.isArray(task.prepare) &&
+    task.prepare.length === 0;
+
+  if (!enabled) {
+    return {
+      enabled: false,
+      root,
+      key: "",
+      cacheDir: ""
+    };
+  }
+
+  const key = await claspBenchmarkPrepCacheKey(task, workspace, env);
+  return {
+    enabled: true,
+    root,
+    key,
+    cacheDir: path.join(root, key)
+  };
+}
+
+function claspBenchmarkPrepCacheVersion() {
+  return 1;
+}
+
+function claspBenchmarkPrepCacheEnabled() {
+  const value = process.env.CLASP_BENCHMARK_PREP_CACHE;
+  return value !== "0" && value !== "false" && value !== "never";
+}
+
+function traceBenchmarkPrepCache(status, plan) {
+  if (process.env.CLASP_BENCHMARK_PREP_CACHE_TRACE !== "1") {
+    return;
+  }
+
+  console.error(`[benchmark-prep-cache] ${status} ${plan.key}`);
+}
+
+async function claspBenchmarkPrepCacheKey(task, workspace, env) {
+  const keyMaterial = {
+    version: claspBenchmarkPrepCacheVersion(),
+    task: await directoryFingerprint(task.dir),
+    workspace: await directoryFingerprint(workspace, {
+      excludeDirectoryNames: new Set(["benchmark-prep", "build", "dist", "node_modules"]),
+      excludeFileNames: new Set([".benchmark-prep.native.image.json", "LANGUAGE_GUIDE.md"])
+    }),
+    compiler: await claspBenchmarkPrepCompilerFingerprint(env),
+    generator: await fileFingerprint(path.join(benchmarkRoot, "run-benchmark.mjs"))
+  };
+
+  return createHash("sha256")
+    .update(JSON.stringify(keyMaterial))
+    .digest("hex");
+}
+
+async function claspBenchmarkPrepCompilerFingerprint(env) {
+  const explicitClaspc = env.CLASP_CLASPC || env.CLASPC_BIN || "";
+  const runtimeSource = await directoryFingerprint(path.resolve("runtime"), {
+    excludeDirectoryNames: new Set(["target"])
+  });
+
+  return {
+    explicitClaspc: explicitClaspc.length > 0
+      ? await fileStatFingerprint(explicitClaspc)
+      : null,
+    resolveScript: await fileFingerprint(path.resolve("scripts", "resolve-claspc.sh")),
+    source: await directoryFingerprint(path.resolve("src")),
+    runtimeSource
+  };
 }
 
 async function generateClaspBenchmarkPrep(task, workspace, env) {
@@ -3879,6 +4041,56 @@ async function collectFiles(rootDir, relativeDir = "") {
   return files;
 }
 
+async function directoryFingerprint(rootDir, options = {}) {
+  const files = await collectFingerprintFiles(rootDir, "", options);
+  const hash = createHash("sha256");
+
+  for (const relativePath of files) {
+    const absolutePath = path.join(rootDir, relativePath);
+    const content = await readFile(absolutePath);
+    hash.update(posixJoin(...relativePath.split(path.sep)));
+    hash.update("\0");
+    hash.update(String(content.length));
+    hash.update("\0");
+    hash.update(content);
+    hash.update("\0");
+  }
+
+  return {
+    fileCount: files.length,
+    sha256: hash.digest("hex")
+  };
+}
+
+async function collectFingerprintFiles(rootDir, relativeDir = "", options = {}) {
+  const directory = path.join(rootDir, relativeDir);
+  const entries = await readdir(directory, { withFileTypes: true });
+  const files = [];
+  const excludedDirectoryNames = options.excludeDirectoryNames ?? new Set();
+  const excludedFileNames = options.excludeFileNames ?? new Set();
+
+  for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+    if (entry.isDirectory() && excludedDirectoryNames.has(entry.name)) {
+      continue;
+    }
+    if (entry.isFile() && excludedFileNames.has(entry.name)) {
+      continue;
+    }
+
+    const relativePath = path.join(relativeDir, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...await collectFingerprintFiles(rootDir, relativePath, options));
+      continue;
+    }
+
+    if (entry.isFile()) {
+      files.push(relativePath);
+    }
+  }
+
+  return files;
+}
+
 async function buildFileRecord(rootDir, absolutePath) {
   const content = await readFile(absolutePath);
   return {
@@ -3891,6 +4103,38 @@ async function buildFileRecord(rootDir, absolutePath) {
 async function sha256File(filePath) {
   const content = await readFile(filePath);
   return createHash("sha256").update(content).digest("hex");
+}
+
+async function fileFingerprint(filePath) {
+  try {
+    const content = await readFile(filePath);
+    return {
+      path: path.resolve(filePath),
+      size: content.length,
+      sha256: createHash("sha256").update(content).digest("hex")
+    };
+  } catch {
+    return {
+      path: path.resolve(filePath),
+      missing: true
+    };
+  }
+}
+
+async function fileStatFingerprint(filePath) {
+  try {
+    const info = await stat(filePath);
+    return {
+      path: path.resolve(filePath),
+      size: info.size,
+      mtimeMs: Math.trunc(info.mtimeMs)
+    };
+  } catch {
+    return {
+      path: filePath,
+      missing: true
+    };
+  }
 }
 
 async function createDeterministicTarball(sourceDir, outputPath) {

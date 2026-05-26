@@ -82,6 +82,8 @@ cp "$project_root/scripts/test-feedback-loop-routing.sh" "$test_root/scripts/tes
 cp "$project_root/scripts/ensure-goal-manager-binary.sh" "$test_root/scripts/ensure-goal-manager-binary.sh"
 cp "$project_root/src/scripts/verify.sh" "$test_root/src/scripts/verify.sh"
 cp "$project_root/src/scripts/run-native-tool.sh" "$test_root/src/scripts/run-native-tool.sh"
+mkdir -p "$test_root/benchmarks"
+cp "$project_root/benchmarks/test-benchmark-prep-cache.sh" "$test_root/benchmarks/test-benchmark-prep-cache.sh"
 mkdir -p "$test_root/examples/swarm-native" "$test_root/runtime"
 printf 'module Main\n\nimport Service\nimport Swarm\n\nmain : Str\nmain = service\n' > "$test_root/examples/swarm-native/GoalManager.clasp"
 printf 'module Main\n\nimport Service\n\nmain : Str\nmain = service\n' > "$test_root/examples/swarm-native/GoalManager.wrapper.clasp"
@@ -127,6 +129,7 @@ fi
 grep -F 'bash scripts/test-verify-affected.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-verify-compiler-slice.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-verify-runtime-slice.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
+grep -F 'bash benchmarks/test-benchmark-prep-cache.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 node - "$test_root/scripts/verify-fast.sh" <<'NODE'
 const fs = require("fs");
 const script = fs.readFileSync(process.argv[2], "utf8");
@@ -254,6 +257,7 @@ NODE
 grep -F 'bash scripts/test-verify-affected.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-verify-compiler-slice.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-verify-runtime-slice.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'bash benchmarks/test-benchmark-prep-cache.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'usage: scripts/verify-compiler-slice.sh' "$test_root/scripts/verify-compiler-slice.sh" >/dev/null
 grep -F -- '--check-only' "$test_root/scripts/verify-compiler-slice.sh" >/dev/null
 grep -F 'CLASP_COMPILER_SLICE_TIMEOUT_SECS' "$test_root/scripts/verify-compiler-slice.sh" >/dev/null
@@ -299,6 +303,9 @@ grep -F 'bash scripts/verify-compiler-slice.sh --check-only' "$test_root/scripts
 grep -F 'bash scripts/test-js-emitter-determinism.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'bash scripts/test-promoted-source-export-cache.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'node --check scripts/generate-promoted-source-export-cache.mjs' "$test_root/scripts/verify-affected.mjs" >/dev/null
+grep -F 'node --check benchmarks/run-benchmark.mjs' "$test_root/scripts/verify-affected.mjs" >/dev/null
+grep -F 'bash benchmarks/test-benchmark-prep-cache.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
+grep -F 'test-benchmark-prep-cache: ok' "$test_root/benchmarks/test-benchmark-prep-cache.sh" >/dev/null
 grep -F 'source-export-cache-v1' "$test_root/scripts/generate-promoted-source-export-cache.mjs" >/dev/null
 grep -F 'src/stage1.task-workspace-runtime-harness.native.image.json' "$test_root/scripts/generate-promoted-source-export-cache.mjs" >/dev/null
 grep -F 'env -u CLASP_CLASPC -u CLASPC_BIN "$project_root/scripts/resolve-claspc.sh"' "$test_root/scripts/test-promoted-source-export-cache.sh" >/dev/null

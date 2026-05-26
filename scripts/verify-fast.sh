@@ -115,6 +115,7 @@ bash scripts/test-verify-all-smoke.sh
 bash scripts/test-verify-affected.sh
 bash scripts/test-verify-compiler-slice.sh
 bash scripts/test-verify-runtime-slice.sh
+bash benchmarks/test-benchmark-prep-cache.sh
 '
 fallback_verify_commands=$'
 bash scripts/verify-compiler-slice.sh all

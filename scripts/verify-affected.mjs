@@ -285,6 +285,8 @@ const COMMANDS = {
   promotedSourceExportCacheNodeCheck: "node --check scripts/generate-promoted-source-export-cache.mjs",
   benchmarkCheckpointNodeCheck: "node --check scripts/benchmark-checkpoint.mjs",
   benchmarkCheckpointRegression: "bash scripts/test-benchmark-checkpoint.sh",
+  runBenchmarkNodeCheck: "node --check benchmarks/run-benchmark.mjs",
+  benchmarkPrepCacheRegression: "bash benchmarks/test-benchmark-prep-cache.sh",
   benchmarkTaskPrep: "bash benchmarks/test-task-prep.sh",
   affectedNodeCheck: "node --check scripts/verify-affected.mjs",
 };
@@ -408,6 +410,10 @@ function isBenchmarkCheckpointFile(file) {
     file === "scripts/test-benchmark-checkpoint.sh" ||
     /^benchmarks\/checkpoints\/[^/]+\.json$/.test(file)
   );
+}
+
+function isBenchmarkPrepCacheFile(file) {
+  return file === "benchmarks/run-benchmark.mjs" || file === "benchmarks/test-benchmark-prep-cache.sh";
 }
 
 function isPromotedSourceExportCacheFile(file) {
@@ -773,6 +779,7 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
     const isSourceNativeVerifyScript = file === "src/scripts/verify.sh";
     const compilerSlice = compilerSliceForFile(file);
     const isBenchmarkCheckpoint = isBenchmarkCheckpointFile(file);
+    const isBenchmarkPrepCache = isBenchmarkPrepCacheFile(file);
     const isPromotedSourceExportCache = isPromotedSourceExportCacheFile(file);
 
     if (file.startsWith("src/") && !isPromotedSourceExportCache && !isSourceNativeVerifyScript) {
@@ -1032,6 +1039,38 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
       );
     }
 
+    if (isBenchmarkPrepCache) {
+      matched = true;
+      reason(
+        file,
+        "benchmark-prep-cache",
+        "benchmark prep cache paths use runner syntax plus focused cache hit/invalidation coverage",
+      );
+      if (file.endsWith(".sh")) {
+        addSelected(
+          selectedByCommand,
+          `bash-syntax:${file}`,
+          `bash -n ${shellQuote(file)}`,
+          "benchmark prep cache shell syntax",
+          file,
+        );
+      }
+      addSelected(
+        selectedByCommand,
+        "run-benchmark-node-check",
+        COMMANDS.runBenchmarkNodeCheck,
+        "benchmark runner syntax",
+        file,
+      );
+      addSelected(
+        selectedByCommand,
+        "benchmark-prep-cache-regression",
+        COMMANDS.benchmarkPrepCacheRegression,
+        "benchmark prep cache regression",
+        file,
+      );
+    }
+
     if (isPromotedSourceExportCache) {
       matched = true;
       reason(
@@ -1099,7 +1138,7 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
       }
     }
 
-    if (!isBenchmarkCheckpoint && file.startsWith("benchmarks/")) {
+    if (!isBenchmarkCheckpoint && !isBenchmarkPrepCache && file.startsWith("benchmarks/")) {
       matched = true;
       reason(file, "benchmarks", "benchmark path uses benchmark task-prep coverage");
       addSelected(selectedByCommand, "benchmark-task-prep", COMMANDS.benchmarkTaskPrep, "benchmark path", file);

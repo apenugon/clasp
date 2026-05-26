@@ -34,6 +34,8 @@ cp "$project_root/scripts/verify-affected.sh" "$project_copy/scripts/verify-affe
 cp "$project_root/scripts/verify-affected.mjs" "$project_copy/scripts/verify-affected.mjs"
 cp "$project_root/scripts/benchmark-checkpoint.mjs" "$project_copy/scripts/benchmark-checkpoint.mjs"
 cp "$project_root/scripts/test-benchmark-checkpoint.sh" "$project_copy/scripts/test-benchmark-checkpoint.sh"
+cp "$project_root/benchmarks/run-benchmark.mjs" "$project_copy/benchmarks/run-benchmark.mjs"
+cp "$project_root/benchmarks/test-benchmark-prep-cache.sh" "$project_copy/benchmarks/test-benchmark-prep-cache.sh"
 cp "$project_root/scripts/generate-promoted-source-export-cache.mjs" "$project_copy/scripts/generate-promoted-source-export-cache.mjs"
 cp "$project_root/scripts/test-promoted-source-export-cache.sh" "$project_copy/scripts/test-promoted-source-export-cache.sh"
 cp "$project_root/scripts/test-native-claspc-diagnostics.sh" "$project_copy/scripts/test-native-claspc-diagnostics.sh"
@@ -527,6 +529,16 @@ switch (scenario) {
     assert(report.usedVerifyFastFallback === false, "known benchmark checkpoint inputs should not use verify-fast fallback");
     assert(logHas("scripts/test-benchmark-checkpoint.sh"), "fake checkpoint regression command should execute");
     break;
+  case "benchmark-prep-cache":
+    assert(report.changedFiles.includes("benchmarks/run-benchmark.mjs"), "benchmark runner should be present");
+    assert(report.changedFiles.includes("benchmarks/test-benchmark-prep-cache.sh"), "benchmark prep cache test should be present");
+    assert(hasCommand("node --check benchmarks/run-benchmark.mjs"), "benchmark runner should run node syntax check");
+    assert(hasCommand("bash -n 'benchmarks/test-benchmark-prep-cache.sh'"), "benchmark prep cache test should run shell syntax check");
+    assert(hasCommand("bash benchmarks/test-benchmark-prep-cache.sh"), "benchmark prep cache route should run focused cache regression");
+    assert(!hasCommand("bash benchmarks/test-task-prep.sh"), "benchmark prep cache route should avoid broad benchmark prep coverage");
+    assert(report.usedVerifyFastFallback === false, "known benchmark prep cache inputs should not use verify-fast fallback");
+    assert(logHas("benchmarks/test-benchmark-prep-cache.sh"), "fake benchmark prep cache regression command should execute");
+    break;
   case "empty-no-git":
     assert(report.usedGitFallback === true, "empty explicit input should try git fallback");
     assert(report.inputFallbackMode === "git-unavailable" || report.inputFallbackMode === "git-empty", `unexpected input fallback mode: ${report.inputFallbackMode}`);
@@ -803,6 +815,14 @@ CLASP_TEST_FAKE_COMMAND_LOG="$benchmark_checkpoint_log" \
     --changed-file scripts/test-benchmark-checkpoint.sh \
     --changed-file benchmarks/checkpoints/2026-05-20-baseline-bottleneck.json > "$benchmark_checkpoint_report"
 assert_report "$benchmark_checkpoint_report" "$benchmark_checkpoint_log" benchmark-checkpoint
+
+benchmark_prep_cache_report="$test_root/benchmark-prep-cache-report.json"
+benchmark_prep_cache_log="$test_root/benchmark-prep-cache.log"
+CLASP_TEST_FAKE_COMMAND_LOG="$benchmark_prep_cache_log" \
+  run_verify_affected \
+    --changed-file benchmarks/run-benchmark.mjs \
+    --changed-file benchmarks/test-benchmark-prep-cache.sh > "$benchmark_prep_cache_report"
+assert_report "$benchmark_prep_cache_report" "$benchmark_prep_cache_log" benchmark-prep-cache
 
 empty_report="$test_root/empty-report.json"
 empty_log="$test_root/empty.log"

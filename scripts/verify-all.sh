@@ -95,6 +95,7 @@ bash scripts/test-verify-affected.sh
 bash scripts/test-verify-compiler-slice.sh
 bash scripts/test-verify-runtime-slice.sh
 bash examples/lead-app-ts/scripts/verify.sh
+bash benchmarks/test-benchmark-prep-cache.sh
 bash benchmarks/test-task-prep.sh
 bash benchmarks/test-persistence-benchmarks.sh
 bash benchmarks/test-correctness-benchmarks.sh
