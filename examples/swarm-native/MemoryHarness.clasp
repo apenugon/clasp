@@ -8,6 +8,8 @@ record MemoryHarnessReport = {
   objectiveValues : [Str],
   taskValues : [Str],
   allValues : [Str],
+  searchValues : [Str],
+  searchScores : [Int],
   mailboxValues : [Str],
   mailboxMemoryCount : Int
 }
@@ -31,6 +33,12 @@ task = taskHandle root "memory-task" "memory-agent"
 memoryValue : SwarmMemory -> Str
 memoryValue item = item.value
 
+searchMemoryValue : SwarmMemorySearchResult -> Str
+searchMemoryValue item = item.memory.value
+
+searchScore : SwarmMemorySearchResult -> Int
+searchScore item = item.score
+
 errorText : Str -> Str
 errorText message = textConcat ["error:", message]
 
@@ -52,17 +60,24 @@ main =
                             Ok taskMemoryValues ->
                               match memoryQuery root "" "" "lesson" 10 {
                                 Ok allMemoryValues ->
-                                  match taskMailbox task 10 {
-                                    Ok mailboxValue ->
-                                      encode (MemoryHarnessReport {
-                                        objectiveMemory = objectiveMemoryValue,
-                                        taskMemory = taskMemoryValue,
-                                        objectiveValues = map memoryValue objectiveMemoryValues,
-                                        taskValues = map memoryValue taskMemoryValues,
-                                        allValues = map memoryValue allMemoryValues,
-                                        mailboxValues = map memoryValue mailboxValue.memory,
-                                        mailboxMemoryCount = length mailboxValue.memory
-                                      }),
+                                  match memorySearch root "" "" "durable task memory" 10 {
+                                    Ok searchValues ->
+                                      match taskMailbox task 10 {
+                                        Ok mailboxValue ->
+                                          encode (MemoryHarnessReport {
+                                            objectiveMemory = objectiveMemoryValue,
+                                            taskMemory = taskMemoryValue,
+                                            objectiveValues = map memoryValue objectiveMemoryValues,
+                                            taskValues = map memoryValue taskMemoryValues,
+                                            allValues = map memoryValue allMemoryValues,
+                                            searchValues = map searchMemoryValue searchValues,
+                                            searchScores = map searchScore searchValues,
+                                            mailboxValues = map memoryValue mailboxValue.memory,
+                                            mailboxMemoryCount = length mailboxValue.memory
+                                          }),
+                                        Err message ->
+                                          errorText message
+                                      },
                                     Err message ->
                                       errorText message
                                   },

@@ -32,6 +32,7 @@ foreign swarmRunsRaw : Str -> Str -> Result Str = "swarmRunsJson"
 foreign swarmArtifactsRaw : Str -> Str -> Result Str = "swarmArtifactsJson"
 foreign swarmMemoryPutRaw : Str -> Str -> Str -> Str -> Str -> Str -> Result Str = "swarmMemoryPutJson"
 foreign swarmMemoryQueryRaw : Str -> Str -> Str -> Str -> Int -> Result Str = "swarmMemoryQueryJson"
+foreign swarmMemorySearchRaw : Str -> Str -> Str -> Str -> Int -> Result Str = "swarmMemorySearchJson"
 foreign swarmHistoryRaw : Str -> Str -> Result Str = "swarmHistoryJson"
 foreign swarmTailRaw : Str -> Str -> Int -> Result Str = "swarmTailJson"
 foreign swarmTasksRaw : Str -> Result Str = "swarmTasksJson"
@@ -135,6 +136,12 @@ record SwarmMemory = {
   key : Str,
   value : Str,
   updatedAtMs : Int
+}
+
+record SwarmMemorySearchResult = {
+  memory : SwarmMemory,
+  score : Int,
+  matchedText : Str
 }
 
 record SwarmEvent = {
@@ -412,6 +419,9 @@ memoryResultError message = Err message
 memoryListResultError : Str -> Result [SwarmMemory]
 memoryListResultError message = Err message
 
+memorySearchResultListError : Str -> Result [SwarmMemorySearchResult]
+memorySearchResultListError message = Err message
+
 eventListResultError : Str -> Result [SwarmEvent]
 eventListResultError message = Err message
 
@@ -537,6 +547,12 @@ memoryListResult : Result Str -> Result [SwarmMemory]
 memoryListResult value = match value {
   Ok raw -> Ok (decode [SwarmMemory] raw),
   Err message -> memoryListResultError message
+}
+
+memorySearchResultListResult : Result Str -> Result [SwarmMemorySearchResult]
+memorySearchResultListResult value = match value {
+  Ok raw -> Ok (decode [SwarmMemorySearchResult] raw),
+  Err message -> memorySearchResultListError message
 }
 
 eventListResult : Result Str -> Result [SwarmEvent]
@@ -669,6 +685,10 @@ memoryQuery : SwarmRoot -> Str -> Str -> Str -> Int -> Result [SwarmMemory]
 memoryQuery root objectiveId taskId key limit =
   memoryListResult (swarmMemoryQueryRaw root.path objectiveId taskId key limit)
 
+memorySearch : SwarmRoot -> Str -> Str -> Str -> Int -> Result [SwarmMemorySearchResult]
+memorySearch root objectiveId taskId query limit =
+  memorySearchResultListResult (swarmMemorySearchRaw root.path objectiveId taskId query limit)
+
 objectiveMemoryPut : ObjectiveHandle -> Str -> Str -> Str -> Result SwarmMemory
 objectiveMemoryPut handle actor key value =
   memoryPut handle.root handle.objectiveId "" actor key value
@@ -684,6 +704,14 @@ taskMemoryPut handle key value =
 taskMemory : TaskHandle -> Str -> Int -> Result [SwarmMemory]
 taskMemory handle key limit =
   memoryQuery handle.root "" handle.taskId key limit
+
+objectiveMemorySearch : ObjectiveHandle -> Str -> Int -> Result [SwarmMemorySearchResult]
+objectiveMemorySearch handle query limit =
+  memorySearch handle.root handle.objectiveId "" query limit
+
+taskMemorySearch : TaskHandle -> Str -> Int -> Result [SwarmMemorySearchResult]
+taskMemorySearch handle query limit =
+  memorySearch handle.root "" handle.taskId query limit
 
 history : TaskHandle -> Result [SwarmEvent]
 history handle = eventListResult (swarmHistoryRaw handle.root.path handle.taskId)

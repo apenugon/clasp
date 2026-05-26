@@ -165,6 +165,13 @@ enum SwarmCommand {
         key: Option<String>,
         limit: usize,
     },
+    MemorySearch {
+        root: PathBuf,
+        objective_id: Option<String>,
+        task_id: Option<String>,
+        query: String,
+        limit: usize,
+    },
     ObjectiveCreate {
         root: PathBuf,
         objective_id: String,
@@ -224,7 +231,7 @@ enum SwarmCommand {
 
 fn swarm_usage(program: &str) -> ! {
     eprintln!(
-        "usage: {program} [--json] swarm <start|bootstrap|lease|release|heartbeat|complete|fail|retry|stop|resume|status|history|tasks|summary|tail|runs|artifacts|memory put|memory query|objective create|objective status|objectives|task create|ready|approve|approvals|policy set|manager next|tool|verifier run|mergegate decide> ..."
+        "usage: {program} [--json] swarm <start|bootstrap|lease|release|heartbeat|complete|fail|retry|stop|resume|status|history|tasks|summary|tail|runs|artifacts|memory put|memory query|memory search|objective create|objective status|objectives|task create|ready|approve|approvals|policy set|manager next|tool|verifier run|mergegate decide> ..."
     );
     std::process::exit(2);
 }
@@ -451,7 +458,7 @@ fn parse_swarm_command(args: &[String]) -> Result<Option<(bool, SwarmCommand)>, 
         }
         "memory" => {
             let Some(action) = rest.first().map(|value| value.as_str()) else {
-                return Err("usage: claspc swarm memory <put|query> ...".to_owned());
+                return Err("usage: claspc swarm memory <put|query|search> ...".to_owned());
             };
             match action {
                 "put" => {
@@ -557,6 +564,56 @@ fn parse_swarm_command(args: &[String]) -> Result<Option<(bool, SwarmCommand)>, 
                         objective_id,
                         task_id,
                         key,
+                        limit,
+                    }
+                }
+                "search" => {
+                    if rest.len() < 3 {
+                        return Err(
+                            "usage: claspc swarm memory search <state-root> <query> [--objective ID] [--task ID] [--limit N]"
+                                .to_owned(),
+                        );
+                    }
+                    let root = parse_root_arg(&rest[1]);
+                    let query = rest[2].clone();
+                    let mut objective_id = None;
+                    let mut task_id = None;
+                    let mut limit = 10usize;
+                    let mut index = 3usize;
+                    while index < rest.len() {
+                        match rest[index].as_str() {
+                            "--objective" => {
+                                let Some(value) = rest.get(index + 1) else {
+                                    return Err("missing value after --objective".to_owned());
+                                };
+                                objective_id = Some(value.clone());
+                                index += 2;
+                            }
+                            "--task" => {
+                                let Some(value) = rest.get(index + 1) else {
+                                    return Err("missing value after --task".to_owned());
+                                };
+                                task_id = Some(value.clone());
+                                index += 2;
+                            }
+                            "--limit" => {
+                                let Some(value) = rest.get(index + 1) else {
+                                    return Err("missing value after --limit".to_owned());
+                                };
+                                limit = value
+                                    .parse::<usize>()
+                                    .map_err(|_| format!("invalid --limit value `{value}`"))?
+                                    .max(1);
+                                index += 2;
+                            }
+                            other => return Err(format!("unknown option `{other}`")),
+                        }
+                    }
+                    SwarmCommand::MemorySearch {
+                        root,
+                        objective_id,
+                        task_id,
+                        query,
                         limit,
                     }
                 }
@@ -2323,6 +2380,150 @@ fn memory_query_json(
     let mut values = Vec::new();
     for row in rows {
         values.push(memory_json(&row.map_err(|err| format!("failed to read swarm memory row: {err}"))?));
+    }
+    Ok(Value::Array(values))
+}
+
+fn memory_search_tokens(query: &str) -> Vec<String> {
+    query
+        .to_ascii_lowercase()
+        .split(|ch: char| !ch.is_ascii_alphanumeric())
+        .filter(|token| !token.is_empty())
+        .map(|token| token.to_owned())
+        .collect()
+}
+
+fn token_match_score(text: &str, tokens: &[String], weight: i64) -> i64 {
+    tokens
+        .iter()
+        .filter(|token| text.contains(token.as_str()))
+        .count() as i64
+        * weight
+}
+
+fn memory_search_score(record: &SwarmMemoryRecord, query_lower: &str, tokens: &[String]) -> i64 {
+    let key = record.key.to_ascii_lowercase();
+    let value = record.value.to_ascii_lowercase();
+    let actor = record.actor.to_ascii_lowercase();
+    let objective_id = record.objective_id.to_ascii_lowercase();
+    let task_id = record.task_id.to_ascii_lowercase();
+    let mut score = 0i64;
+
+    if key == query_lower {
+        score += 1000;
+    }
+    if value == query_lower {
+        score += 900;
+    }
+    if key.contains(query_lower) {
+        score += 400;
+    }
+    if value.contains(query_lower) {
+        score += 300;
+    }
+    if actor.contains(query_lower) {
+        score += 60;
+    }
+    if objective_id.contains(query_lower) {
+        score += 40;
+    }
+    if task_id.contains(query_lower) {
+        score += 40;
+    }
+
+    score += token_match_score(&key, tokens, 80);
+    score += token_match_score(&value, tokens, 60);
+    score += token_match_score(&actor, tokens, 20);
+    score += token_match_score(&objective_id, tokens, 10);
+    score += token_match_score(&task_id, tokens, 10);
+    score
+}
+
+fn memory_search_match_text(record: &SwarmMemoryRecord, query_lower: &str, tokens: &[String]) -> String {
+    let key = record.key.to_ascii_lowercase();
+    let value = record.value.to_ascii_lowercase();
+    if key.contains(query_lower) {
+        return record.key.clone();
+    }
+    if value.contains(query_lower) {
+        return record.value.clone();
+    }
+    for token in tokens {
+        if key.contains(token.as_str()) {
+            return record.key.clone();
+        }
+        if value.contains(token.as_str()) {
+            return record.value.clone();
+        }
+    }
+    String::new()
+}
+
+fn memory_search_json(
+    connection: &Connection,
+    objective_id: Option<&str>,
+    task_id: Option<&str>,
+    query: &str,
+    limit: usize,
+) -> Result<Value, String> {
+    let query = query.trim();
+    if query.is_empty() {
+        return Err("swarm memory search query cannot be empty".to_owned());
+    }
+
+    let query_lower = query.to_ascii_lowercase();
+    let tokens = memory_search_tokens(query);
+    let objective_filter = objective_id.unwrap_or_default();
+    let task_filter = task_id.unwrap_or_default();
+    let candidate_limit = limit.max(1).min(1_000).saturating_mul(20).max(200).min(5_000) as i64;
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT id, objective_id, task_id, key, value, actor, created_at_ms, updated_at_ms
+            FROM swarm_memory
+            WHERE (?1 = '' OR objective_id = ?1)
+              AND (?2 = '' OR task_id = ?2)
+            ORDER BY id DESC
+            LIMIT ?3
+            ",
+        )
+        .map_err(|err| format!("failed to prepare swarm memory search: {err}"))?;
+    let rows = statement
+        .query_map(params![objective_filter, task_filter, candidate_limit], |row| {
+            Ok(SwarmMemoryRecord {
+                memory_id: row.get(0)?,
+                objective_id: row.get(1)?,
+                task_id: row.get(2)?,
+                key: row.get(3)?,
+                value: row.get(4)?,
+                actor: row.get(5)?,
+                created_at_ms: row.get(6)?,
+                updated_at_ms: row.get(7)?,
+            })
+        })
+        .map_err(|err| format!("failed to search swarm memory: {err}"))?;
+    let mut scored = Vec::new();
+    for row in rows {
+        let record = row.map_err(|err| format!("failed to read swarm memory row: {err}"))?;
+        let score = memory_search_score(&record, &query_lower, &tokens);
+        if score > 0 {
+            scored.push((score, record));
+        }
+    }
+    scored.sort_by(|left, right| {
+        right
+            .0
+            .cmp(&left.0)
+            .then_with(|| right.1.memory_id.cmp(&left.1.memory_id))
+    });
+
+    let mut values = Vec::new();
+    for (score, record) in scored.into_iter().take(limit.max(1).min(1_000)) {
+        values.push(json!({
+            "memory": memory_json(&record),
+            "score": score,
+            "matchedText": memory_search_match_text(&record, &query_lower, &tokens),
+        }));
     }
     Ok(Value::Array(values))
 }
@@ -4294,6 +4495,7 @@ fn execute_query_command(command: SwarmCommand) -> Result<Value, String> {
         | SwarmCommand::Tail { root, .. }
         | SwarmCommand::Runs { root, .. }
         | SwarmCommand::MemoryQuery { root, .. }
+        | SwarmCommand::MemorySearch { root, .. }
         | SwarmCommand::ObjectiveStatus { root, .. }
         | SwarmCommand::Objectives { root }
         | SwarmCommand::Ready { root, .. }
@@ -4320,6 +4522,8 @@ fn execute_query_command(command: SwarmCommand) -> Result<Value, String> {
         SwarmCommand::Artifacts { task_id, .. } => artifacts_json(&connection, task_id.as_deref()),
         SwarmCommand::MemoryQuery { objective_id, task_id, key, limit, .. } =>
             memory_query_json(&connection, objective_id.as_deref(), task_id.as_deref(), key.as_deref(), limit),
+        SwarmCommand::MemorySearch { objective_id, task_id, query, limit, .. } =>
+            memory_search_json(&connection, objective_id.as_deref(), task_id.as_deref(), &query, limit),
         SwarmCommand::Approvals { task_id, .. } => approvals_json(&connection, task_id.as_deref()),
         SwarmCommand::ManagerNext { objective_id, .. } => manager_next_json(&connection, &objective_id),
         _ => unreachable!(),
@@ -4769,6 +4973,7 @@ fn execute_command(command: SwarmCommand) -> Result<(ExitCode, Value), String> {
         | SwarmCommand::Tail { .. }
         | SwarmCommand::Runs { .. }
         | SwarmCommand::MemoryQuery { .. }
+        | SwarmCommand::MemorySearch { .. }
         | SwarmCommand::ObjectiveStatus { .. }
         | SwarmCommand::Objectives { .. }
         | SwarmCommand::Ready { .. }
@@ -5159,6 +5364,22 @@ pub fn builtin_swarm_memory_query(
         objective_id: if objective_id.is_empty() { None } else { Some(objective_id.to_owned()) },
         task_id: if task_id.is_empty() { None } else { Some(task_id.to_owned()) },
         key: if key.is_empty() { None } else { Some(key.to_owned()) },
+        limit: if limit <= 0 { 1 } else { limit as usize },
+    })
+}
+
+pub fn builtin_swarm_memory_search(
+    root: &str,
+    objective_id: &str,
+    task_id: &str,
+    query: &str,
+    limit: i64,
+) -> Result<String, String> {
+    render_builtin_query(SwarmCommand::MemorySearch {
+        root: PathBuf::from(root),
+        objective_id: if objective_id.is_empty() { None } else { Some(objective_id.to_owned()) },
+        task_id: if task_id.is_empty() { None } else { Some(task_id.to_owned()) },
+        query: query.to_owned(),
         limit: if limit <= 0 { 1 } else { limit as usize },
     })
 }

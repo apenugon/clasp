@@ -168,6 +168,7 @@ The repo now has the first manager-facing native slice here through:
 - `claspc swarm objectives`
 - `claspc swarm task create`
 - `claspc swarm ready`
+- `claspc swarm memory put|query|search`
 
 That native slice now also includes:
 
@@ -259,7 +260,7 @@ The language/runtime surface should expose native operations for:
 
 These should be Clasp-level primitives over the native runtime, not external shell glue.
 
-The repo now has an ordinary-program slice of this through the internal `@swarm` runtime lane, which is wrapped by ordinary Clasp code in [`examples/swarm-native/Swarm.clasp`](/home/akul_medexfinance_com/clasp/examples/swarm-native/Swarm.clasp). That path lets Clasp programs create objectives/tasks with run budgets and deadlines, acquire and release leases, inspect ready/state projections, run tools/verifiers, inspect runs/artifacts, store/query durable swarm memory, and drive approvals and merge decisions without shell wrapper scripts or external `claspc swarm ...` subprocesses. For the current supervised single-node swarm model, task creation plus durable tool/verifier execution is the native child-work substrate; semantic memory ranking remains follow-on control-plane work rather than a blocker for the ordinary-program orchestration loop. Typed integer helpers now back ordinary Clasp retry counters, so managed loops no longer depend on hand-written finite counter tables.
+The repo now has an ordinary-program slice of this through the internal `@swarm` runtime lane, which is wrapped by ordinary Clasp code in [`examples/swarm-native/Swarm.clasp`](/home/akul_medexfinance_com/clasp/examples/swarm-native/Swarm.clasp). That path lets Clasp programs create objectives/tasks with run budgets and deadlines, acquire and release leases, inspect ready/state projections, run tools/verifiers, inspect runs/artifacts, store/query/search durable swarm memory, and drive approvals and merge decisions without shell wrapper scripts or external `claspc swarm ...` subprocesses. For the current supervised single-node swarm model, task creation plus durable tool/verifier execution is the native child-work substrate; native ranked memory search now covers local text retrieval, while embedding-backed semantic retrieval remains follow-on control-plane work rather than a blocker for the ordinary-program orchestration loop. Typed integer helpers now back ordinary Clasp retry counters, so managed loops no longer depend on hand-written finite counter tables.
 
 The feedback-loop fixture also now proves a non-Codex backend path with [`examples/swarm-native/LocalAgent.clasp`](/home/akul_medexfinance_com/clasp/examples/swarm-native/LocalAgent.clasp): the native builder/verifier loop can invoke a Clasp program as the agent backend through the generic agent-command template, persist durable prompt files and reports, retry from verifier feedback, and converge without a Codex binary.
 
@@ -326,7 +327,7 @@ Build:
 At the time of writing, Clasp is moving toward this shape but still lacks:
 
 - full native workflow/supervisor/runtime parity
-- semantic memory indexing beyond exact key/task/objective filters
+- embedding-backed semantic memory indexing beyond native ranked text search
 - native tool / verifier / mergegate surfaces end to end
 - full backend surface parity without JS helpers
 - rich incremental compilation at the module dependency level

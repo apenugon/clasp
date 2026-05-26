@@ -3193,6 +3193,7 @@ fn interpret_runtime_binding(
         ("swarmArtifactsJson", 2) => unsafe { clasp_rt_swarm_artifacts_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmMemoryPutJson", 6) => unsafe { clasp_rt_swarm_memory_put_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4] as *mut ClaspRtString, args[5] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmMemoryQueryJson", 5) => unsafe { clasp_rt_swarm_memory_query_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4] as i64) as *mut ClaspRtHeader },
+        ("swarmMemorySearchJson", 5) => unsafe { clasp_rt_swarm_memory_search_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4] as i64) as *mut ClaspRtHeader },
         ("runCommandJson", 2) => unsafe { clasp_rt_run_command_json(args[0] as *mut ClaspRtString, args[1]) as *mut ClaspRtHeader },
         ("runCommandTimeoutJson", 3) => unsafe {
             clasp_rt_run_command_timeout_json(args[0] as *mut ClaspRtString, args[1], args[2])
@@ -3431,6 +3432,7 @@ fn interpret_builtin_runtime_binding(
         ("swarmArtifactsJson", 2) => unsafe { clasp_rt_swarm_artifacts_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmMemoryPutJson", 6) => unsafe { clasp_rt_swarm_memory_put_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4] as *mut ClaspRtString, args[5] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmMemoryQueryJson", 5) => unsafe { clasp_rt_swarm_memory_query_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4] as i64) as *mut ClaspRtHeader },
+        ("swarmMemorySearchJson", 5) => unsafe { clasp_rt_swarm_memory_search_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4] as i64) as *mut ClaspRtHeader },
         ("runCommandJson", 2) => unsafe { clasp_rt_run_command_json(args[0] as *mut ClaspRtString, args[1]) as *mut ClaspRtHeader },
         ("runCommandTimeoutJson", 3) => unsafe {
             clasp_rt_run_command_timeout_json(args[0] as *mut ClaspRtString, args[1], args[2])
@@ -3635,6 +3637,7 @@ fn builtin_runtime_binding_name(name: &str) -> bool {
             | "swarmArtifactsJson"
             | "swarmMemoryPutJson"
             | "swarmMemoryQueryJson"
+            | "swarmMemorySearchJson"
             | "runCommandJson"
             | "runCommandTimeoutJson"
             | "runProcessJson"
@@ -11016,6 +11019,23 @@ pub unsafe extern "C" fn clasp_rt_swarm_memory_query_json(
         &String::from_utf8_lossy(string_bytes(objective_id)).into_owned(),
         &String::from_utf8_lossy(string_bytes(task_id)).into_owned(),
         &String::from_utf8_lossy(string_bytes(key)).into_owned(),
+        limit,
+    ))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_swarm_memory_search_json(
+    root: *mut ClaspRtString,
+    objective_id: *mut ClaspRtString,
+    task_id: *mut ClaspRtString,
+    query: *mut ClaspRtString,
+    limit: i64,
+) -> *mut ClaspRtResultString {
+    clasp_rt_result_string_from_owned(swarm::builtin_swarm_memory_search(
+        &String::from_utf8_lossy(string_bytes(root)).into_owned(),
+        &String::from_utf8_lossy(string_bytes(objective_id)).into_owned(),
+        &String::from_utf8_lossy(string_bytes(task_id)).into_owned(),
+        &String::from_utf8_lossy(string_bytes(query)).into_owned(),
         limit,
     ))
 }

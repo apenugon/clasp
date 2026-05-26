@@ -787,6 +787,7 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
       file === "runtime/clasp_runtime.rs" ||
       file === "examples/swarm-native/Swarm.clasp" ||
       file === "examples/swarm-native/MemoryHarness.clasp" ||
+      file === "src/Compiler/Checker.clasp" ||
       file === "docs/autonomous-swarm-runtime-requirements.md" ||
       file === "scripts/test-swarm-memory.sh";
 

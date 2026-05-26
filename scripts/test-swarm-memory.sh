@@ -41,11 +41,17 @@ program_state_root="$test_root/program-state"
   --limit 10 \
   >"$test_root/cli-memory-query.json"
 
-node - "$test_root/cli-memory-put.json" "$test_root/cli-memory-query.json" <<'EOF'
+"$claspc_bin" --json swarm memory search "$cli_state_root" "cli memory" \
+  --objective memory-cli \
+  --limit 10 \
+  >"$test_root/cli-memory-search.json"
+
+node - "$test_root/cli-memory-put.json" "$test_root/cli-memory-query.json" "$test_root/cli-memory-search.json" <<'EOF'
 const fs = require("node:fs");
 
 const put = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
 const query = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
+const search = JSON.parse(fs.readFileSync(process.argv[4], "utf8"));
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -60,6 +66,11 @@ assert(Array.isArray(query), "query is not an array");
 assert(query.length === 1, `query length ${query.length}`);
 assert(query[0].memoryId === put.memoryId, "query did not return inserted record");
 assert(query[0].value === "cli-memory", `query value ${query[0].value}`);
+assert(Array.isArray(search), "search is not an array");
+assert(search.length >= 1, `search length ${search.length}`);
+assert(search[0].memory.memoryId === put.memoryId, "search did not rank inserted record first");
+assert(search[0].score > 0, `search score ${search[0].score}`);
+assert(search[0].matchedText === "cli-memory", `search matched text ${search[0].matchedText}`);
 EOF
 
 env RUSTC=/definitely-missing-rustc \
@@ -99,6 +110,8 @@ sameList(report.objectiveValues, ["prefer-durable-objective-memory"], "objective
 sameList(report.taskValues, ["prefer-durable-task-memory"], "task values");
 assert(report.allValues.includes("prefer-durable-objective-memory"), "all values missing objective memory");
 assert(report.allValues.includes("prefer-durable-task-memory"), "all values missing task memory");
+sameList(report.searchValues, ["prefer-durable-task-memory", "prefer-durable-objective-memory"], "search values");
+assert(report.searchScores[0] > report.searchScores[1], `search scores ${JSON.stringify(report.searchScores)}`);
 sameList(report.mailboxValues, ["prefer-durable-task-memory"], "mailbox memory values");
 assert(report.mailboxMemoryCount === 1, `mailbox memory count ${report.mailboxMemoryCount}`);
 EOF
