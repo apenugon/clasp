@@ -1367,6 +1367,9 @@ EOF
 printf '%s\n' "$status_runtime_root_3/jobs/stopped-job" > "$status_runtime_root_3/job"
 printf '%s\n' "stopped" > "$status_runtime_root_3/jobs/stopped-job/status"
 printf '%s\n' "143" > "$status_runtime_root_3/jobs/stopped-job/exit-status"
+printf '%s\n' "512" > "$status_runtime_root_3/jobs/stopped-job/memory-mb"
+printf '%s\n' "2048" > "$status_runtime_root_3/jobs/stopped-job/min-available-memory-mb"
+printf '%s\n' "systemd-scope" > "$status_runtime_root_3/jobs/stopped-job/memory-enforcer"
 cat > "$status_runtime_root_3/lane.log" <<'EOF'
 interrupted line 1
 EOF
@@ -1405,6 +1408,9 @@ bash -lc "
   [[ \"\$text\" == *'lane: 03-interrupted'* ]]
   [[ \"\$text\" == *'managed job status: stopped'* ]]
   [[ \"\$text\" == *'managed job exit: 143'* ]]
+  [[ \"\$text\" == *'managed job memory mb: 512'* ]]
+  [[ \"\$text\" == *'managed job min available memory mb: 2048'* ]]
+  [[ \"\$text\" == *'managed job memory enforcer: systemd-scope'* ]]
   [[ \"\$text\" == *'current task: CC-300-interrupted'* ]]
   [[ \"\$text\" == *'run status: stopped-before-report'* ]]
   [[ \"\$text\" == *'run summary: Lane 03-interrupted was stopped before writing a structured report.'* ]]
@@ -1449,6 +1455,9 @@ if (idle.latestRun?.status !== 'builder-complete' || idle.latestRun?.summary !==
 }
 if (interrupted.status !== 'stopped' || interrupted.managedJobStatus !== 'stopped' || interrupted.managedJobExitStatus !== '143') {
   throw new Error('unexpected interrupted-lane job state');
+}
+if (interrupted.managedJobMemoryMb !== 512 || interrupted.managedJobMinAvailableMemoryMb !== 2048 || interrupted.managedJobMemoryEnforcer !== 'systemd-scope') {
+  throw new Error('unexpected interrupted-lane memory guard state');
 }
 if (interrupted.latestRun?.status !== 'stopped-before-report' || interrupted.latestRun?.summary !== 'Lane 03-interrupted was stopped before writing a structured report.') {
   throw new Error('unexpected interrupted-lane run summary');

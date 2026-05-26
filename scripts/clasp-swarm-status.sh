@@ -148,6 +148,9 @@ while IFS= read -r lane_dir; do
   status="stopped"
   job_status=""
   job_exit_status=""
+  job_memory_mb=""
+  job_min_available_memory_mb=""
+  job_memory_enforcer=""
   current_task=""
 
   lane_count=$((lane_count + 1))
@@ -159,6 +162,15 @@ while IFS= read -r lane_dir; do
     fi
     if [[ -n "$job_dir" && -f "$job_dir/exit-status" ]]; then
       job_exit_status="$(sed -n '1p' "$job_dir/exit-status")"
+    fi
+    if [[ -n "$job_dir" && -f "$job_dir/memory-mb" ]]; then
+      job_memory_mb="$(sed -n '1p' "$job_dir/memory-mb")"
+    fi
+    if [[ -n "$job_dir" && -f "$job_dir/min-available-memory-mb" ]]; then
+      job_min_available_memory_mb="$(sed -n '1p' "$job_dir/min-available-memory-mb")"
+    fi
+    if [[ -n "$job_dir" && -f "$job_dir/memory-enforcer" ]]; then
+      job_memory_enforcer="$(sed -n '1p' "$job_dir/memory-enforcer")"
     fi
   fi
 
@@ -212,6 +224,15 @@ while IFS= read -r lane_dir; do
     if [[ -n "$job_exit_status" ]]; then
       echo "  managed job exit: $job_exit_status"
     fi
+    if [[ -n "$job_memory_mb" ]]; then
+      echo "  managed job memory mb: $job_memory_mb"
+    fi
+    if [[ -n "$job_min_available_memory_mb" ]]; then
+      echo "  managed job min available memory mb: $job_min_available_memory_mb"
+    fi
+    if [[ -n "$job_memory_enforcer" ]]; then
+      echo "  managed job memory enforcer: $job_memory_enforcer"
+    fi
     if [[ -n "$current_task" ]]; then
       echo "  current task: $current_task"
     fi
@@ -238,6 +259,9 @@ while IFS= read -r lane_dir; do
     "$stale_pid" \
     "$job_status" \
     "$job_exit_status" \
+    "$job_memory_mb" \
+    "$job_min_available_memory_mb" \
+    "$job_memory_enforcer" \
     "$current_task" \
     "$completed_count" \
     "$blocked_count" \
@@ -254,6 +278,9 @@ const [
   stalePid,
   managedJobStatus,
   managedJobExitStatus,
+  managedJobMemoryMb,
+  managedJobMinAvailableMemoryMb,
+  managedJobMemoryEnforcer,
   currentTask,
   completedCount,
   blockedCount,
@@ -282,6 +309,9 @@ const laneStatus = {
   stalePid: stalePid || null,
   managedJobStatus: managedJobStatus || null,
   managedJobExitStatus: managedJobExitStatus || null,
+  managedJobMemoryMb: managedJobMemoryMb ? Number(managedJobMemoryMb) : null,
+  managedJobMinAvailableMemoryMb: managedJobMinAvailableMemoryMb ? Number(managedJobMinAvailableMemoryMb) : null,
+  managedJobMemoryEnforcer: managedJobMemoryEnforcer || null,
   currentTask: currentTask || null,
   completedCount: Number(completedCount),
   blockedCount: Number(blockedCount),
