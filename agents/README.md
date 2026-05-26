@@ -43,9 +43,11 @@ bash scripts/clasp-swarm-stop.sh wave1
 
 By default, `clasp-swarm-start.sh` starts at most two running lanes and launches
 each lane through the managed job memory guard. The guard enforces both a
-per-process virtual-memory limit and a session-level aggregate RSS watcher, so a
-lane that fans out into multiple large children is stopped before it can exhaust
-the VM. Use
+per-process virtual-memory limit and a session-level aggregate RSS watcher. When
+the user systemd manager is available it also runs the workload in a
+`MemoryMax` scope, leaving the detached metadata runner outside the scope so it
+can still record an exit status after a kernel-enforced memory stop. A lane that
+fans out into multiple large children is stopped before it can exhaust the VM. Use
 `CLASP_SWARM_MAX_RUNNING_LANES`, `CLASP_SWARM_LANE_MEMORY_MB`, and
 `CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB` to tune larger machines deliberately.
 

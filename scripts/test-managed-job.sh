@@ -129,6 +129,7 @@ EOF
   wait_for_file "$memory_job_dir/exit-status"
   [[ "$(cat "$memory_job_dir/exit-status")" == "137" ]]
   [[ "$(cat "$memory_job_dir/status")" == "failed" ]]
+  grep -E '^(systemd-scope|session-rss-watch)$' "$memory_job_dir/memory-enforcer" >/dev/null
   grep -F 'limit_mb=128' "$memory_job_dir/memory-exceeded" >/dev/null
   grep -F 'rss_kb=' "$memory_job_dir/memory-exceeded" >/dev/null
   for _ in $(seq 1 50); do

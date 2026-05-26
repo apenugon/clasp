@@ -14,6 +14,11 @@ Launches a command in an isolated session/process group and records metadata
 that scripts/stop-managed-job.sh validates before stopping it. Completed jobs
 record exit-status and update status to completed or failed.
 
+When --memory-mb is set, the runner applies the limit with both a process
+virtual-memory cap and, when available, a user systemd scope MemoryMax cgroup
+around the workload. The detached runner stays outside the cgroup so it can
+still record metadata if the workload is killed by the kernel memory limit.
+
 By default, stop-managed-job requests cooperative stop by writing a stop-request
 file. The detached runner owns any child signalling inside the managed session.
 EOF
@@ -105,6 +110,7 @@ setsid env \
     set +e
     watcher_pid=""
     memory_watcher_pid=""
+    job_dir="$CLASP_MANAGED_JOB_ROOT/$CLASP_MANAGED_JOB_ID"
 
     trim_spaces() {
       tr -d "[:space:]"
@@ -185,7 +191,6 @@ setsid env \
       local stop_file="$CLASP_MANAGED_JOB_STOP_REQUEST"
       while true; do
         if [[ -f "$stop_file" ]]; then
-          local job_dir="$CLASP_MANAGED_JOB_ROOT/$CLASP_MANAGED_JOB_ID"
           printf "stopping\n" >"$job_dir/status"
           signal_session_members TERM "$sid"
           for _ in $(seq 1 50); do
@@ -204,7 +209,6 @@ setsid env \
     watch_memory_limit() {
       local sid="$1"
       local memory_limit_kb="$((CLASP_MANAGED_JOB_MEMORY_MB * 1024))"
-      local job_dir="$CLASP_MANAGED_JOB_ROOT/$CLASP_MANAGED_JOB_ID"
       local memory_exceeded_path="$job_dir/memory-exceeded"
       local rss_kb=""
 
@@ -236,9 +240,38 @@ setsid env \
       done
     }
 
+    should_use_systemd_memory_scope() {
+      local preference="${CLASP_MANAGED_JOB_USE_SYSTEMD_SCOPE:-auto}"
+
+      [[ -n "${CLASP_MANAGED_JOB_MEMORY_MB:-}" ]] || return 1
+      [[ "$preference" != "0" && "$preference" != "false" && "$preference" != "never" ]] || return 1
+      command -v systemd-run >/dev/null 2>&1 || return 1
+      systemctl --user is-active --quiet default.target >/dev/null 2>&1 || return 1
+      return 0
+    }
+
+    start_workload() {
+      if should_use_systemd_memory_scope; then
+        printf "systemd-scope\n" >"$job_dir/memory-enforcer"
+        systemd-run \
+          --user \
+          --scope \
+          --quiet \
+          --collect \
+          -p MemoryAccounting=yes \
+          -p "MemoryMax=${CLASP_MANAGED_JOB_MEMORY_MB}M" \
+          "$@" &
+      else
+        if [[ -n "${CLASP_MANAGED_JOB_MEMORY_MB:-}" ]]; then
+          printf "session-rss-watch\n" >"$job_dir/memory-enforcer"
+        fi
+        "$@" &
+      fi
+      child_pid="$!"
+    }
+
     finish_managed_job() {
       local status="$1"
-      local job_dir="$CLASP_MANAGED_JOB_ROOT/$CLASP_MANAGED_JOB_ID"
 
       if [[ -n "${watcher_pid:-}" ]]; then
         kill "$watcher_pid" >/dev/null 2>&1 || true
@@ -247,6 +280,15 @@ setsid env \
       if [[ -n "${memory_watcher_pid:-}" ]]; then
         kill "$memory_watcher_pid" >/dev/null 2>&1 || true
         wait "$memory_watcher_pid" >/dev/null 2>&1 || true
+      fi
+      if [[ -n "${CLASP_MANAGED_JOB_MEMORY_MB:-}" && -f "$job_dir/memory-enforcer" && ! -f "$job_dir/memory-exceeded" && ! -f "$CLASP_MANAGED_JOB_STOP_REQUEST" ]] &&
+         { [[ "$status" == "137" ]] || { [[ "$(cat "$job_dir/memory-enforcer" 2>/dev/null)" == "systemd-scope" && "$status" == "143" ]]; }; }; then
+        {
+          printf "limit_mb=%s\n" "$CLASP_MANAGED_JOB_MEMORY_MB"
+          printf "rss_kb=unknown\n"
+          printf "reason=workload-killed-by-memory-enforcer\n"
+          date -u +"detected_at=%Y-%m-%dT%H:%M:%SZ"
+        } >"$job_dir/memory-exceeded"
       fi
       if [[ -f "$job_dir/memory-exceeded" && "$status" != "0" ]]; then
         status="137"
@@ -269,8 +311,7 @@ setsid env \
       ulimit -v "$((CLASP_MANAGED_JOB_MEMORY_MB * 1024))" || finish_managed_job 125
     fi
 
-    "$@" &
-    child_pid="$!"
+    start_workload "$@"
     managed_sid="$(current_sid)"
     watch_stop_request "$managed_sid" &
     watcher_pid="$!"
