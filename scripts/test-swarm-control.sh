@@ -2069,7 +2069,8 @@ bash scripts/verify-all.sh
 ```
 EOF
 
-cat > "$prompt_project_root/feedback.json" <<'EOF'
+mkdir -p "$prompt_project_root/previous-run"
+cat > "$prompt_project_root/previous-run/verifier-report.json" <<'EOF'
 {
   "summary": "Previous verifier said $(printf verifier-summary) should stay literal.",
   "findings": [
@@ -2079,6 +2080,31 @@ cat > "$prompt_project_root/feedback.json" <<'EOF'
     "Keep `touch /tmp/feedback` as plain text."
   ]
 }
+EOF
+cat > "$prompt_project_root/previous-run/builder-report.json" <<'EOF'
+{
+  "summary": "Previous builder touched $(printf builder-summary) literally.",
+  "files_touched": [
+    "src/Compiler/Retry.clasp",
+    "scripts/test-retry-context.sh"
+  ],
+  "tests_run": [
+    "bash scripts/test-retry-context.sh"
+  ],
+  "residual_risks": [
+    "The previous diff may need rebasing before reuse."
+  ]
+}
+EOF
+cat > "$prompt_project_root/previous-run/task.diff" <<'EOF'
+diff --git a/src/Compiler/Retry.clasp b/src/Compiler/Retry.clasp
+index 1111111..2222222 100644
+--- a/src/Compiler/Retry.clasp
++++ b/src/Compiler/Retry.clasp
+@@ -1,2 +1,3 @@
+ old
++literal $(printf diff-substitution) ${HOME}
+ keep
 EOF
 
 mkdir -p "$prompt_project_root/workspace" "$prompt_project_root/baseline" "$prompt_project_root/run"
@@ -2098,12 +2124,18 @@ bash -lc "
       '$prompt_workspace_path' \
       '$prompt_project_root/run/builder-report.json' \
       '$prompt_project_root/run/builder-log.jsonl' \
-      '$prompt_project_root/feedback.json'
+      '$prompt_project_root/previous-run/verifier-report.json'
 
   grep -F '\$(printf prompt-substitution)' '$prompt_project_root/builder.prompt' >/dev/null
   grep -F '\${HOME}' '$prompt_project_root/builder.prompt' >/dev/null
   grep -F 'Previous verifier said \$(printf verifier-summary) should stay literal.' '$prompt_project_root/builder.prompt' >/dev/null
   grep -F 'touch /tmp/feedback' '$prompt_project_root/builder.prompt' >/dev/null
+  grep -F 'Previous attempt build evidence:' '$prompt_project_root/builder.prompt' >/dev/null
+  grep -F 'Treat this as context for the retry, not as automatically correct code.' '$prompt_project_root/builder.prompt' >/dev/null
+  grep -F 'Previous builder touched \$(printf builder-summary) literally.' '$prompt_project_root/builder.prompt' >/dev/null
+  grep -F 'src/Compiler/Retry.clasp' '$prompt_project_root/builder.prompt' >/dev/null
+  grep -F 'bash scripts/test-retry-context.sh' '$prompt_project_root/builder.prompt' >/dev/null
+  grep -F 'literal \$(printf diff-substitution) \${HOME}' '$prompt_project_root/builder.prompt' >/dev/null
   grep -F 'Do not replace the checkout or copy in a fresh repo snapshot.' '$prompt_project_root/builder.prompt' >/dev/null
   grep -F 'If Git metadata is missing or the checkout looks incomplete, stop and report that as an infrastructure failure instead of reconstructing the repo yourself.' '$prompt_project_root/builder.prompt' >/dev/null
   grep -F 'Do not rewrite the workspace root, remove \`.git\`, or materialize a new checkout.' '$prompt_project_root/builder.prompt' >/dev/null

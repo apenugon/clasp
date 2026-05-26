@@ -147,6 +147,7 @@ EOF
   if [[ -n "$feedback_file" && -f "$feedback_file" ]]; then
     node - <<'EOF' "$feedback_file"
 const fs = require("fs");
+const path = require("path");
 const report = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
 const truncate = (value, max) =>
   value.length > max ? `${value.slice(0, max - 3)}...` : value;
@@ -171,6 +172,63 @@ if (followUp.length > 0) {
   console.log("Follow up:");
   for (const item of followUp) {
     console.log(`- ${item}`);
+  }
+}
+
+const previousRunDir = path.dirname(process.argv[2]);
+const builderReportPath = path.join(previousRunDir, "builder-report.json");
+const diffPath = path.join(previousRunDir, "task.diff");
+
+const printList = (label, value, limit, maxChars) => {
+  const items = Array.isArray(value) ? value.slice(0, limit) : [];
+  if (items.length === 0) return;
+  console.log(label);
+  for (const item of items) {
+    console.log(`- ${truncate(String(item), maxChars)}`);
+  }
+};
+
+if (fs.existsSync(builderReportPath) || fs.existsSync(diffPath)) {
+  console.log("");
+  console.log("Previous attempt build evidence:");
+  console.log("- Treat this as context for the retry, not as automatically correct code.");
+}
+
+if (fs.existsSync(builderReportPath)) {
+  try {
+    const builderReport = JSON.parse(fs.readFileSync(builderReportPath, "utf8"));
+    if (typeof builderReport.summary === "string" && builderReport.summary.length > 0) {
+      console.log(`Builder summary: ${truncate(builderReport.summary, 360)}`);
+    }
+    printList("Files touched:", builderReport.files_touched, 24, 180);
+    printList("Checks run:", builderReport.tests_run, 12, 220);
+    printList("Residual risks:", builderReport.residual_risks, 8, 220);
+  } catch (error) {
+    console.log(`Builder report could not be parsed: ${truncate(String(error.message || error), 220)}`);
+  }
+}
+
+if (fs.existsSync(diffPath)) {
+  const diff = fs.readFileSync(diffPath, "utf8");
+  const trimmed = diff.trim();
+  if (trimmed.length > 0) {
+    const changedFiles = [];
+    for (const line of diff.split(/\r?\n/)) {
+      const match = /^diff --git a\/(.+?) b\/(.+)$/.exec(line);
+      if (match) {
+        changedFiles.push(match[2]);
+      }
+      if (changedFiles.length >= 24) break;
+    }
+    if (changedFiles.length > 0) {
+      console.log("Diff files:");
+      for (const file of changedFiles) {
+        console.log(`- ${truncate(file, 180)}`);
+      }
+    }
+    const maxDiffChars = 12000;
+    console.log(`Diff excerpt${diff.length > maxDiffChars ? ` (first ${maxDiffChars} chars)` : ""}:`);
+    console.log(diff.slice(0, maxDiffChars));
   }
 }
 EOF
