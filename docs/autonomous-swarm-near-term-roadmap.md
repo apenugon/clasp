@@ -19,6 +19,7 @@ This is the near-term roadmap for getting Clasp to the point where an autonomous
    - routes and server responses: richer `Page` / `View` / `Redirect` support
    - workflows, hooks, tools, agents, policies, verifier/mergegate, and control-plane surfaces
    - remove deprecated backend JS shims after each surface is truly native-backed
+   - keep agent context-pack construction in ordinary Clasp so planners/builders/verifiers consume one compact native state projection
 
 4. Make unsupported surfaces fail early and clearly.
    - detect unsupported self-hosted/native features before broken output is emitted

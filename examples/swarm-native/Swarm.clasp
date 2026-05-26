@@ -259,6 +259,21 @@ record VerificationPlanMailboxSummary = {
   artifactPaths : [Str]
 }
 
+record SwarmContextPack = {
+  task : SwarmTask,
+  readyTaskIds : [Str],
+  managerAction : SwarmManagerAction,
+  mailboxSummary : VerificationPlanMailboxSummary,
+  taskMemoryMatches : [SwarmMemorySearchResult],
+  objectiveMemoryMatches : [SwarmMemorySearchResult],
+  memoryValues : [Str],
+  memoryMatchedText : [Str],
+  memoryScores : [Int],
+  runTrace : [VerificationTraceEntry],
+  artifactKinds : [Str],
+  artifactPaths : [Str]
+}
+
 record VerificationPlanResult = {
   plan : VerificationPlan,
   steps : [VerifierStepResult],
@@ -442,6 +457,9 @@ verifierStepResultError message = Err message
 
 verificationPlanResultError : Str -> Result VerificationPlanResult
 verificationPlanResultError message = Err message
+
+contextPackResultError : Str -> Result SwarmContextPack
+contextPackResultError message = Err message
 
 reviewStepResultError : Str -> Result ReviewStepResult
 reviewStepResultError message = Err message
@@ -745,6 +763,18 @@ artifactKind artifact = artifact.kind
 artifactPath : SwarmArtifact -> Str
 artifactPath artifact = artifact.path
 
+readyTaskId : SwarmTask -> Str
+readyTaskId task = task.taskId
+
+memorySearchResultMemoryValue : SwarmMemorySearchResult -> Str
+memorySearchResultMemoryValue item = item.memory.value
+
+memorySearchResultMatchedText : SwarmMemorySearchResult -> Str
+memorySearchResultMatchedText item = item.matchedText
+
+memorySearchResultScore : SwarmMemorySearchResult -> Int
+memorySearchResultScore item = item.score
+
 verificationTraceFailureClassification : SwarmRun -> Str
 verificationTraceFailureClassification run =
   if runPassed run then
@@ -780,6 +810,9 @@ verificationTraceStdoutArtifactPath entry = entry.stdoutArtifactPath
 verificationTraceStderrArtifactPath : VerificationTraceEntry -> Str
 verificationTraceStderrArtifactPath entry = entry.stderrArtifactPath
 
+runTraceEntry : SwarmRun -> VerificationTraceEntry
+runTraceEntry run = verificationTraceEntry run.name run
+
 verificationPlanMailboxSummary : SwarmMailbox -> VerificationPlanMailboxSummary
 verificationPlanMailboxSummary mailbox =
   VerificationPlanMailboxSummary {
@@ -795,6 +828,56 @@ verificationPlanMailboxSummary mailbox =
     latestVerifier = mailbox.latestVerifier,
     artifactKinds = map artifactKind mailbox.artifacts,
     artifactPaths = map artifactPath mailbox.artifacts
+  }
+
+taskContextPack : TaskHandle -> Str -> Int -> Result SwarmContextPack
+taskContextPack handle query limit =
+  match status handle {
+    Ok taskValue ->
+      let objective = objectiveHandle handle.root taskValue.objectiveId in
+      match ready objective {
+        Ok readyTasks ->
+          match managerNext objective {
+            Ok managerActionValue ->
+              match taskMailbox handle limit {
+                Ok mailboxValue ->
+                  match taskMemorySearch handle query limit {
+                    Ok taskMemoryMatchesValue ->
+                      match objectiveMemorySearch objective query limit {
+                        Ok objectiveMemoryMatchesValue ->
+                          let memoryMatches = append taskMemoryMatchesValue objectiveMemoryMatchesValue in
+                          let mailboxSummary = verificationPlanMailboxSummary mailboxValue in
+                          Ok (SwarmContextPack {
+                            task = taskValue,
+                            readyTaskIds = map readyTaskId readyTasks,
+                            managerAction = managerActionValue,
+                            mailboxSummary = mailboxSummary,
+                            taskMemoryMatches = taskMemoryMatchesValue,
+                            objectiveMemoryMatches = objectiveMemoryMatchesValue,
+                            memoryValues = map memorySearchResultMemoryValue memoryMatches,
+                            memoryMatchedText = map memorySearchResultMatchedText memoryMatches,
+                            memoryScores = map memorySearchResultScore memoryMatches,
+                            runTrace = map runTraceEntry mailboxValue.runs,
+                            artifactKinds = mailboxSummary.artifactKinds,
+                            artifactPaths = mailboxSummary.artifactPaths
+                          }),
+                        Err message ->
+                          contextPackResultError message
+                      },
+                    Err message ->
+                      contextPackResultError message
+                  },
+                Err message ->
+                  contextPackResultError message
+              },
+            Err message ->
+              contextPackResultError message
+          },
+        Err message ->
+          contextPackResultError message
+      },
+    Err message ->
+      contextPackResultError message
   }
 
 taskMailbox : TaskHandle -> Int -> Result SwarmMailbox

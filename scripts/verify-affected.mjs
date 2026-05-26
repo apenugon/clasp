@@ -255,6 +255,7 @@ const COMMANDS = {
   nativeRuntime: "bash scripts/test-native-runtime.sh",
   swarmReady: "bash scripts/test-swarm-ready-gate.sh",
   swarmMemory: "bash scripts/test-swarm-memory.sh",
+  swarmContextPack: "bash scripts/test-swarm-context-pack.sh",
   monitoredLoop: "bash scripts/test-monitored-loop.sh",
   monitoredStep: "bash scripts/test-monitored-step.sh",
   monitoredRunLog: "bash scripts/test-monitored-run-log.sh",
@@ -790,6 +791,12 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
       file === "src/Compiler/Checker.clasp" ||
       file === "docs/autonomous-swarm-runtime-requirements.md" ||
       file === "scripts/test-swarm-memory.sh";
+    const isSwarmContextPackPath =
+      file === "examples/swarm-native/Swarm.clasp" ||
+      file === "examples/swarm-native/ContextPackHarness.clasp" ||
+      file === "docs/autonomous-swarm-runtime-requirements.md" ||
+      file === "docs/autonomous-swarm-near-term-roadmap.md" ||
+      file === "scripts/test-swarm-context-pack.sh";
 
     if (file.startsWith("src/") && !isPromotedSourceExportCache && !isSourceNativeVerifyScript) {
       matched = true;
@@ -888,6 +895,27 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
       addSelected(selectedByCommand, "swarm-memory", COMMANDS.swarmMemory, "swarm memory path", file);
     }
 
+    if (isSwarmContextPackPath) {
+      matched = true;
+      reason(file, "swarm-context-pack", "swarm context-pack paths use focused ordinary Clasp context assembly coverage");
+      if (file.endsWith(".sh")) {
+        addSelected(
+          selectedByCommand,
+          `bash-syntax:${file}`,
+          `bash -n ${shellQuote(file)}`,
+          "swarm context-pack shell syntax",
+          file,
+        );
+      }
+      addSelected(
+        selectedByCommand,
+        "swarm-context-pack",
+        COMMANDS.swarmContextPack,
+        "swarm context-pack path",
+        file,
+      );
+    }
+
     if (file === "scripts/test-int-builtins.sh") {
       matched = true;
       reason(file, "int-builtins-harness", "integer builtin harness uses shell syntax plus focused JS/native builtin coverage");
@@ -958,6 +986,7 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
       addSelected(selectedByCommand, "native-claspc", COMMANDS.nativeClaspc, "swarm native path", file);
       addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "swarm native path", file);
       addSelected(selectedByCommand, "swarm-memory", COMMANDS.swarmMemory, "swarm native path", file);
+      addSelected(selectedByCommand, "swarm-context-pack", COMMANDS.swarmContextPack, "swarm native path", file);
       addSelected(selectedByCommand, "monitored-loop", COMMANDS.monitoredLoop, "swarm native path", file);
       addSelected(selectedByCommand, "runtime-slice:managed-loop", COMMANDS.runtimeSliceManagedLoop, "swarm native path", file);
       addSelected(selectedByCommand, "runtime-slice:swarm-feedback-loop", COMMANDS.runtimeSliceSwarmFeedbackLoop, "swarm native path", file);

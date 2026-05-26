@@ -181,6 +181,7 @@ That native slice now also includes:
 - lease-expiry-aware lease reacquisition checks
 - persisted merge-policy requirements with approval/verifier state projection
 - objective-driven manager next-action projection
+- ordinary Clasp context-pack assembly over task state, manager projection, verifier traces, artifacts, and ranked memory
 
 ## Required Compiler / Language Features
 
@@ -223,6 +224,8 @@ The self-hosted/native compiler must own these surfaces:
 - merge gates
 
 No backend semantics should depend on JS helper files.
+
+The ordinary Clasp swarm library now has a first context-pack surface that lets an agent assemble compact task evidence from native swarm state without scraping logs by hand. That covers local ranked memory, verifier run traces, artifact references, mailbox summaries, ready-set projection, and manager next-action projection.
 
 ### 4. Better Compiler-Authoring Ergonomics
 

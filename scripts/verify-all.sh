@@ -64,6 +64,7 @@ bash scripts/test-native-claspc.sh
 bash scripts/test-record-update-parity.sh
 bash scripts/test-swarm-ready-gate.sh
 bash scripts/test-swarm-memory.sh
+bash scripts/test-swarm-context-pack.sh
 bash scripts/test-swarm-native-managed-loop.sh
 bash scripts/test-swarm-native-feedback-loop.sh
 bash scripts/test-monitored-loop.sh

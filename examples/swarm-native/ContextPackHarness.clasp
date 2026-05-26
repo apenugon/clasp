@@ -1,0 +1,147 @@
+module Main
+
+import Swarm
+
+record ContextPackHarnessReport = {
+  taskId : Str,
+  taskStatus : Str,
+  managerAction : Str,
+  readyTaskIds : [Str],
+  memoryValues : [Str],
+  memoryMatchedText : [Str],
+  memoryScores : [Int],
+  taskMemoryCount : Int,
+  objectiveMemoryCount : Int,
+  traceNames : [Str],
+  traceStatuses : [Str],
+  traceClassifications : [Str],
+  artifactKinds : [Str],
+  artifactPaths : [Str],
+  mailboxRunCount : Int,
+  mailboxArtifactCount : Int,
+  latestVerifierStatus : Str,
+  latestVerifier : Str,
+  verificationPassed : Bool,
+  failedVerifiers : [Str]
+}
+
+stateRootPath : Str
+stateRootPath =
+  if textJoin "" argv == "" then
+    "swarm-native-context-pack-state"
+  else
+    pathJoin argv
+
+root : SwarmRoot
+root = swarmRoot stateRootPath
+
+objective : ObjectiveHandle
+objective = objectiveHandle root "context-objective"
+
+planTask : TaskHandle
+planTask = taskHandle root "context-plan" "context-agent"
+
+repairTask : TaskHandle
+repairTask = taskHandle root "context-repair" "context-agent"
+
+builderCommand : SwarmCommand
+builderCommand =
+  commandSpec "." ["bash", "-lc", "printf context-builder-output; >&2 printf context-builder-warning"]
+
+verifierCommand : SwarmCommand
+verifierCommand =
+  commandSpec "." ["bash", "-lc", "printf context-verifier-output; >&2 printf context-verifier-warning; exit 3"]
+
+contextVerificationPlan : VerificationPlan
+contextVerificationPlan =
+  verificationPlan "context-pack-verifiers" [
+    verificationCommand "context-pack-fail" verifierCommand
+  ]
+
+traceStatus : VerificationTraceEntry -> Str
+traceStatus entry = entry.status
+
+traceName : VerificationTraceEntry -> Str
+traceName entry = entry.verifierName
+
+errorText : Str -> Str
+errorText message = textConcat ["error:", message]
+
+reportContextPack : SwarmContextPack -> VerificationPlanResult -> Str
+reportContextPack pack verificationValue =
+  encode (ContextPackHarnessReport {
+    taskId = pack.task.taskId,
+    taskStatus = pack.task.status,
+    managerAction = pack.managerAction.action,
+    readyTaskIds = pack.readyTaskIds,
+    memoryValues = pack.memoryValues,
+    memoryMatchedText = pack.memoryMatchedText,
+    memoryScores = pack.memoryScores,
+    taskMemoryCount = length pack.taskMemoryMatches,
+    objectiveMemoryCount = length pack.objectiveMemoryMatches,
+    traceNames = map traceName pack.runTrace,
+    traceStatuses = map traceStatus pack.runTrace,
+    traceClassifications = map verificationTraceFailedVerifierClassification pack.runTrace,
+    artifactKinds = pack.artifactKinds,
+    artifactPaths = pack.artifactPaths,
+    mailboxRunCount = pack.mailboxSummary.runCount,
+    mailboxArtifactCount = pack.mailboxSummary.artifactCount,
+    latestVerifierStatus = pack.mailboxSummary.latestVerifierStatus,
+    latestVerifier = pack.mailboxSummary.latestVerifier,
+    verificationPassed = verificationValue.passed,
+    failedVerifiers = verificationValue.failedVerifiers
+  })
+
+main : Str
+main =
+  match mkdirAll stateRootPath {
+    Ok rootCreated ->
+      match objectiveCreate root objective.objectiveId "Assemble agent context from durable swarm state." 2 8 {
+        Ok objectiveValue ->
+          match taskCreate objective planTask.taskId "Prepare the context-pack task." [] 2 60000 {
+            Ok planTaskValue ->
+              match taskCreate objective repairTask.taskId "Repair using compact context evidence." [planTask.taskId] 4 60000 {
+                Ok repairTaskValue ->
+                  match objectiveMemoryPut objective "planner" "context-lesson" "objective focused compiler verifier lesson" {
+                    Ok objectiveMemoryValue ->
+                      match taskMemoryPut repairTask "context-lesson" "task focused compiler verifier should inspect local evidence" {
+                        Ok taskMemoryValue ->
+                          match runToolStep planTask builderCommand 10 {
+                            Ok planStep ->
+                              match runToolStep repairTask builderCommand 10 {
+                                Ok repairStep ->
+                                  match executeVerificationPlanWithTimeout repairTask contextVerificationPlan 5000 10 {
+                                    Ok verificationValue ->
+                                      match taskContextPack repairTask "focused compiler verifier" 10 {
+                                        Ok pack ->
+                                          reportContextPack pack verificationValue,
+                                        Err message ->
+                                          errorText message
+                                      },
+                                    Err message ->
+                                      errorText message
+                                  },
+                                Err message ->
+                                  errorText message
+                              },
+                            Err message ->
+                              errorText message
+                          },
+                        Err message ->
+                          errorText message
+                      },
+                    Err message ->
+                      errorText message
+                  },
+                Err message ->
+                  errorText message
+              },
+            Err message ->
+              errorText message
+          },
+        Err message ->
+          errorText message
+      },
+    Err message ->
+      errorText message
+  }

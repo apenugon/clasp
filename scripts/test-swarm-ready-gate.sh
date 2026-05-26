@@ -23,7 +23,7 @@ reject_pattern() {
   fi
 }
 
-bash -n "$project_root/scripts/test-native-claspc.sh" "$project_root/scripts/test-native-claspc-smoke.sh" "$project_root/scripts/test-int-builtins.sh" "$project_root/scripts/test-dict-builtins.sh" "$project_root/scripts/test-native-runtime-smoke.sh" "$project_root/scripts/test-verify-all-smoke.sh" "$project_root/scripts/test-agent-command-template.sh" "$project_root/scripts/test-goal-manager-agent-command-template.sh" "$project_root/scripts/test-goal-manager-default-planner-command.sh" "$project_root/scripts/test-swarm-memory.sh" "$project_root/benchmarks/test-benchmark-prep-cache.sh"
+bash -n "$project_root/scripts/test-native-claspc.sh" "$project_root/scripts/test-native-claspc-smoke.sh" "$project_root/scripts/test-int-builtins.sh" "$project_root/scripts/test-dict-builtins.sh" "$project_root/scripts/test-native-runtime-smoke.sh" "$project_root/scripts/test-verify-all-smoke.sh" "$project_root/scripts/test-agent-command-template.sh" "$project_root/scripts/test-goal-manager-agent-command-template.sh" "$project_root/scripts/test-goal-manager-default-planner-command.sh" "$project_root/scripts/test-swarm-memory.sh" "$project_root/scripts/test-swarm-context-pack.sh" "$project_root/benchmarks/test-benchmark-prep-cache.sh"
 bash -n "$project_root/scripts/test-goal-manager-planner-report-decode.sh"
 bash -n "$project_root/examples/swarm-kernel/scripts/verify.sh"
 node "$project_root/scripts/check-promoted-native-image-exports.mjs" >/dev/null
@@ -55,10 +55,17 @@ require_pattern "scripts/verify-fast.sh" 'bash benchmarks/test-benchmark-prep-ca
 require_pattern "scripts/verify-all.sh" 'bash scripts/test-swarm-memory.sh'
 require_pattern "scripts/verify-fast.sh" 'bash scripts/test-swarm-memory.sh'
 require_pattern "scripts/verify-affected.mjs" 'bash scripts/test-swarm-memory.sh'
+require_pattern "scripts/verify-all.sh" 'bash scripts/test-swarm-context-pack.sh'
+require_pattern "scripts/verify-fast.sh" 'bash scripts/test-swarm-context-pack.sh'
+require_pattern "scripts/verify-affected.mjs" 'bash scripts/test-swarm-context-pack.sh'
 require_pattern "examples/swarm-native/Swarm.clasp" 'memoryPut : SwarmRoot -> Str -> Str -> Str -> Str -> Str -> Result SwarmMemory'
 require_pattern "examples/swarm-native/Swarm.clasp" 'memorySearch : SwarmRoot -> Str -> Str -> Str -> Int -> Result [SwarmMemorySearchResult]'
+require_pattern "examples/swarm-native/Swarm.clasp" 'record SwarmContextPack ='
+require_pattern "examples/swarm-native/Swarm.clasp" 'taskContextPack : TaskHandle -> Str -> Int -> Result SwarmContextPack'
 require_pattern "examples/swarm-native/MemoryHarness.clasp" 'mailboxValues = map memoryValue mailboxValue.memory'
 require_pattern "examples/swarm-native/MemoryHarness.clasp" 'searchValues = map searchMemoryValue searchValues'
+require_pattern "examples/swarm-native/ContextPackHarness.clasp" 'taskContextPack repairTask "focused compiler verifier" 10'
+require_pattern "examples/swarm-native/ContextPackHarness.clasp" 'traceClassifications = map verificationTraceFailedVerifierClassification pack.runTrace'
 require_pattern "runtime/swarm.rs" 'CREATE TABLE IF NOT EXISTS swarm_memory'
 require_pattern "runtime/swarm.rs" 'fn memory_search_json'
 require_pattern "scripts/verify-affected.mjs" 'node --check benchmarks/run-benchmark.mjs'
