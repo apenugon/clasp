@@ -259,6 +259,8 @@ The repo now has an ordinary-program slice of this through the internal `@swarm`
 
 The feedback-loop fixture also now proves a non-Codex backend path with [`examples/swarm-native/LocalAgent.clasp`](/home/akul_medexfinance_com/clasp/examples/swarm-native/LocalAgent.clasp): the native builder/verifier loop can invoke a Clasp program as the agent backend through the generic agent-command template, persist durable prompt files and reports, retry from verifier feedback, and converge without a Codex binary.
 
+The goal-manager fixture extends that proof to planning with [`examples/swarm-native/LocalPlanner.clasp`](/home/akul_medexfinance_com/clasp/examples/swarm-native/LocalPlanner.clasp): the manager can invoke a Clasp program as the planner backend through `CLASP_MANAGER_PLANNER_AGENT_COMMAND_JSON`, materialize the planned child task, and pass the provider-neutral child agent command configuration through without touching the Codex backend.
+
 ## Required Safety / Governance Features
 
 The swarm should be autonomous but bounded.

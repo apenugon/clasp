@@ -193,7 +193,7 @@ EOF
 chmod +x "$fake_codex"
 
 claspc_bin="$(env -u CLASP_CLASPC -u CLASPC_BIN CLASP_PROJECT_ROOT="$project_root" "$project_root/scripts/resolve-claspc.sh")"
-agent_bin_json="$(json_string "$fake_agent")"
+agent_bin_json="$(json_string "$claspc_bin")"
 codex_bin_json="$(json_string "$fake_codex")"
 child_claspc_json="$(json_string "$fake_child_claspc")"
 workspace_json="$(json_string "$workspace_root")"
@@ -201,9 +201,13 @@ project_root_json="$(json_string "$project_root")"
 goal_json="$(json_string "Prove GoalManager can run with provider-neutral planner and child agent command templates.")"
 
 agent_command_json="$(
-  node - <<'NODE'
+  node - "$project_root/examples/swarm-native/LocalPlanner.clasp" <<'NODE'
+const localPlannerPath = process.argv[2];
 process.stdout.write(JSON.stringify([
   "{agent_bin}",
+  "run",
+  localPlannerPath,
+  "--",
   "--role",
   "{role}",
   "--schema",
@@ -213,16 +217,12 @@ process.stdout.write(JSON.stringify([
   "--prompt-path",
   "{prompt_path}",
   "--workspace",
-  "{workspace_root}",
-  "--model",
-  "{model}",
-  "--reasoning",
-  "{reasoning}",
-  "--sandbox",
-  "{sandbox}"
+  "{workspace_root}"
 ]));
 NODE
 )"
+
+grep -F 'clasp-local-planner' "$project_root/examples/swarm-native/LocalPlanner.clasp" >/dev/null
 
 mkdir -p "$workspace_root"
 XDG_CACHE_HOME="$test_root_abs/xdg-cache" \
@@ -306,6 +306,7 @@ assert(planner.tasks.length === 1 && planner.tasks[0].taskId === "provider-neutr
 assert(feedback.verdict === "pass", `feedback verdict ${feedback.verdict}`);
 assert(agentInvocations.length === 1, `expected one generic planner invocation, saw ${agentInvocations.length}`);
 assert(agentInvocations[0].role === "planner", "generic agent should be used for planner role");
+assert(agentInvocations[0].backend === "clasp-local-planner", "GoalManager should use the Clasp-native planner backend");
 assert(childInvocations.length === 1, `expected one child loop invocation, saw ${childInvocations.length}`);
 assert(childInvocations[0].agentCommandJson === expectedAgentCommandJson, "child should receive generic agent command JSON");
 assert(childInvocations[0].agentBinJson === expectedAgentBinJson, "child should receive generic agent binary JSON");

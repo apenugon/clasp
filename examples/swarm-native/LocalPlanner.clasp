@@ -1,0 +1,167 @@
+module Main
+
+record PlannedTask = {
+  taskId : Str,
+  role : Str,
+  detail : Str,
+  dependencies : [Str],
+  taskPrompt : Str,
+  coordinationFocus : [Str]
+}
+
+record PlannerReport = {
+  objectiveSummary : Str,
+  strategy : Str,
+  tasks : [PlannedTask],
+  testsRun : [Str],
+  residualRisks : [Str]
+}
+
+record PlannerInvocation = {
+  backend : Str,
+  role : Str,
+  reportPath : Str,
+  promptPath : Str,
+  schemaPath : Str,
+  workspaceRoot : Str
+}
+
+emptyTexts : [Str]
+emptyTexts = []
+
+textIncludes : Str -> Str -> Bool
+textIncludes value needle = length (textSplit value needle) > 1
+
+argValue : Str -> Str -> Str
+argValue flag fallback = {
+  let mut previous = "";
+  let mut found = false;
+  let mut result = fallback;
+  for arg in argv {
+    if found then
+      found
+    else if previous == flag then {
+      result = arg;
+      found = true;
+      found
+    } else {
+      previous = arg;
+      found
+    }
+  };
+  result
+}
+
+readTextOr : Str -> Str -> Str
+readTextOr path fallback =
+  match readFile path {
+    Ok raw -> raw,
+    Err message -> fallback
+  }
+
+writeTextOrMessage : Str -> Str -> Str
+writeTextOrMessage path value =
+  match writeFile path value {
+    Ok written -> "",
+    Err message -> textConcat ["write-error:", path, ":", message]
+  }
+
+appendTextOrMessage : Str -> Str -> Str
+appendTextOrMessage path value =
+  match appendFile path value {
+    Ok written -> "",
+    Err message -> textConcat ["append-error:", path, ":", message]
+  }
+
+ensureDirOrMessage : Str -> Str
+ensureDirOrMessage path =
+  match mkdirAll path {
+    Ok created -> "",
+    Err message -> textConcat ["mkdir-error:", path, ":", message]
+  }
+
+logPlannerInvocation : Str -> PlannerInvocation -> Str
+logPlannerInvocation fallbackLogPath invocation =
+  match envVar "CLASP_TEST_AGENT_LOG" {
+    Ok raw ->
+      if raw == "" then
+        ""
+      else
+        appendTextOrMessage raw (textConcat [encode invocation, "\n"]),
+    Err message ->
+      if fallbackLogPath == "" then
+        ""
+      else
+        appendTextOrMessage fallbackLogPath (textConcat [encode invocation, "\n"])
+  }
+
+plannerTask : PlannedTask
+plannerTask =
+  PlannedTask {
+    taskId = "provider-neutral-child",
+    role = "generic-agent-proof",
+    detail = "Run a child loop without requiring Codex as the swarm agent backend.",
+    dependencies = emptyTexts,
+    taskPrompt = "Verify the manager passes generic agent command templates into child loops.",
+    coordinationFocus = ["provider-neutral-agent", "child-loop-env"]
+  }
+
+plannerReport : PlannerReport
+plannerReport =
+  PlannerReport {
+    objectiveSummary = "Prove the manager can plan with a Clasp-native non-Codex backend.",
+    strategy = "Use one child loop task while preserving provider-neutral child agent command configuration.",
+    tasks = [plannerTask],
+    testsRun = ["clasp-local-planner-template"],
+    residualRisks = emptyTexts
+  }
+
+runPlanner : Str -> Str -> Str -> Str -> Str -> Str
+runPlanner reportPath promptPath schemaPath workspaceRoot fallbackLogPath = {
+  let prompt = readTextOr promptPath "" in
+  if textIncludes prompt "planner subagent" then
+    if textIncludes prompt "Plan 1-1 bounded tasks with explicit dependencies and task prompts." then {
+      let reportDirError = ensureDirOrMessage (pathDirname reportPath) in
+      if reportDirError != "" then
+        reportDirError
+      else {
+        let workspaceError = ensureDirOrMessage workspaceRoot in
+        if workspaceError != "" then
+          workspaceError
+        else {
+          let logError =
+            logPlannerInvocation
+              fallbackLogPath
+              (PlannerInvocation {
+                backend = "clasp-local-planner",
+                role = "planner",
+                reportPath = reportPath,
+                promptPath = promptPath,
+                schemaPath = schemaPath,
+                workspaceRoot = workspaceRoot
+              }) in
+          if logError != "" then
+            logError
+          else
+            writeTextOrMessage reportPath (encode plannerReport)
+        }
+      }
+    } else
+      "planner-error:missing task budget contract"
+  else
+    "planner-error:missing planner prompt"
+}
+
+main : Str
+main = {
+  let currentRole = argValue "--role" "planner" in
+  let currentReportPath = argValue "--report" "local-planner-report.json" in
+  let currentPromptPath = argValue "--prompt-path" "" in
+  let currentSchemaPath = argValue "--schema" "" in
+  let currentWorkspaceRoot = argValue "--workspace" "." in
+  let currentLogPath = argValue "--log" "" in
+  if currentRole == "planner" then
+    runPlanner currentReportPath currentPromptPath currentSchemaPath currentWorkspaceRoot currentLogPath
+  else
+    textConcat ["unknown-role:", currentRole]
+}
