@@ -56,6 +56,32 @@ session_has_nonroot_group() {
     '
 }
 
+session_has_unmarked_member() {
+  local sid="$1"
+  local candidate_pid
+
+  while IFS= read -r candidate_pid; do
+    if [[ -n "$candidate_pid" && "$candidate_pid" != "$$" && -r "/proc/$candidate_pid/environ" ]]; then
+      if ! tr '\0' '\n' <"/proc/$candidate_pid/environ" | grep -F 'CLASP_MANAGED_JOB_ID=' >/dev/null; then
+        return 0
+      fi
+    fi
+  done < <(
+    ps -eo pid=,sid= |
+      awk -v want="$sid" '
+        {
+          pid = $1
+          sid = $2
+          gsub(/[[:space:]]/, "", pid)
+          gsub(/[[:space:]]/, "", sid)
+          if (sid == want && pid != "") print pid
+        }
+      '
+  )
+
+  return 1
+}
+
 complete_job_dir="$(
   "$project_root/scripts/run-managed-job.sh" \
     --jobs-root "$jobs_root" \
@@ -87,6 +113,18 @@ failed_job_dir="$(
 wait_for_file "$failed_job_dir/exit-status"
 [[ "$(cat "$failed_job_dir/exit-status")" == "7" ]]
 [[ "$(cat "$failed_job_dir/status")" == "failed" ]]
+
+core_limit_job_dir="$(
+  "$project_root/scripts/run-managed-job.sh" \
+    --jobs-root "$jobs_root" \
+    --job-id core-limit-smoke \
+    -- bash -c 'ulimit -c; sleep 0.2'
+)"
+[[ "$core_limit_job_dir" == "$jobs_root/core-limit-smoke" ]]
+wait_for_file "$core_limit_job_dir/exit-status"
+[[ "$(cat "$core_limit_job_dir/exit-status")" == "0" ]]
+[[ "$(cat "$core_limit_job_dir/status")" == "completed" ]]
+[[ "$(tr -d '[:space:]' <"$core_limit_job_dir/stdout.log")" == "0" ]]
 
 no_inherit_job_dir="$(
   CLASP_MANAGED_JOB_MEMORY_MB=64 \
@@ -221,6 +259,37 @@ if kill -0 "$nested_pid" >/dev/null 2>&1; then
   exit 1
 fi
 [[ "$(cat "$nested_job_dir/status")" == "stopped" ]]
+
+unmarked_child_job_dir="$(
+  "$project_root/scripts/run-managed-job.sh" \
+    --jobs-root "$jobs_root" \
+    --job-id stop-unmarked-session-child \
+    -- bash -c 'env -i PATH="$PATH" bash -c '"'"'while true; do sleep 1; done'"'"' & wait'
+)"
+
+[[ "$unmarked_child_job_dir" == "$jobs_root/stop-unmarked-session-child" ]]
+unmarked_child_sid="$(tr -d '[:space:]' <"$unmarked_child_job_dir/sid")"
+
+for _ in $(seq 1 50); do
+  if session_has_unmarked_member "$unmarked_child_sid"; then
+    break
+  fi
+  sleep 0.1
+done
+if ! session_has_unmarked_member "$unmarked_child_sid"; then
+  printf 'managed job did not create an unmarked same-session child for stop coverage\n' >&2
+  ps -eo pid,ppid,pgid,sid,comm,args | awk -v sid="$unmarked_child_sid" '$4 == sid { print }' >&2
+  "$project_root/scripts/stop-managed-job.sh" --jobs-root "$jobs_root" stop-unmarked-session-child >/dev/null || true
+  exit 1
+fi
+
+"$project_root/scripts/stop-managed-job.sh" --force-signal --jobs-root "$jobs_root" stop-unmarked-session-child >/dev/null
+if session_has_members "$unmarked_child_sid"; then
+  printf 'managed job unmarked same-session child survived force stop\n' >&2
+  ps -eo pid,ppid,pgid,sid,comm,args | awk -v sid="$unmarked_child_sid" '$4 == sid { print }' >&2
+  exit 1
+fi
+[[ "$(cat "$unmarked_child_job_dir/status")" == "stopped" ]]
 
 orphan_job_dir="$(
   "$project_root/scripts/run-managed-job.sh" \

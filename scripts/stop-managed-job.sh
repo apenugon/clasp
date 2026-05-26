@@ -128,6 +128,20 @@ signal_marked_session_pids() {
   return "$sent"
 }
 
+signal_validated_session_pids() {
+  local signal="$1"
+  local sent=1
+  local candidate_pid
+
+  while IFS= read -r candidate_pid; do
+    if [[ -n "$candidate_pid" && "$candidate_pid" =~ ^[0-9]+$ && "$candidate_pid" != "$$" ]]; then
+      kill "-$signal" "$candidate_pid" >/dev/null 2>&1 || true
+      sent=0
+    fi
+  done < <(session_pids "$sid")
+  return "$sent"
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --jobs-root)
@@ -296,10 +310,10 @@ else
 fi
 
 printf 'stopping\n' >"$job_dir/status"
-signal_marked_session_pids TERM || true
+signal_validated_session_pids TERM || true
 
 for _ in $(seq 1 50); do
-  if ! marked_session_has_members "$sid"; then
+  if ! session_has_members "$sid"; then
     printf 'stopped\n' >"$job_dir/status"
     printf 'managed-job-stop: stopped %s\n' "$job_id"
     exit 0
@@ -308,11 +322,11 @@ for _ in $(seq 1 50); do
 done
 
 if [[ "$kill_after_secs" =~ ^[0-9]+$ && "$kill_after_secs" != "0" ]]; then
-  signal_marked_session_pids KILL || true
+  signal_validated_session_pids KILL || true
 fi
 
 for _ in $(seq 1 20); do
-  if ! marked_session_has_members "$sid"; then
+  if ! session_has_members "$sid"; then
     printf 'stopped\n' >"$job_dir/status"
     printf 'managed-job-stop: stopped %s\n' "$job_id"
     exit 0

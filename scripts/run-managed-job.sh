@@ -18,6 +18,8 @@ When --memory-mb is set, the runner applies the limit with both a process
 virtual-memory cap and, when available, a user systemd scope MemoryMax cgroup
 around the workload. The detached runner stays outside the cgroup so it can
 still record metadata if the workload is killed by the kernel memory limit.
+Managed jobs also disable core dumps so memory-limit failures cannot spend
+minutes writing multi-gigabyte crash artifacts.
 
 By default, stop-managed-job requests cooperative stop by writing a stop-request
 file. The detached runner owns any child signalling inside the managed session.
@@ -306,6 +308,8 @@ setsid env \
 
     trap "finish_managed_job 130" INT
     trap "finish_managed_job 143" TERM
+
+    ulimit -c 0 >/dev/null 2>&1 || true
 
     if [[ -n "${CLASP_MANAGED_JOB_MEMORY_MB:-}" ]]; then
       ulimit -v "$((CLASP_MANAGED_JOB_MEMORY_MB * 1024))" || finish_managed_job 125
