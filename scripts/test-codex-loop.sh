@@ -493,7 +493,9 @@ chmod +x "$project_dir/scripts/clasp-codex-loop.sh"
 runtime_dir_5="$project_dir/runtime-detached-start"
 start_output="$(
   cd "$project_dir" && \
-  bash scripts/clasp-codex-loop-start.sh task.md "$workspace_dir" "$runtime_dir_5"
+  CLASP_CODEX_LOOP_MEMORY_MB=256 \
+  CLASP_CODEX_LOOP_MIN_AVAILABLE_MEMORY_MB=1 \
+    bash scripts/clasp-codex-loop-start.sh task.md "$workspace_dir" "$runtime_dir_5"
 )"
 printf '%s\n' "$start_output" | grep -F 'started codex loop pid=' >/dev/null
 printf '%s\n' "$start_output" | grep -F 'job=' >/dev/null
@@ -506,6 +508,9 @@ printf '%s\n' "$status_output" | grep -F 'job:' >/dev/null
 printf '%s\n' "$status_output" | grep -F "runtime: $runtime_dir_5" >/dev/null
 pid_5="$(cat "$runtime_dir_5/loop.pid")"
 [[ -f "$runtime_dir_5/loop.job" ]]
+job_dir_5="$(cat "$runtime_dir_5/loop.job")"
+[[ "$(cat "$job_dir_5/memory-mb")" == "256" ]]
+[[ "$(cat "$job_dir_5/min-available-memory-mb")" == "1" ]]
 kill -0 "$pid_5" >/dev/null 2>&1
 for _ in $(seq 1 100); do
   if [[ -f "$runtime_dir_5/lifecycle.log" ]] && grep -F 'loop-start:task.md' "$runtime_dir_5/lifecycle.log" >/dev/null 2>&1; then

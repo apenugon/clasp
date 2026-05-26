@@ -18,8 +18,23 @@ runtime_dir="$(mkdir -p "$runtime_dir" && cd "$runtime_dir" && pwd)"
 pid_file="$runtime_dir/loop.pid"
 job_file="$runtime_dir/loop.job"
 log_file="$runtime_dir/loop.log"
+memory_mb="${CLASP_CODEX_LOOP_MEMORY_MB:-12288}"
+min_available_memory_mb="${CLASP_CODEX_LOOP_MIN_AVAILABLE_MEMORY_MB:-24576}"
 
 source "$project_root/scripts/clasp-swarm-common.sh"
+
+validate_non_negative_integer() {
+  local name="$1"
+  local value="$2"
+
+  if ! [[ "$value" =~ ^[0-9]+$ ]]; then
+    printf '%s must be a non-negative integer; got %s\n' "$name" "$value" >&2
+    exit 2
+  fi
+}
+
+validate_non_negative_integer "CLASP_CODEX_LOOP_MEMORY_MB" "$memory_mb"
+validate_non_negative_integer "CLASP_CODEX_LOOP_MIN_AVAILABLE_MEMORY_MB" "$min_available_memory_mb"
 
 if [[ -f "$job_file" ]]; then
   job_dir="$(sed -n '1p' "$job_file")"
@@ -42,9 +57,19 @@ elif [[ -f "$pid_file" ]]; then
   rm -f "$pid_file"
 fi
 
+managed_job_args=(
+  "$project_root/scripts/run-managed-job.sh"
+  --jobs-root "$runtime_dir/jobs"
+)
+if (( memory_mb > 0 )); then
+  managed_job_args+=(--memory-mb "$memory_mb")
+fi
+if (( min_available_memory_mb > 0 )); then
+  managed_job_args+=(--min-available-memory-mb "$min_available_memory_mb")
+fi
+
 job_dir="$(
-  "$project_root/scripts/run-managed-job.sh" \
-    --jobs-root "$runtime_dir/jobs" \
+  "${managed_job_args[@]}" \
     -- bash -c 'log_file="$1"; shift; exec "$@" >>"$log_file" 2>&1' \
       managed-codex-loop "$log_file" \
       bash "$project_root/scripts/clasp-codex-loop.sh" "$task_file" "$workspace" "$runtime_dir"

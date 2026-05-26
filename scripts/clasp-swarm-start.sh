@@ -10,10 +10,10 @@ main_branch="${CLASP_SWARM_MAIN_BRANCH:-main}"
 source_ref="${CLASP_SWARM_SOURCE_REF:-HEAD}"
 allow_dirty="${CLASP_SWARM_ALLOW_DIRTY:-0}"
 batch_filter="${CLASP_SWARM_BATCH:-}"
-max_running_lanes="${CLASP_SWARM_MAX_RUNNING_LANES:-2}"
+max_running_lanes="${CLASP_SWARM_MAX_RUNNING_LANES:-1}"
 lane_memory_mb="${CLASP_SWARM_LANE_MEMORY_MB:-12288}"
-min_available_memory_mb="${CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB:-16384}"
-native_jobs_max="${CLASP_SWARM_NATIVE_JOBS_MAX:-2}"
+min_available_memory_mb="${CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB:-24576}"
+native_jobs_max="${CLASP_SWARM_NATIVE_JOBS_MAX:-1}"
 
 validate_non_negative_integer() {
   local name="$1"

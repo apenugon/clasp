@@ -1112,10 +1112,10 @@ grep -F --quiet 'sandbox_mode="${CLASP_SWARM_CODEX_SANDBOX:-danger-full-access}"
 grep -F --quiet -- '--sandbox "$sandbox_mode"' "$project_root/scripts/clasp-verifier.sh"
 grep -F --quiet 'builder_timeout_seconds="${CLASP_SWARM_BUILDER_TIMEOUT_SECONDS:-0}"' "$project_root/scripts/clasp-swarm-lane.sh"
 grep -F --quiet 'if [[ -z "$timeout_seconds" || "$timeout_seconds" == "0" ]]; then' "$project_root/scripts/clasp-swarm-lane.sh"
-grep -F --quiet 'max_running_lanes="${CLASP_SWARM_MAX_RUNNING_LANES:-2}"' "$project_root/scripts/clasp-swarm-start.sh"
+grep -F --quiet 'max_running_lanes="${CLASP_SWARM_MAX_RUNNING_LANES:-1}"' "$project_root/scripts/clasp-swarm-start.sh"
 grep -F --quiet 'lane_memory_mb="${CLASP_SWARM_LANE_MEMORY_MB:-12288}"' "$project_root/scripts/clasp-swarm-start.sh"
-grep -F --quiet 'min_available_memory_mb="${CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB:-16384}"' "$project_root/scripts/clasp-swarm-start.sh"
-grep -F --quiet 'native_jobs_max="${CLASP_SWARM_NATIVE_JOBS_MAX:-2}"' "$project_root/scripts/clasp-swarm-start.sh"
+grep -F --quiet 'min_available_memory_mb="${CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB:-24576}"' "$project_root/scripts/clasp-swarm-start.sh"
+grep -F --quiet 'native_jobs_max="${CLASP_SWARM_NATIVE_JOBS_MAX:-1}"' "$project_root/scripts/clasp-swarm-start.sh"
 grep -F --quiet 'required_available_memory_mb=$((required_available_memory_mb + (lane_memory_mb * (running_lanes + 1))))' "$project_root/scripts/clasp-swarm-start.sh"
 grep -F --quiet 'managed_job_args+=(--min-available-memory-mb "$min_available_memory_mb")' "$project_root/scripts/clasp-swarm-start.sh"
 grep -F --quiet 'CLASP_NATIVE_JOBS_MAX="$native_jobs_max"' "$project_root/scripts/clasp-swarm-start.sh"
@@ -1942,7 +1942,7 @@ bash -lc "
   batches=\$(bash scripts/clasp-swarm-start.sh --list-batches test-wave)
   [[ \"\$batches\" == *'foundation'* ]]
 
-  output=\$(CLASP_SWARM_ALLOW_DIRTY=1 CLASP_SWARM_MAX_RUNNING_LANES=2 bash scripts/clasp-swarm-start.sh --batch foundation test-wave)
+  output=\$(CLASP_SWARM_ALLOW_DIRTY=1 CLASP_SWARM_MAX_RUNNING_LANES=2 CLASP_SWARM_LANE_MEMORY_MB=1024 CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB=1 bash scripts/clasp-swarm-start.sh --batch foundation test-wave)
   [[ \"\$output\" == *'batch=foundation'* ]]
   [[ \"\$output\" == *'lane=01-foundation-a'* ]]
   [[ \"\$output\" == *'lane=02-foundation-b'* ]]
@@ -1962,7 +1962,7 @@ bash -lc "
   [[ ! -f BA-003-follow-up.txt ]]
   [[ \$(sort builder-events.log | tr '\n' ' ') == 'BA-001-foundation-a BA-002-foundation-b ' ]]
 
-  CLASP_SWARM_ALLOW_DIRTY=1 bash scripts/clasp-swarm-start.sh test-wave >/dev/null
+  CLASP_SWARM_ALLOW_DIRTY=1 CLASP_SWARM_LANE_MEMORY_MB=1024 CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB=1 bash scripts/clasp-swarm-start.sh test-wave >/dev/null
   deadline=\$((SECONDS + 20))
   while [[ -f .clasp-swarm/test-wave/03-follow-up/pid ]]; do
     if (( SECONDS >= deadline )); then
@@ -1982,13 +1982,13 @@ bash -lc "
   set -euo pipefail
   cd '$swarm_resource_cap_project_root'
 
-  output=\$(CLASP_SWARM_ALLOW_DIRTY=1 CLASP_SWARM_MAX_RUNNING_LANES=1 CLASP_SWARM_TEST_BUILDER_SLEEP_SECS=2 bash scripts/clasp-swarm-start.sh --batch foundation test-wave)
+  output=\$(CLASP_SWARM_ALLOW_DIRTY=1 CLASP_SWARM_MAX_RUNNING_LANES=1 CLASP_SWARM_LANE_MEMORY_MB=1024 CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB=1 CLASP_SWARM_TEST_BUILDER_SLEEP_SECS=2 bash scripts/clasp-swarm-start.sh --batch foundation test-wave)
   [[ \"\$output\" == *'started lane=01-foundation-a'* ]]
   [[ \"\$output\" == *'resource guard: not starting lane=02-foundation-b; running_lanes=1 max_running_lanes=1'* ]]
   [[ ! -f .clasp-swarm/test-wave/02-foundation-b/job ]]
 
   first_job=\$(sed -n '1p' .clasp-swarm/test-wave/01-foundation-a/job)
-  [[ \$(cat \"\$first_job/memory-mb\") == '12288' ]]
+  [[ \$(cat \"\$first_job/memory-mb\") == '1024' ]]
 
   deadline=\$((SECONDS + 20))
   while [[ -f .clasp-swarm/test-wave/01-foundation-a/pid ]]; do
@@ -1999,7 +1999,7 @@ bash -lc "
     sleep 0.2
   done
 
-  output=\$(CLASP_SWARM_ALLOW_DIRTY=1 CLASP_SWARM_MAX_RUNNING_LANES=1 bash scripts/clasp-swarm-start.sh --batch foundation test-wave)
+  output=\$(CLASP_SWARM_ALLOW_DIRTY=1 CLASP_SWARM_MAX_RUNNING_LANES=1 CLASP_SWARM_LANE_MEMORY_MB=1024 CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB=1 bash scripts/clasp-swarm-start.sh --batch foundation test-wave)
   [[ \"\$output\" == *'started lane=02-foundation-b'* ]]
 
   deadline=\$((SECONDS + 20))
@@ -2013,8 +2013,8 @@ bash -lc "
 
   [[ -f BA-001-foundation-a.txt ]]
   [[ -f BA-002-foundation-b.txt ]]
-  grep -F 'BA-001-foundation-a CLASP_NATIVE_JOBS_MAX=2' builder-env.log >/dev/null
-  grep -F 'BA-002-foundation-b CLASP_NATIVE_JOBS_MAX=2' builder-env.log >/dev/null
+  grep -F 'BA-001-foundation-a CLASP_NATIVE_JOBS_MAX=1' builder-env.log >/dev/null
+  grep -F 'BA-002-foundation-b CLASP_NATIVE_JOBS_MAX=1' builder-env.log >/dev/null
 " >/dev/null
 
 swarm_memory_guard_test_root="$(mktemp -d)"

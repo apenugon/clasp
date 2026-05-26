@@ -6,8 +6,23 @@ runtime_root="$project_root/.clasp-agents"
 log_file="$runtime_root/logs/autopilot.log"
 pid_file="$runtime_root/autopilot.pid"
 job_file="$runtime_root/autopilot.job"
+memory_mb="${CLASP_AUTOPILOT_MEMORY_MB:-12288}"
+min_available_memory_mb="${CLASP_AUTOPILOT_MIN_AVAILABLE_MEMORY_MB:-24576}"
 
 mkdir -p "$runtime_root/logs"
+
+validate_non_negative_integer() {
+  local name="$1"
+  local value="$2"
+
+  if ! [[ "$value" =~ ^[0-9]+$ ]]; then
+    printf '%s must be a non-negative integer; got %s\n' "$name" "$value" >&2
+    exit 2
+  fi
+}
+
+validate_non_negative_integer "CLASP_AUTOPILOT_MEMORY_MB" "$memory_mb"
+validate_non_negative_integer "CLASP_AUTOPILOT_MIN_AVAILABLE_MEMORY_MB" "$min_available_memory_mb"
 
 if [[ -f "$job_file" ]]; then
   job_dir="$(sed -n '1p' "$job_file")"
@@ -30,9 +45,19 @@ elif [[ -f "$pid_file" ]]; then
   rm -f "$pid_file"
 fi
 
+managed_job_args=(
+  "$project_root/scripts/run-managed-job.sh"
+  --jobs-root "$runtime_root/jobs"
+)
+if (( memory_mb > 0 )); then
+  managed_job_args+=(--memory-mb "$memory_mb")
+fi
+if (( min_available_memory_mb > 0 )); then
+  managed_job_args+=(--min-available-memory-mb "$min_available_memory_mb")
+fi
+
 job_dir="$(
-  "$project_root/scripts/run-managed-job.sh" \
-    --jobs-root "$runtime_root/jobs" \
+  "${managed_job_args[@]}" \
     -- bash -c 'log_file="$1"; shift; exec "$@" >>"$log_file" 2>&1' \
       managed-autopilot "$log_file" \
       bash "$project_root/scripts/clasp-autopilot.sh"
