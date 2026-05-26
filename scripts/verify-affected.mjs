@@ -250,6 +250,7 @@ const COMMANDS = {
   sourceVerify: "bash src/scripts/verify.sh",
   nativeDiagnostics: "bash scripts/test-native-claspc-diagnostics.sh",
   intBuiltins: "bash scripts/test-int-builtins.sh",
+  dictBuiltins: "bash scripts/test-dict-builtins.sh",
   nativeClaspc: "bash scripts/test-native-claspc.sh",
   nativeRuntime: "bash scripts/test-native-runtime.sh",
   swarmReady: "bash scripts/test-swarm-ready-gate.sh",
@@ -780,6 +781,7 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
       addSelected(selectedByCommand, "selfhost", COMMANDS.selfhost, "source/compiler path", file);
       addSelected(selectedByCommand, "source-verify", COMMANDS.sourceVerify, "source/compiler path", file);
       addSelected(selectedByCommand, "int-builtins", COMMANDS.intBuiltins, "source/compiler path", file);
+      addSelected(selectedByCommand, "dict-builtins", COMMANDS.dictBuiltins, "source/compiler path", file);
     }
 
     if (compilerSlice) {
@@ -850,6 +852,7 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
       matched = true;
       reason(file, "runtime", "runtime path uses native runtime and native claspc coverage");
       addSelected(selectedByCommand, "int-builtins", COMMANDS.intBuiltins, "runtime path", file);
+      addSelected(selectedByCommand, "dict-builtins", COMMANDS.dictBuiltins, "runtime path", file);
       addSelected(selectedByCommand, "native-runtime", COMMANDS.nativeRuntime, "runtime path", file);
       addSelected(selectedByCommand, "native-claspc", COMMANDS.nativeClaspc, "runtime path", file);
     }
@@ -865,6 +868,19 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
         file,
       );
       addSelected(selectedByCommand, "int-builtins", COMMANDS.intBuiltins, "integer builtin harness", file);
+    }
+
+    if (file === "scripts/test-dict-builtins.sh") {
+      matched = true;
+      reason(file, "dict-builtins-harness", "dictionary builtin harness uses shell syntax plus focused JS/native builtin coverage");
+      addSelected(
+        selectedByCommand,
+        `bash-syntax:${file}`,
+        `bash -n ${shellQuote(file)}`,
+        "dictionary builtin shell syntax",
+        file,
+      );
+      addSelected(selectedByCommand, "dict-builtins", COMMANDS.dictBuiltins, "dictionary builtin harness", file);
     }
 
     if (file === "scripts/test-native-claspc-diagnostics.sh") {

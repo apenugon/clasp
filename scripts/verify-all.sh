@@ -48,7 +48,7 @@ if ! [[ "$verify_managed_poll_secs" =~ ^[0-9]+$ && "$verify_managed_poll_secs" -
   verify_managed_poll_secs=1
 fi
 if ! [[ "$verify_max_parallel_jobs" =~ ^[0-9]+$ ]] || (( verify_max_parallel_jobs < 1 )); then
-  verify_max_parallel_jobs=2
+  verify_max_parallel_jobs=1
 fi
 full_parallel_verify_commands=$'
 bash scripts/test-codex-loop.sh
@@ -59,6 +59,7 @@ bash scripts/test-selfhost.sh
 bash scripts/test-source-run-cache.sh
 bash scripts/test-promoted-source-export-cache.sh
 bash scripts/test-int-builtins.sh
+bash scripts/test-dict-builtins.sh
 bash scripts/test-native-claspc.sh
 bash scripts/test-record-update-parity.sh
 bash scripts/test-swarm-ready-gate.sh
@@ -115,6 +116,7 @@ bash scripts/test-verify-runtime-slice.sh
 bash scripts/test-promoted-source-export-cache.sh
 bash scripts/test-record-update-parity.sh
 bash scripts/test-managed-job.sh
+bash scripts/test-dict-builtins.sh
 bash examples/agent-metadata/scripts/verify.sh
 bash examples/agent-task-scenario/scripts/verify.sh
 bash examples/agent-loop-scenario/scripts/verify.sh

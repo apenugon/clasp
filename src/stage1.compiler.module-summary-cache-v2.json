@@ -5,7 +5,7 @@
   "summaries": [
     {
       "moduleName": "Compiler.AstText",
-      "cacheKey": "c2ca84419bc1031d.cache",
+      "cacheKey": "50f0125752103383.cache",
       "sourceFingerprint": "49a566ef4954112b",
       "declFingerprints": {
         "astTextAppendChar": "b6356c40d145790b",
@@ -50,7 +50,7 @@
     },
     {
       "moduleName": "Compiler.Ast",
-      "cacheKey": "36b523d8fd572f30.cache",
+      "cacheKey": "f0f36da343ce6d12.cache",
       "sourceFingerprint": "002158e3b2427a62",
       "declFingerprints": {
         "renderStringLiteral": "c2e6c2c04b0295ae",
@@ -353,7 +353,7 @@
     },
     {
       "moduleName": "Compiler.Checker",
-      "cacheKey": "2d527e1d24b4fea3.cache",
+      "cacheKey": "2a2ba70c8f1aa529.cache",
       "sourceFingerprint": "04d80c1df7ad170a",
       "declFingerprints": {
         "keepNoTypeBinding": "d5431165551067a3",
@@ -663,7 +663,7 @@
     },
     {
       "moduleName": "Compiler.Json",
-      "cacheKey": "841602a8d3f2f2b5.cache",
+      "cacheKey": "92d4a9cb9f3ca937.cache",
       "sourceFingerprint": "1928aa5d2c3c6c44",
       "declFingerprints": {
         "keepNoJsonRenderedText": "c4f6254976f93445",
@@ -685,7 +685,7 @@
     },
     {
       "moduleName": "Compiler.CheckedCore",
-      "cacheKey": "4309d4b0e4e4915a.cache",
+      "cacheKey": "f9489c1526f5ec78.cache",
       "sourceFingerprint": "cb6198c870c24007",
       "declFingerprints": {
         "keepNoCheckedCoreParamArtifact": "1e55f4bbe876dec1",
@@ -752,7 +752,7 @@
     },
     {
       "moduleName": "Compiler.Lower",
-      "cacheKey": "0399d1e23692022e.cache",
+      "cacheKey": "20d4b87f95d01f40.cache",
       "sourceFingerprint": "0aa1505819f771da",
       "declFingerprints": {
         "keepNoLowerExpr": "f430839ca1ae06ff",
@@ -813,8 +813,8 @@
     },
     {
       "moduleName": "Compiler.Emit.JavaScript",
-      "cacheKey": "8e07c35e2e332847.cache",
-      "sourceFingerprint": "15681f0b014db17d",
+      "cacheKey": "9f07e757e2a5f81d.cache",
+      "sourceFingerprint": "aa750c63e33435c7",
       "declFingerprints": {
         "appendJsRenderedText": "b9235dcf1f49c218",
         "hasJsValues": "111ad4524abdb552",
@@ -852,7 +852,7 @@
         "foreignDeclsNeedNodeProcessPrelude": "e8fd4c0ed9adedf2",
         "moduleNeedsNodeProcessPreludeWithForeigns": "603deb3a502d7e91",
         "emitNodeProcessPrelude": "95e53874850b1af1",
-        "builtinPreludeLines": "f7c4f03c361a9eba",
+        "builtinPreludeLines": "40a89bc397cd2564",
         "emitBuiltinPrelude": "c519a865a2646d09",
         "defaultForeignParamNames": "91279a0574dad6b6",
         "hasForeignDecls": "0d72bad9c2710bf1",
@@ -928,7 +928,7 @@
     },
     {
       "moduleName": "Compiler.Project",
-      "cacheKey": "93bfa6f0f8fea7b6.cache",
+      "cacheKey": "ba4341e4d3448410.cache",
       "sourceFingerprint": "c120a288f2c2ec24",
       "declFingerprints": {
         "keepNoHostedModule": "9c8611c5b49d0668",
@@ -961,7 +961,7 @@
     },
     {
       "moduleName": "Compiler.SemanticArtifacts",
-      "cacheKey": "0501b962547869ae.cache",
+      "cacheKey": "11faa1d7f424429c.cache",
       "sourceFingerprint": "78c94629388efc06",
       "declFingerprints": {
         "semanticJsonTextArray": "e5936281e18d7322",
@@ -1191,7 +1191,7 @@
     },
     {
       "moduleName": "Compiler.Driver.Frontend",
-      "cacheKey": "15b2d4ee8a4aa831.cache",
+      "cacheKey": "70b4eb1eed94497f.cache",
       "sourceFingerprint": "efecd19d84daf708",
       "declFingerprints": {
         "frontendDriverSourceLoweredDecls": "a68438dc249b51a0",
@@ -1218,7 +1218,7 @@
     },
     {
       "moduleName": "Compiler.Emit.NativeJson",
-      "cacheKey": "fd5364f85d98cafe.cache",
+      "cacheKey": "0853ee0ba97e4ef4.cache",
       "sourceFingerprint": "2ff21113fe3bf31e",
       "declFingerprints": {
         "appendNativeJsonText": "b06dd689089b87d6",
@@ -1239,7 +1239,7 @@
     },
     {
       "moduleName": "Compiler.Emit.NativeSurface",
-      "cacheKey": "a619856a73c1e71b.cache",
+      "cacheKey": "9153c8827616db7d.cache",
       "sourceFingerprint": "e5f7b44ab3cee433",
       "declFingerprints": {
         "appendNativeSurfaceText": "3240ebc669264298",
@@ -1276,7 +1276,7 @@
     },
     {
       "moduleName": "Compiler.Emit.NativeDecls",
-      "cacheKey": "b422ae74b8229ed0.cache",
+      "cacheKey": "fa349fe66e1b87fa.cache",
       "sourceFingerprint": "2707fca712035592",
       "declFingerprints": {
         "appendNativeDeclRenderedText": "85927e38635a89b8",
@@ -1302,7 +1302,7 @@
     },
     {
       "moduleName": "Compiler.Emit.NativeMetadata",
-      "cacheKey": "2be022103b0e20d8.cache",
+      "cacheKey": "10904732b98ebb4a.cache",
       "sourceFingerprint": "8a8d3b533e024097",
       "declFingerprints": {
         "appendNativeMetadataText": "8265febaefffcfa8",
@@ -1383,7 +1383,7 @@
     },
     {
       "moduleName": "Compiler.Emit.Native",
-      "cacheKey": "f53583dc4d09046d.cache",
+      "cacheKey": "280354b829dc4b1f.cache",
       "sourceFingerprint": "bb03b6b522ab459f",
       "declFingerprints": {
         "appendNativeRenderedText": "031da1a51b657b78",
@@ -1511,7 +1511,7 @@
     },
     {
       "moduleName": "Compiler.Driver.Native",
-      "cacheKey": "719a884d5f6d01bb.cache",
+      "cacheKey": "33c6229c22640199.cache",
       "sourceFingerprint": "d618d474010b08fc",
       "declFingerprints": {
         "nativeDriverSourceLoweredDecls": "e4f2f7b3dc4a4ee0",
@@ -1542,7 +1542,7 @@
     },
     {
       "moduleName": "Compiler.SnapshotFixture",
-      "cacheKey": "de55f7422d89d63a.cache",
+      "cacheKey": "9248d9c03455aa00.cache",
       "sourceFingerprint": "02952be3932ed617",
       "declFingerprints": {
         "compilerSnapshotCheckEntrypoint": "d8fb81e3859e0248",
@@ -1572,7 +1572,7 @@
     },
     {
       "moduleName": "Main",
-      "cacheKey": "e1d68e10e45de8a6.cache",
+      "cacheKey": "963ac71f631996e8.cache",
       "sourceFingerprint": "043bae6f37167fea",
       "declFingerprints": {
         "checkEntrypoint": "deec79af7e4f42cf",

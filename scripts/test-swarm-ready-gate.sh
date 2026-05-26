@@ -23,7 +23,7 @@ reject_pattern() {
   fi
 }
 
-bash -n "$project_root/scripts/test-native-claspc.sh" "$project_root/scripts/test-native-claspc-smoke.sh" "$project_root/scripts/test-int-builtins.sh" "$project_root/scripts/test-native-runtime-smoke.sh" "$project_root/scripts/test-verify-all-smoke.sh" "$project_root/scripts/test-agent-command-template.sh" "$project_root/scripts/test-goal-manager-agent-command-template.sh" "$project_root/scripts/test-goal-manager-default-planner-command.sh"
+bash -n "$project_root/scripts/test-native-claspc.sh" "$project_root/scripts/test-native-claspc-smoke.sh" "$project_root/scripts/test-int-builtins.sh" "$project_root/scripts/test-dict-builtins.sh" "$project_root/scripts/test-native-runtime-smoke.sh" "$project_root/scripts/test-verify-all-smoke.sh" "$project_root/scripts/test-agent-command-template.sh" "$project_root/scripts/test-goal-manager-agent-command-template.sh" "$project_root/scripts/test-goal-manager-default-planner-command.sh"
 bash -n "$project_root/scripts/test-goal-manager-planner-report-decode.sh"
 bash -n "$project_root/examples/swarm-kernel/scripts/verify.sh"
 node "$project_root/scripts/check-promoted-native-image-exports.mjs" >/dev/null
@@ -49,6 +49,7 @@ require_pattern "examples/swarm-native/FeedbackLoop.clasp" '{prompt_path}'
 require_pattern "scripts/verify-all.sh" 'CLASP_AGENT_COMMAND_TEMPLATE_FEEDBACK=0 CLASP_AGENT_COMMAND_TEMPLATE_NATIVE=1 bash scripts/test-agent-command-template.sh'
 require_pattern "scripts/verify-all.sh" 'bash scripts/test-goal-manager-agent-command-template.sh'
 require_pattern "scripts/verify-all.sh" 'bash scripts/test-goal-manager-default-planner-command.sh'
+require_pattern "scripts/verify-all.sh" 'bash scripts/test-dict-builtins.sh'
 require_pattern "scripts/test-goal-manager-agent-command-template.sh" 'goal-manager-agent-command-template-ok'
 require_pattern "scripts/test-goal-manager-agent-command-template.sh" 'ensure-goal-manager-binary.sh'
 require_pattern "scripts/test-goal-manager-agent-command-template.sh" 'CLASP_GOAL_MANAGER_COMPILE_MEMORY_MB'
@@ -292,9 +293,11 @@ require_pattern "scripts/test-native-claspc.sh" 'CLASP_TEST_NATIVE_CLASPC_SHARED
 require_pattern "scripts/test-native-claspc.sh" 'CLASP_TEST_ISOLATED_XDG_CACHE'
 require_pattern "scripts/test-native-claspc-smoke.sh" 'test-native-claspc-smoke: ok'
 require_pattern "scripts/test-int-builtins.sh" 'test-int-builtins: ok'
+require_pattern "scripts/test-dict-builtins.sh" 'test-dict-builtins: ok'
 require_pattern "scripts/test-native-runtime-smoke.sh" 'test-native-runtime-smoke: ok'
 require_pattern "scripts/verify-fast.sh" 'bash scripts/test-native-claspc-smoke.sh'
 require_pattern "scripts/verify-fast.sh" 'bash scripts/test-int-builtins.sh'
+require_pattern "scripts/verify-fast.sh" 'bash scripts/test-dict-builtins.sh'
 require_pattern "scripts/verify-fast.sh" 'bash scripts/test-native-runtime-smoke.sh'
 require_pattern "scripts/verify-fast.sh" 'bash scripts/test-verify-all-smoke.sh'
 reject_pattern "scripts/verify-fast.sh" 'bash scripts/test-native-claspc.sh'
