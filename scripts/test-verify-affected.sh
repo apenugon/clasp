@@ -322,6 +322,23 @@ switch (scenario) {
     assert(logHas("scripts/test-swarm-native-feedback-loop.sh"), "fake swarm feedback-loop shell syntax should execute");
     assert(logHas("scripts/verify-runtime-slice.sh swarm-feedback-loop"), "fake swarm feedback-loop runtime slice should execute");
     break;
+  case "swarm-feedback-loop-program":
+    assert(report.changedFiles.includes("examples/swarm-native/FeedbackLoop.clasp"), "FeedbackLoop source should be present");
+    assert(report.changedFiles.includes("examples/swarm-native/AttemptLoop.clasp"), "AttemptLoop source should be present");
+    assert(report.changedFiles.includes("examples/swarm-native/LocalAgent.clasp"), "LocalAgent source should be present");
+    assert(hasCommand("bash scripts/verify-runtime-slice.sh swarm-feedback-loop"), "FeedbackLoop source should run focused runtime slice");
+    assert(hasCommand("bash scripts/test-agent-command-template.sh"), "FeedbackLoop source should run provider-neutral/local agent prompt coverage");
+    assert(hasCommand("bash scripts/test-swarm-ready-gate.sh"), "FeedbackLoop source should keep structural swarm-ready coverage");
+    assert(!hasCommand("bash scripts/test-native-claspc.sh"), "FeedbackLoop source should avoid broad native-claspc routing");
+    assert(!hasCommand("bash scripts/verify-runtime-slice.sh managed-loop"), "FeedbackLoop source should avoid unrelated managed-loop runtime slice");
+    assert(!hasCommand("bash scripts/test-swarm-memory.sh"), "FeedbackLoop source should avoid standalone memory harness routing");
+    assert(report.selectedCommands.filter((command) => command.command === "bash scripts/verify-runtime-slice.sh swarm-feedback-loop").length === 1, "FeedbackLoop runtime slice should be deduplicated");
+    assert(report.selectedCommands.filter((command) => command.command === "bash scripts/test-agent-command-template.sh").length === 1, "agent command template should be deduplicated");
+    assert(report.usedVerifyFastFallback === false, "known FeedbackLoop source should not use verify-fast fallback");
+    assert(logHas("scripts/verify-runtime-slice.sh swarm-feedback-loop"), "fake FeedbackLoop runtime slice should execute");
+    assert(logHas("scripts/test-agent-command-template.sh"), "fake agent command template should execute");
+    assert(logHas("scripts/test-swarm-ready-gate.sh"), "fake swarm-ready command should execute");
+    break;
   case "feedback-loop-resume-script":
     assert(report.changedFiles.includes("scripts/test-feedback-loop-resume.sh"), "feedback-loop resume script should be present");
     assert(hasCommand("bash -n 'scripts/test-feedback-loop-resume.sh'"), "feedback-loop resume script should run shell syntax check");
@@ -682,6 +699,15 @@ CLASP_TEST_FAKE_COMMAND_LOG="$swarm_feedback_loop_script_log" \
   run_verify_affected \
     --changed-file scripts/test-swarm-native-feedback-loop.sh > "$swarm_feedback_loop_script_report"
 assert_report "$swarm_feedback_loop_script_report" "$swarm_feedback_loop_script_log" swarm-feedback-loop-script
+
+swarm_feedback_loop_program_report="$test_root/swarm-feedback-loop-program-report.json"
+swarm_feedback_loop_program_log="$test_root/swarm-feedback-loop-program.log"
+CLASP_TEST_FAKE_COMMAND_LOG="$swarm_feedback_loop_program_log" \
+  run_verify_affected \
+    --changed-file examples/swarm-native/FeedbackLoop.clasp \
+    --changed-file examples/swarm-native/AttemptLoop.clasp \
+    --changed-file examples/swarm-native/LocalAgent.clasp > "$swarm_feedback_loop_program_report"
+assert_report "$swarm_feedback_loop_program_report" "$swarm_feedback_loop_program_log" swarm-feedback-loop-program
 
 feedback_loop_resume_script_report="$test_root/feedback-loop-resume-script-report.json"
 feedback_loop_resume_script_log="$test_root/feedback-loop-resume-script.log"

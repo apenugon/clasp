@@ -798,6 +798,10 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
       file === "docs/autonomous-swarm-runtime-requirements.md" ||
       file === "docs/autonomous-swarm-near-term-roadmap.md" ||
       file === "scripts/test-swarm-context-pack.sh";
+    const isSwarmFeedbackLoopProgramPath =
+      file === "examples/swarm-native/FeedbackLoop.clasp" ||
+      file === "examples/swarm-native/AttemptLoop.clasp" ||
+      file === "examples/swarm-native/LocalAgent.clasp";
 
     if (file.startsWith("src/") && !isPromotedSourceExportCache && !isSourceNativeVerifyScript) {
       matched = true;
@@ -981,7 +985,31 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
       );
     }
 
-    if (file.startsWith("examples/swarm-native/")) {
+    if (isSwarmFeedbackLoopProgramPath) {
+      matched = true;
+      reason(
+        file,
+        "swarm-feedback-loop-program",
+        "FeedbackLoop agent-loop sources use focused FeedbackLoop and local agent prompt coverage",
+      );
+      addSelected(
+        selectedByCommand,
+        "runtime-slice:swarm-feedback-loop",
+        COMMANDS.runtimeSliceSwarmFeedbackLoop,
+        "swarm feedback-loop program",
+        file,
+      );
+      addSelected(
+        selectedByCommand,
+        "agent-command-template",
+        COMMANDS.agentCommandTemplate,
+        "swarm feedback-loop program",
+        file,
+      );
+      addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "swarm feedback-loop program", file);
+    }
+
+    if (file.startsWith("examples/swarm-native/") && !isSwarmFeedbackLoopProgramPath) {
       matched = true;
       reason(file, "swarm-native", "native swarm example path uses native claspc, ready-gate, managed-loop, and FeedbackLoop coverage");
       addSelected(selectedByCommand, "native-claspc", COMMANDS.nativeClaspc, "swarm native path", file);
