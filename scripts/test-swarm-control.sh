@@ -1105,7 +1105,8 @@ grep -F --quiet 'builder_timeout_seconds="${CLASP_SWARM_BUILDER_TIMEOUT_SECONDS:
 grep -F --quiet 'if [[ -z "$timeout_seconds" || "$timeout_seconds" == "0" ]]; then' "$project_root/scripts/clasp-swarm-lane.sh"
 grep -F --quiet 'max_running_lanes="${CLASP_SWARM_MAX_RUNNING_LANES:-2}"' "$project_root/scripts/clasp-swarm-start.sh"
 grep -F --quiet 'lane_memory_mb="${CLASP_SWARM_LANE_MEMORY_MB:-12288}"' "$project_root/scripts/clasp-swarm-start.sh"
-grep -F --quiet 'min_available_memory_mb="${CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB:-8192}"' "$project_root/scripts/clasp-swarm-start.sh"
+grep -F --quiet 'min_available_memory_mb="${CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB:-16384}"' "$project_root/scripts/clasp-swarm-start.sh"
+grep -F --quiet 'required_available_memory_mb=$((required_available_memory_mb + (lane_memory_mb * (running_lanes + 1))))' "$project_root/scripts/clasp-swarm-start.sh"
 grep -F --quiet 'resource guard: not starting lane=$lane_name' "$project_root/scripts/clasp-swarm-start.sh"
 grep -F --quiet 'force_signal_args=(--force-signal)' "$project_root/scripts/clasp-swarm-stop.sh"
 grep -F --quiet '"${force_signal_args[@]}" --jobs-root' "$project_root/scripts/clasp-swarm-stop.sh"
@@ -2017,6 +2018,14 @@ bash -lc "
   output=\$(CLASP_SWARM_ALLOW_DIRTY=1 CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB=999999999 bash scripts/clasp-swarm-start.sh --batch foundation test-wave)
   [[ \"\$output\" == *'resource guard: not starting lane=01-foundation-a; available_memory_mb='* ]]
   [[ \"\$output\" == *'min_available_memory_mb=999999999'* ]]
+  [[ ! -f .clasp-swarm/test-wave/01-foundation-a/job ]]
+  [[ ! -f .clasp-swarm/test-wave/02-foundation-b/job ]]
+  [[ ! -f builder-events.log ]]
+
+  output=\$(CLASP_SWARM_ALLOW_DIRTY=1 CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB=0 CLASP_SWARM_LANE_MEMORY_MB=999999999 bash scripts/clasp-swarm-start.sh --batch foundation test-wave)
+  [[ \"\$output\" == *'resource guard: not starting lane=01-foundation-a; available_memory_mb='* ]]
+  [[ \"\$output\" == *'required_available_memory_mb=999999999'* ]]
+  [[ \"\$output\" == *'lane_memory_mb=999999999'* ]]
   [[ ! -f .clasp-swarm/test-wave/01-foundation-a/job ]]
   [[ ! -f .clasp-swarm/test-wave/02-foundation-b/job ]]
   [[ ! -f builder-events.log ]]

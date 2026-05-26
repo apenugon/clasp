@@ -12,7 +12,7 @@ allow_dirty="${CLASP_SWARM_ALLOW_DIRTY:-0}"
 batch_filter="${CLASP_SWARM_BATCH:-}"
 max_running_lanes="${CLASP_SWARM_MAX_RUNNING_LANES:-2}"
 lane_memory_mb="${CLASP_SWARM_LANE_MEMORY_MB:-12288}"
-min_available_memory_mb="${CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB:-8192}"
+min_available_memory_mb="${CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB:-16384}"
 
 validate_non_negative_integer() {
   local name="$1"
@@ -215,10 +215,15 @@ while IFS= read -r lane_dir; do
     continue
   fi
 
-  if (( min_available_memory_mb > 0 )); then
+  required_available_memory_mb="$min_available_memory_mb"
+  if (( lane_memory_mb > 0 )); then
+    required_available_memory_mb=$((required_available_memory_mb + (lane_memory_mb * (running_lanes + 1))))
+  fi
+
+  if (( required_available_memory_mb > 0 )); then
     mem_available_mb="$(available_memory_mb)"
-    if (( mem_available_mb < min_available_memory_mb )); then
-      echo "resource guard: not starting lane=$lane_name; available_memory_mb=$mem_available_mb min_available_memory_mb=$min_available_memory_mb"
+    if (( mem_available_mb < required_available_memory_mb )); then
+      echo "resource guard: not starting lane=$lane_name; available_memory_mb=$mem_available_mb required_available_memory_mb=$required_available_memory_mb min_available_memory_mb=$min_available_memory_mb lane_memory_mb=$lane_memory_mb projected_running_lanes=$((running_lanes + 1))"
       continue
     fi
   fi
