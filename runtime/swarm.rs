@@ -2,7 +2,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Map, Value};
 use std::env;
 use std::fs::{self, File};
-use std::io::{Read, Write};
+use std::io::{self, Read, Write};
 #[cfg(unix)]
 use std::os::raw::c_int;
 #[cfg(unix)]
@@ -22,6 +22,21 @@ const SIGKILL: c_int = 9;
 extern "C" {
     fn setsid() -> c_int;
     fn kill(pid: c_int, sig: c_int) -> c_int;
+}
+
+#[cfg(target_os = "linux")]
+const RLIMIT_AS: c_int = 9;
+
+#[cfg(target_os = "linux")]
+#[repr(C)]
+struct RLimit {
+    rlim_cur: u64,
+    rlim_max: u64,
+}
+
+#[cfg(target_os = "linux")]
+extern "C" {
+    fn setrlimit(resource: c_int, rlim: *const RLimit) -> c_int;
 }
 
 #[derive(Clone)]
@@ -55,6 +70,7 @@ struct SwarmRunRecord {
     name: String,
     cwd: String,
     command: Vec<String>,
+    memory_limit_mb: i64,
     exit_code: i64,
     status: String,
     started_at_ms: i64,
@@ -209,6 +225,7 @@ enum SwarmCommand {
         actor: String,
         cwd: PathBuf,
         timeout_ms: Option<i64>,
+        memory_limit_mb: Option<i64>,
         command: Vec<String>,
     },
     VerifierRun {
@@ -218,6 +235,7 @@ enum SwarmCommand {
         verifier_name: String,
         cwd: PathBuf,
         timeout_ms: Option<i64>,
+        memory_limit_mb: Option<i64>,
         command: Vec<String>,
     },
     MergegateDecide {
@@ -286,15 +304,29 @@ fn parse_timeout_ms(value: &str) -> Result<i64, String> {
     Ok(parsed)
 }
 
-fn parse_named_run_prefix(prefix: &[String], verb: &str) -> Result<(PathBuf, String, String, PathBuf, Option<i64>), String> {
+fn parse_memory_limit_mb(value: &str) -> Result<i64, String> {
+    let parsed = value
+        .parse::<i64>()
+        .map_err(|_| format!("invalid --memory-mb value `{value}`"))?;
+    if parsed <= 0 {
+        return Err("--memory-mb must be greater than 0".to_owned());
+    }
+    Ok(parsed)
+}
+
+fn parse_named_run_prefix(
+    prefix: &[String],
+    verb: &str,
+) -> Result<(PathBuf, String, String, PathBuf, Option<i64>, Option<i64>), String> {
     if prefix.len() < 2 {
-        return Err(format!("usage: claspc swarm {verb} <state-root> <task-id> [--actor NAME] [--cwd DIR] [--timeout-ms MS] -- <command...>"));
+        return Err(format!("usage: claspc swarm {verb} <state-root> <task-id> [--actor NAME] [--cwd DIR] [--timeout-ms MS] [--memory-mb MB] -- <command...>"));
     }
     let root = parse_root_arg(&prefix[0]);
     let task_id = prefix[1].clone();
     let mut actor = default_actor();
     let mut cwd = env::current_dir().map_err(|err| format!("failed to resolve current directory: {err}"))?;
     let mut timeout_ms = None;
+    let mut memory_limit_mb = None;
     let mut index = 2usize;
     while index < prefix.len() {
         match prefix[index].as_str() {
@@ -319,12 +351,19 @@ fn parse_named_run_prefix(prefix: &[String], verb: &str) -> Result<(PathBuf, Str
                 timeout_ms = Some(parse_timeout_ms(value)?);
                 index += 2;
             }
+            "--memory-mb" => {
+                let Some(value) = prefix.get(index + 1) else {
+                    return Err("missing value after --memory-mb".to_owned());
+                };
+                memory_limit_mb = Some(parse_memory_limit_mb(value)?);
+                index += 2;
+            }
             other => {
                 return Err(format!("unknown option `{other}`"));
             }
         }
     }
-    Ok((root, task_id, actor, cwd, timeout_ms))
+    Ok((root, task_id, actor, cwd, timeout_ms, memory_limit_mb))
 }
 
 fn parse_swarm_command(args: &[String]) -> Result<Option<(bool, SwarmCommand)>, String> {
@@ -873,16 +912,16 @@ fn parse_swarm_command(args: &[String]) -> Result<Option<(bool, SwarmCommand)>, 
         }
         "tool" => {
             let (prefix, command) = split_command_args(rest)?;
-            let (root, task_id, actor, cwd, timeout_ms) = parse_named_run_prefix(&prefix, "tool")?;
-            SwarmCommand::ToolRun { root, task_id, actor, cwd, timeout_ms, command }
+            let (root, task_id, actor, cwd, timeout_ms, memory_limit_mb) = parse_named_run_prefix(&prefix, "tool")?;
+            SwarmCommand::ToolRun { root, task_id, actor, cwd, timeout_ms, memory_limit_mb, command }
         }
         "verifier" => {
             if rest.first().map(|value| value.as_str()) != Some("run") {
-                return Err("usage: claspc swarm verifier run <state-root> <task-id> <verifier-name> [--actor NAME] [--cwd DIR] [--timeout-ms MS] -- <command...>".to_owned());
+                return Err("usage: claspc swarm verifier run <state-root> <task-id> <verifier-name> [--actor NAME] [--cwd DIR] [--timeout-ms MS] [--memory-mb MB] -- <command...>".to_owned());
             }
             let (prefix, command) = split_command_args(&rest[1..])?;
             if prefix.len() < 3 {
-                return Err("usage: claspc swarm verifier run <state-root> <task-id> <verifier-name> [--actor NAME] [--cwd DIR] [--timeout-ms MS] -- <command...>".to_owned());
+                return Err("usage: claspc swarm verifier run <state-root> <task-id> <verifier-name> [--actor NAME] [--cwd DIR] [--timeout-ms MS] [--memory-mb MB] -- <command...>".to_owned());
             }
             let root = parse_root_arg(&prefix[0]);
             let task_id = prefix[1].clone();
@@ -890,6 +929,7 @@ fn parse_swarm_command(args: &[String]) -> Result<Option<(bool, SwarmCommand)>, 
             let mut actor = default_actor();
             let mut cwd = env::current_dir().map_err(|err| format!("failed to resolve current directory: {err}"))?;
             let mut timeout_ms = None;
+            let mut memory_limit_mb = None;
             let mut index = 3usize;
             while index < prefix.len() {
                 match prefix[index].as_str() {
@@ -914,10 +954,17 @@ fn parse_swarm_command(args: &[String]) -> Result<Option<(bool, SwarmCommand)>, 
                         timeout_ms = Some(parse_timeout_ms(value)?);
                         index += 2;
                     }
+                    "--memory-mb" => {
+                        let Some(value) = prefix.get(index + 1) else {
+                            return Err("missing value after --memory-mb".to_owned());
+                        };
+                        memory_limit_mb = Some(parse_memory_limit_mb(value)?);
+                        index += 2;
+                    }
                     other => return Err(format!("unknown option `{other}`")),
                 }
             }
-            SwarmCommand::VerifierRun { root, task_id, actor, verifier_name, cwd, timeout_ms, command }
+            SwarmCommand::VerifierRun { root, task_id, actor, verifier_name, cwd, timeout_ms, memory_limit_mb, command }
         }
         "mergegate" => {
             if rest.first().map(|value| value.as_str()) != Some("decide") {
@@ -1035,6 +1082,7 @@ fn open_swarm_connection(root: &Path) -> Result<(SwarmRuntimePaths, Connection),
               name TEXT NOT NULL,
               cwd TEXT NOT NULL,
               command_json TEXT NOT NULL,
+              memory_limit_mb INTEGER NOT NULL DEFAULT 0,
               exit_code INTEGER,
               status TEXT NOT NULL,
               started_at_ms INTEGER NOT NULL,
@@ -1081,7 +1129,39 @@ fn open_swarm_connection(root: &Path) -> Result<(SwarmRuntimePaths, Connection),
             ",
         )
         .map_err(|err| format!("failed to initialize swarm database: {err}"))?;
+    ensure_table_column(
+        &connection,
+        "swarm_runs",
+        "memory_limit_mb",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
     Ok((paths, connection))
+}
+
+fn ensure_table_column(
+    connection: &Connection,
+    table: &str,
+    column: &str,
+    definition: &str,
+) -> Result<(), String> {
+    let mut statement = connection
+        .prepare(&format!("PRAGMA table_info({table})"))
+        .map_err(|err| format!("failed to inspect swarm table `{table}`: {err}"))?;
+    let rows = statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|err| format!("failed to query swarm table `{table}` columns: {err}"))?;
+    for row in rows {
+        if row.map_err(|err| format!("failed to read swarm table `{table}` column: {err}"))? == column {
+            return Ok(());
+        }
+    }
+    connection
+        .execute(
+            &format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"),
+            [],
+        )
+        .map_err(|err| format!("failed to migrate swarm table `{table}` column `{column}`: {err}"))?;
+    Ok(())
 }
 
 fn empty_task_state(task_id: &str, at_ms: i64) -> SwarmTaskState {
@@ -3401,12 +3481,13 @@ fn insert_run(
     name: &str,
     cwd: &Path,
     command: &[String],
+    memory_limit_mb: i64,
 ) -> Result<i64, String> {
     connection
         .execute(
             "
-            INSERT INTO swarm_runs (task_id, role, actor, name, cwd, command_json, status, started_at_ms)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'running', ?7)
+            INSERT INTO swarm_runs (task_id, role, actor, name, cwd, command_json, memory_limit_mb, status, started_at_ms)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'running', ?8)
             ",
             params![
                 task_id,
@@ -3415,6 +3496,7 @@ fn insert_run(
                 name,
                 cwd.display().to_string(),
                 serde_json::to_string(command).map_err(|err| format!("failed to encode swarm run command: {err}"))?,
+                memory_limit_mb,
                 now_ms()
             ],
         )
@@ -3456,7 +3538,7 @@ fn latest_verifier_run(
         .query_row(
             "
             SELECT id, task_id, role, actor, name, cwd, command_json, COALESCE(exit_code, -999), status,
-                   started_at_ms, COALESCE(ended_at_ms, started_at_ms), stdout_artifact_id, stderr_artifact_id
+                   COALESCE(memory_limit_mb, 0), started_at_ms, COALESCE(ended_at_ms, started_at_ms), stdout_artifact_id, stderr_artifact_id
             FROM swarm_runs
             WHERE task_id = ?1 AND role = 'verifier' AND name = ?2
             ORDER BY id DESC
@@ -3466,8 +3548,8 @@ fn latest_verifier_run(
             |row| {
                 let command_json: String = row.get(6)?;
                 let command = serde_json::from_str::<Vec<String>>(&command_json).unwrap_or_default();
-                let stdout_artifact_id: Option<i64> = row.get(11)?;
-                let stderr_artifact_id: Option<i64> = row.get(12)?;
+                let stdout_artifact_id: Option<i64> = row.get(12)?;
+                let stderr_artifact_id: Option<i64> = row.get(13)?;
                 Ok(SwarmRunRecord {
                     run_id: row.get(0)?,
                     task_id: row.get(1)?,
@@ -3478,8 +3560,9 @@ fn latest_verifier_run(
                     command,
                     exit_code: row.get(7)?,
                     status: row.get(8)?,
-                    started_at_ms: row.get(9)?,
-                    ended_at_ms: row.get(10)?,
+                    memory_limit_mb: row.get(9)?,
+                    started_at_ms: row.get(10)?,
+                    ended_at_ms: row.get(11)?,
                     stdout_artifact_path: artifact_path_by_id(connection, stdout_artifact_id)?,
                     stderr_artifact_path: artifact_path_by_id(connection, stderr_artifact_id)?,
                 })
@@ -3494,7 +3577,8 @@ fn latest_run_for_task(connection: &Connection, task_id: &str) -> Result<Option<
         .query_row(
             "
             SELECT runs.id, runs.task_id, runs.role, runs.actor, runs.name, runs.cwd, runs.command_json,
-                   COALESCE(runs.exit_code, -999), runs.status, runs.started_at_ms, COALESCE(runs.ended_at_ms, runs.started_at_ms),
+                   COALESCE(runs.exit_code, -999), runs.status, COALESCE(runs.memory_limit_mb, 0),
+                   runs.started_at_ms, COALESCE(runs.ended_at_ms, runs.started_at_ms),
                    COALESCE(stdout.path, ''), COALESCE(stderr.path, '')
             FROM swarm_runs AS runs
             LEFT JOIN swarm_artifacts AS stdout ON stdout.id = runs.stdout_artifact_id
@@ -3517,10 +3601,11 @@ fn latest_run_for_task(connection: &Connection, task_id: &str) -> Result<Option<
                     command,
                     exit_code: row.get(7)?,
                     status: row.get(8)?,
-                    started_at_ms: row.get(9)?,
-                    ended_at_ms: row.get(10)?,
-                    stdout_artifact_path: row.get(11)?,
-                    stderr_artifact_path: row.get(12)?,
+                    memory_limit_mb: row.get(9)?,
+                    started_at_ms: row.get(10)?,
+                    ended_at_ms: row.get(11)?,
+                    stdout_artifact_path: row.get(12)?,
+                    stderr_artifact_path: row.get(13)?,
                 })
             },
         )
@@ -3533,7 +3618,8 @@ fn latest_verifier_run_for_task(connection: &Connection, task_id: &str) -> Resul
         .query_row(
             "
             SELECT runs.id, runs.task_id, runs.role, runs.actor, runs.name, runs.cwd, runs.command_json,
-                   COALESCE(runs.exit_code, -999), runs.status, runs.started_at_ms, COALESCE(runs.ended_at_ms, runs.started_at_ms),
+                   COALESCE(runs.exit_code, -999), runs.status, COALESCE(runs.memory_limit_mb, 0),
+                   runs.started_at_ms, COALESCE(runs.ended_at_ms, runs.started_at_ms),
                    COALESCE(stdout.path, ''), COALESCE(stderr.path, '')
             FROM swarm_runs AS runs
             LEFT JOIN swarm_artifacts AS stdout ON stdout.id = runs.stdout_artifact_id
@@ -3556,10 +3642,11 @@ fn latest_verifier_run_for_task(connection: &Connection, task_id: &str) -> Resul
                     command,
                     exit_code: row.get(7)?,
                     status: row.get(8)?,
-                    started_at_ms: row.get(9)?,
-                    ended_at_ms: row.get(10)?,
-                    stdout_artifact_path: row.get(11)?,
-                    stderr_artifact_path: row.get(12)?,
+                    memory_limit_mb: row.get(9)?,
+                    started_at_ms: row.get(10)?,
+                    ended_at_ms: row.get(11)?,
+                    stdout_artifact_path: row.get(12)?,
+                    stderr_artifact_path: row.get(13)?,
                 })
             },
         )
@@ -3574,7 +3661,8 @@ fn runs_json(connection: &Connection, task_id: Option<&str>) -> Result<Value, St
             .prepare(
                 "
                 SELECT runs.id, runs.task_id, runs.role, runs.actor, runs.name, runs.cwd, runs.command_json,
-                       COALESCE(runs.exit_code, -999), runs.status, runs.started_at_ms, COALESCE(runs.ended_at_ms, runs.started_at_ms),
+                       COALESCE(runs.exit_code, -999), runs.status, COALESCE(runs.memory_limit_mb, 0),
+                       runs.started_at_ms, COALESCE(runs.ended_at_ms, runs.started_at_ms),
                        COALESCE(stdout.path, ''), COALESCE(stderr.path, '')
                 FROM swarm_runs AS runs
                 LEFT JOIN swarm_artifacts AS stdout ON stdout.id = runs.stdout_artifact_id
@@ -3598,10 +3686,11 @@ fn runs_json(connection: &Connection, task_id: Option<&str>) -> Result<Value, St
                     command,
                     exit_code: row.get(7)?,
                     status: row.get(8)?,
-                    started_at_ms: row.get(9)?,
-                    ended_at_ms: row.get(10)?,
-                    stdout_artifact_path: row.get(11)?,
-                    stderr_artifact_path: row.get(12)?,
+                    memory_limit_mb: row.get(9)?,
+                    started_at_ms: row.get(10)?,
+                    ended_at_ms: row.get(11)?,
+                    stdout_artifact_path: row.get(12)?,
+                    stderr_artifact_path: row.get(13)?,
                 })
             })
             .map_err(|err| format!("failed to query swarm runs: {err}"))?;
@@ -3613,7 +3702,8 @@ fn runs_json(connection: &Connection, task_id: Option<&str>) -> Result<Value, St
             .prepare(
                 "
                 SELECT runs.id, runs.task_id, runs.role, runs.actor, runs.name, runs.cwd, runs.command_json,
-                       COALESCE(runs.exit_code, -999), runs.status, runs.started_at_ms, COALESCE(runs.ended_at_ms, runs.started_at_ms),
+                       COALESCE(runs.exit_code, -999), runs.status, COALESCE(runs.memory_limit_mb, 0),
+                       runs.started_at_ms, COALESCE(runs.ended_at_ms, runs.started_at_ms),
                        COALESCE(stdout.path, ''), COALESCE(stderr.path, '')
                 FROM swarm_runs AS runs
                 LEFT JOIN swarm_artifacts AS stdout ON stdout.id = runs.stdout_artifact_id
@@ -3636,10 +3726,11 @@ fn runs_json(connection: &Connection, task_id: Option<&str>) -> Result<Value, St
                     command,
                     exit_code: row.get(7)?,
                     status: row.get(8)?,
-                    started_at_ms: row.get(9)?,
-                    ended_at_ms: row.get(10)?,
-                    stdout_artifact_path: row.get(11)?,
-                    stderr_artifact_path: row.get(12)?,
+                    memory_limit_mb: row.get(9)?,
+                    started_at_ms: row.get(10)?,
+                    ended_at_ms: row.get(11)?,
+                    stdout_artifact_path: row.get(12)?,
+                    stderr_artifact_path: row.get(13)?,
                 })
             })
             .map_err(|err| format!("failed to query swarm runs: {err}"))?;
@@ -3681,17 +3772,70 @@ fn reader_timeout_grace_duration() -> Duration {
     Duration::from_millis(150)
 }
 
-fn configure_killable_command(command: &mut ProcessCommand) {
+fn memory_limit_bytes(memory_limit_mb: Option<i64>) -> Result<Option<u64>, String> {
+    let Some(memory_limit_mb) = memory_limit_mb else {
+        return Ok(None);
+    };
+    if memory_limit_mb <= 0 {
+        return Ok(None);
+    }
+    let mb = memory_limit_mb as u64;
+    mb.checked_mul(1024 * 1024)
+        .map(Some)
+        .ok_or_else(|| format!("--memory-mb value `{memory_limit_mb}` is too large"))
+}
+
+#[cfg(target_os = "linux")]
+fn apply_virtual_memory_limit(limit_bytes: u64) -> io::Result<()> {
+    let limit = RLimit {
+        rlim_cur: limit_bytes,
+        rlim_max: limit_bytes,
+    };
+    unsafe {
+        if setrlimit(RLIMIT_AS, &limit) < 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn apply_virtual_memory_limit(_limit_bytes: u64) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "swarm command --memory-mb is currently supported only on Linux",
+    ))
+}
+
+fn configure_command_process(
+    command: &mut ProcessCommand,
+    killable_group: bool,
+    memory_limit_mb: Option<i64>,
+) -> Result<(), String> {
+    let memory_limit_bytes = memory_limit_bytes(memory_limit_mb)?;
     #[cfg(unix)]
     unsafe {
-        command.pre_exec(|| {
-            if setsid() < 0 {
+        command.pre_exec(move || {
+            if killable_group && setsid() < 0 {
                 Err(std::io::Error::last_os_error())
             } else {
+                if let Some(limit_bytes) = memory_limit_bytes {
+                    apply_virtual_memory_limit(limit_bytes)?;
+                }
                 Ok(())
             }
         });
     }
+    #[cfg(not(unix))]
+    {
+        if memory_limit_bytes.is_some() {
+            return Err("swarm command --memory-mb is currently supported only on Unix-like hosts".to_owned());
+        }
+        let _ = killable_group;
+        let _ = command;
+    }
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -3827,6 +3971,7 @@ fn run_command_with_timeout_to_artifacts(
     stdout_path: &Path,
     stderr_path: &Path,
     timeout_ms: i64,
+    memory_limit_mb: Option<i64>,
 ) -> Result<NativeCommandOutcome, String> {
     fs::write(stdout_path, [])
         .map_err(|err| format!("failed to initialize swarm stdout artifact `{}`: {err}", stdout_path.display()))?;
@@ -3840,7 +3985,7 @@ fn run_command_with_timeout_to_artifacts(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    configure_killable_command(&mut process);
+    configure_command_process(&mut process, true, memory_limit_mb)?;
 
     let mut child = process
         .spawn()
@@ -3945,6 +4090,7 @@ fn run_native_command(
     cwd: &Path,
     command: &[String],
     timeout_ms: Option<i64>,
+    memory_limit_mb: Option<i64>,
 ) -> Result<SwarmRunRecord, String> {
     let at_ms = now_ms();
     let (_, spec) = if role == "verifier" {
@@ -3969,7 +4115,8 @@ fn run_native_command(
         }
     }
 
-    let run_id = insert_run(connection, task_id, role, actor, name, cwd, command)?;
+    let memory_limit_mb_value = memory_limit_mb.unwrap_or(0);
+    let run_id = insert_run(connection, task_id, role, actor, name, cwd, command, memory_limit_mb_value)?;
     let started_at_ms = now_ms();
     let start_kind = if role == "verifier" { "verifier_run_started" } else { "tool_run_started" };
     let finish_kind = if role == "verifier" { "verifier_run_finished" } else { "tool_run_finished" };
@@ -3979,17 +4126,24 @@ fn run_native_command(
         task_id,
         actor,
         &format!("Run {role} `{name}`."),
-        json!({ "runId": run_id, "cwd": cwd.display().to_string(), "command": command }),
+        json!({
+            "runId": run_id,
+            "cwd": cwd.display().to_string(),
+            "command": command,
+            "timeoutMs": timeout_ms.unwrap_or(0),
+            "memoryLimitMb": memory_limit_mb_value
+        }),
     )?;
 
     let stdout_path = next_artifact_path(paths, task_id, run_id, "stdout");
     let stderr_path = next_artifact_path(paths, task_id, run_id, "stderr");
     let outcome = if let Some(timeout_ms) = timeout_ms {
-        run_command_with_timeout_to_artifacts(cwd, command, &stdout_path, &stderr_path, timeout_ms)?
+        run_command_with_timeout_to_artifacts(cwd, command, &stdout_path, &stderr_path, timeout_ms, memory_limit_mb)?
     } else {
-        let output = ProcessCommand::new(&command[0])
-            .args(&command[1..])
-            .current_dir(cwd)
+        let mut process = ProcessCommand::new(&command[0]);
+        process.args(&command[1..]).current_dir(cwd);
+        configure_command_process(&mut process, false, memory_limit_mb)?;
+        let output = process
             .output()
             .map_err(|err| format!("failed to execute swarm {role} command `{}`: {err}", command[0]))?;
         fs::write(&stdout_path, &output.stdout)
@@ -4013,6 +4167,7 @@ fn run_native_command(
         "name": name,
         "timedOut": outcome.timed_out,
         "timeoutMs": timeout_ms.unwrap_or(0),
+        "memoryLimitMb": memory_limit_mb_value,
         "stdoutReaderFinished": outcome.stdout_reader_finished,
         "stderrReaderFinished": outcome.stderr_reader_finished,
         "readerErrors": outcome.reader_errors.clone(),
@@ -4046,6 +4201,7 @@ fn run_native_command(
             "status": status,
             "timedOut": outcome.timed_out,
             "timeoutMs": timeout_ms.unwrap_or(0),
+            "memoryLimitMb": memory_limit_mb_value,
             "stdoutReaderFinished": outcome.stdout_reader_finished,
             "stderrReaderFinished": outcome.stderr_reader_finished,
             "readerErrors": outcome.reader_errors.clone(),
@@ -4062,6 +4218,7 @@ fn run_native_command(
         name: name.to_owned(),
         cwd: cwd.display().to_string(),
         command: command.to_vec(),
+        memory_limit_mb: memory_limit_mb_value,
         exit_code,
         status: status.to_owned(),
         started_at_ms,
@@ -4083,6 +4240,7 @@ fn run_json(run: &SwarmRunRecord) -> Value {
         "exitCode": run.exit_code,
         "status": run.status,
         "timedOut": run.status == "timed_out",
+        "memoryLimitMb": run.memory_limit_mb,
         "startedAtMs": run.started_at_ms,
         "endedAtMs": run.ended_at_ms,
         "stdoutArtifactPath": run.stdout_artifact_path,
@@ -4722,9 +4880,21 @@ fn execute_tool_run(
     cwd: &Path,
     command: &[String],
     timeout_ms: Option<i64>,
+    memory_limit_mb: Option<i64>,
 ) -> Result<SwarmRunRecord, String> {
     let (paths, mut connection) = open_swarm_connection(root)?;
-    run_native_command(&mut connection, &paths, task_id, actor, "tool", &command[0], cwd, command, timeout_ms)
+    run_native_command(
+        &mut connection,
+        &paths,
+        task_id,
+        actor,
+        "tool",
+        &command[0],
+        cwd,
+        command,
+        timeout_ms,
+        memory_limit_mb,
+    )
 }
 
 fn handle_tool_run(
@@ -4735,8 +4905,9 @@ fn handle_tool_run(
     cwd: &Path,
     command: &[String],
     timeout_ms: Option<i64>,
+    memory_limit_mb: Option<i64>,
 ) -> ExitCode {
-    match execute_tool_run(root, task_id, actor, cwd, command, timeout_ms) {
+    match execute_tool_run(root, task_id, actor, cwd, command, timeout_ms, memory_limit_mb) {
         Ok(run) => {
             print_output(&run_json(&run), json_mode);
             if run.exit_code == 0 {
@@ -4757,6 +4928,7 @@ fn execute_verifier_run(
     cwd: &Path,
     command: &[String],
     timeout_ms: Option<i64>,
+    memory_limit_mb: Option<i64>,
 ) -> Result<SwarmRunRecord, String> {
     let (paths, mut connection) = open_swarm_connection(root)?;
     run_native_command(
@@ -4769,6 +4941,7 @@ fn execute_verifier_run(
         cwd,
         command,
         timeout_ms,
+        memory_limit_mb,
     )
 }
 
@@ -4781,8 +4954,9 @@ fn handle_verifier_run(
     cwd: &Path,
     command: &[String],
     timeout_ms: Option<i64>,
+    memory_limit_mb: Option<i64>,
 ) -> ExitCode {
-    match execute_verifier_run(root, task_id, actor, verifier_name, cwd, command, timeout_ms) {
+    match execute_verifier_run(root, task_id, actor, verifier_name, cwd, command, timeout_ms, memory_limit_mb) {
         Ok(run) => {
             print_output(&run_json(&run), json_mode);
             if run.exit_code == 0 {
@@ -4980,8 +5154,8 @@ fn execute_command(command: SwarmCommand) -> Result<(ExitCode, Value), String> {
         | SwarmCommand::Approvals { .. }
         | SwarmCommand::Artifacts { .. }
         | SwarmCommand::ManagerNext { .. } => Ok((ExitCode::SUCCESS, execute_query_command(command)?)),
-        SwarmCommand::ToolRun { root, task_id, actor, cwd, timeout_ms, command } => {
-            let run = execute_tool_run(&root, &task_id, &actor, &cwd, &command, timeout_ms)?;
+        SwarmCommand::ToolRun { root, task_id, actor, cwd, timeout_ms, memory_limit_mb, command } => {
+            let run = execute_tool_run(&root, &task_id, &actor, &cwd, &command, timeout_ms, memory_limit_mb)?;
             let exit_code = if run.exit_code == 0 {
                 ExitCode::SUCCESS
             } else {
@@ -4989,8 +5163,8 @@ fn execute_command(command: SwarmCommand) -> Result<(ExitCode, Value), String> {
             };
             Ok((exit_code, run_json(&run)))
         }
-        SwarmCommand::VerifierRun { root, task_id, actor, verifier_name, cwd, timeout_ms, command } => {
-            let run = execute_verifier_run(&root, &task_id, &actor, &verifier_name, &cwd, &command, timeout_ms)?;
+        SwarmCommand::VerifierRun { root, task_id, actor, verifier_name, cwd, timeout_ms, memory_limit_mb, command } => {
+            let run = execute_verifier_run(&root, &task_id, &actor, &verifier_name, &cwd, &command, timeout_ms, memory_limit_mb)?;
             let exit_code = if run.exit_code == 0 {
                 ExitCode::SUCCESS
             } else {
@@ -5238,7 +5412,20 @@ pub fn builtin_swarm_tool_run_with_timeout(
     timeout_ms: i64,
     command: &[String],
 ) -> Result<String, String> {
+    builtin_swarm_tool_run_with_limits(root, task_id, actor, cwd, timeout_ms, 0, command)
+}
+
+pub fn builtin_swarm_tool_run_with_limits(
+    root: &str,
+    task_id: &str,
+    actor: &str,
+    cwd: &str,
+    timeout_ms: i64,
+    memory_limit_mb: i64,
+    command: &[String],
+) -> Result<String, String> {
     let timeout_ms = if timeout_ms > 0 { Some(timeout_ms) } else { None };
+    let memory_limit_mb = if memory_limit_mb > 0 { Some(memory_limit_mb) } else { None };
     render_builtin_json(run_json(&execute_tool_run(
         Path::new(root),
         task_id,
@@ -5246,6 +5433,7 @@ pub fn builtin_swarm_tool_run_with_timeout(
         Path::new(cwd),
         command,
         timeout_ms,
+        memory_limit_mb,
     )?))
 }
 
@@ -5269,7 +5457,21 @@ pub fn builtin_swarm_verifier_run_with_timeout(
     timeout_ms: i64,
     command: &[String],
 ) -> Result<String, String> {
+    builtin_swarm_verifier_run_with_limits(root, task_id, actor, verifier_name, cwd, timeout_ms, 0, command)
+}
+
+pub fn builtin_swarm_verifier_run_with_limits(
+    root: &str,
+    task_id: &str,
+    actor: &str,
+    verifier_name: &str,
+    cwd: &str,
+    timeout_ms: i64,
+    memory_limit_mb: i64,
+    command: &[String],
+) -> Result<String, String> {
     let timeout_ms = if timeout_ms > 0 { Some(timeout_ms) } else { None };
+    let memory_limit_mb = if memory_limit_mb > 0 { Some(memory_limit_mb) } else { None };
     render_builtin_json(run_json(&execute_verifier_run(
         Path::new(root),
         task_id,
@@ -5278,6 +5480,7 @@ pub fn builtin_swarm_verifier_run_with_timeout(
         Path::new(cwd),
         command,
         timeout_ms,
+        memory_limit_mb,
     )?))
 }
 
@@ -5708,6 +5911,65 @@ mod tests {
             .expect("load detached timed run");
         assert_eq!(detached_exit_code, 124);
         assert_eq!(detached_status, "timed_out");
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn swarm_tool_run_enforces_memory_limit_and_records_it() {
+        let root = unique_root("memory-limit");
+        let root_text = root.to_string_lossy().to_string();
+        let bootstrap_args = vec!["claspc".to_owned(), "swarm".to_owned(), "bootstrap".to_owned(), root_text.clone(), "memory".to_owned()];
+        let lease_args = vec!["claspc".to_owned(), "swarm".to_owned(), "lease".to_owned(), root_text.clone(), "memory".to_owned()];
+        assert_eq!(maybe_run_swarm(&bootstrap_args), Some(ExitCode::SUCCESS));
+        assert_eq!(maybe_run_swarm(&lease_args), Some(ExitCode::SUCCESS));
+
+        let (_, run_json_text) = run_swarm_json_command(&vec![
+            "tool".to_owned(),
+            root_text.clone(),
+            "memory".to_owned(),
+            "--memory-mb".to_owned(),
+            "512".to_owned(),
+            "--".to_owned(),
+            "bash".to_owned(),
+            "-lc".to_owned(),
+            "ulimit -v".to_owned(),
+        ])
+        .expect("run memory-limited tool");
+        let run: Value = serde_json::from_str(&run_json_text).expect("decode run json");
+        assert_eq!(run.get("memoryLimitMb").and_then(Value::as_i64), Some(512));
+        assert_eq!(run.get("status").and_then(Value::as_str), Some("passed"));
+        let stdout_path = run
+            .get("stdoutArtifactPath")
+            .and_then(Value::as_str)
+            .expect("stdout artifact path");
+        assert_eq!(fs::read_to_string(stdout_path).expect("read stdout artifact"), "524288\n");
+
+        let (_, runs_json_text) = run_swarm_json_command(&vec![
+            "runs".to_owned(),
+            root_text.clone(),
+            "memory".to_owned(),
+        ])
+        .expect("query memory-limited run");
+        let runs: Value = serde_json::from_str(&runs_json_text).expect("decode runs json");
+        let first = runs.as_array().and_then(|items| items.first()).expect("first run");
+        assert_eq!(first.get("memoryLimitMb").and_then(Value::as_i64), Some(512));
+
+        let connection = Connection::open(runtime_paths(&root).db_path).expect("open sqlite db");
+        let finish_payload: String = connection
+            .query_row(
+                "
+                SELECT payload_json
+                FROM swarm_events
+                WHERE task_id = 'memory' AND kind = 'tool_run_finished'
+                ORDER BY id DESC
+                LIMIT 1
+                ",
+                [],
+                |row| row.get(0),
+            )
+            .expect("load memory-limited finish event");
+        assert!(finish_payload.contains("\"memoryLimitMb\":512"));
 
         let _ = fs::remove_dir_all(root);
     }

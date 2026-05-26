@@ -23,8 +23,10 @@ foreign swarmTaskCreateWithDeadlineRaw : Str -> Str -> Str -> Str -> [Str] -> In
 foreign swarmPolicySetRaw : Str -> Str -> Str -> [Str] -> [Str] -> Result Str = "swarmPolicySetJson"
 foreign swarmToolRunRaw : Str -> Str -> Str -> Str -> [Str] -> Result Str = "swarmToolRunJson"
 foreign swarmToolRunWithTimeoutRaw : Str -> Str -> Str -> Str -> Int -> [Str] -> Result Str = "swarmToolRunWithTimeoutJson"
+foreign swarmToolRunWithLimitsRaw : Str -> Str -> Str -> Str -> Int -> Int -> [Str] -> Result Str = "swarmToolRunWithLimitsJson"
 foreign swarmVerifierRunRaw : Str -> Str -> Str -> Str -> Str -> [Str] -> Result Str = "swarmVerifierRunJson"
 foreign swarmVerifierRunWithTimeoutRaw : Str -> Str -> Str -> Str -> Str -> Int -> [Str] -> Result Str = "swarmVerifierRunWithTimeoutJson"
+foreign swarmVerifierRunWithLimitsRaw : Str -> Str -> Str -> Str -> Str -> Int -> Int -> [Str] -> Result Str = "swarmVerifierRunWithLimitsJson"
 foreign swarmApproveRaw : Str -> Str -> Str -> Str -> Result Str = "swarmApproveJson"
 foreign swarmApprovalsRaw : Str -> Str -> Result Str = "swarmApprovalsJson"
 foreign swarmMergegateDecideRaw : Str -> Str -> Str -> Str -> [Str] -> Result Str = "swarmMergegateDecideJson"
@@ -101,7 +103,8 @@ record SwarmRun = {
   stderrArtifactPath : Str,
   stdoutArtifactPath : Str,
   taskId : Str,
-  timedOut : Bool
+  timedOut : Bool,
+  memoryLimitMb : Int
 }
 
 record SwarmApproval = {
@@ -674,6 +677,10 @@ toolRunWithTimeout : TaskHandle -> SwarmCommand -> Int -> Result SwarmRun
 toolRunWithTimeout handle spec timeoutMs =
   runResult (swarmToolRunWithTimeoutRaw handle.root.path handle.taskId handle.actor spec.cwd timeoutMs spec.command)
 
+toolRunWithLimits : TaskHandle -> SwarmCommand -> Int -> Int -> Result SwarmRun
+toolRunWithLimits handle spec timeoutMs memoryLimitMb =
+  runResult (swarmToolRunWithLimitsRaw handle.root.path handle.taskId handle.actor spec.cwd timeoutMs memoryLimitMb spec.command)
+
 verifierRun : TaskHandle -> Str -> SwarmCommand -> Result SwarmRun
 verifierRun handle verifierName spec =
   runResult (swarmVerifierRunRaw handle.root.path handle.taskId handle.actor verifierName spec.cwd spec.command)
@@ -681,6 +688,10 @@ verifierRun handle verifierName spec =
 verifierRunWithTimeout : TaskHandle -> Str -> SwarmCommand -> Int -> Result SwarmRun
 verifierRunWithTimeout handle verifierName spec timeoutMs =
   runResult (swarmVerifierRunWithTimeoutRaw handle.root.path handle.taskId handle.actor verifierName spec.cwd timeoutMs spec.command)
+
+verifierRunWithLimits : TaskHandle -> Str -> SwarmCommand -> Int -> Int -> Result SwarmRun
+verifierRunWithLimits handle verifierName spec timeoutMs memoryLimitMb =
+  runResult (swarmVerifierRunWithLimitsRaw handle.root.path handle.taskId handle.actor verifierName spec.cwd timeoutMs memoryLimitMb spec.command)
 
 approve : TaskHandle -> Str -> Result SwarmApproval
 approve handle approvalName =

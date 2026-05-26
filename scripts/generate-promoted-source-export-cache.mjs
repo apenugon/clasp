@@ -15,6 +15,7 @@ const defaultSources = [
   "examples/compiler-emitter.clasp",
 ];
 const projectBundleSeparator = "\n-- CLASP_PROJECT_MODULE --\n";
+const defaultNativeBundleJobs = "2";
 const defaultNativeImageEntries = [
   {
     source: "examples/hello.clasp",
@@ -265,7 +266,7 @@ function refreshNativeImageEntries(nativeImageEntries, sourceExportCachePath, fo
     const env = {
       ...process.env,
       CLASP_PROJECT_ROOT: projectRoot,
-      CLASP_NATIVE_BUNDLE_JOBS: process.env.CLASP_NATIVE_BUNDLE_JOBS || "8",
+      CLASP_NATIVE_BUNDLE_JOBS: process.env.CLASP_NATIVE_BUNDLE_JOBS || defaultNativeBundleJobs,
       CLASP_NATIVE_IMAGE_SECTION_JOBS: process.env.CLASP_NATIVE_IMAGE_SECTION_JOBS || "1",
       CLASP_NATIVE_IMAGE_MONOLITHIC_DECL_THRESHOLD:
         process.env.CLASP_NATIVE_IMAGE_MONOLITHIC_DECL_THRESHOLD || "999999",

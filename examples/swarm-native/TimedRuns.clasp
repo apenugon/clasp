@@ -6,6 +6,10 @@ record TimedRunsReport = {
   objective : Str,
   task : Str,
   verifier : Str,
+  memoryVerifier : Str,
+  memoryLimitMb : Int,
+  memoryStdout : Str,
+  memoryRun : SwarmRun,
   run : SwarmRun,
   runs : [SwarmRun],
   tail : [SwarmEvent],
@@ -35,6 +39,12 @@ taskId = "pipe-holder"
 verifierName : Str
 verifierName = "pipe-timeout"
 
+memoryVerifierName : Str
+memoryVerifierName = "memory-limit"
+
+memoryLimitMb : Int
+memoryLimitMb = 512
+
 actorName : Str
 actorName = "manager"
 
@@ -63,6 +73,14 @@ timeoutCommand =
     holdPath
   ]
 
+memoryCommand : SwarmCommand
+memoryCommand =
+  commandSpec workspaceCwd [
+    "bash",
+    "-lc",
+    "ulimit -v"
+  ]
+
 errorText : Str -> Str
 errorText message = textConcat ["ERROR:", message]
 
@@ -80,7 +98,13 @@ main =
                     Ok policyValue ->
                       match lease taskRef {
                         Ok leaseValue ->
-                          match verifierRunWithTimeout taskRef verifierName timeoutCommand 200 {
+                          match verifierRunWithLimits taskRef memoryVerifierName memoryCommand 5000 memoryLimitMb {
+                            Ok memoryRunValue ->
+                              let memoryStdoutValue = match readFile memoryRunValue.stdoutArtifactPath {
+                                Ok value -> value,
+                                Err message -> errorText message
+                              } in
+                              match verifierRunWithTimeout taskRef verifierName timeoutCommand 200 {
                             Ok runValue ->
                               match runs taskRef {
                                 Ok runsValue ->
@@ -92,6 +116,10 @@ main =
                                             objective = objectiveId,
                                             task = taskId,
                                             verifier = verifierName,
+                                            memoryVerifier = memoryVerifierName,
+                                            memoryLimitMb = memoryLimitMb,
+                                            memoryStdout = memoryStdoutValue,
+                                            memoryRun = memoryRunValue,
                                             run = runValue,
                                             runs = runsValue,
                                             tail = tailValue,
@@ -110,6 +138,9 @@ main =
                                 Err message ->
                                   errorText message
                               },
+                            Err message ->
+                              errorText message
+                          },
                             Err message ->
                               errorText message
                           },

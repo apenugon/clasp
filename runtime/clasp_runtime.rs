@@ -3184,8 +3184,10 @@ fn interpret_runtime_binding(
         ("swarmPolicySetJson", 5) => unsafe { clasp_rt_swarm_policy_set_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3], args[4]) as *mut ClaspRtHeader },
         ("swarmToolRunJson", 5) => unsafe { clasp_rt_swarm_tool_run_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4]) as *mut ClaspRtHeader },
         ("swarmToolRunWithTimeoutJson", 6) => unsafe { clasp_rt_swarm_tool_run_with_timeout_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4], args[5]) as *mut ClaspRtHeader },
+        ("swarmToolRunWithLimitsJson", 7) => unsafe { clasp_rt_swarm_tool_run_with_limits_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4], args[5], args[6]) as *mut ClaspRtHeader },
         ("swarmVerifierRunJson", 6) => unsafe { clasp_rt_swarm_verifier_run_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4] as *mut ClaspRtString, args[5]) as *mut ClaspRtHeader },
         ("swarmVerifierRunWithTimeoutJson", 7) => unsafe { clasp_rt_swarm_verifier_run_with_timeout_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4] as *mut ClaspRtString, args[5], args[6]) as *mut ClaspRtHeader },
+        ("swarmVerifierRunWithLimitsJson", 8) => unsafe { clasp_rt_swarm_verifier_run_with_limits_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4] as *mut ClaspRtString, args[5], args[6], args[7]) as *mut ClaspRtHeader },
         ("swarmApproveJson", 4) => unsafe { clasp_rt_swarm_approve_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmApprovalsJson", 2) => unsafe { clasp_rt_swarm_approvals_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmMergegateDecideJson", 5) => unsafe { clasp_rt_swarm_mergegate_decide_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4]) as *mut ClaspRtHeader },
@@ -3423,8 +3425,10 @@ fn interpret_builtin_runtime_binding(
         ("swarmPolicySetJson", 5) => unsafe { clasp_rt_swarm_policy_set_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3], args[4]) as *mut ClaspRtHeader },
         ("swarmToolRunJson", 5) => unsafe { clasp_rt_swarm_tool_run_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4]) as *mut ClaspRtHeader },
         ("swarmToolRunWithTimeoutJson", 6) => unsafe { clasp_rt_swarm_tool_run_with_timeout_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4], args[5]) as *mut ClaspRtHeader },
+        ("swarmToolRunWithLimitsJson", 7) => unsafe { clasp_rt_swarm_tool_run_with_limits_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4], args[5], args[6]) as *mut ClaspRtHeader },
         ("swarmVerifierRunJson", 6) => unsafe { clasp_rt_swarm_verifier_run_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4] as *mut ClaspRtString, args[5]) as *mut ClaspRtHeader },
         ("swarmVerifierRunWithTimeoutJson", 7) => unsafe { clasp_rt_swarm_verifier_run_with_timeout_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4] as *mut ClaspRtString, args[5], args[6]) as *mut ClaspRtHeader },
+        ("swarmVerifierRunWithLimitsJson", 8) => unsafe { clasp_rt_swarm_verifier_run_with_limits_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4] as *mut ClaspRtString, args[5], args[6], args[7]) as *mut ClaspRtHeader },
         ("swarmApproveJson", 4) => unsafe { clasp_rt_swarm_approve_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmApprovalsJson", 2) => unsafe { clasp_rt_swarm_approvals_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmMergegateDecideJson", 5) => unsafe { clasp_rt_swarm_mergegate_decide_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4]) as *mut ClaspRtHeader },
@@ -3628,8 +3632,10 @@ fn builtin_runtime_binding_name(name: &str) -> bool {
             | "swarmPolicySetJson"
             | "swarmToolRunJson"
             | "swarmToolRunWithTimeoutJson"
+            | "swarmToolRunWithLimitsJson"
             | "swarmVerifierRunJson"
             | "swarmVerifierRunWithTimeoutJson"
+            | "swarmVerifierRunWithLimitsJson"
             | "swarmApproveJson"
             | "swarmApprovalsJson"
             | "swarmMergegateDecideJson"
@@ -10942,6 +10948,39 @@ pub unsafe extern "C" fn clasp_rt_swarm_tool_run_with_timeout_json(
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn clasp_rt_swarm_tool_run_with_limits_json(
+    root: *mut ClaspRtString,
+    task_id: *mut ClaspRtString,
+    actor: *mut ClaspRtString,
+    cwd: *mut ClaspRtString,
+    timeout_ms: *mut ClaspRtHeader,
+    memory_limit_mb: *mut ClaspRtHeader,
+    command: *mut ClaspRtHeader,
+) -> *mut ClaspRtResultString {
+    let timeout_value = match clasp_rt_int_arg(timeout_ms) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let memory_limit_value = match clasp_rt_int_arg(memory_limit_mb) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let command_value = match clasp_rt_string_list_arg(command) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    clasp_rt_result_string_from_owned(swarm::builtin_swarm_tool_run_with_limits(
+        &String::from_utf8_lossy(string_bytes(root)).into_owned(),
+        &String::from_utf8_lossy(string_bytes(task_id)).into_owned(),
+        &String::from_utf8_lossy(string_bytes(actor)).into_owned(),
+        &String::from_utf8_lossy(string_bytes(cwd)).into_owned(),
+        timeout_value,
+        memory_limit_value,
+        &command_value,
+    ))
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn clasp_rt_swarm_verifier_run_json(
     root: *mut ClaspRtString,
     task_id: *mut ClaspRtString,
@@ -10989,6 +11028,41 @@ pub unsafe extern "C" fn clasp_rt_swarm_verifier_run_with_timeout_json(
         &String::from_utf8_lossy(string_bytes(verifier_name)).into_owned(),
         &String::from_utf8_lossy(string_bytes(cwd)).into_owned(),
         timeout_value,
+        &command_value,
+    ))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_swarm_verifier_run_with_limits_json(
+    root: *mut ClaspRtString,
+    task_id: *mut ClaspRtString,
+    actor: *mut ClaspRtString,
+    verifier_name: *mut ClaspRtString,
+    cwd: *mut ClaspRtString,
+    timeout_ms: *mut ClaspRtHeader,
+    memory_limit_mb: *mut ClaspRtHeader,
+    command: *mut ClaspRtHeader,
+) -> *mut ClaspRtResultString {
+    let timeout_value = match clasp_rt_int_arg(timeout_ms) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let memory_limit_value = match clasp_rt_int_arg(memory_limit_mb) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let command_value = match clasp_rt_string_list_arg(command) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    clasp_rt_result_string_from_owned(swarm::builtin_swarm_verifier_run_with_limits(
+        &String::from_utf8_lossy(string_bytes(root)).into_owned(),
+        &String::from_utf8_lossy(string_bytes(task_id)).into_owned(),
+        &String::from_utf8_lossy(string_bytes(actor)).into_owned(),
+        &String::from_utf8_lossy(string_bytes(verifier_name)).into_owned(),
+        &String::from_utf8_lossy(string_bytes(cwd)).into_owned(),
+        timeout_value,
+        memory_limit_value,
         &command_value,
     ))
 }

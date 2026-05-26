@@ -2028,7 +2028,7 @@ swarm_sqlite_tool_timeout_lease_output="$(CLASP_SWARM_ACTOR=manager "$claspc_bin
 printf '%s\n' "$swarm_sqlite_tool_timeout_lease_output" | grep -F '"kind":"lease_acquired"' >/dev/null
 set +e
 swarm_sqlite_tool_timeout_output="$(
-  CLASP_SWARM_ACTOR=manager timeout 5s "$claspc_bin" --json swarm tool "$swarm_sqlite_state_root" tool-timeout --cwd "$project_root" --timeout-ms 200 -- \
+  CLASP_SWARM_ACTOR=manager timeout 5s "$claspc_bin" --json swarm tool "$swarm_sqlite_state_root" tool-timeout --cwd "$project_root" --timeout-ms 200 --memory-mb 512 -- \
     bash -lc 'printf tool-timeout-out; printf tool-timeout-err >&2; tail -f "$1" >&1 2>&2 & wait' bash "$swarm_sqlite_tool_timeout_hold" 2>&1
 )"
 swarm_sqlite_tool_timeout_status=$?
@@ -2038,6 +2038,7 @@ printf '%s\n' "$swarm_sqlite_tool_timeout_output" | grep -F '"role":"tool"' >/de
 printf '%s\n' "$swarm_sqlite_tool_timeout_output" | grep -F '"status":"timed_out"' >/dev/null
 printf '%s\n' "$swarm_sqlite_tool_timeout_output" | grep -F '"exitCode":124' >/dev/null
 printf '%s\n' "$swarm_sqlite_tool_timeout_output" | grep -F '"timedOut":true' >/dev/null
+printf '%s\n' "$swarm_sqlite_tool_timeout_output" | grep -F '"memoryLimitMb":512' >/dev/null
 
 swarm_sqlite_timeout_hold="$test_root_abs/swarm-sqlite-timeout-held.txt"
 printf '' >"$swarm_sqlite_timeout_hold"
@@ -2047,7 +2048,7 @@ swarm_sqlite_timeout_lease_output="$(CLASP_SWARM_ACTOR=manager "$claspc_bin" --j
 printf '%s\n' "$swarm_sqlite_timeout_lease_output" | grep -F '"kind":"lease_acquired"' >/dev/null
 set +e
 swarm_sqlite_timeout_output="$(
-  CLASP_SWARM_ACTOR=manager timeout 5s "$claspc_bin" --json swarm verifier run "$swarm_sqlite_state_root" pipe-timeout pipe-holder --cwd "$project_root" --timeout-ms 200 -- \
+  CLASP_SWARM_ACTOR=manager timeout 5s "$claspc_bin" --json swarm verifier run "$swarm_sqlite_state_root" pipe-timeout pipe-holder --cwd "$project_root" --timeout-ms 200 --memory-mb 512 -- \
     bash -lc 'printf timeout-out; printf timeout-err >&2; tail -f "$1" >&1 2>&2 & wait' bash "$swarm_sqlite_timeout_hold" 2>&1
 )"
 swarm_sqlite_timeout_status=$?
@@ -2056,6 +2057,7 @@ set -e
 printf '%s\n' "$swarm_sqlite_timeout_output" | grep -F '"status":"timed_out"' >/dev/null
 printf '%s\n' "$swarm_sqlite_timeout_output" | grep -F '"exitCode":124' >/dev/null
 printf '%s\n' "$swarm_sqlite_timeout_output" | grep -F '"timedOut":true' >/dev/null
+printf '%s\n' "$swarm_sqlite_timeout_output" | grep -F '"memoryLimitMb":512' >/dev/null
 swarm_sqlite_timeout_stdout_path="$(printf '%s\n' "$swarm_sqlite_timeout_output" | sed -n 's/.*"stdoutArtifactPath":"\([^"]*\)".*/\1/p')"
 swarm_sqlite_timeout_stderr_path="$(printf '%s\n' "$swarm_sqlite_timeout_output" | sed -n 's/.*"stderrArtifactPath":"\([^"]*\)".*/\1/p')"
 [[ -f "$swarm_sqlite_timeout_stdout_path" ]]
@@ -2066,9 +2068,11 @@ swarm_sqlite_timeout_runs_output="$("$claspc_bin" --json swarm runs "$swarm_sqli
 printf '%s\n' "$swarm_sqlite_timeout_runs_output" | grep -F '"name":"pipe-holder"' >/dev/null
 printf '%s\n' "$swarm_sqlite_timeout_runs_output" | grep -F '"status":"timed_out"' >/dev/null
 printf '%s\n' "$swarm_sqlite_timeout_runs_output" | grep -F '"timedOut":true' >/dev/null
+printf '%s\n' "$swarm_sqlite_timeout_runs_output" | grep -F '"memoryLimitMb":512' >/dev/null
 swarm_sqlite_timeout_tail_output="$("$claspc_bin" --json swarm tail "$swarm_sqlite_state_root" pipe-timeout --limit 5)"
 printf '%s\n' "$swarm_sqlite_timeout_tail_output" | grep -F '"kind":"verifier_run_finished"' >/dev/null
 printf '%s\n' "$swarm_sqlite_timeout_tail_output" | grep -F '"timedOut":true' >/dev/null
+printf '%s\n' "$swarm_sqlite_timeout_tail_output" | grep -F '"memoryLimitMb":512' >/dev/null
 set +e
 swarm_sqlite_timeout_mergegate_output="$("$claspc_bin" --json swarm mergegate decide "$swarm_sqlite_state_root" pipe-timeout trunk pipe-holder 2>&1)"
 swarm_sqlite_timeout_mergegate_status=$?
@@ -2177,6 +2181,9 @@ swarm_timed_run_output="$(
 )"
 printf '%s\n' "$swarm_timed_run_output" | grep -F '"objective":"timed-runs"' >/dev/null
 printf '%s\n' "$swarm_timed_run_output" | grep -F '"verifier":"pipe-timeout"' >/dev/null
+printf '%s\n' "$swarm_timed_run_output" | grep -F '"memoryVerifier":"memory-limit"' >/dev/null
+printf '%s\n' "$swarm_timed_run_output" | grep -F '"memoryLimitMb":512' >/dev/null
+printf '%s\n' "$swarm_timed_run_output" | grep -F '"memoryStdout":"524288\n"' >/dev/null
 printf '%s\n' "$swarm_timed_run_output" | grep -F '"runTimedOut":true' >/dev/null
 printf '%s\n' "$swarm_timed_run_output" | grep -F '"runStatus":"timed_out"' >/dev/null
 printf '%s\n' "$swarm_timed_run_output" | grep -F '"runExitCode":124' >/dev/null
