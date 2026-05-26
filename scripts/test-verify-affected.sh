@@ -37,6 +37,7 @@ cp "$project_root/scripts/test-benchmark-checkpoint.sh" "$project_copy/scripts/t
 cp "$project_root/scripts/generate-promoted-source-export-cache.mjs" "$project_copy/scripts/generate-promoted-source-export-cache.mjs"
 cp "$project_root/scripts/test-promoted-source-export-cache.sh" "$project_copy/scripts/test-promoted-source-export-cache.sh"
 cp "$project_root/scripts/test-native-claspc-diagnostics.sh" "$project_copy/scripts/test-native-claspc-diagnostics.sh"
+cp "$project_root/scripts/test-int-builtins.sh" "$project_copy/scripts/test-int-builtins.sh"
 cp "$project_root/scripts/test-record-update-parity.sh" "$project_copy/scripts/test-record-update-parity.sh"
 cp "$project_root/scripts/verify-compiler-slice.sh" "$project_copy/scripts/verify-compiler-slice.sh"
 cp "$project_root/scripts/test-verify-compiler-slice.sh" "$project_copy/scripts/test-verify-compiler-slice.sh"
@@ -181,12 +182,14 @@ switch (scenario) {
     assert(report.changedFiles.includes("src/Compiler/Checker.clasp"), "source file should be normalized");
     assert(hasCommand("bash scripts/test-selfhost.sh"), "source route should run selfhost coverage");
     assert(hasCommand("bash src/scripts/verify.sh"), "source route should run hosted source verification");
+    assert(hasCommand("bash scripts/test-int-builtins.sh"), "source route should run focused integer builtin coverage");
     assert(hasCommand("bash scripts/verify-compiler-slice.sh --check-only checker"), "compiler implementation route should run cheaper check-only compiler slice coverage");
     assert(!report.selectedCommands.some((command) => command.command === "bash scripts/verify-compiler-slice.sh checker"), "compiler implementation route should not run duplicate compiler fixture execution");
     assert(!hasCommand("benchmarks/"), "source route should avoid broad benchmark commands");
     assert(report.usedVerifyFastFallback === false, "known source input should not use verify-fast fallback");
     assert(logHas("scripts/test-selfhost.sh"), "fake selfhost command should execute");
     assert(logHas("src/scripts/verify.sh"), "fake source verify command should execute");
+    assert(logHas("scripts/test-int-builtins.sh"), "fake integer builtin command should execute");
     assert(logHas("scripts/verify-compiler-slice.sh --check-only checker"), "fake check-only compiler slice command should execute");
     break;
   case "mixed-swarm-runtime":
@@ -195,6 +198,7 @@ switch (scenario) {
     assert(report.changedFiles.includes("runtime/swarm.rs"), "runtime file should be present");
     assert(report.changedFiles.includes("examples/swarm-native/GoalManager.clasp"), "swarm file should be present");
     assert(report.changedFiles.includes("examples/feedback-loop/Main.clasp"), "feedback-loop file should be present");
+    assert(hasCommand("bash scripts/test-int-builtins.sh"), "runtime route should run focused integer builtin coverage");
     assert(hasCommand("bash scripts/test-native-runtime.sh"), "runtime route should run native runtime coverage");
     assert(hasCommand("bash scripts/test-native-claspc.sh"), "runtime/swarm route should run native claspc coverage");
     assert(hasCommand("bash scripts/test-swarm-ready-gate.sh"), "swarm route should run ready-gate coverage");
@@ -236,6 +240,14 @@ switch (scenario) {
     assert(hasCommand("bash scripts/test-native-claspc-diagnostics.sh"), "native diagnostics harness should run focused diagnostics coverage");
     assert(report.usedVerifyFastFallback === false, "known native diagnostics harness should not use verify-fast fallback");
     assert(logHas("scripts/test-native-claspc-diagnostics.sh"), "fake native diagnostics command should execute");
+    break;
+  case "int-builtins-script":
+    assert(report.changedFiles.includes("scripts/test-int-builtins.sh"), "integer builtin harness should be present");
+    assert(hasCommand("bash -n 'scripts/test-int-builtins.sh'"), "integer builtin harness should run shell syntax check");
+    assert(hasCommand("bash scripts/test-int-builtins.sh"), "integer builtin harness should run focused JS/native coverage");
+    assert(report.selectedCommands.filter((command) => command.command === "bash scripts/test-int-builtins.sh").length === 1, "integer builtin command should be deduplicated");
+    assert(report.usedVerifyFastFallback === false, "known integer builtin harness should not use verify-fast fallback");
+    assert(logHas("scripts/test-int-builtins.sh"), "fake integer builtin command should execute");
     break;
   case "record-update-parity-script":
     assert(report.changedFiles.includes("scripts/test-record-update-parity.sh"), "record update parity harness should be present");
@@ -563,6 +575,12 @@ native_diagnostics_log="$test_root/native-diagnostics.log"
 CLASP_TEST_FAKE_COMMAND_LOG="$native_diagnostics_log" \
   run_verify_affected --changed-file scripts/test-native-claspc-diagnostics.sh > "$native_diagnostics_report"
 assert_report "$native_diagnostics_report" "$native_diagnostics_log" native-diagnostics-script
+
+int_builtins_report="$test_root/int-builtins-report.json"
+int_builtins_log="$test_root/int-builtins.log"
+CLASP_TEST_FAKE_COMMAND_LOG="$int_builtins_log" \
+  run_verify_affected --changed-file scripts/test-int-builtins.sh > "$int_builtins_report"
+assert_report "$int_builtins_report" "$int_builtins_log" int-builtins-script
 
 record_update_parity_report="$test_root/record-update-parity-report.json"
 record_update_parity_log="$test_root/record-update-parity.log"

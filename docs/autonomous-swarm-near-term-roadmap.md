@@ -11,6 +11,7 @@ This is the near-term roadmap for getting Clasp to the point where an autonomous
 
 2. Improve compiler-authoring ergonomics in the self-hosted language.
    - collection helpers: `map`, `fold`, `filter`, `find`, `any`, `all`, `concat`
+   - typed integer helpers for ordinary loop counters and retry budgets: `intAdd`, `intSubtract`
    - a basic dictionary/map type for compiler metadata, manifests, and lookup-heavy passes
    - better structured literals, destructuring, and record update ergonomics
 

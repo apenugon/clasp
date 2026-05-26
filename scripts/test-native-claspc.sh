@@ -371,10 +371,10 @@ const hostKey = stableFingerprint(Buffer.concat([
   fs.readFileSync(claspcPath),
   fs.readFileSync(imagePath),
 ]));
-const nativeDir = path.join(cacheRoot, 'claspc-native', 'export-host-v1');
+const nativeDir = path.join(cacheRoot, 'claspc-native', 'export-host-v2');
 const fileName = `${hostKey}.sock`;
 const cacheRootKey = stableFingerprint(Buffer.from(nativeDir));
-const socketPath = path.join('/tmp/clasp-native-export-host', 'export-host-v1', cacheRootKey, fileName);
+const socketPath = path.join('/tmp/clasp-native-export-host', 'export-host-v2', cacheRootKey, fileName);
 
 process.stdout.write(`${socketPath}\n`);
 EOF

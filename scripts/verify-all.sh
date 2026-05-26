@@ -58,6 +58,7 @@ full_sequential_verify_commands=$'
 bash scripts/test-selfhost.sh
 bash scripts/test-source-run-cache.sh
 bash scripts/test-promoted-source-export-cache.sh
+bash scripts/test-int-builtins.sh
 bash scripts/test-native-claspc.sh
 bash scripts/test-record-update-parity.sh
 bash scripts/test-swarm-ready-gate.sh

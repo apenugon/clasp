@@ -23,7 +23,7 @@ hasReturnInExprs exprs = {
 }
 
 jsBuiltinPreludeName : Str -> Bool
-jsBuiltinPreludeName name = if name == "textConcat" then true else if name == "textJoin" then true else if name == "textSplit" then true else if name == "textChars" then true else if name == "textFingerprint64Hex" then true else if name == "not" then true else if name == "textPrefix" then true else if name == "textSplitFirst" then true else if name == "dictEmpty" then true else if name == "dictSet" then true else if name == "dictGet" then true else if name == "dictHas" then true else if name == "dictRemove" then true else if name == "dictKeys" then true else if name == "dictValues" then true else if name == "pathJoin" then true else if name == "pathDirname" then true else if name == "pathBasename" then true else if name == "fileExists" then true else if name == "readFile" then true else if name == "swarmBootstrapJson" then true else if name == "swarmLeaseJson" then true else if name == "swarmCompleteJson" then true else if name == "swarmStatusJson" then true else if name == "swarmSummaryJson" then true else if name == "swarmReadyJson" then true else if name == "swarmManagerNextJson" then true else if name == "swarmObjectiveCreateJson" then true else if name == "swarmObjectiveStatusJson" then true else if name == "swarmTaskCreateJson" then true else if name == "swarmPolicySetJson" then true else if name == "swarmToolRunJson" then true else if name == "swarmVerifierRunJson" then true else if name == "swarmApproveJson" then true else if name == "swarmMergegateDecideJson" then true else if name == "swarmRunsJson" then true else if name == "swarmArtifactsJson" then true else if name == "runCommandJson" then true else if name == "runCommandTimeoutJson" then true else if name == "handoffCommandJson" then true else if name == "upgradeCommandJson" then true else if name == "superviseCommandJson" then true else false
+jsBuiltinPreludeName name = if name == "intAdd" then true else if name == "intSubtract" then true else if name == "textConcat" then true else if name == "textJoin" then true else if name == "textSplit" then true else if name == "textChars" then true else if name == "textFingerprint64Hex" then true else if name == "not" then true else if name == "textPrefix" then true else if name == "textSplitFirst" then true else if name == "dictEmpty" then true else if name == "dictSet" then true else if name == "dictGet" then true else if name == "dictHas" then true else if name == "dictRemove" then true else if name == "dictKeys" then true else if name == "dictValues" then true else if name == "pathJoin" then true else if name == "pathDirname" then true else if name == "pathBasename" then true else if name == "fileExists" then true else if name == "readFile" then true else if name == "swarmBootstrapJson" then true else if name == "swarmLeaseJson" then true else if name == "swarmCompleteJson" then true else if name == "swarmStatusJson" then true else if name == "swarmSummaryJson" then true else if name == "swarmReadyJson" then true else if name == "swarmManagerNextJson" then true else if name == "swarmObjectiveCreateJson" then true else if name == "swarmObjectiveStatusJson" then true else if name == "swarmTaskCreateJson" then true else if name == "swarmPolicySetJson" then true else if name == "swarmToolRunJson" then true else if name == "swarmVerifierRunJson" then true else if name == "swarmApproveJson" then true else if name == "swarmMergegateDecideJson" then true else if name == "swarmRunsJson" then true else if name == "swarmArtifactsJson" then true else if name == "runCommandJson" then true else if name == "runCommandTimeoutJson" then true else if name == "handoffCommandJson" then true else if name == "upgradeCommandJson" then true else if name == "superviseCommandJson" then true else false
 
 jsNodeProcessBuiltinPreludeName : Str -> Bool
 jsNodeProcessBuiltinPreludeName name = if name == "runCommandJson" then true else if name == "runCommandTimeoutJson" then true else false
@@ -591,6 +591,12 @@ builtinPreludeLines =
     "function $claspResultErr(message) {",
     "  return [\"Err\", String(message)];",
     "}",
+    "function $claspExpectRuntimeInt(value, path) {",
+    "  if (!Number.isSafeInteger(value)) {",
+    "    throw new Error(`${path} expected a safe integer`);",
+    "  }",
+    "  return value;",
+    "}",
     "function $claspNormalizeCommand(value) {",
     "  if (!Array.isArray(value)) {",
     "    throw new Error(\"command expected a list of strings\");",
@@ -677,6 +683,20 @@ builtinPreludeLines =
     "      hash &= mask;",
     "    }",
     "    return hash.toString(16).padStart(16, \"0\");",
+    "  },",
+    "  intAdd(left, right) {",
+    "    const result = $claspExpectRuntimeInt(left, \"left\") + $claspExpectRuntimeInt(right, \"right\");",
+    "    if (!Number.isSafeInteger(result)) {",
+    "      throw new Error(\"intAdd overflowed safe integer range\");",
+    "    }",
+    "    return result;",
+    "  },",
+    "  intSubtract(left, right) {",
+    "    const result = $claspExpectRuntimeInt(left, \"left\") - $claspExpectRuntimeInt(right, \"right\");",
+    "    if (!Number.isSafeInteger(result)) {",
+    "      throw new Error(\"intSubtract overflowed safe integer range\");",
+    "    }",
+    "    return result;",
     "  },",
     "  textPrefix(value, prefix) {",
     "    if (typeof value !== \"string\") {",
@@ -787,6 +807,8 @@ builtinPreludeLines =
     "function textSplit($0, $1) { return $claspBuiltinRuntime.textSplit($0, $1); }",
     "function textChars($0) { return $claspBuiltinRuntime.textChars($0); }",
     "function textFingerprint64Hex($0) { return $claspBuiltinRuntime.textFingerprint64Hex($0); }",
+    "function intAdd($0, $1) { return $claspBuiltinRuntime.intAdd($0, $1); }",
+    "function intSubtract($0, $1) { return $claspBuiltinRuntime.intSubtract($0, $1); }",
     "function textPrefix($0, $1) { return $claspBuiltinRuntime.textPrefix($0, $1); }",
     "function textSplitFirst($0, $1) { return $claspBuiltinRuntime.textSplitFirst($0, $1); }",
     "const dictEmpty = $claspBuiltinRuntime.dictEmpty();",

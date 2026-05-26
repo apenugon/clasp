@@ -1514,6 +1514,23 @@ unsafe fn header_int_value(value: *mut ClaspRtHeader) -> Option<i64> {
     }
 }
 
+unsafe fn build_runtime_int_binary_result(
+    left: *mut ClaspRtHeader,
+    right: *mut ClaspRtHeader,
+    op: impl FnOnce(i64, i64) -> Option<i64>,
+) -> *mut ClaspRtHeader {
+    let Some(left_value) = header_int_value(left) else {
+        return null_mut();
+    };
+    let Some(right_value) = header_int_value(right) else {
+        return null_mut();
+    };
+    match op(left_value, right_value) {
+        Some(result) => build_runtime_int(result) as *mut ClaspRtHeader,
+        None => null_mut(),
+    }
+}
+
 unsafe fn list_like_string_items(value: *mut ClaspRtHeader) -> Option<Vec<*mut ClaspRtString>> {
     if value.is_null() {
         return None;
@@ -1744,44 +1761,51 @@ fn interpret_legacy_list_builtin_call(
             }
             Some(result)
         }
-        "append" if args.len() == 2 => {
-            let left_value = interpret_native_expr(runtime, image, &args[0], env, depth + 1);
-            if left_value.is_null() {
+        "append" if args.len() >= 2 => {
+            let mut current_value = interpret_native_expr(runtime, image, &args[0], env, depth + 1);
+            if current_value.is_null() {
                 return Some(null_mut());
             }
-            if unsafe { is_early_return_value(left_value) } {
-                return Some(left_value);
+            if unsafe { is_early_return_value(current_value) } {
+                return Some(current_value);
             }
-            let right_value = interpret_native_expr(runtime, image, &args[1], env, depth + 1);
-            if right_value.is_null() {
-                unsafe {
-                    release_header(runtime, left_value);
+
+            for right_expr in &args[1..] {
+                let right_value = interpret_native_expr(runtime, image, right_expr, env, depth + 1);
+                if right_value.is_null() {
+                    unsafe {
+                        release_header(runtime, current_value);
+                    }
+                    return Some(null_mut());
                 }
-                return Some(null_mut());
-            }
-            if unsafe { is_early_return_value(right_value) } {
-                unsafe {
-                    release_header(runtime, left_value);
+                if unsafe { is_early_return_value(right_value) } {
+                    unsafe {
+                        release_header(runtime, current_value);
+                    }
+                    return Some(right_value);
                 }
-                return Some(right_value);
+                let appended = unsafe { append_list_like_values(current_value, right_value) };
+                let view_appended = if appended.is_none()
+                    && unsafe { runtime_value_is_view_like(current_value) }
+                    && unsafe { runtime_value_is_view_like(right_value) }
+                {
+                    unsafe { clasp_rt_view_append(current_value, right_value) }
+                } else {
+                    null_mut()
+                };
+                unsafe {
+                    release_header(runtime, current_value);
+                    release_header(runtime, right_value);
+                }
+                current_value = match appended {
+                    Some(items) => unsafe { build_runtime_list_value(items) as *mut ClaspRtHeader },
+                    None => view_appended,
+                };
+                if current_value.is_null() {
+                    return Some(null_mut());
+                }
             }
-            let appended = unsafe { append_list_like_values(left_value, right_value) };
-            let view_appended = if appended.is_none()
-                && unsafe { runtime_value_is_view_like(left_value) }
-                && unsafe { runtime_value_is_view_like(right_value) }
-            {
-                unsafe { clasp_rt_view_append(left_value, right_value) }
-            } else {
-                null_mut()
-            };
-            unsafe {
-                release_header(runtime, left_value);
-                release_header(runtime, right_value);
-            }
-            Some(match appended {
-                Some(items) => unsafe { build_runtime_list_value(items) as *mut ClaspRtHeader },
-                None => view_appended,
-            })
+            Some(current_value)
         }
         "prepend" if args.len() == 2 => {
             let value = interpret_native_expr(runtime, image, &args[0], env, depth + 1);
@@ -3064,6 +3088,8 @@ fn interpret_runtime_binding(
         ("textSplit", 2) => unsafe { clasp_rt_text_split(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("textChars", 1) => unsafe { clasp_rt_text_chars(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("textFingerprint64Hex", 1) => unsafe { clasp_rt_text_fingerprint64_hex(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("intAdd", 2) => unsafe { clasp_rt_int_add(args[0], args[1]) },
+        ("intSubtract", 2) => unsafe { clasp_rt_int_subtract(args[0], args[1]) },
         ("not", 1) => unsafe {
             header_bool_value(args[0])
                 .map(|value| build_runtime_bool(!value) as *mut ClaspRtHeader)
@@ -3307,6 +3333,8 @@ fn interpret_builtin_runtime_binding(
         ("textSplit", 2) => unsafe { clasp_rt_text_split(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("textChars", 1) => unsafe { clasp_rt_text_chars(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("textFingerprint64Hex", 1) => unsafe { clasp_rt_text_fingerprint64_hex(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("intAdd", 2) => unsafe { clasp_rt_int_add(args[0], args[1]) },
+        ("intSubtract", 2) => unsafe { clasp_rt_int_subtract(args[0], args[1]) },
         ("not", 1) => unsafe {
             header_bool_value(args[0])
                 .map(|value| build_runtime_bool(!value) as *mut ClaspRtHeader)
@@ -3516,6 +3544,8 @@ fn builtin_runtime_binding_name(name: &str) -> bool {
             | "textSplit"
             | "textChars"
             | "textFingerprint64Hex"
+            | "intAdd"
+            | "intSubtract"
             | "not"
             | "textPrefix"
             | "textSplitFirst"
@@ -7255,6 +7285,22 @@ pub unsafe extern "C" fn clasp_rt_call_native_route_json(
 pub unsafe extern "C" fn clasp_rt_text_concat(parts: *mut ClaspRtStringList) -> *mut ClaspRtString {
     let items = string_list_items_mut(parts);
     build_runtime_string(&join_string_bytes(items, &[]))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_int_add(
+    left: *mut ClaspRtHeader,
+    right: *mut ClaspRtHeader,
+) -> *mut ClaspRtHeader {
+    build_runtime_int_binary_result(left, right, i64::checked_add)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_int_subtract(
+    left: *mut ClaspRtHeader,
+    right: *mut ClaspRtHeader,
+) -> *mut ClaspRtHeader {
+    build_runtime_int_binary_result(left, right, i64::checked_sub)
 }
 
 #[no_mangle]

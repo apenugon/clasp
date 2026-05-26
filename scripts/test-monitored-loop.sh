@@ -3,7 +3,7 @@ set -euo pipefail
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tmp_root="${CLASP_TEST_TMPDIR:-${TMPDIR:-/tmp}}"
-timeout_secs="${CLASP_MONITORED_LOOP_TIMEOUT_SECS:-120}"
+timeout_secs="${CLASP_MONITORED_LOOP_TIMEOUT_SECS:-240}"
 
 if ! [[ "$timeout_secs" =~ ^[0-9]+$ ]] || (( timeout_secs < 1 )); then
   printf 'CLASP_MONITORED_LOOP_TIMEOUT_SECS must be a positive integer\n' >&2

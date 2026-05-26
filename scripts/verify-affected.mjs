@@ -249,6 +249,7 @@ const COMMANDS = {
   selfhost: "bash scripts/test-selfhost.sh",
   sourceVerify: "bash src/scripts/verify.sh",
   nativeDiagnostics: "bash scripts/test-native-claspc-diagnostics.sh",
+  intBuiltins: "bash scripts/test-int-builtins.sh",
   nativeClaspc: "bash scripts/test-native-claspc.sh",
   nativeRuntime: "bash scripts/test-native-runtime.sh",
   swarmReady: "bash scripts/test-swarm-ready-gate.sh",
@@ -778,6 +779,7 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
       reason(file, "source", "source/compiler path uses selfhost and hosted compiler verification");
       addSelected(selectedByCommand, "selfhost", COMMANDS.selfhost, "source/compiler path", file);
       addSelected(selectedByCommand, "source-verify", COMMANDS.sourceVerify, "source/compiler path", file);
+      addSelected(selectedByCommand, "int-builtins", COMMANDS.intBuiltins, "source/compiler path", file);
     }
 
     if (compilerSlice) {
@@ -847,8 +849,22 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
     if (file.startsWith("runtime/")) {
       matched = true;
       reason(file, "runtime", "runtime path uses native runtime and native claspc coverage");
+      addSelected(selectedByCommand, "int-builtins", COMMANDS.intBuiltins, "runtime path", file);
       addSelected(selectedByCommand, "native-runtime", COMMANDS.nativeRuntime, "runtime path", file);
       addSelected(selectedByCommand, "native-claspc", COMMANDS.nativeClaspc, "runtime path", file);
+    }
+
+    if (file === "scripts/test-int-builtins.sh") {
+      matched = true;
+      reason(file, "int-builtins-harness", "integer builtin harness uses shell syntax plus focused JS/native builtin coverage");
+      addSelected(
+        selectedByCommand,
+        `bash-syntax:${file}`,
+        `bash -n ${shellQuote(file)}`,
+        "integer builtin shell syntax",
+        file,
+      );
+      addSelected(selectedByCommand, "int-builtins", COMMANDS.intBuiltins, "integer builtin harness", file);
     }
 
     if (file === "scripts/test-native-claspc-diagnostics.sh") {

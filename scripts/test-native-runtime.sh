@@ -28,11 +28,19 @@ native_runtime_artifacts_ready() {
     return 1
   fi
 
-  if [[ -f "$rust_runtime_lib" ]]; then
+  if runtime_lib_is_current "$rust_runtime_lib"; then
     return 0
   fi
 
-  [[ -f "$fallback_rust_runtime_lib" ]]
+  runtime_lib_is_current "$fallback_rust_runtime_lib"
+}
+
+runtime_lib_is_current() {
+  local candidate="$1"
+
+  [[ -f "$candidate" ]] || return 1
+  [[ "$candidate" -nt "$project_root/runtime/Cargo.toml" ]] || return 1
+  [[ "$candidate" -nt "$project_root/runtime/clasp_runtime.rs" ]]
 }
 
 maybe_enter_nix_shell() {

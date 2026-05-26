@@ -50,6 +50,7 @@ cp "$project_root/scripts/test-verify-runtime-slice.sh" "$test_root/scripts/test
 cp "$project_root/scripts/test-promoted-source-export-cache.sh" "$test_root/scripts/test-promoted-source-export-cache.sh"
 cp "$project_root/scripts/test-native-incremental-guard.sh" "$test_root/scripts/test-native-incremental-guard.sh"
 cp "$project_root/scripts/test-native-claspc-diagnostics.sh" "$test_root/scripts/test-native-claspc-diagnostics.sh"
+cp "$project_root/scripts/test-int-builtins.sh" "$test_root/scripts/test-int-builtins.sh"
 cp "$project_root/scripts/test-native-claspc-smoke.sh" "$test_root/scripts/test-native-claspc-smoke.sh"
 cp "$project_root/scripts/test-source-run-cache.sh" "$test_root/scripts/test-source-run-cache.sh"
 cp "$project_root/scripts/test-native-claspc.sh" "$test_root/scripts/test-native-claspc.sh"
@@ -101,6 +102,7 @@ fi
 grep -F 'bash scripts/test-native-claspc-diagnostics.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-source-run-cache.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-promoted-source-export-cache.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
+grep -F 'bash scripts/test-int-builtins.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-native-claspc-smoke.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-native-runtime-smoke.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-managed-job.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
@@ -191,6 +193,7 @@ grep -F 'export CLASPC_BIN="$resolved_claspc_bin"' "$test_root/scripts/verify-fa
 grep -F 'bash scripts/test-selfhost.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-source-run-cache.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-promoted-source-export-cache.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'bash scripts/test-int-builtins.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-codex-loop.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-record-update-parity.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'CLASP_VERIFY_REPORT_JSON' "$test_root/scripts/verify-all.sh" >/dev/null
@@ -273,6 +276,7 @@ grep -F 'CLASP_VERIFY_CHANGED_FILES' "$test_root/scripts/verify-affected.mjs" >/
 grep -F 'verificationFallbackMode' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'usedVerifyFastFallback' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'bash scripts/verify-fast.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
+grep -F 'bash scripts/test-int-builtins.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'bash scripts/test-native-claspc-diagnostics.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'bash scripts/test-native-claspc.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'bash scripts/verify-runtime-slice.sh swarm-feedback-loop' "$test_root/scripts/verify-affected.mjs" >/dev/null

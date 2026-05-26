@@ -9,7 +9,7 @@ use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::ExitCode;
+use std::process::{Command as ProcessCommand, ExitCode, Stdio};
 use std::sync::OnceLock;
 use std::thread;
 use std::time::Duration;
@@ -68,7 +68,7 @@ fn usage(program: &str) -> ! {
 
 fn exec_image_usage(program: &str) -> ! {
     eprintln!(
-        "usage: {program} exec-image <module.native.image.json> <export> [source.clasp|--project-entry=entry.clasp] <output>"
+        "usage: {program} exec-image <module.native.image.json> <export> [source.clasp|--project-entry=entry.clasp] [arg ...] <output>"
     );
     std::process::exit(2);
 }
@@ -3429,6 +3429,17 @@ fn execute_project_module_decls_export(
     bundle: &str,
     module_name: &str,
 ) -> Result<String, String> {
+    if env::var("CLASP_NATIVE_IMAGE_MODULE_DECL_FRESH_PROCESS")
+        .map(|value| value != "0" && value != "false")
+        .unwrap_or(false)
+    {
+        return execute_project_export_args_fresh_process(
+            image_path,
+            NATIVE_IMAGE_MODULE_DECLS_EXPORT,
+            &[bundle.to_owned(), module_name.to_owned()],
+        );
+    }
+
     execute_project_export_args(
         image_path,
         NATIVE_IMAGE_MODULE_DECLS_EXPORT,
@@ -3446,6 +3457,75 @@ fn execute_project_module_decls_export_local_only(
         NATIVE_IMAGE_MODULE_DECLS_EXPORT,
         &[bundle.to_owned(), module_name.to_owned()],
     )
+}
+
+fn temp_exec_image_path(label: &str, extension: &str) -> PathBuf {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_else(|_| Duration::from_secs(0))
+        .as_nanos();
+    env::temp_dir().join(format!(
+        "claspc-{label}-{}-{stamp}.{extension}",
+        std::process::id()
+    ))
+}
+
+fn execute_project_export_args_fresh_process(
+    image_path: &str,
+    export_name: &str,
+    args: &[String],
+) -> Result<String, String> {
+    let current_exe =
+        env::current_exe().map_err(|err| format!("failed to resolve current claspc binary: {err}"))?;
+    let input_path = temp_exec_image_path("exec-image-input", "clasp-bundle");
+    let output_path = temp_exec_image_path("exec-image-output", "txt");
+
+    let result = (|| -> Result<String, String> {
+        let Some((first_arg, remaining_args)) = args.split_first() else {
+            return Err("fresh native export process requires at least one argument".to_owned());
+        };
+        atomic_write(&input_path, first_arg.as_bytes()).map_err(|err| {
+            format!(
+                "failed to write fresh native export input `{}`: {err}",
+                input_path.display()
+            )
+        })?;
+
+        let mut command = ProcessCommand::new(&current_exe);
+        command
+            .arg("exec-image")
+            .arg(image_path)
+            .arg(export_name)
+            .arg(&input_path)
+            .args(remaining_args)
+            .arg(&output_path)
+            .env("CLASP_NATIVE_DISABLE_EXPORT_HOST", "1")
+            .env("CLASP_NATIVE_IMAGE_MODULE_DECL_FRESH_PROCESS", "0")
+            .stdout(Stdio::null());
+        let output = command.output().map_err(|err| {
+            format!(
+                "failed to run fresh native export process `{}`: {err}",
+                current_exe.display()
+            )
+        })?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!(
+                "fresh native export process failed for `{export_name}`: {}",
+                stderr.trim()
+            ));
+        }
+        fs::read_to_string(&output_path).map_err(|err| {
+            format!(
+                "failed to read fresh native export output `{}`: {err}",
+                output_path.display()
+            )
+        })
+    })();
+
+    let _ = fs::remove_file(&input_path);
+    let _ = fs::remove_file(&output_path);
+    result
 }
 
 fn execute_parallel_module_decl_section_export(
@@ -9876,32 +9956,47 @@ fn run_build(
 }
 
 fn run_exec_image(args: &[String]) -> ExitCode {
-    if args.len() != 5 && args.len() != 6 {
+    if args.len() < 5 {
         exec_image_usage(&args[0]);
     }
 
     let image_path = &args[2];
     let export_name = &args[3];
-    let exec_image_source_argument = args.get(4).map(|value| value.as_str());
+    let output_path = Path::new(args.last().expect("missing output path"));
+    let raw_export_args = if args.len() > 5 {
+        &args[4..args.len() - 1]
+    } else {
+        &[][..]
+    };
+    let exec_image_source_argument = raw_export_args.first().map(|value| value.as_str());
     let project_entry_path = exec_image_source_argument.and_then(|argument| argument.strip_prefix("--project-entry="));
-    let source_text = if args.len() == 6 && project_entry_path.is_none() {
-        match load_exec_image_source(&args[4]) {
-            Ok(source_text) => Some(source_text),
-            Err(message) => {
-                eprintln!("{message}");
-                return ExitCode::from(1);
-            }
-        }
-    } else if let Some(project_entry_path) = project_entry_path {
-        if export_name == "nativeImageProjectText" {
+    let mut export_args = Vec::new();
+    let source_text = if let Some(project_entry_path) = project_entry_path {
+        if export_name == "nativeImageProjectText" && raw_export_args.len() == 1 {
             None
         } else {
             match build_project_bundle(project_entry_path) {
-                Ok(bundle) => Some(bundle),
+                Ok(bundle) => {
+                    export_args.push(bundle.clone());
+                    export_args.extend(raw_export_args.iter().skip(1).cloned());
+                    Some(bundle)
+                }
                 Err(message) => {
                     eprintln!("{message}");
                     return ExitCode::from(1);
                 }
+            }
+        }
+    } else if let Some(source_argument) = exec_image_source_argument {
+        match load_exec_image_source(source_argument) {
+            Ok(source_text) => {
+                export_args.push(source_text.clone());
+                export_args.extend(raw_export_args.iter().skip(1).cloned());
+                Some(source_text)
+            }
+            Err(message) => {
+                eprintln!("{message}");
+                return ExitCode::from(1);
             }
         }
     } else {
@@ -9909,14 +10004,14 @@ fn run_exec_image(args: &[String]) -> ExitCode {
     };
 
     let remapped_export_name = remap_exec_image_project_export_name(export_name, source_text.as_deref());
-    let cacheable_bundle = if export_name == "nativeImageProjectText" {
+    let has_extra_export_args = raw_export_args.len() > 1;
+    let cacheable_bundle = if export_name == "nativeImageProjectText" || has_extra_export_args {
         None
     } else {
         source_text.as_deref()
     };
     if let Some(bundle) = cacheable_bundle {
         if let Some(cached) = read_cached_source_export(image_path, remapped_export_name, bundle) {
-            let output_path = Path::new(args.last().expect("missing output path"));
             let cached = if export_name_is_native_image(export_name) || export_name_is_native_image(remapped_export_name) {
                 let image_bytes = harden_native_image_runtime_bindings(cached);
                 write_cached_source_export(image_path, remapped_export_name, bundle, &image_bytes);
@@ -9939,7 +10034,7 @@ fn run_exec_image(args: &[String]) -> ExitCode {
     }
 
     if let Some(project_entry_path) = project_entry_path {
-        if exec_image_project_export_uses_incremental_summary(export_name) {
+        if !has_extra_export_args && exec_image_project_export_uses_incremental_summary(export_name) {
             let bundle_build = match build_project_bundle_build(project_entry_path) {
                 Ok(bundle_build) => bundle_build,
                 Err(message) => {
@@ -9957,7 +10052,6 @@ fn run_exec_image(args: &[String]) -> ExitCode {
             let summary = enhance_compiler_diagnostic_text(&summary);
             let output_bytes = summary.into_bytes();
             write_cached_source_export(image_path, remapped_export_name, &bundle_build.bundle, &output_bytes);
-            let output_path = Path::new(args.last().expect("missing output path"));
             if let Err(message) = write_output(output_path, &output_bytes) {
                 eprintln!("{message}");
                 return ExitCode::from(1);
@@ -9969,7 +10063,7 @@ fn run_exec_image(args: &[String]) -> ExitCode {
     let result = unsafe {
         if export_name == "nativeImageProjectText" {
             match project_entry_path {
-                Some(project_entry_path) => match build_project_bundle_build(project_entry_path) {
+                Some(project_entry_path) if raw_export_args.len() == 1 => match build_project_bundle_build(project_entry_path) {
                     Ok(bundle_build) => {
                         if let Some(cached) =
                             read_cached_source_export(image_path, remapped_export_name, &bundle_build.bundle)
@@ -10008,8 +10102,8 @@ fn run_exec_image(args: &[String]) -> ExitCode {
                     }
                     Err(message) => Err(message),
                 },
-                None => match source_text.as_deref() {
-                    Some(bundle) => {
+                _ => match source_text.as_deref() {
+                    Some(bundle) if export_args.len() == 1 => {
                         if let Some(cached) = read_cached_source_export(image_path, remapped_export_name, bundle) {
                             let image_bytes = harden_native_image_runtime_bindings(cached);
                             write_cached_source_export(image_path, remapped_export_name, bundle, &image_bytes);
@@ -10034,12 +10128,23 @@ fn run_exec_image(args: &[String]) -> ExitCode {
                             }
                         }
                     }
+                    Some(_) => execute_native_export_from_image_path_args(
+                        image_path,
+                        remapped_export_name,
+                        &export_args,
+                    )
+                    .map(harden_native_image_runtime_bindings),
                     None => execute_native_export_from_image_path(image_path, remapped_export_name, None)
                         .map(harden_native_image_runtime_bindings),
                 },
             }
         } else {
-            match execute_native_export_from_image_path(image_path, remapped_export_name, source_text.as_deref()) {
+            let export_result = if export_args.is_empty() {
+                execute_native_export_from_image_path(image_path, remapped_export_name, None)
+            } else {
+                execute_native_export_from_image_path_args(image_path, remapped_export_name, &export_args)
+            };
+            match export_result {
                 Ok(output_bytes) => {
                     let output_bytes =
                         if export_name_is_native_image(export_name) || export_name_is_native_image(remapped_export_name)
@@ -10076,7 +10181,6 @@ fn run_exec_image(args: &[String]) -> ExitCode {
         output_bytes
     };
 
-    let output_path = Path::new(args.last().expect("missing output path"));
     if let Err(message) = write_output(output_path, &output_bytes) {
         eprintln!("{message}");
         return ExitCode::from(1);

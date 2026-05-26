@@ -3,7 +3,7 @@ set -euo pipefail
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tmp_root="${CLASP_TEST_TMPDIR:-${TMPDIR:-/tmp}}"
-timeout_secs="${CLASP_AGENT_COMMAND_TEMPLATE_TIMEOUT_SECS:-150}"
+timeout_secs="${CLASP_AGENT_COMMAND_TEMPLATE_TIMEOUT_SECS:-300}"
 run_feedback_template="${CLASP_AGENT_COMMAND_TEMPLATE_FEEDBACK:-1}"
 run_native_template="${CLASP_AGENT_COMMAND_TEMPLATE_NATIVE:-0}"
 

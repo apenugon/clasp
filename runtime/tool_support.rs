@@ -24,10 +24,11 @@ use clasp_runtime::{
 
 pub const PROJECT_BUNDLE_SEPARATOR: &str = "\n-- CLASP_PROJECT_MODULE --\n";
 const PROJECT_BUNDLE_CACHE_VERSION: &str = "bundle-cache-v1";
-const NATIVE_EXPORT_HOST_VERSION: &str = "export-host-v1";
+const NATIVE_EXPORT_HOST_VERSION: &str = "export-host-v2";
 const DEFAULT_SHARED_CACHE_ROOT: &str = "/tmp/clasp-nix-cache";
 const DEFAULT_SHORT_HOST_ROOT: &str = "/tmp/clasp-native-export-host";
 const NATIVE_EXPORT_HOST_STACK_BYTES: usize = 64 * 1024 * 1024;
+const DEFAULT_NATIVE_EXPORT_HOST_IDLE_TIMEOUT_SECS: u64 = 30;
 const NATIVE_IMAGE_READ_RETRY_ATTEMPTS: usize = 10;
 const NATIVE_IMAGE_READ_RETRY_DELAY_MS: u64 = 25;
 
@@ -1263,6 +1264,14 @@ fn wait_for_native_export_host_startup(socket_path: &Path, lock_path: &Path) -> 
     ))
 }
 
+fn native_export_host_idle_timeout() -> Duration {
+    Duration::from_secs(
+        positive_env_usize("CLASP_NATIVE_EXPORT_HOST_IDLE_TIMEOUT_SECS")
+            .map(|value| value as u64)
+            .unwrap_or(DEFAULT_NATIVE_EXPORT_HOST_IDLE_TIMEOUT_SECS),
+    )
+}
+
 fn spawn_native_export_host(image_path_text: &str, socket_path: &Path) -> Result<(), String> {
     if let Some(parent) = socket_path.parent() {
         fs::create_dir_all(parent)
@@ -1395,7 +1404,7 @@ fn run_native_export_host_server_inner(image_path_text: &str, socket_path_text: 
         .set_nonblocking(true)
         .map_err(|err| format!("failed to configure native export host socket `{}`: {err}", socket_path.display()))?;
 
-    let idle_timeout = Duration::from_secs(120);
+    let idle_timeout = native_export_host_idle_timeout();
     let mut last_activity = Instant::now();
     let mut host: Option<NativeExportHost> = None;
     loop {
@@ -1815,7 +1824,7 @@ mod tests {
     use std::fs;
     use std::os::unix::net::UnixListener;
     use std::path::PathBuf;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     fn unique_test_root(name: &str) -> PathBuf {
         let stamp = SystemTime::now()
@@ -2297,5 +2306,27 @@ mod tests {
             super::runtime_cache_root(),
             PathBuf::from("/tmp/clasp-nix-cache").join("claspc-native")
         );
+    }
+
+    #[test]
+    fn native_export_host_idle_timeout_defaults_and_honors_env() {
+        let _env_lock = super::TEST_ENV_LOCK.lock().expect("lock test env");
+
+        std::env::remove_var("CLASP_NATIVE_EXPORT_HOST_IDLE_TIMEOUT_SECS");
+        assert_eq!(
+            super::native_export_host_idle_timeout(),
+            Duration::from_secs(super::DEFAULT_NATIVE_EXPORT_HOST_IDLE_TIMEOUT_SECS)
+        );
+
+        std::env::set_var("CLASP_NATIVE_EXPORT_HOST_IDLE_TIMEOUT_SECS", "7");
+        assert_eq!(super::native_export_host_idle_timeout(), Duration::from_secs(7));
+
+        std::env::set_var("CLASP_NATIVE_EXPORT_HOST_IDLE_TIMEOUT_SECS", "0");
+        assert_eq!(
+            super::native_export_host_idle_timeout(),
+            Duration::from_secs(super::DEFAULT_NATIVE_EXPORT_HOST_IDLE_TIMEOUT_SECS)
+        );
+
+        std::env::remove_var("CLASP_NATIVE_EXPORT_HOST_IDLE_TIMEOUT_SECS");
     }
 }

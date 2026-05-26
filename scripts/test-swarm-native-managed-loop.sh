@@ -147,12 +147,12 @@ assert(blocked.approvalCount === 0, `blocked approval count ${blocked.approvalCo
 const budget = report.budget;
 assert(budget, "missing budget report");
 assert(budget.phase === "builder-failed", `budget phase ${budget.phase}`);
-assert(budget.attempt === 11, `budget attempt ${budget.attempt}`);
-assert(budget.maxAttempts === 11, `budget maxAttempts ${budget.maxAttempts}`);
+assert(budget.attempt === 25, `budget attempt ${budget.attempt}`);
+assert(budget.maxAttempts === 25, `budget maxAttempts ${budget.maxAttempts}`);
 assert(budget.completed === false, "budget loop should not complete");
 assert(budget.exhausted === true, "budget loop should exhaust attempts");
 assert(budget.requeued === true, "budget loop should requeue before exhaustion");
-assert(budget.requeueCount === 10, `budget requeueCount ${budget.requeueCount}`);
+assert(budget.requeueCount === 24, `budget requeueCount ${budget.requeueCount}`);
 assert(budget.taskStatus === "failed", `budget task status ${budget.taskStatus}`);
 assert(budget.latestRunStatus === "failed", `budget latest run ${budget.latestRunStatus}`);
 assert(budget.latestVerifierStatus === "", `budget verifier status ${budget.latestVerifierStatus}`);
@@ -160,5 +160,5 @@ assert(budget.latestFailureClassification === "exit-code", `budget classificatio
 sameList(budget.requiredVerifiers, ["budget-unused"], "budget required verifiers");
 sameList(budget.failedVerifiers, [], "budget failed verifiers");
 sameList(budget.verificationTrace, [], "budget verification trace");
-assert(budget.mailboxSummary.runCount === 11, `budget run count ${budget.mailboxSummary.runCount}`);
+assert(budget.mailboxSummary.runCount === 25, `budget run count ${budget.mailboxSummary.runCount}`);
 EOF
