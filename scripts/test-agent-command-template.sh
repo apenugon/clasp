@@ -47,6 +47,10 @@ output_path="$test_root/output.txt"
 status_path="$test_root/status.json"
 native_output_path="$test_root/native-output.json"
 native_status_path="$test_root/native-status.json"
+local_agent_state_root="$test_root/local-agent-state"
+local_agent_workspace_root="$test_root/local-agent-workspace"
+local_agent_output_path="$test_root/local-agent-output.json"
+local_agent_status_path="$test_root/local-agent-status.json"
 agent_log="$test_root/agent-invocations.jsonl"
 native_agent_log="$test_root/native-agent-invocations.jsonl"
 
@@ -174,6 +178,7 @@ else
 fi
 
 agent_bin_json="$(node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "$fake_agent")"
+claspc_bin_json="$(node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "$claspc_bin")"
 agent_command_json="$(
   node - <<'NODE'
 process.stdout.write(JSON.stringify([
@@ -222,8 +227,31 @@ process.stdout.write(JSON.stringify([
 NODE
 )"
 
+local_agent_command_json="$(
+  node - "$project_root/examples/swarm-native/LocalAgent.clasp" <<'NODE'
+const localAgentPath = process.argv[2];
+process.stdout.write(JSON.stringify([
+  "{agent_bin}",
+  "run",
+  localAgentPath,
+  "--",
+  "--role",
+  "{role}",
+  "--schema",
+  "{schema_path}",
+  "--report",
+  "{report_path}",
+  "--prompt",
+  "{prompt}",
+  "--workspace",
+  "{workspace_root}"
+]));
+NODE
+)"
+
 grep -F 'CLASP_LOOP_AGENT_COMMAND_JSON' "$project_root/examples/feedback-loop/Main.clasp" >/dev/null
 grep -F 'CLASP_LOOP_AGENT_COMMAND_JSON' "$project_root/examples/swarm-native/FeedbackLoop.clasp" >/dev/null
+grep -F 'local Clasp builder backend completed' "$project_root/examples/swarm-native/LocalAgent.clasp" >/dev/null
 grep -F 'CLASP_MANAGER_PLANNER_AGENT_COMMAND_JSON' "$project_root/examples/swarm-native/GoalManagerConfig.clasp" >/dev/null
 grep -F 'plannerAgentCommandArgs' "$project_root/examples/swarm-native/GoalManagerBootstrapPlanner.clasp" >/dev/null
 grep -F 'CLASP_LOOP_AGENT_COMMAND_JSON' "$project_root/examples/swarm-native/GoalManagerServiceMain.clasp" >/dev/null
@@ -311,12 +339,66 @@ assert(status.state?.phase === "completed", `native status phase ${status.state?
 assert(status.state?.verdict === "pass" && status.state?.final === true, "native status should persist a passing final status");
 assert(artifact === "generic-agent-template-ok", "native generic builder should update the workspace");
 assert(invocations.map((entry) => entry.role).join(",") === "builder,verifier", "native generic agent should run builder then verifier");
-for (const invocation of invocations) {
-  assert(!invocation.reportPath.includes("codex"), "native generic template should not need Codex-named report paths");
-  assert(invocation.promptPath === "", "native generic template should receive an inline prompt");
-}
+  for (const invocation of invocations) {
+    assert(!invocation.reportPath.includes("codex"), "native generic template should not need Codex-named report paths");
+    assert(invocation.promptPath === "", "native generic template should receive an inline prompt");
+  }
 NODE
 
+  mkdir -p "$local_agent_workspace_root"
+  CLASP_LOOP_AGENT_BIN_JSON="$claspc_bin_json" \
+    CLASP_LOOP_AGENT_COMMAND_JSON="$local_agent_command_json" \
+    CLASP_LOOP_TASK_FILE_JSON="$(node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "$task_file")" \
+    CLASP_LOOP_WORKSPACE_JSON="$(node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "$local_agent_workspace_root")" \
+    CLASP_LOOP_MAX_ATTEMPTS_JSON='2' \
+    timeout "$timeout_secs" "$claspc_bin" run "$project_root/examples/swarm-native/FeedbackLoop.clasp" -- "$local_agent_state_root" >"$local_agent_output_path"
+
+  CLASP_LOOP_COMMAND=status \
+    timeout "$timeout_secs" "$claspc_bin" run "$project_root/examples/swarm-native/FeedbackLoop.clasp" -- "$local_agent_state_root" >"$local_agent_status_path"
+
+  node - "$local_agent_output_path" "$local_agent_status_path" "$local_agent_workspace_root/workspace.txt" "$local_agent_state_root/builder-2.json" "$local_agent_state_root/verifier-1.json" "$local_agent_state_root/verifier-2.json" <<'NODE'
+const fs = require("node:fs");
+const [
+  outputPath,
+  statusPath,
+  workspacePath,
+  secondBuilderReportPath,
+  firstVerifierReportPath,
+  secondVerifierReportPath,
+] = process.argv.slice(2);
+
+function assert(condition, message) {
+  if (!condition) throw new Error(message);
+}
+
+function readJson(path) {
+  return JSON.parse(fs.readFileSync(path, "utf8"));
+}
+
+const output = readJson(outputPath);
+const status = readJson(statusPath);
+const workspaceText = fs.readFileSync(workspacePath, "utf8");
+const secondBuilder = readJson(secondBuilderReportPath);
+const firstVerifier = readJson(firstVerifierReportPath);
+const secondVerifier = readJson(secondVerifierReportPath);
+
+assert(output.state?.phase === "completed", `local agent phase ${output.state?.phase}`);
+assert(output.state?.attempt === 2, `local agent attempt ${output.state?.attempt}`);
+assert(output.state?.verdict === "pass" && output.state?.final === true, "local agent loop should finish with a pass");
+assert(output.objectiveProjectedStatus === "completed", `local projected ${output.objectiveProjectedStatus}`);
+assert(status.state?.phase === "completed", `local status phase ${status.state?.phase}`);
+assert(status.previousVerifierFeedback?.present === true, "local status should persist previous verifier feedback");
+assert(workspaceText === "fixed-after-feedback\n", "local Clasp builder should consume verifier feedback");
+assert(secondBuilder.feedback?.summary === "local Clasp builder backend completed", "second builder report should come from LocalAgent.clasp");
+assert(firstVerifier.verdict === "fail", `first local verifier verdict ${firstVerifier.verdict}`);
+assert(secondVerifier.verdict === "pass", `second local verifier verdict ${secondVerifier.verdict}`);
+assert(
+  secondVerifier.capability_statuses?.some((entry) => entry.name === "clasp_native_agent_backend" && entry.status === "pass"),
+  "local verifier should prove the Clasp-native agent backend capability",
+);
+NODE
+
+  printf 'native-clasp-local-agent-template-ok\n'
   printf 'native-provider-neutral-agent-template-ok\n'
 fi
 

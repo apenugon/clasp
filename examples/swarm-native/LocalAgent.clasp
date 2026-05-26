@@ -1,0 +1,226 @@
+module Main
+
+record BuilderFeedback = {
+  summary : Str,
+  ergonomics : [Str],
+  follow_ups : [Str],
+  warnings : [Str]
+}
+
+record BuilderReport = {
+  summary : Str,
+  files_touched : [Str],
+  tests_run : [Str],
+  residual_risks : [Str],
+  feedback : BuilderFeedback
+}
+
+record CapabilityStatus = {
+  name : Str,
+  status : Str,
+  evidence : [Str],
+  blocking_gaps : [Str],
+  required_closure : [Str]
+}
+
+record VerifierReport = {
+  verdict : Str,
+  summary : Str,
+  findings : [Str],
+  tests_run : [Str],
+  follow_up : [Str],
+  capability_statuses : [CapabilityStatus]
+}
+
+emptyTexts : [Str]
+emptyTexts = []
+
+emptyCapabilityStatuses : [CapabilityStatus]
+emptyCapabilityStatuses = []
+
+textIncludes : Str -> Str -> Bool
+textIncludes value needle = length (textSplit value needle) > 1
+
+argValue : Str -> Str -> Str
+argValue flag fallback = {
+  let mut previous = "";
+  let mut found = false;
+  let mut result = fallback;
+  for arg in argv {
+    if found then
+      found
+    else if previous == flag then {
+      result = arg;
+      found = true;
+      found
+    } else {
+      previous = arg;
+      found
+    }
+  };
+  result
+}
+
+readTextOr : Str -> Str -> Str
+readTextOr path fallback =
+  match readFile path {
+    Ok raw -> raw,
+    Err message -> fallback
+  }
+
+localAgentPromptTextFromArgs : Str -> Str
+localAgentPromptTextFromArgs unused = {
+  let inlinePrompt = argValue "--prompt" "" in
+  if inlinePrompt != "" then
+    inlinePrompt
+  else {
+    let promptPath = argValue "--prompt-path" "" in
+    if promptPath == "" then "" else readTextOr promptPath ""
+  }
+}
+
+writeTextOrMessage : Str -> Str -> Str
+writeTextOrMessage path value =
+  match writeFile path value {
+    Ok written -> "",
+    Err message -> textConcat ["write-error:", path, ":", message]
+  }
+
+ensureDirOrMessage : Str -> Str
+ensureDirOrMessage path =
+  match mkdirAll path {
+    Ok created -> "",
+    Err message -> textConcat ["mkdir-error:", path, ":", message]
+  }
+
+writeBuilderReport : Str -> Str -> Str
+writeBuilderReport reportPath content =
+  writeTextOrMessage
+    reportPath
+    (encode
+      (BuilderReport {
+        summary = textConcat ["local Clasp builder wrote ", content],
+        files_touched = ["workspace.txt", "notes/child-artifact.txt"],
+        tests_run = ["clasp-local-agent"],
+        residual_risks = emptyTexts,
+        feedback =
+          BuilderFeedback {
+            summary = "local Clasp builder backend completed",
+            ergonomics = ["ordinary Clasp program can act as a swarm agent backend"],
+            follow_ups = emptyTexts,
+            warnings = emptyTexts
+          }
+      }))
+
+passingCapability : Str -> CapabilityStatus
+passingCapability unused =
+  CapabilityStatus {
+    name = "clasp_native_agent_backend",
+    status = "pass",
+    evidence = ["builder and verifier reports were produced by examples/swarm-native/LocalAgent.clasp"],
+    blocking_gaps = emptyTexts,
+    required_closure = emptyTexts
+  }
+
+failingCapability : Str -> CapabilityStatus
+failingCapability unused =
+  CapabilityStatus {
+    name = "clasp_native_agent_backend",
+    status = "fail",
+    evidence = ["local verifier observed first-attempt workspace state"],
+    blocking_gaps = ["builder has not consumed verifier feedback yet"],
+    required_closure = ["Use the persisted verifier feedback to update workspace.txt on the next attempt."]
+  }
+
+writeVerifierReport : Str -> VerifierReport -> Str
+writeVerifierReport reportPath report = writeTextOrMessage reportPath (encode report)
+
+runBuilder : Str -> Str -> Str -> Str -> Str
+runBuilder reportPath workspaceRoot reportRoot prompt = {
+  let workspaceTextPath = pathJoin [workspaceRoot, "workspace.txt"] in
+  let workspaceArtifactPath = pathJoin [workspaceRoot, "notes", "child-artifact.txt"] in
+  let rootError = ensureDirOrMessage workspaceRoot in
+  if rootError != "" then
+    rootError
+  else {
+    let notesError = ensureDirOrMessage (pathJoin [workspaceRoot, "notes"]) in
+    if notesError != "" then
+      notesError
+    else {
+      let reportError = ensureDirOrMessage reportRoot in
+      if reportError != "" then
+        reportError
+      else {
+        let content =
+          if textIncludes prompt "Verifier feedback from the previous attempt:" then
+            if textIncludes prompt "force-close-category" then
+              "fixed-after-feedback"
+            else
+              "first-attempt"
+          else
+            "first-attempt" in
+        let workspaceError = writeTextOrMessage workspaceTextPath (textConcat [content, "\n"]) in
+        if workspaceError != "" then
+          workspaceError
+        else {
+          let artifactError = writeTextOrMessage workspaceArtifactPath (textConcat [content, "\n"]) in
+          if artifactError != "" then artifactError else writeBuilderReport reportPath content
+        }
+      }
+    }
+  }
+}
+
+runVerifier : Str -> Str -> Str -> Str
+runVerifier reportPath workspaceRoot reportRoot = {
+  let workspaceTextPath = pathJoin [workspaceRoot, "workspace.txt"] in
+  let builderPolicyPath = pathJoin [reportRoot, "builder-policy.md"] in
+  let reportError = ensureDirOrMessage reportRoot in
+  if reportError != "" then
+    reportError
+  else {
+    let content = readTextOr workspaceTextPath "" in
+    if content == "fixed-after-feedback\n" then
+      writeVerifierReport
+        reportPath
+        (VerifierReport {
+          verdict = "pass",
+          summary = "local Clasp verifier passed",
+          findings = emptyTexts,
+          tests_run = ["clasp-local-agent"],
+          follow_up = emptyTexts,
+          capability_statuses = [passingCapability ""]
+        })
+    else {
+      let policyError = writeTextOrMessage builderPolicyPath "force-close-category\n" in
+      if policyError != "" then
+        policyError
+      else
+        writeVerifierReport
+          reportPath
+          (VerifierReport {
+            verdict = "fail",
+            summary = "local Clasp verifier requested feedback retry",
+            findings = ["workspace.txt still has first-attempt content"],
+            tests_run = ["clasp-local-agent"],
+            follow_up = ["Close the clasp_native_agent_backend category by consuming verifier feedback."],
+            capability_statuses = [failingCapability ""]
+          })
+    }
+  }
+}
+
+main : Str
+main = {
+  let currentRole = argValue "--role" "builder" in
+  let currentReportPath = argValue "--report" "local-agent-report.json" in
+  let currentWorkspaceRoot = argValue "--workspace" "." in
+  let currentReportRoot = pathDirname currentReportPath in
+  let currentPrompt = localAgentPromptTextFromArgs "" in
+  if currentRole == "builder" then
+    runBuilder currentReportPath currentWorkspaceRoot currentReportRoot currentPrompt
+  else if currentRole == "verifier" then
+    runVerifier currentReportPath currentWorkspaceRoot currentReportRoot
+  else
+    textConcat ["unknown-role:", currentRole]
+}
