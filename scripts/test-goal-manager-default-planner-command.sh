@@ -39,6 +39,19 @@ json_string() {
   node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "$1"
 }
 
+require_bootstrap_planner_pattern() {
+  local pattern="$1"
+
+  if ! grep -F -- "$pattern" "$project_root/examples/swarm-native/GoalManagerBootstrapPlanner.clasp" >/dev/null; then
+    printf 'default planner source missing native context pack pattern: %s\n' "$pattern" >&2
+    exit 67
+  fi
+}
+
+require_bootstrap_planner_pattern 'plannerContextSectionFor wave'
+require_bootstrap_planner_pattern 'taskContextPack (plannerHandleForWave wave)'
+require_bootstrap_planner_pattern 'plannerContextSectionFor wave,'
+
 cat >"$fake_codex" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail

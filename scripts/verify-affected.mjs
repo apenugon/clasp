@@ -273,6 +273,8 @@ const COMMANDS = {
   runtimeSliceManagedLoop: "bash scripts/verify-runtime-slice.sh managed-loop",
   runtimeSliceSwarmFeedbackLoop: "bash scripts/verify-runtime-slice.sh swarm-feedback-loop",
   goalManagerFast: "bash scripts/test-goal-manager-fast.sh",
+  goalManagerAgentCommandTemplate: "bash scripts/test-goal-manager-agent-command-template.sh",
+  goalManagerDefaultPlannerCommand: "bash scripts/test-goal-manager-default-planner-command.sh",
   goalManagerPlannerReportDecode: "bash scripts/test-goal-manager-planner-report-decode.sh",
   feedbackLoopRouting: "bash scripts/test-feedback-loop-routing.sh",
   feedbackLoopRoutingLoop: "bash scripts/test-feedback-loop-routing.sh loop-routing",
@@ -802,6 +804,11 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
       file === "examples/swarm-native/FeedbackLoop.clasp" ||
       file === "examples/swarm-native/AttemptLoop.clasp" ||
       file === "examples/swarm-native/LocalAgent.clasp";
+    const isGoalManagerPlannerPromptPath =
+      file === "examples/swarm-native/GoalManagerBootstrapPlanner.clasp" ||
+      file === "examples/swarm-native/LocalPlanner.clasp" ||
+      file === "scripts/test-goal-manager-agent-command-template.sh" ||
+      file === "scripts/test-goal-manager-default-planner-command.sh";
 
     if (file.startsWith("src/") && !isPromotedSourceExportCache && !isSourceNativeVerifyScript) {
       matched = true;
@@ -1009,7 +1016,40 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
       addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "swarm feedback-loop program", file);
     }
 
-    if (file.startsWith("examples/swarm-native/") && !isSwarmFeedbackLoopProgramPath) {
+    if (isGoalManagerPlannerPromptPath) {
+      matched = true;
+      reason(
+        file,
+        "goal-manager-planner-prompt",
+        "GoalManager planner prompt paths use provider-neutral planner command coverage and structural ready-gate checks",
+      );
+      if (file.endsWith(".sh")) {
+        addSelected(
+          selectedByCommand,
+          `bash-syntax:${file}`,
+          `bash -n ${shellQuote(file)}`,
+          "GoalManager planner prompt shell syntax",
+          file,
+        );
+      }
+      addSelected(
+        selectedByCommand,
+        "goal-manager-agent-command-template",
+        COMMANDS.goalManagerAgentCommandTemplate,
+        "GoalManager planner prompt path",
+        file,
+      );
+      addSelected(
+        selectedByCommand,
+        "goal-manager-default-planner-command",
+        COMMANDS.goalManagerDefaultPlannerCommand,
+        "GoalManager planner prompt path",
+        file,
+      );
+      addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "GoalManager planner prompt path", file);
+    }
+
+    if (file.startsWith("examples/swarm-native/") && !isSwarmFeedbackLoopProgramPath && !isGoalManagerPlannerPromptPath) {
       matched = true;
       reason(file, "swarm-native", "native swarm example path uses native claspc, ready-gate, managed-loop, and FeedbackLoop coverage");
       addSelected(selectedByCommand, "native-claspc", COMMANDS.nativeClaspc, "swarm native path", file);

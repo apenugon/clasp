@@ -79,6 +79,111 @@ managerHealthSummaryText wave =
     "hostProbe=disabled-in-native-fast-path"
   ]
 
+plannerContextBoolText : Bool -> Str
+plannerContextBoolText value = if value then "true" else "false"
+
+plannerContextMemoryLine : SwarmMemorySearchResult -> Str
+plannerContextMemoryLine item =
+  textConcat [
+    "- score=",
+    encode item.score,
+    " key=",
+    item.memory.key,
+    " actor=",
+    item.memory.actor,
+    " value=",
+    item.memory.value,
+    " matched=",
+    item.matchedText
+  ]
+
+plannerContextTraceLine : VerificationTraceEntry -> Str
+plannerContextTraceLine entry =
+  textConcat [
+    "- verifier=",
+    entry.verifierName,
+    " status=",
+    entry.status,
+    " exit=",
+    encode entry.exitCode,
+    " timedOut=",
+    plannerContextBoolText entry.timedOut,
+    " class=",
+    entry.failedVerifierClassification
+  ]
+
+plannerContextListSection : Str -> [Str] -> Str
+plannerContextListSection title values =
+  if length values == 0 then
+    textJoin "\n" [title, "- none"]
+  else
+    textJoin "\n" [title, textJoin "\n" values]
+
+plannerMemorySection : Str -> [SwarmMemorySearchResult] -> Str
+plannerMemorySection title values =
+  plannerContextListSection title (map plannerContextMemoryLine values)
+
+plannerTraceSection : Str -> [VerificationTraceEntry] -> Str
+plannerTraceSection title values =
+  plannerContextListSection title (map plannerContextTraceLine values)
+
+plannerContextPackQuery : Str
+plannerContextPackQuery = "planner task child loop verifier feedback benchmark evidence"
+
+renderPlannerContextPack : SwarmContextPack -> Str
+renderPlannerContextPack pack =
+  textJoin "\n" [
+    "Planner context pack:",
+    textConcat [
+      "task: ",
+      pack.task.taskId,
+      " status=",
+      pack.task.status,
+      " ready=",
+      plannerContextBoolText pack.task.ready,
+      " attempts=",
+      encode pack.task.attempts
+    ],
+    textConcat [
+      "objective: ",
+      pack.task.objectiveId,
+      " manager-action=",
+      pack.managerAction.action,
+      " manager-task=",
+      pack.managerAction.taskId,
+      " manager-task-status=",
+      pack.managerAction.taskStatus
+    ],
+    textConcat ["ready tasks: ", textJoin ", " pack.readyTaskIds],
+    textConcat [
+      "mailbox: runs=",
+      encode pack.mailboxSummary.runCount,
+      " artifacts=",
+      encode pack.mailboxSummary.artifactCount,
+      " memory=",
+      encode pack.mailboxSummary.memoryCount,
+      " latest-run=",
+      pack.mailboxSummary.latestRunName,
+      "/",
+      pack.mailboxSummary.latestRunStatus,
+      " latest-verifier=",
+      pack.mailboxSummary.latestVerifier,
+      "/",
+      pack.mailboxSummary.latestVerifierStatus
+    ],
+    plannerMemorySection "planner task memory matches:" pack.taskMemoryMatches,
+    plannerMemorySection "objective memory matches:" pack.objectiveMemoryMatches,
+    plannerTraceSection "planner run trace:" pack.runTrace,
+    plannerContextListSection "artifact paths:" pack.artifactPaths
+  ]
+
+plannerContextSectionFor : Int -> Str
+plannerContextSectionFor wave =
+  match taskContextPack (plannerHandleForWave wave) plannerContextPackQuery 8 {
+    Ok pack -> renderPlannerContextPack pack,
+    Err message -> textConcat ["Planner context pack unavailable: ", message]
+  }
+
 plannerPromptFor : Int -> Str -> Str
 plannerPromptFor wave benchmarkSummary =
   textJoin "\n" [
@@ -89,6 +194,7 @@ plannerPromptFor wave benchmarkSummary =
     goalText,
     "Current manager health/resource context:",
     managerHealthSummaryText wave,
+    plannerContextSectionFor wave,
     "Planning is a control-plane step, not a verification or implementation step.",
     "Do not run repo-wide verification, benchmarks, builds, package installs, or other long commands from the planner.",
     "Do not inspect files, run shell commands, invoke tools, or gather extra repository context from the planner.",

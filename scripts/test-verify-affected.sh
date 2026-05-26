@@ -339,6 +339,26 @@ switch (scenario) {
     assert(logHas("scripts/test-agent-command-template.sh"), "fake agent command template should execute");
     assert(logHas("scripts/test-swarm-ready-gate.sh"), "fake swarm-ready command should execute");
     break;
+  case "goal-manager-planner-prompt":
+    assert(report.changedFiles.includes("examples/swarm-native/GoalManagerBootstrapPlanner.clasp"), "GoalManager planner source should be present");
+    assert(report.changedFiles.includes("examples/swarm-native/LocalPlanner.clasp"), "LocalPlanner source should be present");
+    assert(report.changedFiles.includes("scripts/test-goal-manager-agent-command-template.sh"), "provider-neutral planner harness should be present");
+    assert(report.changedFiles.includes("scripts/test-goal-manager-default-planner-command.sh"), "default planner harness should be present");
+    assert(hasCommand("bash -n 'scripts/test-goal-manager-agent-command-template.sh'"), "provider-neutral planner harness should run shell syntax check");
+    assert(hasCommand("bash -n 'scripts/test-goal-manager-default-planner-command.sh'"), "default planner harness should run shell syntax check");
+    assert(hasCommand("bash scripts/test-goal-manager-agent-command-template.sh"), "planner prompt route should run provider-neutral planner coverage");
+    assert(hasCommand("bash scripts/test-goal-manager-default-planner-command.sh"), "planner prompt route should run default planner command coverage");
+    assert(hasCommand("bash scripts/test-swarm-ready-gate.sh"), "planner prompt route should keep structural swarm-ready coverage");
+    assert(!hasCommand("bash scripts/test-native-claspc.sh"), "planner prompt route should avoid broad native-claspc routing");
+    assert(!hasCommand("bash scripts/verify-runtime-slice.sh managed-loop"), "planner prompt route should avoid unrelated managed-loop slice");
+    assert(!hasCommand("bash scripts/test-swarm-memory.sh"), "planner prompt route should avoid standalone memory harness routing");
+    assert(report.selectedCommands.filter((command) => command.command === "bash scripts/test-goal-manager-agent-command-template.sh").length === 1, "provider-neutral planner command should be deduplicated");
+    assert(report.selectedCommands.filter((command) => command.command === "bash scripts/test-goal-manager-default-planner-command.sh").length === 1, "default planner command should be deduplicated");
+    assert(report.usedVerifyFastFallback === false, "known planner prompt paths should not use verify-fast fallback");
+    assert(logHas("scripts/test-goal-manager-agent-command-template.sh"), "fake provider-neutral planner harness should execute");
+    assert(logHas("scripts/test-goal-manager-default-planner-command.sh"), "fake default planner harness should execute");
+    assert(logHas("scripts/test-swarm-ready-gate.sh"), "fake swarm-ready command should execute");
+    break;
   case "feedback-loop-resume-script":
     assert(report.changedFiles.includes("scripts/test-feedback-loop-resume.sh"), "feedback-loop resume script should be present");
     assert(hasCommand("bash -n 'scripts/test-feedback-loop-resume.sh'"), "feedback-loop resume script should run shell syntax check");
@@ -823,6 +843,16 @@ agent_command_template_log="$test_root/agent-command-template.log"
 CLASP_TEST_FAKE_COMMAND_LOG="$agent_command_template_log" \
   run_verify_affected --changed-file scripts/test-agent-command-template.sh > "$agent_command_template_report"
 assert_report "$agent_command_template_report" "$agent_command_template_log" agent-command-template-script
+
+goal_manager_planner_prompt_report="$test_root/goal-manager-planner-prompt-report.json"
+goal_manager_planner_prompt_log="$test_root/goal-manager-planner-prompt.log"
+CLASP_TEST_FAKE_COMMAND_LOG="$goal_manager_planner_prompt_log" \
+  run_verify_affected \
+    --changed-file examples/swarm-native/GoalManagerBootstrapPlanner.clasp \
+    --changed-file examples/swarm-native/LocalPlanner.clasp \
+    --changed-file scripts/test-goal-manager-agent-command-template.sh \
+    --changed-file scripts/test-goal-manager-default-planner-command.sh > "$goal_manager_planner_prompt_report"
+assert_report "$goal_manager_planner_prompt_report" "$goal_manager_planner_prompt_log" goal-manager-planner-prompt
 
 goal_manager_binary_helper_report="$test_root/goal-manager-binary-helper-report.json"
 goal_manager_binary_helper_log="$test_root/goal-manager-binary-helper.log"
