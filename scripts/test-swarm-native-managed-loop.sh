@@ -49,6 +49,11 @@ function sameList(actual, expected, label) {
   );
 }
 
+function includes(list, value, label) {
+  assert(Array.isArray(list), `${label} is not an array`);
+  assert(list.includes(value), `${label} missing ${JSON.stringify(value)}: ${JSON.stringify(list)}`);
+}
+
 function artifactText(path, expected, label) {
   assert(typeof path === "string" && path.length > 0, `${label} missing artifact path`);
   assert(fs.existsSync(path), `${label} artifact missing: ${path}`);
@@ -116,10 +121,21 @@ sameList(managed.readyTaskIds, [], "managed ready task ids");
 sameList(managed.blockerTaskIds, [], "managed blocker task ids");
 assert(managed.mailboxSummary.runCount === 6, `managed run count ${managed.mailboxSummary.runCount}`);
 assert(managed.mailboxSummary.artifactCount === 12, `managed artifact count ${managed.mailboxSummary.artifactCount}`);
+assert(managed.mailboxSummary.memoryCount === 1, `managed memory count ${managed.mailboxSummary.memoryCount}`);
 assert(managed.mailboxSummary.latestVerifierStatus === "passed", "managed mailbox latest verifier status");
 for (const artifactPath of managed.mailboxSummary.artifactPaths) {
   assert(fs.existsSync(artifactPath), `managed artifact path missing: ${artifactPath}`);
 }
+sameList(
+  managed.contextMemoryValues,
+  [
+    "managed loop failure phase=verification-plan-failed attempt=1 classification=exit-code failedVerifiers=managed-primary trace=managed-primary,managed-secondary",
+  ],
+  "managed context memory values",
+);
+assert(managed.contextMemoryScores[0] > 0, `managed context memory score ${managed.contextMemoryScores[0]}`);
+sameList(managed.contextRunTraceClassifications, ["none", "none", "none", "none", "exit-code", "none"], "managed context trace classifications");
+sameList(managed.contextArtifactPaths, managed.mailboxSummary.artifactPaths, "managed context artifact paths");
 
 assert(report.statusFileExists === true, "managed status file should be written");
 assert(report.statusFileMatches === true, "managed status file should match returned report");
@@ -143,6 +159,9 @@ sameList(blocked.blockerTaskIds, ["missing-parent"], "blocked blocker task ids")
 assert(blocked.blockedBy.includes("waiting on missing-parent"), `blocked reasons ${JSON.stringify(blocked.blockedBy)}`);
 assert(blocked.latestRunStatus === "", `blocked latest run ${blocked.latestRunStatus}`);
 assert(blocked.approvalCount === 0, `blocked approval count ${blocked.approvalCount}`);
+sameList(blocked.contextMemoryValues, [], "blocked context memory values");
+sameList(blocked.contextRunTraceClassifications, [], "blocked context trace classifications");
+sameList(blocked.contextArtifactPaths, [], "blocked context artifact paths");
 
 const budget = report.budget;
 assert(budget, "missing budget report");
@@ -161,4 +180,24 @@ sameList(budget.requiredVerifiers, ["budget-unused"], "budget required verifiers
 sameList(budget.failedVerifiers, [], "budget failed verifiers");
 sameList(budget.verificationTrace, [], "budget verification trace");
 assert(budget.mailboxSummary.runCount === 25, `budget run count ${budget.mailboxSummary.runCount}`);
+assert(budget.mailboxSummary.artifactCount === 50, `budget artifact count ${budget.mailboxSummary.artifactCount}`);
+assert(budget.mailboxSummary.memoryCount === 25, `budget memory count ${budget.mailboxSummary.memoryCount}`);
+assert(budget.contextMemoryValues.length === 25, `budget context memory length ${budget.contextMemoryValues.length}`);
+includes(
+  budget.contextMemoryValues,
+  "managed loop failure phase=builder-failed attempt=25 classification=exit-code failedVerifiers= trace=",
+  "budget context memory values",
+);
+includes(
+  budget.contextMemoryValues,
+  "managed loop failure phase=builder-failed attempt=1 classification=exit-code failedVerifiers= trace=",
+  "budget context memory values",
+);
+assert(budget.contextMemoryScores.every((score) => score > 0), `budget context memory scores ${JSON.stringify(budget.contextMemoryScores)}`);
+assert(
+  budget.contextRunTraceClassifications.length === 25 &&
+    budget.contextRunTraceClassifications.every((classification) => classification === "exit-code"),
+  `budget context classifications ${JSON.stringify(budget.contextRunTraceClassifications)}`,
+);
+sameList(budget.contextArtifactPaths, budget.mailboxSummary.artifactPaths, "budget context artifact paths");
 EOF

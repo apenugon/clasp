@@ -215,7 +215,7 @@ switch (scenario) {
     assert(hasCommand("bash scripts/verify-runtime-slice.sh workflow"), "feedback-loop route should run workflow runtime slice coverage");
     assert(hasCommand("bash scripts/verify-runtime-slice.sh codex-loop"), "feedback-loop route should run ordinary Codex runtime slice coverage");
     assert(hasCommand("bash scripts/verify-runtime-slice.sh managed-loop"), "swarm route should run managed-loop runtime slice coverage");
-    assert(hasCommand("bash scripts/verify-runtime-slice.sh swarm-feedback-loop"), "swarm route should run FeedbackLoop runtime slice coverage");
+    assert(!hasCommand("bash scripts/verify-runtime-slice.sh swarm-feedback-loop"), "generic swarm route should avoid the expensive FeedbackLoop runtime slice");
     assert(hasCommand("bash scripts/test-feedback-loop-routing.sh loop-routing"), "feedback-loop route should run the lightweight loop-routing selector probe");
     assert(report.selectedCommands.filter((command) => command.command === "bash scripts/test-native-claspc.sh").length === 1, "native claspc command should be deduplicated");
     assert(report.usedVerifyFastFallback === false, "mixed known inputs should not fall back to verify-fast");

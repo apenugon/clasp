@@ -359,7 +359,11 @@ record ManagedLoopReport = {
   failedVerificationTraceClassifications : [Str],
   approvalCount : Int,
   mergegateVerdict : Str,
-  mailboxSummary : VerificationPlanMailboxSummary
+  mailboxSummary : VerificationPlanMailboxSummary,
+  contextMemoryValues : [Str],
+  contextMemoryScores : [Int],
+  contextRunTraceClassifications : [Str],
+  contextArtifactPaths : [Str]
 }
 
 noDeadlineAtMs : Int

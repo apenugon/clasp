@@ -1062,7 +1062,7 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
 
     if (file.startsWith("examples/swarm-native/") && !isSwarmFeedbackLoopProgramPath && !isGoalManagerPlannerPromptPath) {
       matched = true;
-      reason(file, "swarm-native", "native swarm example path uses native claspc, ready-gate, managed-loop, and FeedbackLoop coverage");
+      reason(file, "swarm-native", "native swarm example path uses native claspc, ready-gate, managed-loop, memory, and context-pack coverage");
       addSelected(selectedByCommand, "native-claspc", COMMANDS.nativeClaspc, "swarm native path", file);
       addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "swarm native path", file);
       if (file === "examples/swarm-native/SwarmReadyBenchmark.clasp") {
@@ -1078,7 +1078,6 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
       addSelected(selectedByCommand, "swarm-context-pack", COMMANDS.swarmContextPack, "swarm native path", file);
       addSelected(selectedByCommand, "monitored-loop", COMMANDS.monitoredLoop, "swarm native path", file);
       addSelected(selectedByCommand, "runtime-slice:managed-loop", COMMANDS.runtimeSliceManagedLoop, "swarm native path", file);
-      addSelected(selectedByCommand, "runtime-slice:swarm-feedback-loop", COMMANDS.runtimeSliceSwarmFeedbackLoop, "swarm native path", file);
     }
 
     if (plannerReportDecodeFiles.has(file)) {

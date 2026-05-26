@@ -29,6 +29,7 @@ runtime/target/debug/claspc --json check src/CompilerMain.clasp
 - The native CLI now embeds `src/stage1.compiler.module-summary-cache-v2.json`, a promoted module-summary seed for the `src/Main.clasp` self-host import closure.
 - `scripts/generate-promoted-module-summary-cache.mjs --check` verifies that the promoted seed is reproducible from the current promoted compiler image and source closure.
 - `scripts/test-selfhost.sh` now checks a fresh-cache `src/Main.clasp` check and requires promoted module-summary hits for `Compiler.Ast`, `Compiler.Emit.JavaScript`, and `Main`.
+- `scripts/verify-affected.mjs` now keeps the expensive `swarm-feedback-loop` runtime slice on FeedbackLoop-specific files instead of every generic `examples/swarm-native/*` change; shared swarm-native library edits still run native claspc, readiness, memory, context-pack, monitored-loop, and managed-loop coverage.
 
 ## Measured Timings
 
