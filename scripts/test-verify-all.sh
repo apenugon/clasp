@@ -67,6 +67,8 @@ cp "$project_root/scripts/test-monitored-workflow.sh" "$test_root/scripts/test-m
 cp "$project_root/scripts/test-codex-loop-program.sh" "$test_root/scripts/test-codex-loop-program.sh"
 cp "$project_root/scripts/test-agent-command-template.sh" "$test_root/scripts/test-agent-command-template.sh"
 cp "$project_root/scripts/test-goal-manager-agent-command-template.sh" "$test_root/scripts/test-goal-manager-agent-command-template.sh"
+cp "$project_root/scripts/test-goal-manager-default-planner-command.sh" "$test_root/scripts/test-goal-manager-default-planner-command.sh"
+cp "$project_root/scripts/test-goal-manager-fixture-manager.mjs" "$test_root/scripts/test-goal-manager-fixture-manager.mjs"
 cp "$project_root/scripts/test-host-runtime.sh" "$test_root/scripts/test-host-runtime.sh"
 cp "$project_root/scripts/test-safe-workspace.sh" "$test_root/scripts/test-safe-workspace.sh"
 cp "$project_root/scripts/test-goal-manager-child-loop-monitor.sh" "$test_root/scripts/test-goal-manager-child-loop-monitor.sh"
@@ -212,6 +214,7 @@ grep -F 'bash examples/agent-loop-scenario/scripts/verify.sh' "$test_root/script
 grep -F 'bash scripts/test-agent-command-template.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'CLASP_AGENT_COMMAND_TEMPLATE_FEEDBACK=0 CLASP_AGENT_COMMAND_TEMPLATE_NATIVE=1 bash scripts/test-agent-command-template.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-goal-manager-agent-command-template.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'bash scripts/test-goal-manager-default-planner-command.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash examples/browser-counter/scripts/verify.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-host-runtime.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-safe-workspace.sh' "$test_root/scripts/verify-all.sh" >/dev/null
@@ -289,7 +292,6 @@ grep -F 'bash scripts/test-js-emitter-determinism.sh' "$test_root/scripts/verify
 grep -F 'bash scripts/test-promoted-source-export-cache.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'node --check scripts/generate-promoted-source-export-cache.mjs' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'source-export-cache-v1' "$test_root/scripts/generate-promoted-source-export-cache.mjs" >/dev/null
-grep -F 'src/stage1.goal-manager.native.image.json' "$test_root/scripts/generate-promoted-source-export-cache.mjs" >/dev/null
 grep -F 'src/stage1.task-workspace-runtime-harness.native.image.json' "$test_root/scripts/generate-promoted-source-export-cache.mjs" >/dev/null
 grep -F 'env -u CLASP_CLASPC -u CLASPC_BIN "$project_root/scripts/resolve-claspc.sh"' "$test_root/scripts/test-promoted-source-export-cache.sh" >/dev/null
 grep -F 'source-export promoted hit export=checkSourceText' "$test_root/scripts/test-promoted-source-export-cache.sh" >/dev/null
@@ -316,6 +318,11 @@ grep -F 'nativeImageProjectModuleDeclsText' "$test_root/src/scripts/verify.sh" >
 grep -F 'fast_verify_fixture_root="$verify_root/fast-project"' "$test_root/src/scripts/verify.sh" >/dev/null
 grep -F 'CLASP_GOAL_MANAGER_COMPILE_TIMEOUT_SECS' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
 grep -F 'CLASP_GOAL_MANAGER_COMPILE_ATTEMPTS' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
+grep -F 'CLASP_GOAL_MANAGER_COMPILE_MANAGED' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
+grep -F 'CLASP_GOAL_MANAGER_COMPILE_MEMORY_MB' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
+grep -F 'CLASP_GOAL_MANAGER_COMPILE_MIN_AVAILABLE_MEMORY_MB' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
+grep -F 'run_goal_manager_compile_managed()' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
+grep -F 'run-managed-job.sh" --jobs-root "$cache_root/compile-jobs"' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
 grep -F 'CLASP_GOAL_MANAGER_ALLOW_STALE_ON_COMPILE_FAILURE' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
 grep -F 'CLASP_GOAL_MANAGER_ALLOW_UNMANAGED_STALE' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
 grep -F 'CLASP_GOAL_MANAGER_STALE_SMOKE_TIMEOUT_SECS' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null

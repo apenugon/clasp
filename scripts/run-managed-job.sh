@@ -130,6 +130,9 @@ setsid env \
     watcher_pid=""
     memory_watcher_pid=""
     job_dir="$CLASP_MANAGED_JOB_ROOT/$CLASP_MANAGED_JOB_ID"
+    expected_job_id="$CLASP_MANAGED_JOB_ID"
+    expected_job_root="$CLASP_MANAGED_JOB_ROOT"
+    expected_job_token="$CLASP_MANAGED_JOB_TOKEN"
 
     trim_spaces() {
       tr -d "[:space:]"
@@ -168,9 +171,9 @@ setsid env \
       fi
       local environ
       environ="$({ tr "\0" "\n" <"/proc/$candidate_pid/environ"; } 2>/dev/null)" || return 1
-      grep -Fx "CLASP_MANAGED_JOB_ID=$CLASP_MANAGED_JOB_ID" <<<"$environ" >/dev/null &&
-        grep -Fx "CLASP_MANAGED_JOB_ROOT=$CLASP_MANAGED_JOB_ROOT" <<<"$environ" >/dev/null &&
-        grep -Fx "CLASP_MANAGED_JOB_TOKEN=$CLASP_MANAGED_JOB_TOKEN" <<<"$environ" >/dev/null
+      grep -Fx "CLASP_MANAGED_JOB_ID=$expected_job_id" <<<"$environ" >/dev/null &&
+        grep -Fx "CLASP_MANAGED_JOB_ROOT=$expected_job_root" <<<"$environ" >/dev/null &&
+        grep -Fx "CLASP_MANAGED_JOB_TOKEN=$expected_job_token" <<<"$environ" >/dev/null
     }
 
     marked_job_pids() {
@@ -411,6 +414,46 @@ setsid env \
       child_pid="$!"
     }
 
+    record_runner_metadata() {
+      {
+        printf "%s\n" "$$"
+      } >"$job_dir/pid"
+      {
+        ps -o pgid= -p "$$" | trim_spaces
+      } >"$job_dir/pgid"
+      {
+        current_sid
+      } >"$job_dir/sid"
+      {
+        printf "%s\n" "$PWD"
+      } >"$job_dir/cwd"
+      {
+        date -u +%Y-%m-%dT%H:%M:%SZ
+      } >"$job_dir/started-at"
+    }
+
+    apply_virtual_memory_limit() {
+      local requested_kb="$((CLASP_MANAGED_JOB_MEMORY_MB * 1024))"
+      local current_limit
+
+      current_limit="$(ulimit -v 2>/dev/null || printf "unknown")"
+      if [[ "$current_limit" =~ ^[0-9]+$ ]] && (( requested_kb > current_limit )); then
+        {
+          printf "%s\n" "$((current_limit / 1024))"
+        } >"$job_dir/effective-memory-mb"
+        {
+          printf "requested_mb=%s\n" "$CLASP_MANAGED_JOB_MEMORY_MB"
+          printf "inherited_limit_mb=%s\n" "$((current_limit / 1024))"
+        } >"$job_dir/inherited-memory-limit"
+        return 0
+      fi
+
+      ulimit -v "$requested_kb" || finish_managed_job 125
+      {
+        printf "%s\n" "$CLASP_MANAGED_JOB_MEMORY_MB"
+      } >"$job_dir/effective-memory-mb"
+    }
+
     finish_managed_job() {
       local status="$1"
 
@@ -450,8 +493,9 @@ setsid env \
 
     ulimit -c 0 >/dev/null 2>&1 || true
 
+    record_runner_metadata
     if [[ -n "${CLASP_MANAGED_JOB_MEMORY_MB:-}" ]]; then
-      ulimit -v "$((CLASP_MANAGED_JOB_MEMORY_MB * 1024))" || finish_managed_job 125
+      apply_virtual_memory_limit
     fi
 
     start_workload "$@"
@@ -471,26 +515,36 @@ pid="$!"
 
 sleep 0.05
 if ! kill -0 "$pid" >/dev/null 2>&1; then
+  if [[ -f "$job_dir/pid" && -f "$job_dir/pgid" && -f "$job_dir/sid" && -f "$job_dir/cwd" && -f "$job_dir/exit-status" ]]; then
+    printf '%s\n' "$job_dir"
+    exit 0
+  fi
   printf 'managed-job: command exited before metadata could be recorded: %s\n' "$job_id" >&2
   exit 1
 fi
 
-pgid="$(ps -o pgid= -p "$pid" | tr -d '[:space:]')"
-sid="$(ps -o sid= -p "$pid" | tr -d '[:space:]')"
+pgid="$(tr -d '[:space:]' <"$job_dir/pgid" 2>/dev/null || ps -o pgid= -p "$pid" | tr -d '[:space:]')"
+sid="$(tr -d '[:space:]' <"$job_dir/sid" 2>/dev/null || ps -o sid= -p "$pid" | tr -d '[:space:]')"
 if [[ -z "$pgid" || -z "$sid" ]]; then
+  if [[ -f "$job_dir/pid" && -f "$job_dir/pgid" && -f "$job_dir/sid" && -f "$job_dir/cwd" && -f "$job_dir/exit-status" ]]; then
+    printf '%s\n' "$job_dir"
+    exit 0
+  fi
   printf 'managed-job: failed to inspect launched job process: %s\n' "$job_id" >&2
   exit 1
 fi
 
-{
-  printf '%s\n' "$pid"
-} >"$job_dir/pid"
 {
   printf '%s\n' "$pgid"
 } >"$job_dir/pgid"
 {
   printf '%s\n' "$sid"
 } >"$job_dir/sid"
+if [[ ! -f "$job_dir/pid" ]]; then
+  {
+    printf '%s\n' "$pid"
+  } >"$job_dir/pid"
+fi
 {
   printf '%s\n' "$project_root"
 } >"$job_dir/cwd"

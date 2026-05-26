@@ -22,11 +22,6 @@ const defaultNativeImageEntries = [
     outputPath: "src/stage1.hello.native.image.json",
   },
   {
-    source: "examples/swarm-native/GoalManager.wrapper.clasp",
-    exportName: "nativeImageProjectText",
-    outputPath: "src/stage1.goal-manager.native.image.json",
-  },
-  {
     source: "examples/swarm-native/TaskWorkspaceRuntimeHarness.clasp",
     exportName: "nativeImageProjectText",
     outputPath: "src/stage1.task-workspace-runtime-harness.native.image.json",

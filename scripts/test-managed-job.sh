@@ -108,6 +108,44 @@ if kill -0 "$complete_pid" >/dev/null 2>&1; then
   exit 1
 fi
 
+instant_job_dir="$(
+  "$project_root/scripts/run-managed-job.sh" \
+    --jobs-root "$jobs_root" \
+    --job-id instant-complete-smoke \
+    -- bash -c 'printf instant-output; exit 0'
+)"
+[[ "$instant_job_dir" == "$jobs_root/instant-complete-smoke" ]]
+wait_for_file "$instant_job_dir/exit-status"
+[[ "$(cat "$instant_job_dir/exit-status")" == "0" ]]
+[[ "$(cat "$instant_job_dir/status")" == "completed" ]]
+[[ "$(cat "$instant_job_dir/stdout.log")" == "instant-output" ]]
+for required in pid pgid sid cwd started-at; do
+  [[ -f "$instant_job_dir/$required" ]]
+done
+"$project_root/scripts/stop-managed-job.sh" --jobs-root "$jobs_root" instant-complete-smoke >"$test_root/instant-completed-stop.out"
+grep -F 'managed-job-stop: completed instant-complete-smoke' "$test_root/instant-completed-stop.out" >/dev/null
+
+if (ulimit -v 262144) >/dev/null 2>&1; then
+  inherited_limit_job_dir="$(
+    (
+      ulimit -v 262144
+      CLASP_MANAGED_JOB_USE_SYSTEMD_SCOPE=never \
+        "$project_root/scripts/run-managed-job.sh" \
+          --jobs-root "$jobs_root" \
+          --job-id inherited-memory-limit-smoke \
+          --memory-mb 512 \
+          -- bash -c 'printf inherited-limit-output'
+    )
+  )"
+  [[ "$inherited_limit_job_dir" == "$jobs_root/inherited-memory-limit-smoke" ]]
+  wait_for_file "$inherited_limit_job_dir/exit-status"
+  [[ "$(cat "$inherited_limit_job_dir/exit-status")" == "0" ]]
+  [[ "$(cat "$inherited_limit_job_dir/status")" == "completed" ]]
+  [[ "$(cat "$inherited_limit_job_dir/stdout.log")" == "inherited-limit-output" ]]
+  [[ "$(cat "$inherited_limit_job_dir/effective-memory-mb")" == "256" ]]
+  grep -F 'requested_mb=512' "$inherited_limit_job_dir/inherited-memory-limit" >/dev/null
+fi
+
 marked_orphan_pid_file="$test_root/marked-orphan.pid"
 marked_orphan_job_dir="$(
   "$project_root/scripts/run-managed-job.sh" \

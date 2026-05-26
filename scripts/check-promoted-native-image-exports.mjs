@@ -15,7 +15,6 @@ const portableTaskWorkspace =
   projectRoot.split(path.sep).includes(".clasp-task-workspaces") ||
   process.env.CLASP_ALLOW_SOURCE_EXPORT_ONLY_NATIVE_IMAGE_CHECK === "1";
 const requiredSourceExportOutputPaths = [
-  "src/stage1.goal-manager.native.image.json",
   "src/stage1.task-workspace-runtime-harness.native.image.json",
 ];
 

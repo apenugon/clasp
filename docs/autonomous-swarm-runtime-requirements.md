@@ -261,6 +261,10 @@ The feedback-loop fixture also now proves a non-Codex backend path with [`exampl
 
 The goal-manager fixture extends that proof to planning with [`examples/swarm-native/LocalPlanner.clasp`](/home/akul_medexfinance_com/clasp/examples/swarm-native/LocalPlanner.clasp): the manager can invoke a Clasp program as the planner backend through `CLASP_MANAGER_PLANNER_AGENT_COMMAND_JSON`, materialize the planned child task, and pass the provider-neutral child agent command configuration through without touching the Codex backend.
 
+The modular GoalManager default planner path is shell-free as well: it still writes the durable planner prompt artifact for inspection, but passes the prompt directly to the configured agent command instead of wrapping Codex in a `bash -c` stdin shim. Agent templates can consume either `{prompt}` or `{prompt_path}`.
+
+GoalManager cache-miss compiles are now expected to run under the managed-job memory guard by default. A missing or stale binary should fail inside a bounded cgroup and fall back only through the explicit stale-binary path; it should not be able to consume unbounded VM memory while rebuilding the native manager image. The large GoalManager image is intentionally outside the promoted source-export cache refresh path; promoting it made ordinary verification depend on a 30 GiB-class native-image build.
+
 ## Required Safety / Governance Features
 
 The swarm should be autonomous but bounded.

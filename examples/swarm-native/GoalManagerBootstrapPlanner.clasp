@@ -12,16 +12,7 @@ plannerPromptPathForWave wave =
   pathJoin [stateRootPath, textConcat ["planner-", encode wave, ".prompt.txt"]]
 
 codexCommandDefault : Str -> Str -> Str -> [Str]
-codexCommandDefault schemaPath reportPath promptPath = [
-  "bash",
-  "-c",
-  textJoin "\n" [
-    "prompt_path=\"$1\"",
-    "shift",
-    "exec \"$@\" - < \"$prompt_path\""
-  ],
-  "planner-stdin",
-  promptPath,
+codexCommandDefault schemaPath reportPath prompt = [
   agentBin,
   "exec",
   "--json",
@@ -38,18 +29,19 @@ codexCommandDefault schemaPath reportPath promptPath = [
   "--output-schema",
   schemaPath,
   "-o",
-  reportPath
+  reportPath,
+  prompt
 ]
 
-plannerAgentCommandArgs : Str -> Str -> Str -> [Str]
-plannerAgentCommandArgs schemaPath reportPath promptPath =
+plannerAgentCommandArgs : Str -> Str -> Str -> Str -> [Str]
+plannerAgentCommandArgs schemaPath reportPath promptPath prompt =
   if length plannerAgentCommandTemplate > 0 then
-    renderAgentCommand plannerAgentCommandTemplate "planner" schemaPath reportPath promptPath resolvedWorkspaceRoot
+    renderAgentCommand plannerAgentCommandTemplate "planner" schemaPath reportPath promptPath prompt resolvedWorkspaceRoot
   else
-    codexCommandDefault schemaPath reportPath promptPath
+    codexCommandDefault schemaPath reportPath prompt
 
 codexCommand : Str -> Str -> Str -> [Str]
-codexCommand schemaPath reportPath promptPath = plannerAgentCommandArgs schemaPath reportPath promptPath
+codexCommand schemaPath reportPath prompt = plannerAgentCommandArgs schemaPath reportPath "" prompt
 
 plannerBenchmarkContextFor : Int -> Str -> Str
 plannerBenchmarkContextFor wave benchmarkSummary =
@@ -114,4 +106,8 @@ plannerCommandFor : Int -> Str -> SwarmCommand
 plannerCommandFor wave benchmarkSummary =
   commandSpec
     managerProjectRoot
-    (plannerAgentCommandArgs resolvedPlannerSchemaPath (plannerReportPathFor wave) (plannerPromptPathForWave wave))
+    (plannerAgentCommandArgs
+      resolvedPlannerSchemaPath
+      (plannerReportPathFor wave)
+      (plannerPromptPathForWave wave)
+      (plannerPromptFor wave benchmarkSummary))

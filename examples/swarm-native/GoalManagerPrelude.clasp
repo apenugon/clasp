@@ -106,24 +106,25 @@ codexReasoningConfig = textConcat ["model_reasoning_effort=\"", agentReasoning, 
 templateReplace : Str -> Str -> Str -> Str
 templateReplace value needle replacement = textJoin replacement (textSplit value needle)
 
-renderAgentCommandArg : Str -> Str -> Str -> Str -> Str -> Str -> Str
-renderAgentCommandArg role schemaPath reportPath promptPath workspacePath value = {
+renderAgentCommandArg : Str -> Str -> Str -> Str -> Str -> Str -> Str -> Str
+renderAgentCommandArg role schemaPath reportPath promptPath prompt workspacePath value = {
   let rendered0 = templateReplace value "{role}" role in
   let rendered1 = templateReplace rendered0 "{schema_path}" schemaPath in
   let rendered2 = templateReplace rendered1 "{report_path}" reportPath in
   let rendered3 = templateReplace rendered2 "{prompt_path}" promptPath in
-  let rendered4 = templateReplace rendered3 "{workspace_root}" workspacePath in
-  let rendered5 = templateReplace rendered4 "{agent_bin}" agentBin in
-  let rendered6 = templateReplace rendered5 "{model}" agentModel in
-  let rendered7 = templateReplace rendered6 "{reasoning}" agentReasoning in
-  templateReplace rendered7 "{sandbox}" agentSandbox
+  let rendered4 = templateReplace rendered3 "{prompt}" prompt in
+  let rendered5 = templateReplace rendered4 "{workspace_root}" workspacePath in
+  let rendered6 = templateReplace rendered5 "{agent_bin}" agentBin in
+  let rendered7 = templateReplace rendered6 "{model}" agentModel in
+  let rendered8 = templateReplace rendered7 "{reasoning}" agentReasoning in
+  templateReplace rendered8 "{sandbox}" agentSandbox
 }
 
-renderAgentCommand : [Str] -> Str -> Str -> Str -> Str -> Str -> [Str]
-renderAgentCommand template role schemaPath reportPath promptPath workspacePath = {
+renderAgentCommand : [Str] -> Str -> Str -> Str -> Str -> Str -> Str -> [Str]
+renderAgentCommand template role schemaPath reportPath promptPath prompt workspacePath = {
   let mut rendered = emptyTexts;
   for arg in template {
-    rendered = append rendered [renderAgentCommandArg role schemaPath reportPath promptPath workspacePath arg];
+    rendered = append rendered [renderAgentCommandArg role schemaPath reportPath promptPath prompt workspacePath arg];
     rendered
   };
   rendered

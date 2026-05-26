@@ -289,6 +289,7 @@ set -euo pipefail
 workspace_root="."
 report_path=""
 prompt=""
+prompt_from_stdin=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     exec)
@@ -316,6 +317,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ "$prompt" == "-" ]]; then
+  prompt_from_stdin=1
   prompt="$(cat)"
 fi
 
@@ -351,6 +353,10 @@ planner_timeout_sleep_secs="${CLASP_TEST_FAKE_PLANNER_TIMEOUT_SLEEP_SECS:-2}"
 planner_wave2_sleep_secs="${CLASP_TEST_FAKE_PLANNER_WAVE2_SLEEP_SECS:-}"
 
 if [[ "$prompt" == *"planner subagent"* || "$report_basename" == planner-*.json ]]; then
+  if [[ "${CLASP_TEST_EXPECT_PLANNER_PROMPT_ARG:-0}" == "1" && "$prompt_from_stdin" == "1" ]]; then
+    printf 'planner prompt should be passed as an argument without the stdin shell shim\n' >&2
+    exit 56
+  fi
   if [[ "${CLASP_TEST_FAIL_IF_PLANNER_RUN:-0}" == "1" ]]; then
     printf 'planner should not run for this preflight failure case\n' >&2
     exit 53
@@ -1247,6 +1253,7 @@ mkdir -p "$tiered_workspace"
 run_goal_manager "$tiered_state" "$tiered_workspace" \
   CLASP_TEST_EXPECT_PLANNER_HEALTH='1' \
   CLASP_TEST_EXPECT_PLANNER_NO_BROAD_VERIFY='1' \
+  CLASP_TEST_EXPECT_PLANNER_PROMPT_ARG='1' \
   CLASP_TEST_EXPECT_FOCUSED_VERIFY_TIER='1' \
   CLASP_MANAGER_CHILD_FOCUSED_VERIFY_COMMANDS_JSON='["bash scripts/verify-fast.sh","bash scripts/test-swarm-ready-gate.sh"]' \
   CLASP_MANAGER_MAX_WAVES_JSON='1' \

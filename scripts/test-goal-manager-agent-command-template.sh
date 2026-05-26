@@ -18,6 +18,8 @@ workspace_root="$test_root_abs/workspace"
 fake_agent="$test_root_abs/generic-agent"
 fake_child_claspc="$test_root_abs/fake-child-claspc"
 fake_codex="$test_root_abs/codex-must-not-run"
+fake_goal_manager="$test_root_abs/swarm-goal-manager"
+fake_ensure_claspc="$test_root_abs/fake-ensure-claspc"
 agent_log="$test_root_abs/agent-invocations.jsonl"
 child_log="$test_root_abs/child-env.jsonl"
 codex_marker="$test_root_abs/codex-was-used"
@@ -192,7 +194,35 @@ exit 79
 EOF
 chmod +x "$fake_codex"
 
+cp "$project_root/scripts/test-goal-manager-fixture-manager.mjs" "$fake_goal_manager"
+chmod +x "$fake_goal_manager"
+
+cat >"$fake_ensure_claspc" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'test fixture intentionally disables full GoalManager native compilation\n' >&2
+exit 90
+EOF
+chmod +x "$fake_ensure_claspc"
+
 claspc_bin="$(env -u CLASP_CLASPC -u CLASPC_BIN CLASP_PROJECT_ROOT="$project_root" "$project_root/scripts/resolve-claspc.sh")"
+goal_manager_bin="$(
+  XDG_CACHE_HOME="$test_root_abs/xdg-cache" \
+  CLASP_GOAL_MANAGER_CLASPC_BIN="$fake_ensure_claspc" \
+  CLASP_GOAL_MANAGER_COMPILE_MANAGED="${CLASP_GOAL_MANAGER_COMPILE_MANAGED:-0}" \
+  CLASP_GOAL_MANAGER_COMPILE_TIMEOUT_SECS="${CLASP_GOAL_MANAGER_COMPILE_TIMEOUT_SECS:-1}" \
+  CLASP_GOAL_MANAGER_COMPILE_ATTEMPTS="${CLASP_GOAL_MANAGER_COMPILE_ATTEMPTS:-1}" \
+  CLASP_GOAL_MANAGER_ALLOW_STALE_ON_COMPILE_FAILURE="${CLASP_GOAL_MANAGER_ALLOW_STALE_ON_COMPILE_FAILURE:-1}" \
+  CLASP_GOAL_MANAGER_ALLOW_UNMANAGED_STALE="${CLASP_GOAL_MANAGER_ALLOW_UNMANAGED_STALE:-1}" \
+  CLASP_GOAL_MANAGER_COMPILE_MEMORY_MB="${CLASP_GOAL_MANAGER_COMPILE_MEMORY_MB:-12288}" \
+  CLASP_GOAL_MANAGER_COMPILE_MIN_AVAILABLE_MEMORY_MB="${CLASP_GOAL_MANAGER_COMPILE_MIN_AVAILABLE_MEMORY_MB:-16384}" \
+  CLASP_NATIVE_BUNDLE_JOBS="${CLASP_NATIVE_BUNDLE_JOBS:-1}" \
+  CLASP_NATIVE_IMAGE_SECTION_JOBS="${CLASP_NATIVE_IMAGE_SECTION_JOBS:-1}" \
+  CLASP_NATIVE_JOBS_MAX="${CLASP_NATIVE_JOBS_MAX:-1}" \
+  CLASP_NATIVE_RELAXED_BUILD_PLAN_CACHE="${CLASP_NATIVE_RELAXED_BUILD_PLAN_CACHE:-1}" \
+  "$project_root/scripts/ensure-goal-manager-binary.sh" \
+    --alias "$fake_goal_manager"
+)"
 agent_bin_json="$(json_string "$claspc_bin")"
 codex_bin_json="$(json_string "$fake_codex")"
 child_claspc_json="$(json_string "$fake_child_claspc")"
@@ -251,10 +281,10 @@ CLASP_TEST_AGENT_LOG="$agent_log" \
 CLASP_TEST_CHILD_ENV_LOG="$child_log" \
 CLASP_TEST_EXPECT_CHILD_AGENT_COMMAND_JSON="$agent_command_json" \
 CLASP_TEST_EXPECT_AGENT_BIN_JSON="$agent_bin_json" \
-timeout "$timeout_secs" "$claspc_bin" run "$project_root/examples/swarm-native/GoalManager.wrapper.clasp" -- "$state_root" >"$output_path"
+timeout "$timeout_secs" "$goal_manager_bin" "$state_root" >"$output_path"
 
 CLASP_MANAGER_COMMAND=status \
-timeout "$timeout_secs" "$claspc_bin" run "$project_root/examples/swarm-native/GoalManager.wrapper.clasp" -- "$state_root" >"$status_path"
+timeout "$timeout_secs" "$goal_manager_bin" "$state_root" >"$status_path"
 
 node - "$output_path" "$status_path" "$agent_log" "$child_log" "$state_root" "$workspace_root" "$codex_marker" "$agent_command_json" "$agent_bin_json" <<'NODE'
 const fs = require("node:fs");

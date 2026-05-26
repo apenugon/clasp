@@ -269,7 +269,6 @@ switch (scenario) {
     assert(report.changedFiles.includes("scripts/generate-promoted-source-export-cache.mjs"), "promoted source export generator should be present");
     assert(report.changedFiles.includes("scripts/test-promoted-source-export-cache.sh"), "promoted source export smoke test should be present");
     assert(report.changedFiles.includes("src/stage1.compiler.source-export-cache-v1.json"), "promoted source export cache should be present");
-    assert(report.changedFiles.includes("src/stage1.goal-manager.native.image.json"), "promoted GoalManager native image should be present");
     assert(report.changedFiles.includes("src/stage1.task-workspace-runtime-harness.native.image.json"), "promoted task workspace harness native image should be present");
     assert(hasCommand("node --check scripts/generate-promoted-source-export-cache.mjs"), "promoted source export generator should run node syntax check");
     assert(hasCommand("bash -n 'scripts/test-promoted-source-export-cache.sh'"), "promoted source export smoke should run shell syntax check");
@@ -610,7 +609,6 @@ CLASP_TEST_FAKE_COMMAND_LOG="$promoted_source_export_log" \
     --changed-file scripts/generate-promoted-source-export-cache.mjs \
     --changed-file scripts/test-promoted-source-export-cache.sh \
     --changed-file src/stage1.compiler.source-export-cache-v1.json \
-    --changed-file src/stage1.goal-manager.native.image.json \
     --changed-file src/stage1.task-workspace-runtime-harness.native.image.json > "$promoted_source_export_report"
 assert_report "$promoted_source_export_report" "$promoted_source_export_log" promoted-source-export-cache
 
