@@ -241,8 +241,8 @@ process.stdout.write(JSON.stringify([
   "{schema_path}",
   "--report",
   "{report_path}",
-  "--prompt",
-  "{prompt}",
+  "--prompt-path",
+  "{prompt_path}",
   "--workspace",
   "{workspace_root}"
 ]));
@@ -251,6 +251,7 @@ NODE
 
 grep -F 'CLASP_LOOP_AGENT_COMMAND_JSON' "$project_root/examples/feedback-loop/Main.clasp" >/dev/null
 grep -F 'CLASP_LOOP_AGENT_COMMAND_JSON' "$project_root/examples/swarm-native/FeedbackLoop.clasp" >/dev/null
+grep -F '{prompt_path}' "$project_root/examples/swarm-native/FeedbackLoop.clasp" >/dev/null
 grep -F 'local Clasp builder backend completed' "$project_root/examples/swarm-native/LocalAgent.clasp" >/dev/null
 grep -F 'CLASP_MANAGER_PLANNER_AGENT_COMMAND_JSON' "$project_root/examples/swarm-native/GoalManagerConfig.clasp" >/dev/null
 grep -F 'plannerAgentCommandArgs' "$project_root/examples/swarm-native/GoalManagerBootstrapPlanner.clasp" >/dev/null
@@ -356,7 +357,7 @@ NODE
   CLASP_LOOP_COMMAND=status \
     timeout "$timeout_secs" "$claspc_bin" run "$project_root/examples/swarm-native/FeedbackLoop.clasp" -- "$local_agent_state_root" >"$local_agent_status_path"
 
-  node - "$local_agent_output_path" "$local_agent_status_path" "$local_agent_workspace_root/workspace.txt" "$local_agent_state_root/builder-2.json" "$local_agent_state_root/verifier-1.json" "$local_agent_state_root/verifier-2.json" <<'NODE'
+  node - "$local_agent_output_path" "$local_agent_status_path" "$local_agent_workspace_root/workspace.txt" "$local_agent_state_root/builder-2.json" "$local_agent_state_root/verifier-1.json" "$local_agent_state_root/verifier-2.json" "$local_agent_state_root/builder-2.prompt.md" "$local_agent_state_root/verifier-2.prompt.md" <<'NODE'
 const fs = require("node:fs");
 const [
   outputPath,
@@ -365,6 +366,8 @@ const [
   secondBuilderReportPath,
   firstVerifierReportPath,
   secondVerifierReportPath,
+  secondBuilderPromptPath,
+  secondVerifierPromptPath,
 ] = process.argv.slice(2);
 
 function assert(condition, message) {
@@ -381,6 +384,8 @@ const workspaceText = fs.readFileSync(workspacePath, "utf8");
 const secondBuilder = readJson(secondBuilderReportPath);
 const firstVerifier = readJson(firstVerifierReportPath);
 const secondVerifier = readJson(secondVerifierReportPath);
+const secondBuilderPrompt = fs.readFileSync(secondBuilderPromptPath, "utf8");
+const secondVerifierPrompt = fs.readFileSync(secondVerifierPromptPath, "utf8");
 
 assert(output.state?.phase === "completed", `local agent phase ${output.state?.phase}`);
 assert(output.state?.attempt === 2, `local agent attempt ${output.state?.attempt}`);
@@ -392,6 +397,9 @@ assert(workspaceText === "fixed-after-feedback\n", "local Clasp builder should c
 assert(secondBuilder.feedback?.summary === "local Clasp builder backend completed", "second builder report should come from LocalAgent.clasp");
 assert(firstVerifier.verdict === "fail", `first local verifier verdict ${firstVerifier.verdict}`);
 assert(secondVerifier.verdict === "pass", `second local verifier verdict ${secondVerifier.verdict}`);
+assert(secondBuilderPrompt.includes("Verifier feedback from the previous attempt:"), "second builder prompt should be persisted for prompt-path agents");
+assert(secondBuilderPrompt.includes("force-close-category"), "second builder prompt should include persisted verifier feedback");
+assert(secondVerifierPrompt.includes("verifier subagent"), "second verifier prompt should be persisted for prompt-path agents");
 assert(
   secondVerifier.capability_statuses?.some((entry) => entry.name === "clasp_native_agent_backend" && entry.status === "pass"),
   "local verifier should prove the Clasp-native agent backend capability",

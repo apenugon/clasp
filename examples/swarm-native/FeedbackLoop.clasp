@@ -174,6 +174,12 @@ builderReportPath attempt = pathJoin [stateRootPath, textConcat ["builder-", enc
 verifierReportPath : Int -> Str
 verifierReportPath attempt = pathJoin [stateRootPath, textConcat ["verifier-", encode attempt, ".json"]]
 
+builderPromptPath : Int -> Str
+builderPromptPath attempt = pathJoin [stateRootPath, textConcat ["builder-", encode attempt, ".prompt.md"]]
+
+verifierPromptPath : Int -> Str
+verifierPromptPath attempt = pathJoin [stateRootPath, textConcat ["verifier-", encode attempt, ".prompt.md"]]
+
 builderTaskId : Int -> Str
 builderTaskId attempt = attemptBuilderTaskId attempt
 
@@ -316,6 +322,13 @@ writeFeedback report = match writeFile feedbackPath (encode report) {
   Err message -> message
 }
 
+writePromptFile : Str -> Str -> Str
+writePromptFile path prompt =
+  match writeFile path prompt {
+    Ok written -> "",
+    Err message -> textConcat ["prompt-write-error:", message]
+  }
+
 taskInObjective : SwarmTask -> Bool
 taskInObjective task = task.objectiveId == objectiveId
 
@@ -457,24 +470,25 @@ codexReasoningConfig = textConcat ["model_reasoning_effort=\"", agentReasoning, 
 templateReplace : Str -> Str -> Str -> Str
 templateReplace value needle replacement = textJoin replacement (textSplit value needle)
 
-renderAgentCommandArg : Str -> Str -> Str -> Str -> Str -> Str
-renderAgentCommandArg role schemaPath reportPath prompt value = {
+renderAgentCommandArg : Str -> Str -> Str -> Str -> Str -> Str -> Str
+renderAgentCommandArg role schemaPath reportPath promptPath prompt value = {
   let rendered0 = templateReplace value "{role}" role in
   let rendered1 = templateReplace rendered0 "{schema_path}" schemaPath in
   let rendered2 = templateReplace rendered1 "{report_path}" reportPath in
-  let rendered3 = templateReplace rendered2 "{prompt}" prompt in
-  let rendered4 = templateReplace rendered3 "{workspace_root}" workspaceRoot in
-  let rendered5 = templateReplace rendered4 "{agent_bin}" agentBin in
-  let rendered6 = templateReplace rendered5 "{model}" agentModel in
-  let rendered7 = templateReplace rendered6 "{reasoning}" agentReasoning in
-  templateReplace rendered7 "{sandbox}" agentSandbox
+  let rendered3 = templateReplace rendered2 "{prompt_path}" promptPath in
+  let rendered4 = templateReplace rendered3 "{prompt}" prompt in
+  let rendered5 = templateReplace rendered4 "{workspace_root}" workspaceRoot in
+  let rendered6 = templateReplace rendered5 "{agent_bin}" agentBin in
+  let rendered7 = templateReplace rendered6 "{model}" agentModel in
+  let rendered8 = templateReplace rendered7 "{reasoning}" agentReasoning in
+  templateReplace rendered8 "{sandbox}" agentSandbox
 }
 
-renderAgentCommand : Str -> Str -> Str -> Str -> [Str]
-renderAgentCommand role schemaPath reportPath prompt = {
+renderAgentCommand : Str -> Str -> Str -> Str -> Str -> [Str]
+renderAgentCommand role schemaPath reportPath promptPath prompt = {
   let mut rendered = emptyTexts;
   for arg in agentCommandTemplate {
-    rendered = append rendered [renderAgentCommandArg role schemaPath reportPath prompt arg];
+    rendered = append rendered [renderAgentCommandArg role schemaPath reportPath promptPath prompt arg];
     rendered
   };
   rendered
@@ -502,21 +516,21 @@ codexCommandDefault schemaPath reportPath prompt = [
   prompt
 ]
 
-agentCommand : Str -> Str -> Str -> Str -> [Str]
-agentCommand role schemaPath reportPath prompt =
+agentCommand : Str -> Str -> Str -> Str -> Str -> [Str]
+agentCommand role schemaPath reportPath promptPath prompt =
   if length agentCommandTemplate > 0 then
-    renderAgentCommand role schemaPath reportPath prompt
+    renderAgentCommand role schemaPath reportPath promptPath prompt
   else
     codexCommandDefault schemaPath reportPath prompt
 
 codexCommand : Str -> Str -> Str -> [Str]
-codexCommand schemaPath reportPath prompt = agentCommand "agent" schemaPath reportPath prompt
+codexCommand schemaPath reportPath prompt = agentCommand "agent" schemaPath reportPath "" prompt
 
 builderCommand : Int -> SwarmCommand
-builderCommand attempt = commandSpec "." (agentCommand "builder" builderSchemaPath (builderReportPath attempt) (builderPrompt attempt))
+builderCommand attempt = commandSpec "." (agentCommand "builder" builderSchemaPath (builderReportPath attempt) (builderPromptPath attempt) (builderPrompt attempt))
 
 verifierCommand : Int -> SwarmCommand
-verifierCommand attempt = commandSpec "." (agentCommand "verifier" verifierSchemaPath (verifierReportPath attempt) (verifierPrompt attempt))
+verifierCommand attempt = commandSpec "." (agentCommand "verifier" verifierSchemaPath (verifierReportPath attempt) (verifierPromptPath attempt) (verifierPrompt attempt))
 
 ensureLoopReady : Str
 ensureLoopReady =
@@ -625,28 +639,32 @@ runVerifierAttempt attempt = {
       Err message ->
         continueAfterFailure attempt (syntheticFailureReport "verifier lease failed" message),
       Ok leaseValue ->
-        match verifierRun (verifierHandle attempt) "autonomous-confidence" (verifierCommand attempt) {
-          Err message ->
-            continueAfterFailure attempt (syntheticFailureReport "verifier run failed" message),
-          Ok runValue ->
-            match complete (verifierHandle attempt) {
-              Err message ->
-                continueAfterFailure attempt (syntheticFailureReport "verifier completion failed" message),
-              Ok completedValue ->
-                if fileExists (verifierReportPath attempt) then {
-                  let report = readVerifierReport attempt in
-                  if report.verdict == "pass" then
-                    finishAfterApproval attempt report
-                  else
-                    continueAfterFailure attempt report
-                } else
-                  continueAfterFailure
-                    attempt
-                    (syntheticFailureReport
-                      "verifier step failed before producing a durable report"
-                      runValue.stderrArtifactPath)
-            }
-        }
+        let promptError = writePromptFile (verifierPromptPath attempt) (verifierPrompt attempt) in
+        if promptError != "" then
+          continueAfterFailure attempt (syntheticFailureReport "verifier prompt write failed" promptError)
+        else
+          match verifierRun (verifierHandle attempt) "autonomous-confidence" (verifierCommand attempt) {
+            Err message ->
+              continueAfterFailure attempt (syntheticFailureReport "verifier run failed" message),
+            Ok runValue ->
+              match complete (verifierHandle attempt) {
+                Err message ->
+                  continueAfterFailure attempt (syntheticFailureReport "verifier completion failed" message),
+                Ok completedValue ->
+                  if fileExists (verifierReportPath attempt) then {
+                    let report = readVerifierReport attempt in
+                    if report.verdict == "pass" then
+                      finishAfterApproval attempt report
+                    else
+                      continueAfterFailure attempt report
+                  } else
+                    continueAfterFailure
+                      attempt
+                      (syntheticFailureReport
+                        "verifier step failed before producing a durable report"
+                        runValue.stderrArtifactPath)
+              }
+          }
     }
 }
 
@@ -670,33 +688,36 @@ runBuilderAttempt attempt = {
           Err message ->
             continueAfterFailure attempt (syntheticFailureReport "builder lease failed" message),
           Ok leaseValue ->
-            match toolRun (builderHandle attempt) (builderCommand attempt) {
-              Err message ->
-                continueAfterFailure attempt (syntheticFailureReport "builder run failed" message),
-              Ok runValue ->
-                match complete (builderHandle attempt) {
-                  Err message ->
-                    continueAfterFailure attempt (syntheticFailureReport "builder completion failed" message),
-                  Ok completedValue ->
-                    if fileExists (builderReportPath attempt) then {
-                      let readyError = verifyTaskReady attempt in
-                      if readyError != "" then
-                        continueAfterFailure attempt (syntheticFailureReport "verifier task did not become ready" readyError)
-                      else
-                        runVerifierAttempt attempt
-                    } else
-                      continueAfterFailure
-                        attempt
-                        (syntheticFailureReport
-                          "builder step failed before producing a durable report"
-                          runValue.stderrArtifactPath)
-                }
-            }
+            let promptError = writePromptFile (builderPromptPath attempt) (builderPrompt attempt) in
+            if promptError != "" then
+              continueAfterFailure attempt (syntheticFailureReport "builder prompt write failed" promptError)
+            else
+              match toolRun (builderHandle attempt) (builderCommand attempt) {
+                Err message ->
+                  continueAfterFailure attempt (syntheticFailureReport "builder run failed" message),
+                Ok runValue ->
+                  match complete (builderHandle attempt) {
+                    Err message ->
+                      continueAfterFailure attempt (syntheticFailureReport "builder completion failed" message),
+                    Ok completedValue ->
+                      if fileExists (builderReportPath attempt) then {
+                        let readyError = verifyTaskReady attempt in
+                        if readyError != "" then
+                          continueAfterFailure attempt (syntheticFailureReport "verifier task did not become ready" readyError)
+                        else
+                          runVerifierAttempt attempt
+                      } else
+                        continueAfterFailure
+                          attempt
+                          (syntheticFailureReport
+                            "builder step failed before producing a durable report"
+                            runValue.stderrArtifactPath)
+                  }
+              }
         }
     }
   }
 }
-
 attemptLimitForState : AttemptStatus -> Int
 attemptLimitForState state =
   if state.maxAttempts == 0 then

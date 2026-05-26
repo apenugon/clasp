@@ -42,6 +42,7 @@ require_pattern "scripts/test-agent-command-template.sh" 'native-clasp-local-age
 require_pattern "scripts/test-agent-command-template.sh" 'CLASP_AGENT_COMMAND_TEMPLATE_NATIVE'
 require_pattern "scripts/test-agent-command-template.sh" 'examples/swarm-native/FeedbackLoop.clasp'
 require_pattern "scripts/test-agent-command-template.sh" 'examples/swarm-native/LocalAgent.clasp'
+require_pattern "examples/swarm-native/FeedbackLoop.clasp" '{prompt_path}'
 require_pattern "scripts/verify-all.sh" 'CLASP_AGENT_COMMAND_TEMPLATE_FEEDBACK=0 CLASP_AGENT_COMMAND_TEMPLATE_NATIVE=1 bash scripts/test-agent-command-template.sh'
 require_pattern "scripts/verify-all.sh" 'bash scripts/test-goal-manager-agent-command-template.sh'
 require_pattern "scripts/test-goal-manager-agent-command-template.sh" 'goal-manager-agent-command-template-ok'
