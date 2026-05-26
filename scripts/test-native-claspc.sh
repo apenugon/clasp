@@ -1922,9 +1922,10 @@ printf '%s\n' "$swarm_sqlite_task_plan_output" | grep -F '"ready":true' >/dev/nu
 swarm_sqlite_task_repair_output="$("$claspc_bin" --json swarm task create "$swarm_sqlite_state_root" appbench repair-2 --detail 'Repair runtime path' --depends-on plan --max-runs 1)"
 printf '%s\n' "$swarm_sqlite_task_repair_output" | grep -F '"taskId":"repair-2"' >/dev/null
 printf '%s\n' "$swarm_sqlite_task_repair_output" | grep -F '"ready":false' >/dev/null
-swarm_sqlite_policy_output="$("$claspc_bin" --json swarm policy set "$swarm_sqlite_state_root" repair-2 trunk --require-approval merge-ready --require-verifier native-smoke)"
+swarm_sqlite_policy_output="$("$claspc_bin" --json swarm policy set "$swarm_sqlite_state_root" repair-2 trunk --require-approval merge-ready --require-verifier native-smoke --allow-process bash)"
 printf '%s\n' "$swarm_sqlite_policy_output" | grep -F '"taskId":"repair-2"' >/dev/null
 printf '%s\n' "$swarm_sqlite_policy_output" | grep -F '"mergegateName":"trunk"' >/dev/null
+printf '%s\n' "$swarm_sqlite_policy_output" | grep -F '"allowedProcesses":["bash"]' >/dev/null
 swarm_sqlite_manager_initial_output="$("$claspc_bin" --json swarm manager next "$swarm_sqlite_state_root" appbench)"
 printf '%s\n' "$swarm_sqlite_manager_initial_output" | grep -F '"action":"run-task"' >/dev/null
 printf '%s\n' "$swarm_sqlite_manager_initial_output" | grep -F '"taskId":"plan"' >/dev/null
@@ -1962,6 +1963,12 @@ printf '%s\n' "$swarm_sqlite_manager_after_repair_output" | grep -F '"mergegateV
 swarm_sqlite_wrong_completed_verifier_marker="$test_root_abs/swarm-sqlite-wrong-completed-verifier.marker"
 expect_command_failure_contains 'lease is owned by `manager`' env CLASP_SWARM_ACTOR=intruder "$claspc_bin" --json swarm verifier run "$swarm_sqlite_state_root" repair-2 native-smoke --cwd "$project_root" -- bash -lc 'printf wrong-completed-verifier > "$1"' bash "$swarm_sqlite_wrong_completed_verifier_marker"
 [[ ! -e "$swarm_sqlite_wrong_completed_verifier_marker" ]]
+swarm_sqlite_denied_process_marker="$test_root_abs/swarm-sqlite-denied-process.marker"
+expect_command_failure_contains 'process `sh` is not allowed by task policy' env CLASP_SWARM_ACTOR=manager "$claspc_bin" --json swarm verifier run "$swarm_sqlite_state_root" repair-2 native-smoke --cwd "$project_root" -- sh -c 'printf denied-process > "$1"' sh "$swarm_sqlite_denied_process_marker"
+[[ ! -e "$swarm_sqlite_denied_process_marker" ]]
+swarm_sqlite_process_policy_tail_output="$("$claspc_bin" --json swarm tail "$swarm_sqlite_state_root" repair-2 --limit 5)"
+printf '%s\n' "$swarm_sqlite_process_policy_tail_output" | grep -F '"kind":"process_permission_denied"' >/dev/null
+printf '%s\n' "$swarm_sqlite_process_policy_tail_output" | grep -F '"processName":"sh"' >/dev/null
 swarm_sqlite_repair_verifier_output="$(CLASP_SWARM_ACTOR=manager "$claspc_bin" --json swarm verifier run "$swarm_sqlite_state_root" repair-2 native-smoke --cwd "$project_root" -- bash -lc 'printf verifier-ok')"
 printf '%s\n' "$swarm_sqlite_repair_verifier_output" | grep -F '"taskId":"repair-2"' >/dev/null
 swarm_sqlite_manager_after_verifier_output="$("$claspc_bin" --json swarm manager next "$swarm_sqlite_state_root" appbench)"

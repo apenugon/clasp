@@ -21,6 +21,7 @@ foreign swarmObjectivesRaw : Str -> Result Str = "swarmObjectivesJson"
 foreign swarmTaskCreateRaw : Str -> Str -> Str -> Str -> [Str] -> Int -> Int -> Result Str = "swarmTaskCreateJson"
 foreign swarmTaskCreateWithDeadlineRaw : Str -> Str -> Str -> Str -> [Str] -> Int -> Int -> Int -> Result Str = "swarmTaskCreateWithDeadlineJson"
 foreign swarmPolicySetRaw : Str -> Str -> Str -> [Str] -> [Str] -> Result Str = "swarmPolicySetJson"
+foreign swarmPolicySetWithProcessAccessRaw : Str -> Str -> Str -> [Str] -> [Str] -> [Str] -> Result Str = "swarmPolicySetWithProcessAccessJson"
 foreign swarmToolRunRaw : Str -> Str -> Str -> Str -> [Str] -> Result Str = "swarmToolRunJson"
 foreign swarmToolRunWithTimeoutRaw : Str -> Str -> Str -> Str -> Int -> [Str] -> Result Str = "swarmToolRunWithTimeoutJson"
 foreign swarmToolRunWithLimitsRaw : Str -> Str -> Str -> Str -> Int -> Int -> [Str] -> Result Str = "swarmToolRunWithLimitsJson"
@@ -86,6 +87,7 @@ record SwarmPolicy = {
   mergegateName : Str,
   requiredApprovals : [Str],
   requiredVerifiers : [Str],
+  allowedProcesses : [Str],
   updatedAtMs : Int
 }
 
@@ -674,6 +676,10 @@ tasks root = taskListResult (swarmTasksRaw root.path)
 policySet : TaskHandle -> Str -> [Str] -> [Str] -> Result SwarmPolicy
 policySet handle mergegateName requiredApprovals requiredVerifiers =
   policyResult (swarmPolicySetRaw handle.root.path handle.taskId mergegateName requiredApprovals requiredVerifiers)
+
+policySetWithProcessAccess : TaskHandle -> Str -> [Str] -> [Str] -> [Str] -> Result SwarmPolicy
+policySetWithProcessAccess handle mergegateName requiredApprovals requiredVerifiers allowedProcesses =
+  policyResult (swarmPolicySetWithProcessAccessRaw handle.root.path handle.taskId mergegateName requiredApprovals requiredVerifiers allowedProcesses)
 
 toolRun : TaskHandle -> SwarmCommand -> Result SwarmRun
 toolRun handle spec =
@@ -1272,6 +1278,10 @@ executeVerificationPlanWithOptionalLimits handle plan timeoutMs memoryLimitMb ma
 policySetForVerificationPlan : TaskHandle -> Str -> [Str] -> VerificationPlan -> Result SwarmPolicy
 policySetForVerificationPlan handle mergegateName requiredApprovals plan =
   policySet handle mergegateName requiredApprovals plan.requiredVerifierNames
+
+policySetForVerificationPlanWithProcessAccess : TaskHandle -> Str -> [Str] -> VerificationPlan -> [Str] -> Result SwarmPolicy
+policySetForVerificationPlanWithProcessAccess handle mergegateName requiredApprovals plan allowedProcesses =
+  policySetWithProcessAccess handle mergegateName requiredApprovals plan.requiredVerifierNames allowedProcesses
 
 mergegateDecideVerificationPlan : TaskHandle -> Str -> VerificationPlan -> Result SwarmMergeDecision
 mergegateDecideVerificationPlan handle mergegateName plan =

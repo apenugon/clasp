@@ -136,6 +136,7 @@ struct SwarmMergePolicyRecord {
     mergegate_name: String,
     required_approvals_json: String,
     required_verifiers_json: String,
+    allowed_processes_json: String,
     created_at_ms: i64,
     updated_at_ms: i64,
 }
@@ -217,6 +218,7 @@ enum SwarmCommand {
         mergegate_name: String,
         required_approvals: Vec<String>,
         required_verifiers: Vec<String>,
+        allowed_processes: Vec<String>,
     },
     ManagerNext { root: PathBuf, objective_id: String },
     ToolRun {
@@ -858,13 +860,13 @@ fn parse_swarm_command(args: &[String]) -> Result<Option<(bool, SwarmCommand)>, 
         "policy" => {
             if rest.first().map(|value| value.as_str()) != Some("set") {
                 return Err(
-                    "usage: claspc swarm policy set <state-root> <task-id> <mergegate-name> [--require-approval NAME]... [--require-verifier NAME]..."
+                    "usage: claspc swarm policy set <state-root> <task-id> <mergegate-name> [--require-approval NAME]... [--require-verifier NAME]... [--allow-process NAME]..."
                         .to_owned(),
                 );
             }
             if rest.len() < 4 {
                 return Err(
-                    "usage: claspc swarm policy set <state-root> <task-id> <mergegate-name> [--require-approval NAME]... [--require-verifier NAME]..."
+                    "usage: claspc swarm policy set <state-root> <task-id> <mergegate-name> [--require-approval NAME]... [--require-verifier NAME]... [--allow-process NAME]..."
                         .to_owned(),
                 );
             }
@@ -873,6 +875,7 @@ fn parse_swarm_command(args: &[String]) -> Result<Option<(bool, SwarmCommand)>, 
             let mergegate_name = rest[3].clone();
             let mut required_approvals = Vec::new();
             let mut required_verifiers = Vec::new();
+            let mut allowed_processes = Vec::new();
             let mut index = 4usize;
             while index < rest.len() {
                 match rest[index].as_str() {
@@ -890,6 +893,13 @@ fn parse_swarm_command(args: &[String]) -> Result<Option<(bool, SwarmCommand)>, 
                         required_verifiers.push(value.clone());
                         index += 2;
                     }
+                    "--allow-process" => {
+                        let Some(value) = rest.get(index + 1) else {
+                            return Err("missing value after --allow-process".to_owned());
+                        };
+                        allowed_processes.push(value.clone());
+                        index += 2;
+                    }
                     other => return Err(format!("unknown option `{other}`")),
                 }
             }
@@ -899,6 +909,7 @@ fn parse_swarm_command(args: &[String]) -> Result<Option<(bool, SwarmCommand)>, 
                 mergegate_name,
                 required_approvals,
                 required_verifiers,
+                allowed_processes,
             }
         }
         "manager" => {
@@ -1123,6 +1134,7 @@ fn open_swarm_connection(root: &Path) -> Result<(SwarmRuntimePaths, Connection),
               mergegate_name TEXT NOT NULL,
               required_approvals_json TEXT NOT NULL DEFAULT '[]',
               required_verifiers_json TEXT NOT NULL DEFAULT '[]',
+              allowed_processes_json TEXT NOT NULL DEFAULT '[]',
               created_at_ms INTEGER NOT NULL,
               updated_at_ms INTEGER NOT NULL
             );
@@ -1134,6 +1146,12 @@ fn open_swarm_connection(root: &Path) -> Result<(SwarmRuntimePaths, Connection),
         "swarm_runs",
         "memory_limit_mb",
         "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    ensure_table_column(
+        &connection,
+        "swarm_merge_policies",
+        "allowed_processes_json",
+        "TEXT NOT NULL DEFAULT '[]'",
     )?;
     Ok((paths, connection))
 }
@@ -1393,7 +1411,7 @@ fn load_merge_policy(connection: &Connection, task_id: &str) -> Result<Option<Sw
     connection
         .query_row(
             "
-            SELECT task_id, mergegate_name, required_approvals_json, required_verifiers_json, created_at_ms, updated_at_ms
+            SELECT task_id, mergegate_name, required_approvals_json, required_verifiers_json, allowed_processes_json, created_at_ms, updated_at_ms
             FROM swarm_merge_policies
             WHERE task_id = ?1
             ",
@@ -1404,8 +1422,9 @@ fn load_merge_policy(connection: &Connection, task_id: &str) -> Result<Option<Sw
                     mergegate_name: row.get(1)?,
                     required_approvals_json: row.get(2)?,
                     required_verifiers_json: row.get(3)?,
-                    created_at_ms: row.get(4)?,
-                    updated_at_ms: row.get(5)?,
+                    allowed_processes_json: row.get(4)?,
+                    created_at_ms: row.get(5)?,
+                    updated_at_ms: row.get(6)?,
                 })
             },
         )
@@ -1419,6 +1438,7 @@ fn store_merge_policy(
     mergegate_name: &str,
     required_approvals: &[String],
     required_verifiers: &[String],
+    allowed_processes: &[String],
 ) -> Result<SwarmMergePolicyRecord, String> {
     if load_task_state(connection, task_id)?.is_none() {
         return Err(format!("unknown swarm task `{task_id}`"));
@@ -1431,16 +1451,19 @@ fn store_merge_policy(
         serde_json::to_string(required_approvals).map_err(|err| format!("failed to encode required approvals: {err}"))?;
     let required_verifiers_json =
         serde_json::to_string(required_verifiers).map_err(|err| format!("failed to encode required verifiers: {err}"))?;
+    let allowed_processes_json =
+        serde_json::to_string(allowed_processes).map_err(|err| format!("failed to encode allowed processes: {err}"))?;
     connection
         .execute(
             "
             INSERT INTO swarm_merge_policies (
-              task_id, mergegate_name, required_approvals_json, required_verifiers_json, created_at_ms, updated_at_ms
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+              task_id, mergegate_name, required_approvals_json, required_verifiers_json, allowed_processes_json, created_at_ms, updated_at_ms
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
             ON CONFLICT(task_id) DO UPDATE SET
               mergegate_name = excluded.mergegate_name,
               required_approvals_json = excluded.required_approvals_json,
               required_verifiers_json = excluded.required_verifiers_json,
+              allowed_processes_json = excluded.allowed_processes_json,
               updated_at_ms = excluded.updated_at_ms
             ",
             params![
@@ -1448,6 +1471,7 @@ fn store_merge_policy(
                 mergegate_name,
                 required_approvals_json,
                 required_verifiers_json,
+                allowed_processes_json,
                 created_at_ms,
                 updated_at_ms
             ],
@@ -1458,6 +1482,7 @@ fn store_merge_policy(
         mergegate_name: mergegate_name.to_owned(),
         required_approvals_json,
         required_verifiers_json,
+        allowed_processes_json,
         created_at_ms,
         updated_at_ms,
     })
@@ -2663,6 +2688,7 @@ fn merge_policy_status_json(connection: &Connection, task_id: &str) -> Result<Op
     };
     let required_approvals = decode_string_list(&policy.required_approvals_json);
     let required_verifiers = decode_string_list(&policy.required_verifiers_json);
+    let allowed_processes = decode_string_list(&policy.allowed_processes_json);
     let granted_approvals = granted_approval_names(connection, task_id)?;
     let missing_approvals = required_approvals
         .iter()
@@ -2717,6 +2743,7 @@ fn merge_policy_status_json(connection: &Connection, task_id: &str) -> Result<Op
         "requiredVerifiers": verifier_states,
         "missingVerifiers": missing_verifiers,
         "failedVerifiers": failed_verifiers,
+        "allowedProcesses": allowed_processes,
         "mergegate": mergegate_payload.unwrap_or_else(|| json!({
             "mergegateName": policy.mergegate_name,
             "verdict": "missing",
@@ -4080,6 +4107,62 @@ fn run_command_with_timeout_to_artifacts(
     })
 }
 
+fn command_process_name(command: &[String]) -> String {
+    let executable = command.first().map(String::as_str).unwrap_or_default();
+    Path::new(executable)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or(executable)
+        .to_owned()
+}
+
+fn process_allowed_by_policy(allowed_processes: &[String], command: &[String]) -> bool {
+    if allowed_processes.is_empty() {
+        return true;
+    }
+    let executable = command.first().map(String::as_str).unwrap_or_default();
+    let process_name = command_process_name(command);
+    allowed_processes
+        .iter()
+        .any(|allowed| allowed == executable || allowed == &process_name)
+}
+
+fn enforce_process_policy(
+    connection: &mut Connection,
+    task_id: &str,
+    actor: &str,
+    role: &str,
+    name: &str,
+    command: &[String],
+) -> Result<(), String> {
+    let Some(policy) = load_merge_policy(connection, task_id)? else {
+        return Ok(());
+    };
+    let allowed_processes = decode_string_list(&policy.allowed_processes_json);
+    if process_allowed_by_policy(&allowed_processes, command) {
+        return Ok(());
+    }
+    let process_name = command_process_name(command);
+    let _ = record_swarm_event(
+        connection,
+        "process_permission_denied",
+        task_id,
+        actor,
+        &format!("Denied {role} `{name}` process `{process_name}` by task policy."),
+        json!({
+            "role": role,
+            "name": name,
+            "command": command,
+            "processName": process_name,
+            "allowedProcesses": allowed_processes,
+            "mergegateName": policy.mergegate_name,
+        }),
+    );
+    Err(format!(
+        "swarm task `{task_id}` cannot run {role} `{name}`: process `{process_name}` is not allowed by task policy"
+    ))
+}
+
 fn run_native_command(
     connection: &mut Connection,
     paths: &SwarmRuntimePaths,
@@ -4114,6 +4197,8 @@ fn run_native_command(
             }
         }
     }
+
+    enforce_process_policy(connection, task_id, actor, role, name, command)?;
 
     let memory_limit_mb_value = memory_limit_mb.unwrap_or(0);
     let run_id = insert_run(connection, task_id, role, actor, name, cwd, command, memory_limit_mb_value)?;
@@ -4832,8 +4917,33 @@ fn execute_policy_set(
     required_approvals: &[String],
     required_verifiers: &[String],
 ) -> Result<Value, String> {
+    execute_policy_set_with_process_access(
+        root,
+        task_id,
+        mergegate_name,
+        required_approvals,
+        required_verifiers,
+        &[],
+    )
+}
+
+fn execute_policy_set_with_process_access(
+    root: &Path,
+    task_id: &str,
+    mergegate_name: &str,
+    required_approvals: &[String],
+    required_verifiers: &[String],
+    allowed_processes: &[String],
+) -> Result<Value, String> {
     let (_paths, mut connection) = open_swarm_connection(root)?;
-    let policy = store_merge_policy(&connection, task_id, mergegate_name, required_approvals, required_verifiers)?;
+    let policy = store_merge_policy(
+        &connection,
+        task_id,
+        mergegate_name,
+        required_approvals,
+        required_verifiers,
+        allowed_processes,
+    )?;
     let _ = record_swarm_event(
         &mut connection,
         "merge_policy_set",
@@ -4844,6 +4954,7 @@ fn execute_policy_set(
             "mergegateName": mergegate_name,
             "requiredApprovals": required_approvals,
             "requiredVerifiers": required_verifiers,
+            "allowedProcesses": allowed_processes,
         }),
     );
     Ok(json!({
@@ -4851,6 +4962,7 @@ fn execute_policy_set(
         "mergegateName": policy.mergegate_name,
         "requiredApprovals": decode_string_list(&policy.required_approvals_json),
         "requiredVerifiers": decode_string_list(&policy.required_verifiers_json),
+        "allowedProcesses": decode_string_list(&policy.allowed_processes_json),
         "createdAtMs": policy.created_at_ms,
         "updatedAtMs": policy.updated_at_ms,
     }))
@@ -5132,9 +5244,16 @@ fn execute_command(command: SwarmCommand) -> Result<(ExitCode, Value), String> {
             ExitCode::SUCCESS,
             execute_task_create(&root, &objective_id, &task_id, &detail, &dependencies, max_runs, deadline_at_ms, lease_timeout_ms)?,
         )),
-        SwarmCommand::PolicySet { root, task_id, mergegate_name, required_approvals, required_verifiers } => Ok((
+        SwarmCommand::PolicySet { root, task_id, mergegate_name, required_approvals, required_verifiers, allowed_processes } => Ok((
             ExitCode::SUCCESS,
-            execute_policy_set(&root, &task_id, &mergegate_name, &required_approvals, &required_verifiers)?,
+            execute_policy_set_with_process_access(
+                &root,
+                &task_id,
+                &mergegate_name,
+                &required_approvals,
+                &required_verifiers,
+                &allowed_processes,
+            )?,
         )),
         SwarmCommand::MemoryPut { root, objective_id, task_id, actor, key, value } => Ok((
             ExitCode::SUCCESS,
@@ -5391,6 +5510,24 @@ pub fn builtin_swarm_policy_set(
         mergegate_name,
         required_approvals,
         required_verifiers,
+    )?)
+}
+
+pub fn builtin_swarm_policy_set_with_process_access(
+    root: &str,
+    task_id: &str,
+    mergegate_name: &str,
+    required_approvals: &[String],
+    required_verifiers: &[String],
+    allowed_processes: &[String],
+) -> Result<String, String> {
+    render_builtin_json(execute_policy_set_with_process_access(
+        Path::new(root),
+        task_id,
+        mergegate_name,
+        required_approvals,
+        required_verifiers,
+        allowed_processes,
     )?)
 }
 
@@ -5772,6 +5909,102 @@ mod tests {
             )
             .expect("count mergegate events");
         assert_eq!(event_count, 1);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn swarm_policy_process_allowlist_blocks_unapproved_commands() {
+        let root = unique_root("process-policy");
+        let root_text = root.to_string_lossy().to_string();
+        assert_eq!(
+            maybe_run_swarm(&vec![
+                "claspc".to_owned(),
+                "swarm".to_owned(),
+                "bootstrap".to_owned(),
+                root_text.clone(),
+                "repair".to_owned()
+            ]),
+            Some(ExitCode::SUCCESS)
+        );
+        assert_eq!(
+            maybe_run_swarm(&vec![
+                "claspc".to_owned(),
+                "swarm".to_owned(),
+                "lease".to_owned(),
+                root_text.clone(),
+                "repair".to_owned()
+            ]),
+            Some(ExitCode::SUCCESS)
+        );
+
+        let (policy_code, policy_json_text) = run_swarm_json_command(&vec![
+            "policy".to_owned(),
+            "set".to_owned(),
+            root_text.clone(),
+            "repair".to_owned(),
+            "trunk".to_owned(),
+            "--require-verifier".to_owned(),
+            "native-smoke".to_owned(),
+            "--allow-process".to_owned(),
+            "bash".to_owned(),
+        ])
+        .expect("set process policy");
+        assert_eq!(policy_code, 0);
+        let policy_json: Value = serde_json::from_str(&policy_json_text).expect("decode policy json");
+        assert_eq!(policy_json.get("allowedProcesses"), Some(&json!(["bash"])));
+
+        let denied_args = vec![
+            "claspc".to_owned(),
+            "swarm".to_owned(),
+            "verifier".to_owned(),
+            "run".to_owned(),
+            root_text.clone(),
+            "repair".to_owned(),
+            "native-smoke".to_owned(),
+            "--".to_owned(),
+            "sh".to_owned(),
+            "-c".to_owned(),
+            "printf denied".to_owned(),
+        ];
+        assert_eq!(maybe_run_swarm(&denied_args), Some(ExitCode::from(1)));
+
+        let allowed_args = vec![
+            "claspc".to_owned(),
+            "swarm".to_owned(),
+            "verifier".to_owned(),
+            "run".to_owned(),
+            root_text.clone(),
+            "repair".to_owned(),
+            "native-smoke".to_owned(),
+            "--".to_owned(),
+            "bash".to_owned(),
+            "-lc".to_owned(),
+            "printf ok".to_owned(),
+        ];
+        assert_eq!(maybe_run_swarm(&allowed_args), Some(ExitCode::SUCCESS));
+
+        let connection = Connection::open(runtime_paths(&root).db_path).expect("open sqlite db");
+        let run_count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM swarm_runs WHERE task_id = 'repair'", [], |row| row.get(0))
+            .expect("count runs");
+        assert_eq!(run_count, 1);
+        let denied_events: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM swarm_events WHERE task_id = 'repair' AND kind = 'process_permission_denied'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count denied events");
+        assert_eq!(denied_events, 1);
+        let policy_json: String = connection
+            .query_row(
+                "SELECT allowed_processes_json FROM swarm_merge_policies WHERE task_id = 'repair'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("load allowed processes");
+        assert_eq!(policy_json, "[\"bash\"]");
 
         let _ = fs::remove_dir_all(root);
     }

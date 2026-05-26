@@ -281,9 +281,13 @@ Native swarm tool and verifier runs now also accept a `--memory-mb` limit and ex
 
 The native feedback loop and managed-loop helpers now consume that surface directly. `CLASP_LOOP_AGENT_MEMORY_MB_JSON` defaults builder and verifier attempts to an 8 GiB cap, with `CLASP_LOOP_BUILDER_MEMORY_MB_JSON` and `CLASP_LOOP_VERIFIER_MEMORY_MB_JSON` available for role-specific overrides; GoalManager propagates those settings into child loops. Memory limits are part of the ordinary Clasp run configuration rather than a shell-only launcher concern.
 
+Native merge policies can now also carry a task-local process allowlist through `claspc swarm policy set --allow-process ...` and ordinary Clasp `policySetWithProcessAccess`. Tool and verifier runs outside that executable allowlist are rejected before spawn and audited as `process_permission_denied` events. This is the first process-permission slice; filesystem, network, and richer capability policies remain follow-on work.
+
 The modular GoalManager default planner path is shell-free as well: it still writes the durable planner prompt artifact for inspection, but passes the prompt directly to the configured agent command instead of wrapping Codex in a `bash -c` stdin shim. Agent templates can consume either `{prompt}` or `{prompt_path}`.
 
 GoalManager cache-miss compiles are now expected to run under the managed-job memory guard by default. A missing or stale binary should fail inside a bounded cgroup and fall back only through the explicit stale-binary path; it should not be able to consume unbounded VM memory while rebuilding the native manager image. The default guard keeps an 8 GiB compile cap but now reserves 32 GiB of host memory before continuing. The large GoalManager image is intentionally outside the promoted source-export cache refresh path; promoting it made ordinary verification depend on a 30 GiB-class native-image build.
+
+Promoted source-export cache refreshes also force fresh native-image module declaration workers by default. That keeps generated-image refreshes from retaining all compiler state in one long-lived `claspc` process and lets the managed memory guard bound the refresh without approaching VM-wide OOM.
 
 ## Required Safety / Governance Features
 
