@@ -30,6 +30,8 @@ foreign swarmApprovalsRaw : Str -> Str -> Result Str = "swarmApprovalsJson"
 foreign swarmMergegateDecideRaw : Str -> Str -> Str -> Str -> [Str] -> Result Str = "swarmMergegateDecideJson"
 foreign swarmRunsRaw : Str -> Str -> Result Str = "swarmRunsJson"
 foreign swarmArtifactsRaw : Str -> Str -> Result Str = "swarmArtifactsJson"
+foreign swarmMemoryPutRaw : Str -> Str -> Str -> Str -> Str -> Str -> Result Str = "swarmMemoryPutJson"
+foreign swarmMemoryQueryRaw : Str -> Str -> Str -> Str -> Int -> Result Str = "swarmMemoryQueryJson"
 foreign swarmHistoryRaw : Str -> Str -> Result Str = "swarmHistoryJson"
 foreign swarmTailRaw : Str -> Str -> Int -> Result Str = "swarmTailJson"
 foreign swarmTasksRaw : Str -> Result Str = "swarmTasksJson"
@@ -124,6 +126,17 @@ record SwarmArtifact = {
   path : Str
 }
 
+record SwarmMemory = {
+  actor : Str,
+  createdAtMs : Int,
+  memoryId : Int,
+  objectiveId : Str,
+  taskId : Str,
+  key : Str,
+  value : Str,
+  updatedAtMs : Int
+}
+
 record SwarmEvent = {
   actor : Str,
   atMs : Int,
@@ -183,6 +196,7 @@ record SwarmMailbox = {
   approvals : [SwarmApproval],
   runs : [SwarmRun],
   artifacts : [SwarmArtifact],
+  memory : [SwarmMemory],
   latestRunStatus : Str,
   latestRunName : Str,
   latestVerifierStatus : Str,
@@ -229,6 +243,7 @@ record VerificationPlanMailboxSummary = {
   approvalCount : Int,
   runCount : Int,
   artifactCount : Int,
+  memoryCount : Int,
   latestRunStatus : Str,
   latestRunName : Str,
   latestVerifierStatus : Str,
@@ -391,6 +406,12 @@ runListResultError message = Err message
 artifactListResultError : Str -> Result [SwarmArtifact]
 artifactListResultError message = Err message
 
+memoryResultError : Str -> Result SwarmMemory
+memoryResultError message = Err message
+
+memoryListResultError : Str -> Result [SwarmMemory]
+memoryListResultError message = Err message
+
 eventListResultError : Str -> Result [SwarmEvent]
 eventListResultError message = Err message
 
@@ -504,6 +525,18 @@ artifactListResult : Result Str -> Result [SwarmArtifact]
 artifactListResult value = match value {
   Ok raw -> Ok (decode [SwarmArtifact] raw),
   Err message -> artifactListResultError message
+}
+
+memoryResult : Result Str -> Result SwarmMemory
+memoryResult value = match value {
+  Ok raw -> Ok (decode SwarmMemory raw),
+  Err message -> memoryResultError message
+}
+
+memoryListResult : Result Str -> Result [SwarmMemory]
+memoryListResult value = match value {
+  Ok raw -> Ok (decode [SwarmMemory] raw),
+  Err message -> memoryListResultError message
 }
 
 eventListResult : Result Str -> Result [SwarmEvent]
@@ -628,6 +661,30 @@ runs handle = runListResult (swarmRunsRaw handle.root.path handle.taskId)
 artifacts : TaskHandle -> Result [SwarmArtifact]
 artifacts handle = artifactListResult (swarmArtifactsRaw handle.root.path handle.taskId)
 
+memoryPut : SwarmRoot -> Str -> Str -> Str -> Str -> Str -> Result SwarmMemory
+memoryPut root objectiveId taskId actor key value =
+  memoryResult (swarmMemoryPutRaw root.path objectiveId taskId actor key value)
+
+memoryQuery : SwarmRoot -> Str -> Str -> Str -> Int -> Result [SwarmMemory]
+memoryQuery root objectiveId taskId key limit =
+  memoryListResult (swarmMemoryQueryRaw root.path objectiveId taskId key limit)
+
+objectiveMemoryPut : ObjectiveHandle -> Str -> Str -> Str -> Result SwarmMemory
+objectiveMemoryPut handle actor key value =
+  memoryPut handle.root handle.objectiveId "" actor key value
+
+objectiveMemory : ObjectiveHandle -> Str -> Int -> Result [SwarmMemory]
+objectiveMemory handle key limit =
+  memoryQuery handle.root handle.objectiveId "" key limit
+
+taskMemoryPut : TaskHandle -> Str -> Str -> Result SwarmMemory
+taskMemoryPut handle key value =
+  memoryPut handle.root "" handle.taskId handle.actor key value
+
+taskMemory : TaskHandle -> Str -> Int -> Result [SwarmMemory]
+taskMemory handle key limit =
+  memoryQuery handle.root "" handle.taskId key limit
+
 history : TaskHandle -> Result [SwarmEvent]
 history handle = eventListResult (swarmHistoryRaw handle.root.path handle.taskId)
 
@@ -703,6 +760,7 @@ verificationPlanMailboxSummary mailbox =
     approvalCount = length mailbox.approvals,
     runCount = length mailbox.runs,
     artifactCount = length mailbox.artifacts,
+    memoryCount = length mailbox.memory,
     latestRunStatus = mailbox.latestRunStatus,
     latestRunName = mailbox.latestRunName,
     latestVerifierStatus = mailbox.latestVerifierStatus,
@@ -723,17 +781,23 @@ taskMailbox handle limit =
                 Ok runsValue ->
                   match artifacts handle {
                     Ok artifactsValue ->
-                    Ok (SwarmMailbox {
-                      history = historyValue,
-                      tail = tailValue,
-                      approvals = approvalsValue,
-                      runs = runsValue,
-                      artifacts = artifactsValue,
-                      latestRunStatus = fold firstRunStatus "" runsValue,
-                      latestRunName = fold firstRunName "" runsValue,
-                      latestVerifierStatus = fold firstVerifierStatus "" runsValue,
-                      latestVerifier = fold firstVerifierName "" runsValue
-                    }),
+                      match taskMemory handle "" limit {
+                        Ok memoryValue ->
+                          Ok (SwarmMailbox {
+                            history = historyValue,
+                            tail = tailValue,
+                            approvals = approvalsValue,
+                            runs = runsValue,
+                            artifacts = artifactsValue,
+                            memory = memoryValue,
+                            latestRunStatus = fold firstRunStatus "" runsValue,
+                            latestRunName = fold firstRunName "" runsValue,
+                            latestVerifierStatus = fold firstVerifierStatus "" runsValue,
+                            latestVerifier = fold firstVerifierName "" runsValue
+                          }),
+                        Err message ->
+                          mailboxResultError message
+                      },
                     Err message ->
                       mailboxResultError message
                   },

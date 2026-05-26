@@ -254,6 +254,7 @@ const COMMANDS = {
   nativeClaspc: "bash scripts/test-native-claspc.sh",
   nativeRuntime: "bash scripts/test-native-runtime.sh",
   swarmReady: "bash scripts/test-swarm-ready-gate.sh",
+  swarmMemory: "bash scripts/test-swarm-memory.sh",
   monitoredLoop: "bash scripts/test-monitored-loop.sh",
   monitoredStep: "bash scripts/test-monitored-step.sh",
   monitoredRunLog: "bash scripts/test-monitored-run-log.sh",
@@ -781,6 +782,13 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
     const isBenchmarkCheckpoint = isBenchmarkCheckpointFile(file);
     const isBenchmarkPrepCache = isBenchmarkPrepCacheFile(file);
     const isPromotedSourceExportCache = isPromotedSourceExportCacheFile(file);
+    const isSwarmMemoryPath =
+      file === "runtime/swarm.rs" ||
+      file === "runtime/clasp_runtime.rs" ||
+      file === "examples/swarm-native/Swarm.clasp" ||
+      file === "examples/swarm-native/MemoryHarness.clasp" ||
+      file === "docs/autonomous-swarm-runtime-requirements.md" ||
+      file === "scripts/test-swarm-memory.sh";
 
     if (file.startsWith("src/") && !isPromotedSourceExportCache && !isSourceNativeVerifyScript) {
       matched = true;
@@ -864,6 +872,21 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
       addSelected(selectedByCommand, "native-claspc", COMMANDS.nativeClaspc, "runtime path", file);
     }
 
+    if (isSwarmMemoryPath) {
+      matched = true;
+      reason(file, "swarm-memory", "swarm memory paths use focused native CLI and ordinary Clasp API coverage");
+      if (file.endsWith(".sh")) {
+        addSelected(
+          selectedByCommand,
+          `bash-syntax:${file}`,
+          `bash -n ${shellQuote(file)}`,
+          "swarm memory shell syntax",
+          file,
+        );
+      }
+      addSelected(selectedByCommand, "swarm-memory", COMMANDS.swarmMemory, "swarm memory path", file);
+    }
+
     if (file === "scripts/test-int-builtins.sh") {
       matched = true;
       reason(file, "int-builtins-harness", "integer builtin harness uses shell syntax plus focused JS/native builtin coverage");
@@ -933,6 +956,7 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
       reason(file, "swarm-native", "native swarm example path uses native claspc, ready-gate, managed-loop, and FeedbackLoop coverage");
       addSelected(selectedByCommand, "native-claspc", COMMANDS.nativeClaspc, "swarm native path", file);
       addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "swarm native path", file);
+      addSelected(selectedByCommand, "swarm-memory", COMMANDS.swarmMemory, "swarm native path", file);
       addSelected(selectedByCommand, "monitored-loop", COMMANDS.monitoredLoop, "swarm native path", file);
       addSelected(selectedByCommand, "runtime-slice:managed-loop", COMMANDS.runtimeSliceManagedLoop, "swarm native path", file);
       addSelected(selectedByCommand, "runtime-slice:swarm-feedback-loop", COMMANDS.runtimeSliceSwarmFeedbackLoop, "swarm native path", file);

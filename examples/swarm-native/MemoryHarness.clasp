@@ -1,0 +1,92 @@
+module Main
+
+import Swarm
+
+record MemoryHarnessReport = {
+  objectiveMemory : SwarmMemory,
+  taskMemory : SwarmMemory,
+  objectiveValues : [Str],
+  taskValues : [Str],
+  allValues : [Str],
+  mailboxValues : [Str],
+  mailboxMemoryCount : Int
+}
+
+stateRootPath : Str
+stateRootPath =
+  if textJoin "" argv == "" then
+    "swarm-native-memory-state"
+  else
+    pathJoin argv
+
+root : SwarmRoot
+root = swarmRoot stateRootPath
+
+objective : ObjectiveHandle
+objective = objectiveHandle root "memory-objective"
+
+task : TaskHandle
+task = taskHandle root "memory-task" "memory-agent"
+
+memoryValue : SwarmMemory -> Str
+memoryValue item = item.value
+
+errorText : Str -> Str
+errorText message = textConcat ["error:", message]
+
+main : Str
+main =
+  match mkdirAll stateRootPath {
+    Ok rootCreated ->
+      match objectiveCreate root objective.objectiveId "Persist and retrieve swarm memory from ordinary Clasp." 1 4 {
+        Ok objectiveValue ->
+          match taskCreate objective task.taskId "Record a memory item and read it through the mailbox." [] 4 60000 {
+            Ok taskValue ->
+              match objectiveMemoryPut objective "planner" "lesson" "prefer-durable-objective-memory" {
+                Ok objectiveMemoryValue ->
+                  match taskMemoryPut task "lesson" "prefer-durable-task-memory" {
+                    Ok taskMemoryValue ->
+                      match objectiveMemory objective "lesson" 10 {
+                        Ok objectiveMemoryValues ->
+                          match taskMemory task "lesson" 10 {
+                            Ok taskMemoryValues ->
+                              match memoryQuery root "" "" "lesson" 10 {
+                                Ok allMemoryValues ->
+                                  match taskMailbox task 10 {
+                                    Ok mailboxValue ->
+                                      encode (MemoryHarnessReport {
+                                        objectiveMemory = objectiveMemoryValue,
+                                        taskMemory = taskMemoryValue,
+                                        objectiveValues = map memoryValue objectiveMemoryValues,
+                                        taskValues = map memoryValue taskMemoryValues,
+                                        allValues = map memoryValue allMemoryValues,
+                                        mailboxValues = map memoryValue mailboxValue.memory,
+                                        mailboxMemoryCount = length mailboxValue.memory
+                                      }),
+                                    Err message ->
+                                      errorText message
+                                  },
+                                Err message ->
+                                  errorText message
+                              },
+                            Err message ->
+                              errorText message
+                          },
+                        Err message ->
+                          errorText message
+                      },
+                    Err message ->
+                      errorText message
+                  },
+                Err message ->
+                  errorText message
+              },
+            Err message ->
+              errorText message
+          },
+        Err message ->
+          errorText message
+      },
+    Err message ->
+      errorText message
+  }

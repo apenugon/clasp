@@ -82,6 +82,17 @@ struct SwarmApprovalRecord {
     payload_json: String,
 }
 
+struct SwarmMemoryRecord {
+    memory_id: i64,
+    objective_id: String,
+    task_id: String,
+    key: String,
+    value: String,
+    actor: String,
+    created_at_ms: i64,
+    updated_at_ms: i64,
+}
+
 struct SwarmObjectiveRecord {
     objective_id: String,
     detail: String,
@@ -139,6 +150,21 @@ enum SwarmCommand {
     Tail { root: PathBuf, task_id: Option<String>, limit: usize },
     Runs { root: PathBuf, task_id: Option<String> },
     Artifacts { root: PathBuf, task_id: Option<String> },
+    MemoryPut {
+        root: PathBuf,
+        objective_id: String,
+        task_id: String,
+        actor: String,
+        key: String,
+        value: String,
+    },
+    MemoryQuery {
+        root: PathBuf,
+        objective_id: Option<String>,
+        task_id: Option<String>,
+        key: Option<String>,
+        limit: usize,
+    },
     ObjectiveCreate {
         root: PathBuf,
         objective_id: String,
@@ -198,7 +224,7 @@ enum SwarmCommand {
 
 fn swarm_usage(program: &str) -> ! {
     eprintln!(
-        "usage: {program} [--json] swarm <start|bootstrap|lease|release|heartbeat|complete|fail|retry|stop|resume|status|history|tasks|summary|tail|runs|artifacts|objective create|objective status|objectives|task create|ready|approve|approvals|policy set|manager next|tool|verifier run|mergegate decide> ..."
+        "usage: {program} [--json] swarm <start|bootstrap|lease|release|heartbeat|complete|fail|retry|stop|resume|status|history|tasks|summary|tail|runs|artifacts|memory put|memory query|objective create|objective status|objectives|task create|ready|approve|approvals|policy set|manager next|tool|verifier run|mergegate decide> ..."
     );
     std::process::exit(2);
 }
@@ -421,6 +447,120 @@ fn parse_swarm_command(args: &[String]) -> Result<Option<(bool, SwarmCommand)>, 
             SwarmCommand::Artifacts {
                 root: parse_root_arg(&rest[0]),
                 task_id: rest.get(1).cloned(),
+            }
+        }
+        "memory" => {
+            let Some(action) = rest.first().map(|value| value.as_str()) else {
+                return Err("usage: claspc swarm memory <put|query> ...".to_owned());
+            };
+            match action {
+                "put" => {
+                    if rest.len() < 4 {
+                        return Err(
+                            "usage: claspc swarm memory put <state-root> <key> <value> [--objective ID] [--task ID] [--actor NAME]"
+                                .to_owned(),
+                        );
+                    }
+                    let root = parse_root_arg(&rest[1]);
+                    let key = rest[2].clone();
+                    let value = rest[3].clone();
+                    let mut objective_id = String::new();
+                    let mut task_id = String::new();
+                    let mut actor = default_actor();
+                    let mut index = 4usize;
+                    while index < rest.len() {
+                        match rest[index].as_str() {
+                            "--objective" => {
+                                let Some(value) = rest.get(index + 1) else {
+                                    return Err("missing value after --objective".to_owned());
+                                };
+                                objective_id = value.clone();
+                                index += 2;
+                            }
+                            "--task" => {
+                                let Some(value) = rest.get(index + 1) else {
+                                    return Err("missing value after --task".to_owned());
+                                };
+                                task_id = value.clone();
+                                index += 2;
+                            }
+                            "--actor" => {
+                                let Some(value) = rest.get(index + 1) else {
+                                    return Err("missing value after --actor".to_owned());
+                                };
+                                actor = value.clone();
+                                index += 2;
+                            }
+                            other => return Err(format!("unknown option `{other}`")),
+                        }
+                    }
+                    SwarmCommand::MemoryPut {
+                        root,
+                        objective_id,
+                        task_id,
+                        actor,
+                        key,
+                        value,
+                    }
+                }
+                "query" => {
+                    if rest.len() < 2 {
+                        return Err(
+                            "usage: claspc swarm memory query <state-root> [--objective ID] [--task ID] [--key KEY] [--limit N]"
+                                .to_owned(),
+                        );
+                    }
+                    let root = parse_root_arg(&rest[1]);
+                    let mut objective_id = None;
+                    let mut task_id = None;
+                    let mut key = None;
+                    let mut limit = 50usize;
+                    let mut index = 2usize;
+                    while index < rest.len() {
+                        match rest[index].as_str() {
+                            "--objective" => {
+                                let Some(value) = rest.get(index + 1) else {
+                                    return Err("missing value after --objective".to_owned());
+                                };
+                                objective_id = Some(value.clone());
+                                index += 2;
+                            }
+                            "--task" => {
+                                let Some(value) = rest.get(index + 1) else {
+                                    return Err("missing value after --task".to_owned());
+                                };
+                                task_id = Some(value.clone());
+                                index += 2;
+                            }
+                            "--key" => {
+                                let Some(value) = rest.get(index + 1) else {
+                                    return Err("missing value after --key".to_owned());
+                                };
+                                key = Some(value.clone());
+                                index += 2;
+                            }
+                            "--limit" => {
+                                let Some(value) = rest.get(index + 1) else {
+                                    return Err("missing value after --limit".to_owned());
+                                };
+                                limit = value
+                                    .parse::<usize>()
+                                    .map_err(|_| format!("invalid --limit value `{value}`"))?
+                                    .max(1);
+                                index += 2;
+                            }
+                            other => return Err(format!("unknown option `{other}`")),
+                        }
+                    }
+                    SwarmCommand::MemoryQuery {
+                        root,
+                        objective_id,
+                        task_id,
+                        key,
+                        limit,
+                    }
+                }
+                other => return Err(format!("unknown swarm memory command `{other}`")),
             }
         }
         "objective" => {
@@ -806,6 +946,20 @@ fn open_swarm_connection(root: &Path) -> Result<(SwarmRuntimePaths, Connection),
               metadata_json TEXT NOT NULL DEFAULT '{}'
             );
             CREATE INDEX IF NOT EXISTS swarm_artifacts_task_idx ON swarm_artifacts(task_id, id);
+            CREATE TABLE IF NOT EXISTS swarm_memory (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              objective_id TEXT NOT NULL DEFAULT '',
+              task_id TEXT NOT NULL DEFAULT '',
+              key TEXT NOT NULL,
+              value TEXT NOT NULL,
+              actor TEXT NOT NULL,
+              created_at_ms INTEGER NOT NULL,
+              updated_at_ms INTEGER NOT NULL,
+              payload_json TEXT NOT NULL DEFAULT '{}'
+            );
+            CREATE INDEX IF NOT EXISTS swarm_memory_objective_idx ON swarm_memory(objective_id, id);
+            CREATE INDEX IF NOT EXISTS swarm_memory_task_idx ON swarm_memory(task_id, id);
+            CREATE INDEX IF NOT EXISTS swarm_memory_key_idx ON swarm_memory(key, id);
             CREATE TABLE IF NOT EXISTS swarm_approvals (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               task_id TEXT NOT NULL,
@@ -2061,6 +2215,116 @@ fn approval_json(record: &SwarmApprovalRecord) -> Value {
         "atMs": record.at_ms,
         "payload": payload,
     })
+}
+
+fn memory_json(record: &SwarmMemoryRecord) -> Value {
+    json!({
+        "memoryId": record.memory_id,
+        "objectiveId": record.objective_id,
+        "taskId": record.task_id,
+        "key": record.key,
+        "value": record.value,
+        "actor": record.actor,
+        "createdAtMs": record.created_at_ms,
+        "updatedAtMs": record.updated_at_ms,
+    })
+}
+
+fn insert_memory(
+    connection: &mut Connection,
+    objective_id: &str,
+    task_id: &str,
+    actor: &str,
+    key: &str,
+    value: &str,
+) -> Result<SwarmMemoryRecord, String> {
+    if key.is_empty() {
+        return Err("swarm memory key cannot be empty".to_owned());
+    }
+    if !objective_id.is_empty() && load_objective(connection, objective_id)?.is_none() {
+        return Err(format!("unknown swarm objective `{objective_id}`"));
+    }
+    if !task_id.is_empty() {
+        if load_task_state(connection, task_id)?.is_none() {
+            return Err(format!("unknown swarm task `{task_id}`"));
+        }
+        if !objective_id.is_empty() {
+            if let Some(spec) = load_task_spec(connection, task_id)? {
+                if spec.objective_id != objective_id {
+                    return Err(format!(
+                        "swarm task `{task_id}` belongs to objective `{}`, not `{objective_id}`",
+                        spec.objective_id
+                    ));
+                }
+            }
+        }
+    }
+    let at_ms = now_ms();
+    connection
+        .execute(
+            "
+            INSERT INTO swarm_memory (
+              objective_id, task_id, key, value, actor, created_at_ms, updated_at_ms, payload_json
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6, '{}')
+            ",
+            params![objective_id, task_id, key, value, actor, at_ms],
+        )
+        .map_err(|err| format!("failed to store swarm memory `{key}`: {err}"))?;
+    Ok(SwarmMemoryRecord {
+        memory_id: connection.last_insert_rowid(),
+        objective_id: objective_id.to_owned(),
+        task_id: task_id.to_owned(),
+        key: key.to_owned(),
+        value: value.to_owned(),
+        actor: actor.to_owned(),
+        created_at_ms: at_ms,
+        updated_at_ms: at_ms,
+    })
+}
+
+fn memory_query_json(
+    connection: &Connection,
+    objective_id: Option<&str>,
+    task_id: Option<&str>,
+    key: Option<&str>,
+    limit: usize,
+) -> Result<Value, String> {
+    let objective_filter = objective_id.unwrap_or_default();
+    let task_filter = task_id.unwrap_or_default();
+    let key_filter = key.unwrap_or_default();
+    let limit = limit.max(1).min(1_000) as i64;
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT id, objective_id, task_id, key, value, actor, created_at_ms, updated_at_ms
+            FROM swarm_memory
+            WHERE (?1 = '' OR objective_id = ?1)
+              AND (?2 = '' OR task_id = ?2)
+              AND (?3 = '' OR key = ?3)
+            ORDER BY id DESC
+            LIMIT ?4
+            ",
+        )
+        .map_err(|err| format!("failed to prepare swarm memory query: {err}"))?;
+    let rows = statement
+        .query_map(params![objective_filter, task_filter, key_filter, limit], |row| {
+            Ok(SwarmMemoryRecord {
+                memory_id: row.get(0)?,
+                objective_id: row.get(1)?,
+                task_id: row.get(2)?,
+                key: row.get(3)?,
+                value: row.get(4)?,
+                actor: row.get(5)?,
+                created_at_ms: row.get(6)?,
+                updated_at_ms: row.get(7)?,
+            })
+        })
+        .map_err(|err| format!("failed to query swarm memory: {err}"))?;
+    let mut values = Vec::new();
+    for row in rows {
+        values.push(memory_json(&row.map_err(|err| format!("failed to read swarm memory row: {err}"))?));
+    }
+    Ok(Value::Array(values))
 }
 
 fn decode_string_list(raw: &str) -> Vec<String> {
@@ -4029,6 +4293,7 @@ fn execute_query_command(command: SwarmCommand) -> Result<Value, String> {
         | SwarmCommand::Summary { root }
         | SwarmCommand::Tail { root, .. }
         | SwarmCommand::Runs { root, .. }
+        | SwarmCommand::MemoryQuery { root, .. }
         | SwarmCommand::ObjectiveStatus { root, .. }
         | SwarmCommand::Objectives { root }
         | SwarmCommand::Ready { root, .. }
@@ -4053,6 +4318,8 @@ fn execute_query_command(command: SwarmCommand) -> Result<Value, String> {
         SwarmCommand::Tail { task_id, limit, .. } => tail_json(&connection, task_id.as_deref(), limit),
         SwarmCommand::Runs { task_id, .. } => runs_json(&connection, task_id.as_deref()),
         SwarmCommand::Artifacts { task_id, .. } => artifacts_json(&connection, task_id.as_deref()),
+        SwarmCommand::MemoryQuery { objective_id, task_id, key, limit, .. } =>
+            memory_query_json(&connection, objective_id.as_deref(), task_id.as_deref(), key.as_deref(), limit),
         SwarmCommand::Approvals { task_id, .. } => approvals_json(&connection, task_id.as_deref()),
         SwarmCommand::ManagerNext { objective_id, .. } => manager_next_json(&connection, &objective_id),
         _ => unreachable!(),
@@ -4099,6 +4366,19 @@ fn handle_approve_command(
         }
         Err(message) => fail(&message, json_mode),
     }
+}
+
+fn execute_memory_put(
+    root: &Path,
+    objective_id: &str,
+    task_id: &str,
+    actor: &str,
+    key: &str,
+    value: &str,
+) -> Result<Value, String> {
+    let (_paths, mut connection) = open_swarm_connection(root)?;
+    let memory = insert_memory(&mut connection, objective_id, task_id, actor, key, value)?;
+    Ok(memory_json(&memory))
 }
 
 fn execute_objective_create(
@@ -4478,12 +4758,17 @@ fn execute_command(command: SwarmCommand) -> Result<(ExitCode, Value), String> {
             ExitCode::SUCCESS,
             execute_policy_set(&root, &task_id, &mergegate_name, &required_approvals, &required_verifiers)?,
         )),
+        SwarmCommand::MemoryPut { root, objective_id, task_id, actor, key, value } => Ok((
+            ExitCode::SUCCESS,
+            execute_memory_put(&root, &objective_id, &task_id, &actor, &key, &value)?,
+        )),
         SwarmCommand::Status { .. }
         | SwarmCommand::History { .. }
         | SwarmCommand::Tasks { .. }
         | SwarmCommand::Summary { .. }
         | SwarmCommand::Tail { .. }
         | SwarmCommand::Runs { .. }
+        | SwarmCommand::MemoryQuery { .. }
         | SwarmCommand::ObjectiveStatus { .. }
         | SwarmCommand::Objectives { .. }
         | SwarmCommand::Ready { .. }
@@ -4841,6 +5126,40 @@ pub fn builtin_swarm_artifacts(root: &str, task_id: &str) -> Result<String, Stri
     render_builtin_query(SwarmCommand::Artifacts {
         root: PathBuf::from(root),
         task_id: Some(task_id.to_owned()),
+    })
+}
+
+pub fn builtin_swarm_memory_put(
+    root: &str,
+    objective_id: &str,
+    task_id: &str,
+    actor: &str,
+    key: &str,
+    value: &str,
+) -> Result<String, String> {
+    render_builtin_json(execute_memory_put(
+        Path::new(root),
+        objective_id,
+        task_id,
+        actor,
+        key,
+        value,
+    )?)
+}
+
+pub fn builtin_swarm_memory_query(
+    root: &str,
+    objective_id: &str,
+    task_id: &str,
+    key: &str,
+    limit: i64,
+) -> Result<String, String> {
+    render_builtin_query(SwarmCommand::MemoryQuery {
+        root: PathBuf::from(root),
+        objective_id: if objective_id.is_empty() { None } else { Some(objective_id.to_owned()) },
+        task_id: if task_id.is_empty() { None } else { Some(task_id.to_owned()) },
+        key: if key.is_empty() { None } else { Some(key.to_owned()) },
+        limit: if limit <= 0 { 1 } else { limit as usize },
     })
 }
 

@@ -100,6 +100,7 @@ bash scripts/test-int-builtins.sh
 bash scripts/test-dict-builtins.sh
 bash scripts/test-native-runtime-smoke.sh
 bash scripts/test-native-claspc-smoke.sh
+bash scripts/test-swarm-memory.sh
 bash scripts/test-managed-job.sh
 '
 fast_sequential_verify_commands=$'
@@ -111,6 +112,7 @@ bash examples/agent-task-scenario/scripts/verify.sh
 bash scripts/test-js-process-runtime.sh
 bash scripts/test-js-emitter-determinism.sh
 bash scripts/test-unsafe-quarantine.sh
+bash scripts/test-swarm-memory.sh
 bash scripts/test-verify-all-smoke.sh
 bash scripts/test-verify-affected.sh
 bash scripts/test-verify-compiler-slice.sh
