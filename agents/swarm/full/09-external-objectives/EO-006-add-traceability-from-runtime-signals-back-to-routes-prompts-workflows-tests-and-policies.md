@@ -18,11 +18,12 @@ Clasp’s long-term differentiator is the ability to relate runtime and business
 
 ## Likely Files
 
-- `src/Clasp/`
+- `src/Compiler/`
 - `runtime/`
 - `examples/`
 - `benchmarks/`
-- `test/Main.hs`
+- `scripts/`
+- `test/`
 - `docs/`
 
 ## Dependencies

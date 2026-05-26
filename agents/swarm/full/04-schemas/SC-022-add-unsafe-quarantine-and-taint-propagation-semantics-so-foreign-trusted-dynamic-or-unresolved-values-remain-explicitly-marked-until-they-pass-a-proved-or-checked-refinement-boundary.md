@@ -18,11 +18,12 @@ Generated trust-boundary handling is one of the main reasons Clasp should outper
 
 ## Likely Files
 
-- `src/Clasp/Checker.hs`
-- `src/Clasp/Lower.hs`
-- `src/Clasp/Emit/JavaScript.hs`
+- `src/Compiler/Checker.clasp`
+- `src/Compiler/Lower.clasp`
+- `src/Compiler/Emit/JavaScript.clasp`
 - `runtime/`
-- `test/Main.hs`
+- `scripts/`
+- `test/`
 - `docs/clasp-spec-v0.md`
 - `examples/`
 

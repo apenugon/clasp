@@ -18,12 +18,12 @@ The agent platform only becomes real when permissions, commands, hooks, agents, 
 
 ## Likely Files
 
-- `src/Clasp/`
+- `src/Compiler/`
 - `runtime/`
 - `scripts/`
 - `docs/`
 - `agents/`
-- `test/Main.hs`
+- `test/`
 
 ## Dependencies
 

@@ -18,11 +18,13 @@ Clasp needs one shared app surface that spans backend, frontend, workers, and ev
 
 ## Likely Files
 
-- `src/Clasp/Emit/JavaScript.hs`
-- `runtime/bun/`
+- `src/Compiler/Emit/JavaScript.clasp`
+- `src/Compiler/Emit/NativeSurface.clasp`
+- `runtime/`
 - `examples/`
 - `benchmarks/`
-- `test/Main.hs`
+- `scripts/`
+- `test/`
 - `docs/clasp-spec-v0.md`
 
 ## Dependencies

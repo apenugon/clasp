@@ -18,10 +18,11 @@ Long-running agent systems need durable state, replay, and supervised self-updat
 
 ## Likely Files
 
-- `src/Clasp/`
+- `src/Compiler/`
 - `runtime/`
 - `examples/`
-- `test/Main.hs`
+- `scripts/`
+- `test/`
 - `docs/`
 
 ## Dependencies

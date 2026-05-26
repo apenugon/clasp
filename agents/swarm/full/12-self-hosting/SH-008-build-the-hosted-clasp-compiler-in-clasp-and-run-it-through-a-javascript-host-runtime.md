@@ -1,8 +1,8 @@
-# SH-009 Add Stage0/Stage1/Stage2 Bootstrap Reproducibility Checks
+# SH-008 Build The Hosted Clasp Compiler In Clasp And Run It Through A JavaScript Host Runtime
 
 ## Goal
 
-Add stage0/stage1/stage2 bootstrap reproducibility checks
+Build the hosted Clasp compiler in Clasp and run it through a JavaScript host runtime
 
 ## Why
 
@@ -10,7 +10,7 @@ Clasp should eventually be able to carry its own compiler once the language and 
 
 ## Scope
 
-- Implement `SH-009` as one narrow slice of work: Add stage0/stage1/stage2 bootstrap reproducibility checks
+- Implement `SH-008` as one narrow slice of work: Build the hosted Clasp compiler in Clasp and run it through a JavaScript host runtime
 - Add or update regression coverage for the new behavior
 - If the task changes runtime behavior, trust boundaries, workflows, interop, or app/user-facing execution surfaces, add or update at least one scenario-level or end-to-end verification path
 - Update docs or examples only where the new surface changes visible behavior
@@ -26,11 +26,11 @@ Clasp should eventually be able to carry its own compiler once the language and 
 
 ## Dependencies
 
-- `SH-008`
+- `SH-007`
 
 ## Acceptance
 
-- `SH-009` is implemented without breaking previously integrated tasks
+- `SH-008` is implemented without breaking previously integrated tasks
 - Tests or regressions cover the new behavior
 - Runtime, boundary, workflow, interop, or app-surface changes are backed by scenario-level or end-to-end verification, not only a local unit-style regression
 - `bash scripts/verify-all.sh` passes

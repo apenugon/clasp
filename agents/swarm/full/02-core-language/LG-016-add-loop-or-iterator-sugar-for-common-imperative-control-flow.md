@@ -18,12 +18,13 @@ The core language still needs enough control flow and ergonomics to support nont
 
 ## Likely Files
 
-- `src/Clasp/Syntax.hs`
-- `src/Clasp/Parser.hs`
-- `src/Clasp/Checker.hs`
-- `src/Clasp/Lower.hs`
-- `src/Clasp/Emit/JavaScript.hs`
-- `test/Main.hs`
+- `src/Compiler/Ast.clasp`
+- `runtime/claspc.rs`
+- `src/Compiler/Checker.clasp`
+- `src/Compiler/Lower.clasp`
+- `src/Compiler/Emit/JavaScript.clasp`
+- `scripts/`
+- `test/`
 - `docs/clasp-spec-v0.md`
 - `examples/`
 

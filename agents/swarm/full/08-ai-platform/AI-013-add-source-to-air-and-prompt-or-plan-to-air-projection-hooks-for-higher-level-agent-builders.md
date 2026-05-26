@@ -18,11 +18,12 @@ Typed model boundaries, tools, evals, and traces are central to the language the
 
 ## Likely Files
 
-- `src/Clasp/`
+- `src/Compiler/`
 - `runtime/`
 - `examples/`
 - `benchmarks/`
-- `test/Main.hs`
+- `scripts/`
+- `test/`
 - `docs/`
 
 ## Dependencies

@@ -11,3 +11,8 @@ node "$project_root/scripts/clasp-swarm-validate-task.mjs" "$task_file" >/dev/nu
 [[ "$(node "$project_root/scripts/clasp-swarm-validate-task.mjs" --print-field taskId "$task_file")" == 'SW-001-replace-the-current-coarse-agents-tasks-backlog-with-a-granular-task-manifest-template-and-task-schema' ]]
 [[ "$(node "$project_root/scripts/clasp-swarm-validate-task.mjs" --print-field taskKey "$task_file")" == 'SW-001' ]]
 [[ "$(node "$project_root/scripts/clasp-swarm-validate-task.mjs" --print-field batchLabel "$task_file")" == "" ]]
+
+if rg -n 'deprecated/|src/Clasp|runtime/bun' "$project_root/agents/swarm/full" "$project_root/scripts/materialize-full-backlog.mjs" >/dev/null; then
+  printf 'task manifests should point at current self-hosted Clasp paths, not removed legacy paths\n' >&2
+  exit 1
+fi

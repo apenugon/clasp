@@ -25,11 +25,7 @@ The swarm itself needs to be reliable before it can safely drive the rest of the
 
 ## Dependencies
 
-- `SW-001`
-
-## Dependency Labels
-
-- swarm-infra-foundation
+- `SW-004`
 
 ## Acceptance
 

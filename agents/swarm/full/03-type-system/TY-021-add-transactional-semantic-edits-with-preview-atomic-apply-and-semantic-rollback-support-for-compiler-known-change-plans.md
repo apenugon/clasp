@@ -18,11 +18,13 @@ Clasp needs stronger typing and more useful diagnostics than mainstream baseline
 
 ## Likely Files
 
-- `src/Clasp/Core.hs`
-- `src/Clasp/Checker.hs`
-- `src/Clasp/Diagnostic.hs`
-- `src/Clasp/Lower.hs`
-- `test/Main.hs`
+- `src/Compiler/CheckedCore.clasp`
+- `src/Compiler/Checker.clasp`
+- `src/Compiler/Driver/Frontend.clasp`
+- `src/Compiler/Lower.clasp`
+- `runtime/claspc.rs`
+- `scripts/`
+- `test/`
 - `docs/clasp-spec-v0.md`
 
 ## Dependencies
