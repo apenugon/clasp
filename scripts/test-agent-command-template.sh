@@ -130,11 +130,21 @@ if [[ -z "$prompt" ]]; then
 fi
 
 mkdir -p "$(dirname "$report_path")" "$workspace_root"
-printf '{"role":%s,"reportPath":%s,"promptPath":%s,"schemaPath":%s}\n' \
+prompt_has_task_content=false
+prompt_has_task_text=false
+if [[ "$prompt" == *"Task file content:"* ]]; then
+  prompt_has_task_content=true
+fi
+if [[ "$prompt" == *"Prove a generic non-Codex agent command template can run the Clasp feedback loop."* ]]; then
+  prompt_has_task_text=true
+fi
+printf '{"role":%s,"reportPath":%s,"promptPath":%s,"schemaPath":%s,"promptHasTaskFileContent":%s,"promptHasTaskText":%s}\n' \
   "$(node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "$role")" \
   "$(node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "$report_path")" \
   "$(node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "$prompt_path")" \
   "$(node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "$schema_path")" \
+  "$prompt_has_task_content" \
+  "$prompt_has_task_text" \
   >> "${CLASP_TEST_AGENT_LOG:?}"
 
 case "$role" in
@@ -343,6 +353,8 @@ assert(invocations.map((entry) => entry.role).join(",") === "builder,verifier", 
   for (const invocation of invocations) {
     assert(!invocation.reportPath.includes("codex"), "native generic template should not need Codex-named report paths");
     assert(invocation.promptPath === "", "native generic template should receive an inline prompt");
+    assert(invocation.promptHasTaskFileContent === true, "native generic template should receive inlined task file content");
+    assert(invocation.promptHasTaskText === true, "native generic template should receive the task file text");
   }
 NODE
 
@@ -396,23 +408,40 @@ assert(status.previousVerifierFeedback?.present === true, "local status should p
 assert(workspaceText === "fixed-after-feedback\n", "local Clasp builder should consume verifier feedback");
 assert(secondBuilder.feedback?.summary === "local Clasp builder backend completed", "second builder report should come from LocalAgent.clasp");
 assert(secondBuilder.tests_run?.includes("clasp-local-agent-context-pack"), "local builder should record context-pack coverage");
+assert(secondBuilder.tests_run?.includes("clasp-local-agent-task-file-prompt"), "local builder should record task-file prompt coverage");
 assert(
   secondBuilder.feedback?.ergonomics?.includes("local builder consumed the native swarm context pack"),
   "local builder feedback should mention native context pack consumption",
 );
+assert(
+  secondBuilder.feedback?.ergonomics?.includes("local builder received the task file content in its prompt"),
+  "local builder feedback should mention task file prompt content",
+);
 assert(firstVerifier.verdict === "fail", `first local verifier verdict ${firstVerifier.verdict}`);
 assert(firstVerifier.tests_run?.includes("clasp-local-agent-context-pack"), "first local verifier should record context-pack coverage");
+assert(firstVerifier.tests_run?.includes("clasp-local-agent-task-file-prompt"), "first local verifier should record task-file prompt coverage");
 assert(secondVerifier.verdict === "pass", `second local verifier verdict ${secondVerifier.verdict}`);
 assert(secondVerifier.tests_run?.includes("clasp-local-agent-context-pack"), "second local verifier should record context-pack coverage");
+assert(secondVerifier.tests_run?.includes("clasp-local-agent-task-file-prompt"), "second local verifier should record task-file prompt coverage");
 assert(secondBuilderPrompt.includes("Verifier feedback from the previous attempt:"), "second builder prompt should be persisted for prompt-path agents");
 assert(secondBuilderPrompt.includes("force-close-category"), "second builder prompt should include persisted verifier feedback");
 assert(secondBuilderPrompt.includes("Swarm context pack:"), "second builder prompt should include native context pack evidence");
 assert(secondBuilderPrompt.includes("task: builder-2"), "second builder prompt should identify the builder task context");
 assert(secondBuilderPrompt.includes("verifier-feedback"), "second builder prompt should include persisted verifier feedback memory");
+assert(secondBuilderPrompt.includes("Task file content:"), "second builder prompt should include inlined task file content");
+assert(
+  secondBuilderPrompt.includes("Prove a generic non-Codex agent command template can run the Clasp feedback loop."),
+  "second builder prompt should include the task file text",
+);
 assert(secondVerifierPrompt.includes("verifier subagent"), "second verifier prompt should be persisted for prompt-path agents");
 assert(secondVerifierPrompt.includes("Swarm context pack:"), "second verifier prompt should include native context pack evidence");
 assert(secondVerifierPrompt.includes("task: verifier-2"), "second verifier prompt should identify the verifier task context");
 assert(secondVerifierPrompt.includes("run trace:"), "second verifier prompt should include run trace context");
+assert(secondVerifierPrompt.includes("Task file content:"), "second verifier prompt should include inlined task file content");
+assert(
+  secondVerifierPrompt.includes("Prove a generic non-Codex agent command template can run the Clasp feedback loop."),
+  "second verifier prompt should include the task file text",
+);
 assert(
   secondVerifier.capability_statuses?.some((entry) => entry.name === "clasp_native_agent_backend" && entry.status === "pass"),
   "local verifier should prove the Clasp-native agent backend capability",
@@ -422,6 +451,12 @@ assert(
     entry.evidence?.includes("local Clasp agent consumed native builder and verifier context packs")
   ),
   "local verifier should report native context-pack consumption evidence",
+);
+assert(
+  secondVerifier.capability_statuses?.some((entry) =>
+    entry.evidence?.includes("local Clasp agent received task file content without reading a separate task file")
+  ),
+  "local verifier should report task-file prompt evidence",
 );
 NODE
 

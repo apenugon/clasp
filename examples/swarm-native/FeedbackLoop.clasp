@@ -272,6 +272,18 @@ verifierPolicySection = textJoin "\n" [
   readPolicyText verifierPolicyPath defaultVerifierPolicyText
 ]
 
+taskFileContentSection : Str
+taskFileContentSection = match readFile taskFile {
+  Ok raw -> textJoin "\n" [
+    "Task file content:",
+    raw
+  ],
+  Err message -> textJoin "\n" [
+    "Task file content unavailable:",
+    message
+  ]
+}
+
 promptBoolText : Bool -> Str
 promptBoolText value = if value then "true" else "false"
 
@@ -398,6 +410,7 @@ builderPrompt attempt = textJoin "\n" [
   "You are the builder subagent for the Clasp repository.",
   "Read AGENTS.md first if it exists.",
   textConcat ["Read the task file at ", taskFile, "."],
+  taskFileContentSection,
   "Drive the repository toward the full task goal. Prefer coherent capability-closing changes over tiny local patches.",
   "Work only in the current checkout. Add or update tests. Run the narrowest checks that cover your changes. Do not run bash scripts/verify-all.sh.",
   "Capability categories to close:",
@@ -416,6 +429,7 @@ verifierPrompt attempt = textJoin "\n" [
   "You are the verifier subagent for the Clasp repository.",
   "Read AGENTS.md first if it exists.",
   textConcat ["Read the task file at ", taskFile, "."],
+  taskFileContentSection,
   "Evaluate the whole repository against the autonomous swarm confidence goal and required capability categories.",
   verifierPolicySection,
   verifierContextSection attempt,
