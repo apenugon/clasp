@@ -31,6 +31,8 @@ count_task_files() {
 collect_latest_run_state() {
   local runs_root="$1"
   local lane_name="$2"
+  local lane_status="$3"
+  local job_status="$4"
 
   latest_run_path=""
   latest_run_attempt=""
@@ -50,9 +52,9 @@ collect_latest_run_state() {
   latest_run_attempt="$(clasp_swarm_task_run_attempt "$latest_run_path" 2>/dev/null || true)"
 
   read -r latest_run_status latest_run_summary < <(
-    node - <<'EOF' "$latest_run_path/builder-report.json" "$latest_run_path/verifier-report.json" "$lane_name"
+    node - <<'EOF' "$latest_run_path/builder-report.json" "$latest_run_path/verifier-report.json" "$lane_name" "$lane_status" "$job_status"
 const fs = require("fs");
-const [builderPath, verifierPath, laneName] = process.argv.slice(2);
+const [builderPath, verifierPath, laneName, laneStatus, jobStatus] = process.argv.slice(2);
 
 function sanitize(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
@@ -78,6 +80,20 @@ if (fs.existsSync(verifierPath)) {
   } catch (_) {
     status = "invalid-report";
     summary = `Lane ${laneName} produced an unreadable builder report.`;
+  }
+} else if (laneStatus !== "running") {
+  if (jobStatus === "memory-exceeded") {
+    status = "memory-exceeded";
+    summary = `Lane ${laneName} stopped before writing a structured report because the managed job exceeded its memory guard.`;
+  } else if (jobStatus === "failed") {
+    status = "failed-before-report";
+    summary = `Lane ${laneName} failed before writing a structured report.`;
+  } else if (jobStatus === "stopped") {
+    status = "stopped-before-report";
+    summary = `Lane ${laneName} was stopped before writing a structured report.`;
+  } else {
+    status = "interrupted-before-report";
+    summary = `Lane ${laneName} is not running and has no structured report for the latest run.`;
   }
 }
 
@@ -126,12 +142,25 @@ while IFS= read -r lane_dir; do
   completed_root="$runtime_root/completed"
   blocked_root="$runtime_root/blocked"
   log_file="$runtime_root/lane.log"
+  job_file="$runtime_root/job"
   pid=""
   stale_pid=""
   status="stopped"
+  job_status=""
+  job_exit_status=""
   current_task=""
 
   lane_count=$((lane_count + 1))
+
+  if [[ -f "$job_file" ]]; then
+    job_dir="$(sed -n '1p' "$job_file")"
+    if [[ -n "$job_dir" && -f "$job_dir/status" ]]; then
+      job_status="$(sed -n '1p' "$job_dir/status")"
+    fi
+    if [[ -n "$job_dir" && -f "$job_dir/exit-status" ]]; then
+      job_exit_status="$(sed -n '1p' "$job_dir/exit-status")"
+    fi
+  fi
 
   if [[ -f "$pid_file" ]]; then
     pid="$(cat "$pid_file")"
@@ -157,7 +186,7 @@ while IFS= read -r lane_dir; do
   completed_total=$((completed_total + completed_count))
   blocked_total=$((blocked_total + blocked_count))
 
-  collect_latest_run_state "$runs_root" "$lane_name"
+  collect_latest_run_state "$runs_root" "$lane_name" "$status" "$job_status"
 
   if [[ "$status" == "stopped" && "$blocked_count" == "0" && "$completed_count" == "$lane_task_count" ]]; then
     latest_run_path=""
@@ -176,6 +205,12 @@ while IFS= read -r lane_dir; do
     fi
     if [[ -n "$stale_pid" ]]; then
       echo "  stale pid: $stale_pid"
+    fi
+    if [[ -n "$job_status" ]]; then
+      echo "  managed job status: $job_status"
+    fi
+    if [[ -n "$job_exit_status" ]]; then
+      echo "  managed job exit: $job_exit_status"
     fi
     if [[ -n "$current_task" ]]; then
       echo "  current task: $current_task"
@@ -201,6 +236,8 @@ while IFS= read -r lane_dir; do
     "$status" \
     "$pid" \
     "$stale_pid" \
+    "$job_status" \
+    "$job_exit_status" \
     "$current_task" \
     "$completed_count" \
     "$blocked_count" \
@@ -215,6 +252,8 @@ const [
   status,
   pid,
   stalePid,
+  managedJobStatus,
+  managedJobExitStatus,
   currentTask,
   completedCount,
   blockedCount,
@@ -241,6 +280,8 @@ const laneStatus = {
   status,
   pid: pid || null,
   stalePid: stalePid || null,
+  managedJobStatus: managedJobStatus || null,
+  managedJobExitStatus: managedJobExitStatus || null,
   currentTask: currentTask || null,
   completedCount: Number(completedCount),
   blockedCount: Number(blockedCount),

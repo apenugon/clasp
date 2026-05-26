@@ -36,8 +36,10 @@ task_file_drain_test_root=""
 status_wave_name=""
 status_lane_root_1=""
 status_lane_root_2=""
+status_lane_root_3=""
 status_runtime_root_1=""
 status_runtime_root_2=""
+status_runtime_root_3=""
 status_text_output=""
 status_json_output=""
 status_live_pid=""
@@ -54,7 +56,7 @@ cleanup() {
   if [[ -n "${status_live_pid:-}" ]]; then
     kill "${status_live_pid}" >/dev/null 2>&1 || true
   fi
-  rm -rf "${runs_root:-}" "${markers_root:-}" "${repo_root:-}" "${lane_root:-}" "${completed_root:-}" "${blocked_root:-}" "${global_completed_root:-}" "${spawn_root:-}" "${spawn_path_root:-}" "${invalid_lane_root:-}" "${autopilot_test_root:-}" "${autopilot_test_root_2:-}" "${autopilot_test_root_3:-}" "${lane_merge_test_root:-}" "${lane_merge_gate_snapshot_test_root:-}" "${lane_cleanup_test_root:-}" "${lane_worktree_retry_test_root:-}" "${batch_start_test_root:-}" "${prompt_test_root:-}" "${prompt_test_root_2:-}" "${task_file_drain_test_root:-}" "${status_lane_root_1:-}" "${status_lane_root_2:-}" "${status_runtime_root_1:-}" "${status_runtime_root_2:-}" "${summary_lane_root_1:-}" "${summary_lane_root_2:-}" "${summary_runtime_root_1:-}" "${summary_runtime_root_2:-}"
+  rm -rf "${runs_root:-}" "${markers_root:-}" "${repo_root:-}" "${lane_root:-}" "${completed_root:-}" "${blocked_root:-}" "${global_completed_root:-}" "${spawn_root:-}" "${spawn_path_root:-}" "${invalid_lane_root:-}" "${autopilot_test_root:-}" "${autopilot_test_root_2:-}" "${autopilot_test_root_3:-}" "${lane_merge_test_root:-}" "${lane_merge_gate_snapshot_test_root:-}" "${lane_cleanup_test_root:-}" "${lane_worktree_retry_test_root:-}" "${batch_start_test_root:-}" "${prompt_test_root:-}" "${prompt_test_root_2:-}" "${task_file_drain_test_root:-}" "${status_lane_root_1:-}" "${status_lane_root_2:-}" "${status_lane_root_3:-}" "${status_runtime_root_1:-}" "${status_runtime_root_2:-}" "${status_runtime_root_3:-}" "${summary_lane_root_1:-}" "${summary_lane_root_2:-}" "${summary_runtime_root_1:-}" "${summary_runtime_root_2:-}"
   rm -f "${status_text_output:-}" "${status_json_output:-}" "${summary_text_output:-}" "${summary_json_output:-}" "${summary_markdown_output:-}"
 }
 
@@ -1283,8 +1285,10 @@ bash "$project_root/scripts/clasp-swarm-status.sh" >/dev/null
 status_wave_name="status-test-$$"
 status_lane_root_1="$project_root/agents/swarm/$status_wave_name/01-active"
 status_lane_root_2="$project_root/agents/swarm/$status_wave_name/02-idle"
+status_lane_root_3="$project_root/agents/swarm/$status_wave_name/03-interrupted"
 status_runtime_root_1="$project_root/.clasp-swarm/$status_wave_name/01-active"
 status_runtime_root_2="$project_root/.clasp-swarm/$status_wave_name/02-idle"
+status_runtime_root_3="$project_root/.clasp-swarm/$status_wave_name/03-interrupted"
 status_text_output="$(mktemp)"
 status_json_output="$(mktemp)"
 
@@ -1293,15 +1297,29 @@ mkdir -p \
   "$status_runtime_root_2" \
   "$status_lane_root_1" \
   "$status_lane_root_2" \
+  "$status_lane_root_3" \
   "$status_runtime_root_1/completed" \
   "$status_runtime_root_1/blocked" \
   "$status_runtime_root_1/runs/20260314T120000Z-AA-100-sample-attempt1" \
   "$status_runtime_root_1/runs/20260314T121500Z-AA-100-sample-attempt2" \
   "$status_runtime_root_2/completed" \
   "$status_runtime_root_2/blocked" \
-  "$status_runtime_root_2/runs/20260314T122000Z-BB-200-sample-attempt1"
+  "$status_runtime_root_2/runs/20260314T122000Z-BB-200-sample-attempt1" \
+  "$status_runtime_root_3/completed" \
+  "$status_runtime_root_3/blocked" \
+  "$status_runtime_root_3/jobs/stopped-job" \
+  "$status_runtime_root_3/runs/20260314T123000Z-CC-300-interrupted-attempt1"
+
+cat > "$status_lane_root_3/CC-300-interrupted.md" <<'EOF'
+# CC-300 Interrupted
+
+## Goal
+
+Exercise reportless stopped-run status classification.
+EOF
 
 printf '%s\n' "AA-100-sample" > "$status_runtime_root_1/current-task.txt"
+printf '%s\n' "CC-300-interrupted" > "$status_runtime_root_3/current-task.txt"
 printf '%s\n' "done" > "$status_runtime_root_1/completed/AA-001"
 printf '%s\n' "done" > "$status_runtime_root_1/completed/AA-002"
 printf '%s\n' '{}' > "$status_runtime_root_1/blocked/AA-003.json"
@@ -1346,6 +1364,13 @@ idle line 1
 idle line 2
 EOF
 
+printf '%s\n' "$status_runtime_root_3/jobs/stopped-job" > "$status_runtime_root_3/job"
+printf '%s\n' "stopped" > "$status_runtime_root_3/jobs/stopped-job/status"
+printf '%s\n' "143" > "$status_runtime_root_3/jobs/stopped-job/exit-status"
+cat > "$status_runtime_root_3/lane.log" <<'EOF'
+interrupted line 1
+EOF
+
 sleep 30 >/dev/null 2>&1 &
 status_live_pid="$!"
 mkdir -p "$status_runtime_root_1"
@@ -1365,8 +1390,8 @@ bash -lc "
   set -euo pipefail
   text=\$(cat '$status_text_output')
   [[ \"\$text\" == *'wave: $status_wave_name'* ]]
-  [[ \"\$text\" == *'summary: lanes=2 running=1 stopped=1 completed=3 blocked=1'* ]]
-  [[ \"\$text\" == *'run-states: builder-complete=1 pass=1'* ]]
+  [[ \"\$text\" == *'summary: lanes=3 running=1 stopped=2 completed=3 blocked=1'* ]]
+  [[ \"\$text\" == *'run-states: builder-complete=1 pass=1 stopped-before-report=1'* ]]
   [[ \"\$text\" == *'lane: 01-active'* ]]
   [[ \"\$text\" == *'stale pid: '* ]]
   [[ \"\$text\" == *'current task: AA-100-sample'* ]]
@@ -1377,6 +1402,12 @@ bash -lc "
   [[ \"\$text\" == *'pid: $status_live_pid'* ]]
   [[ \"\$text\" == *'run status: builder-complete'* ]]
   [[ \"\$text\" == *'run summary: builder summary only'* ]]
+  [[ \"\$text\" == *'lane: 03-interrupted'* ]]
+  [[ \"\$text\" == *'managed job status: stopped'* ]]
+  [[ \"\$text\" == *'managed job exit: 143'* ]]
+  [[ \"\$text\" == *'current task: CC-300-interrupted'* ]]
+  [[ \"\$text\" == *'run status: stopped-before-report'* ]]
+  [[ \"\$text\" == *'run summary: Lane 03-interrupted was stopped before writing a structured report.'* ]]
   [[ \"\$text\" == *'line 6'* ]]
   [[ \"\$text\" == *'idle line 2'* ]]
   node - <<'EOF' '$status_json_output' '$status_wave_name' '$status_live_pid'
@@ -1386,22 +1417,23 @@ const payload = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
 if (payload.wave !== expectedWave) {
   throw new Error(\`unexpected wave: \${payload.wave}\`);
 }
-if (payload.summary.laneCount !== 2 || payload.summary.runningCount !== 1 || payload.summary.stoppedCount !== 1) {
+if (payload.summary.laneCount !== 3 || payload.summary.runningCount !== 1 || payload.summary.stoppedCount !== 2) {
   throw new Error('unexpected lane summary counts');
 }
 if (payload.summary.completedCount !== 3 || payload.summary.blockedCount !== 1) {
   throw new Error('unexpected completion summary counts');
 }
-if (payload.summary.runStateCounts?.pass !== 1 || payload.summary.runStateCounts?.['builder-complete'] !== 1) {
+if (payload.summary.runStateCounts?.pass !== 1 || payload.summary.runStateCounts?.['builder-complete'] !== 1 || payload.summary.runStateCounts?.['stopped-before-report'] !== 1) {
   throw new Error('unexpected run-state summary counts');
 }
-if (Object.keys(payload.summary.runStateCounts || {}).length !== 2) {
+if (Object.keys(payload.summary.runStateCounts || {}).length !== 3) {
   throw new Error('unexpected run-state summary keys');
 }
 const active = payload.lanes.find((lane) => lane.lane === '01-active');
 const idle = payload.lanes.find((lane) => lane.lane === '02-idle');
-if (!active || !idle) {
-  throw new Error('expected both lanes in JSON output');
+const interrupted = payload.lanes.find((lane) => lane.lane === '03-interrupted');
+if (!active || !idle || !interrupted) {
+  throw new Error('expected all lanes in JSON output');
 }
 if (active.status !== 'stopped' || active.stalePid === null || active.currentTask !== 'AA-100-sample') {
   throw new Error('unexpected active-lane JSON state');
@@ -1414,6 +1446,12 @@ if (idle.status !== 'running' || String(idle.pid) !== livePid) {
 }
 if (idle.latestRun?.status !== 'builder-complete' || idle.latestRun?.summary !== 'builder summary only') {
   throw new Error('unexpected idle-lane run summary');
+}
+if (interrupted.status !== 'stopped' || interrupted.managedJobStatus !== 'stopped' || interrupted.managedJobExitStatus !== '143') {
+  throw new Error('unexpected interrupted-lane job state');
+}
+if (interrupted.latestRun?.status !== 'stopped-before-report' || interrupted.latestRun?.summary !== 'Lane 03-interrupted was stopped before writing a structured report.') {
+  throw new Error('unexpected interrupted-lane run summary');
 }
 if (!Array.isArray(active.recentLogLines) || active.recentLogLines.at(-1) !== 'line 6') {
   throw new Error('unexpected active-lane log tail');
