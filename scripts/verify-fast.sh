@@ -105,6 +105,7 @@ bash examples/agent-metadata/scripts/verify.sh
 bash examples/agent-task-scenario/scripts/verify.sh
 bash scripts/test-js-process-runtime.sh
 bash scripts/test-js-emitter-determinism.sh
+bash scripts/test-unsafe-quarantine.sh
 bash scripts/test-verify-all-smoke.sh
 bash scripts/test-verify-affected.sh
 bash scripts/test-verify-compiler-slice.sh
@@ -120,6 +121,7 @@ bash scripts/test-native-runtime-smoke.sh
 bash scripts/test-native-claspc-smoke.sh
 bash scripts/test-managed-job.sh
 bash scripts/test-promoted-source-export-cache.sh
+bash scripts/test-unsafe-quarantine.sh
 bash examples/agent-metadata/scripts/verify.sh
 bash examples/agent-task-scenario/scripts/verify.sh
 bash scripts/test-js-emitter-determinism.sh

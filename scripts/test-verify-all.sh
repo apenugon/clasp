@@ -42,6 +42,7 @@ cp "$project_root/scripts/verify-affected.mjs" "$test_root/scripts/verify-affect
 cp "$project_root/scripts/generate-promoted-source-export-cache.mjs" "$test_root/scripts/generate-promoted-source-export-cache.mjs"
 cp "$project_root/scripts/test-verify-affected.sh" "$test_root/scripts/test-verify-affected.sh"
 cp "$project_root/scripts/test-js-emitter-determinism.sh" "$test_root/scripts/test-js-emitter-determinism.sh"
+cp "$project_root/scripts/test-unsafe-quarantine.sh" "$test_root/scripts/test-unsafe-quarantine.sh"
 cp "$project_root/scripts/test-verify-compiler-slice.sh" "$test_root/scripts/test-verify-compiler-slice.sh"
 cp "$project_root/scripts/test-verify-runtime-slice.sh" "$test_root/scripts/test-verify-runtime-slice.sh"
 cp "$project_root/scripts/test-promoted-source-export-cache.sh" "$test_root/scripts/test-promoted-source-export-cache.sh"
@@ -109,6 +110,7 @@ grep -F 'bash scripts/verify-runtime-slice.sh process workflow codex-loop agent-
 grep -F 'bash examples/agent-metadata/scripts/verify.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash examples/agent-task-scenario/scripts/verify.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-js-emitter-determinism.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
+grep -F 'bash scripts/test-unsafe-quarantine.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-verify-all-smoke.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 if grep -F 'bash scripts/test-verify-all.sh' "$test_root/scripts/verify-fast.sh" >/dev/null 2>&1; then
   printf 'fast verification should use test-verify-all-smoke, not exhaustive test-verify-all\n' >&2
@@ -215,6 +217,7 @@ grep -F 'wait "$finished_pid"' "$test_root/src/scripts/verify.sh" >/dev/null
 grep -F 'bash examples/agent-metadata/scripts/verify.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash examples/agent-task-scenario/scripts/verify.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-js-emitter-determinism.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'bash scripts/test-unsafe-quarantine.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'parallel wait returned without a pid and no tracked jobs remain' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'local fallback_pid=""' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'wait "$finished_pid"' "$test_root/scripts/verify-all.sh" >/dev/null

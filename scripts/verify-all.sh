@@ -61,6 +61,7 @@ bash scripts/test-host-runtime.sh
 bash scripts/test-safe-workspace.sh
 bash scripts/test-goal-manager-child-loop-monitor.sh
 bash scripts/test-feedback-loop-resume.sh
+bash scripts/test-unsafe-quarantine.sh
 bash scripts/test-native-runtime.sh
 bash src/scripts/verify.sh
 bash scripts/test-swarm-control.sh
