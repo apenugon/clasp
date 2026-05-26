@@ -63,6 +63,8 @@ touch "$project_copy/examples/lead-app/Shared/Lead.clasp"
 touch "$project_copy/examples/lead-app/scripts/verify.sh"
 touch "$project_copy/examples/agent-task-scenario/Main.clasp"
 touch "$project_copy/examples/agent-task-scenario/scripts/verify.sh"
+touch "$project_copy/examples/swarm-native/SwarmReadyBenchmark.clasp"
+touch "$project_copy/scripts/test-swarm-ready-benchmark.sh"
 touch "$project_copy/scripts/test-swarm-native-feedback-loop.sh"
 touch "$project_copy/benchmarks/tasks/clasp-lead-segment/repo/Shared/Lead.clasp"
 touch "$project_copy/benchmarks/tasks/clasp-lead-segment/repo/scripts/verify.sh"
@@ -524,6 +526,23 @@ switch (scenario) {
     assert(logHas("scripts/test-goal-manager-fast.sh"), "fake GoalManager fast command should execute");
     assert(logHas("scripts/test-swarm-ready-gate.sh"), "fake swarm-ready command should execute");
     break;
+  case "swarm-ready-benchmark-script":
+    assert(report.changedFiles.includes("scripts/test-swarm-ready-benchmark.sh"), "swarm-ready benchmark harness should be present");
+    assert(hasCommand("bash -n 'scripts/test-swarm-ready-benchmark.sh'"), "swarm-ready benchmark harness should run shell syntax check");
+    assert(hasCommand("bash scripts/test-swarm-ready-benchmark.sh"), "swarm-ready benchmark harness should run focused native coverage");
+    assert(report.selectedCommands.filter((command) => command.command === "bash scripts/test-swarm-ready-benchmark.sh").length === 1, "swarm-ready benchmark command should be deduplicated");
+    assert(report.usedVerifyFastFallback === false, "known swarm-ready benchmark harness should not use verify-fast fallback");
+    assert(logHas("scripts/test-swarm-ready-benchmark.sh"), "fake swarm-ready benchmark command should execute");
+    break;
+  case "swarm-ready-benchmark-program":
+    assert(report.changedFiles.includes("examples/swarm-native/SwarmReadyBenchmark.clasp"), "swarm-ready benchmark program should be present");
+    assert(hasCommand("bash scripts/test-native-claspc.sh"), "benchmark program should retain native claspc coverage");
+    assert(hasCommand("bash scripts/test-swarm-ready-gate.sh"), "benchmark program should retain structural ready-gate coverage");
+    assert(hasCommand("bash scripts/test-swarm-ready-benchmark.sh"), "benchmark program should run focused native readiness coverage");
+    assert(report.selectedCommands.filter((command) => command.command === "bash scripts/test-swarm-ready-benchmark.sh").length === 1, "benchmark program should deduplicate focused coverage");
+    assert(report.usedVerifyFastFallback === false, "known swarm-ready benchmark program should not use verify-fast fallback");
+    assert(logHas("scripts/test-swarm-ready-benchmark.sh"), "fake swarm-ready benchmark command should execute");
+    break;
   case "agent-command-template-script":
     assert(report.changedFiles.includes("scripts/test-agent-command-template.sh"), "agent command template harness should be present");
     assert(hasCommand("bash -n 'scripts/test-agent-command-template.sh'"), "agent command template harness should run shell syntax check");
@@ -840,6 +859,18 @@ goal_manager_log="$test_root/goal-manager.log"
 CLASP_TEST_FAKE_COMMAND_LOG="$goal_manager_log" \
   run_verify_affected --changed-file scripts/test-goal-manager-fast.sh --changed-file scripts/test-swarm-ready-gate.sh > "$goal_manager_report"
 assert_report "$goal_manager_report" "$goal_manager_log" goal-manager-fast-script
+
+swarm_ready_benchmark_script_report="$test_root/swarm-ready-benchmark-script-report.json"
+swarm_ready_benchmark_script_log="$test_root/swarm-ready-benchmark-script.log"
+CLASP_TEST_FAKE_COMMAND_LOG="$swarm_ready_benchmark_script_log" \
+  run_verify_affected --changed-file scripts/test-swarm-ready-benchmark.sh > "$swarm_ready_benchmark_script_report"
+assert_report "$swarm_ready_benchmark_script_report" "$swarm_ready_benchmark_script_log" swarm-ready-benchmark-script
+
+swarm_ready_benchmark_program_report="$test_root/swarm-ready-benchmark-program-report.json"
+swarm_ready_benchmark_program_log="$test_root/swarm-ready-benchmark-program.log"
+CLASP_TEST_FAKE_COMMAND_LOG="$swarm_ready_benchmark_program_log" \
+  run_verify_affected --changed-file examples/swarm-native/SwarmReadyBenchmark.clasp > "$swarm_ready_benchmark_program_report"
+assert_report "$swarm_ready_benchmark_program_report" "$swarm_ready_benchmark_program_log" swarm-ready-benchmark-program
 
 agent_command_template_report="$test_root/agent-command-template-report.json"
 agent_command_template_log="$test_root/agent-command-template.log"

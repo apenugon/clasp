@@ -63,6 +63,7 @@ bash scripts/test-dict-builtins.sh
 bash scripts/test-native-claspc.sh
 bash scripts/test-record-update-parity.sh
 bash scripts/test-swarm-ready-gate.sh
+bash scripts/test-swarm-ready-benchmark.sh
 bash scripts/test-swarm-memory.sh
 bash scripts/test-swarm-context-pack.sh
 bash scripts/test-swarm-native-managed-loop.sh

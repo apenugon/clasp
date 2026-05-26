@@ -76,6 +76,7 @@ cp "$project_root/scripts/test-safe-workspace.sh" "$test_root/scripts/test-safe-
 cp "$project_root/scripts/test-goal-manager-child-loop-monitor.sh" "$test_root/scripts/test-goal-manager-child-loop-monitor.sh"
 cp "$project_root/scripts/test-goal-manager-fast.sh" "$test_root/scripts/test-goal-manager-fast.sh"
 cp "$project_root/scripts/test-swarm-ready-gate.sh" "$test_root/scripts/test-swarm-ready-gate.sh"
+cp "$project_root/scripts/test-swarm-ready-benchmark.sh" "$test_root/scripts/test-swarm-ready-benchmark.sh"
 cp "$project_root/scripts/test-swarm-native-feedback-loop.sh" "$test_root/scripts/test-swarm-native-feedback-loop.sh"
 cp "$project_root/scripts/test-feedback-loop-resume.sh" "$test_root/scripts/test-feedback-loop-resume.sh"
 cp "$project_root/scripts/test-feedback-loop-routing.sh" "$test_root/scripts/test-feedback-loop-routing.sh"
@@ -212,6 +213,7 @@ grep -F '"firstFailedCommand"' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'command failed (exit %s)' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-native-claspc.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-swarm-ready-gate.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'bash scripts/test-swarm-ready-benchmark.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-swarm-native-feedback-loop.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-monitored-step.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-monitored-run-log.sh' "$test_root/scripts/verify-all.sh" >/dev/null

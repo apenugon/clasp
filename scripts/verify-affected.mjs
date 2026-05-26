@@ -254,6 +254,7 @@ const COMMANDS = {
   nativeClaspc: "bash scripts/test-native-claspc.sh",
   nativeRuntime: "bash scripts/test-native-runtime.sh",
   swarmReady: "bash scripts/test-swarm-ready-gate.sh",
+  swarmReadyBenchmark: "bash scripts/test-swarm-ready-benchmark.sh",
   swarmMemory: "bash scripts/test-swarm-memory.sh",
   swarmContextPack: "bash scripts/test-swarm-context-pack.sh",
   agentCommandTemplate: "bash scripts/test-agent-command-template.sh",
@@ -1064,6 +1065,15 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
       reason(file, "swarm-native", "native swarm example path uses native claspc, ready-gate, managed-loop, and FeedbackLoop coverage");
       addSelected(selectedByCommand, "native-claspc", COMMANDS.nativeClaspc, "swarm native path", file);
       addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "swarm native path", file);
+      if (file === "examples/swarm-native/SwarmReadyBenchmark.clasp") {
+        addSelected(
+          selectedByCommand,
+          "swarm-ready-benchmark",
+          COMMANDS.swarmReadyBenchmark,
+          "native swarm readiness benchmark",
+          file,
+        );
+      }
       addSelected(selectedByCommand, "swarm-memory", COMMANDS.swarmMemory, "swarm native path", file);
       addSelected(selectedByCommand, "swarm-context-pack", COMMANDS.swarmContextPack, "swarm native path", file);
       addSelected(selectedByCommand, "monitored-loop", COMMANDS.monitoredLoop, "swarm native path", file);
@@ -1315,6 +1325,25 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
         file,
       );
       addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "swarm-ready gate harness", file);
+    }
+
+    if (file === "scripts/test-swarm-ready-benchmark.sh") {
+      matched = true;
+      reason(file, "swarm-ready-benchmark-harness", "swarm-ready benchmark uses shell syntax plus focused native runtime coverage");
+      addSelected(
+        selectedByCommand,
+        `bash-syntax:${file}`,
+        `bash -n ${shellQuote(file)}`,
+        "swarm-ready benchmark shell syntax",
+        file,
+      );
+      addSelected(
+        selectedByCommand,
+        "swarm-ready-benchmark",
+        COMMANDS.swarmReadyBenchmark,
+        "swarm-ready benchmark harness",
+        file,
+      );
     }
 
     if (file === "scripts/test-agent-command-template.sh") {

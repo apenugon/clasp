@@ -23,7 +23,7 @@ reject_pattern() {
   fi
 }
 
-bash -n "$project_root/scripts/test-native-claspc.sh" "$project_root/scripts/test-native-claspc-smoke.sh" "$project_root/scripts/test-int-builtins.sh" "$project_root/scripts/test-dict-builtins.sh" "$project_root/scripts/test-native-runtime-smoke.sh" "$project_root/scripts/test-verify-all-smoke.sh" "$project_root/scripts/test-agent-command-template.sh" "$project_root/scripts/test-goal-manager-agent-command-template.sh" "$project_root/scripts/test-goal-manager-default-planner-command.sh" "$project_root/scripts/test-swarm-memory.sh" "$project_root/scripts/test-swarm-context-pack.sh" "$project_root/benchmarks/test-benchmark-prep-cache.sh"
+bash -n "$project_root/scripts/test-native-claspc.sh" "$project_root/scripts/test-native-claspc-smoke.sh" "$project_root/scripts/test-int-builtins.sh" "$project_root/scripts/test-dict-builtins.sh" "$project_root/scripts/test-native-runtime-smoke.sh" "$project_root/scripts/test-verify-all-smoke.sh" "$project_root/scripts/test-agent-command-template.sh" "$project_root/scripts/test-goal-manager-agent-command-template.sh" "$project_root/scripts/test-goal-manager-default-planner-command.sh" "$project_root/scripts/test-swarm-ready-benchmark.sh" "$project_root/scripts/test-swarm-memory.sh" "$project_root/scripts/test-swarm-context-pack.sh" "$project_root/benchmarks/test-benchmark-prep-cache.sh"
 bash -n "$project_root/scripts/test-goal-manager-planner-report-decode.sh"
 bash -n "$project_root/examples/swarm-kernel/scripts/verify.sh"
 node "$project_root/scripts/check-promoted-native-image-exports.mjs" >/dev/null
@@ -58,6 +58,8 @@ require_pattern "scripts/verify-fast.sh" 'bash benchmarks/test-benchmark-prep-ca
 require_pattern "scripts/verify-all.sh" 'bash scripts/test-swarm-memory.sh'
 require_pattern "scripts/verify-fast.sh" 'bash scripts/test-swarm-memory.sh'
 require_pattern "scripts/verify-affected.mjs" 'bash scripts/test-swarm-memory.sh'
+require_pattern "scripts/verify-all.sh" 'bash scripts/test-swarm-ready-benchmark.sh'
+require_pattern "scripts/verify-affected.mjs" 'bash scripts/test-swarm-ready-benchmark.sh'
 require_pattern "scripts/verify-all.sh" 'bash scripts/test-swarm-context-pack.sh'
 require_pattern "scripts/verify-fast.sh" 'bash scripts/test-swarm-context-pack.sh'
 require_pattern "scripts/verify-affected.mjs" 'bash scripts/test-swarm-context-pack.sh'
@@ -414,8 +416,16 @@ require_pattern "examples/swarm-native/Main.clasp" 'failedVerificationPlanScenar
 require_pattern "examples/swarm-native/Main.clasp" 'focused-native-failure'
 require_pattern "examples/swarm-native/Main.clasp" 'failedPlanFailedVerifiers'
 require_pattern "examples/swarm-native/SwarmReadyBenchmark.clasp" 'BenchmarkSignal'
-require_pattern "examples/swarm-native/SwarmReadyBenchmark.clasp" 'scripts/test-swarm-ready-gate.sh'
-require_pattern "examples/swarm-native/SwarmReadyBenchmark.clasp" 'suite = "swarm-ready-gate"'
+require_pattern "examples/swarm-native/SwarmReadyBenchmark.clasp" 'import Swarm'
+require_pattern "examples/swarm-native/SwarmReadyBenchmark.clasp" 'suite = "native-swarm-readiness"'
+require_pattern "examples/swarm-native/SwarmReadyBenchmark.clasp" 'objectiveCreateWithDeadline'
+require_pattern "examples/swarm-native/SwarmReadyBenchmark.clasp" 'taskCreateWithDeadline'
+require_pattern "examples/swarm-native/SwarmReadyBenchmark.clasp" 'policySetForVerificationPlan'
+require_pattern "examples/swarm-native/SwarmReadyBenchmark.clasp" 'runToolStepWithTimeout'
+require_pattern "examples/swarm-native/SwarmReadyBenchmark.clasp" 'executeVerificationPlanWithTimeout'
+require_pattern "examples/swarm-native/SwarmReadyBenchmark.clasp" 'approveAndMergeVerificationPlan'
+require_pattern "examples/swarm-native/SwarmReadyBenchmark.clasp" 'taskContextPack'
+reject_pattern "examples/swarm-native/SwarmReadyBenchmark.clasp" 'scripts/test-swarm-ready-gate.sh'
 require_pattern "runtime/swarm.rs" 'require_active_lease_owner'
 require_pattern "runtime/swarm.rs" 'require_unexpired_lease_owner'
 require_pattern "runtime/swarm.rs" 'require_recorded_lease_owner'

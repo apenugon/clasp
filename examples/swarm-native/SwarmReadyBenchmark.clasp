@@ -1,8 +1,7 @@
 module Main
 
 import GoalManagerTypes
-
-foreign runCommandRaw : Str -> [Str] -> Result Str = "runCommandJson"
+import Swarm
 
 envText : Str -> Str -> Str
 envText name fallback =
@@ -18,43 +17,269 @@ envInt name fallback =
     Err message -> fallback
   }
 
+textIncludes : Str -> Str -> Bool
+textIncludes value needle = length (textSplit value needle) > 1
+
 benchmarkRoot : Str
 benchmarkRoot = envText "CLASP_MANAGER_PROJECT_ROOT" "."
 
 benchmarkWave : Int
 benchmarkWave = envInt "CLASP_MANAGER_BENCHMARK_WAVE" 1
 
-runGate : ProcessResult
-runGate =
-  match runCommandRaw benchmarkRoot ["bash", "scripts/test-swarm-ready-gate.sh"] {
-    Ok raw -> decode ProcessResult raw,
-    Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
+benchmarkRunId : Str
+benchmarkRunId =
+  envText "CLASP_MANAGER_BENCHMARK_RUN_ID" (textConcat [encode benchmarkWave, "-", encode timeUnixMs])
+
+defaultStateRoot : Str
+defaultStateRoot =
+  pathJoin [
+    envText "CLASP_TEST_TMPDIR" (pathJoin [benchmarkRoot, ".clasp-loops"]),
+    "native-swarm-readiness",
+    benchmarkRunId
+  ]
+
+benchmarkStateRoot : Str
+benchmarkStateRoot =
+  if textJoin "" argv == "" then
+    envText "CLASP_MANAGER_BENCHMARK_STATE_ROOT" defaultStateRoot
+  else
+    pathJoin argv
+
+root : SwarmRoot
+root = swarmRoot benchmarkStateRoot
+
+objectiveId : Str
+objectiveId = textConcat ["native-readiness-", benchmarkRunId]
+
+planTaskId : Str
+planTaskId = textConcat [objectiveId, "-plan"]
+
+repairTaskId : Str
+repairTaskId = textConcat [objectiveId, "-repair"]
+
+objective : ObjectiveHandle
+objective = objectiveHandle root objectiveId
+
+planTask : TaskHandle
+planTask = taskHandle root planTaskId "readiness-builder"
+
+repairTask : TaskHandle
+repairTask = taskHandle root repairTaskId "readiness-builder"
+
+deadlineAtMs : Int
+deadlineAtMs = 4102444800000
+
+leaseTimeoutMs : Int
+leaseTimeoutMs = 60000
+
+mailboxLimit : Int
+mailboxLimit = 20
+
+readinessTarget : Int
+readinessTarget = 10
+
+builderCommand : SwarmCommand
+builderCommand = commandSpec benchmarkRoot ["printf", "builder-ok"]
+
+verifierCommand : SwarmCommand
+verifierCommand = commandSpec benchmarkRoot ["printf", "verifier-ok"]
+
+readinessVerificationPlan : VerificationPlan
+readinessVerificationPlan =
+  verificationPlan "native-readiness-verifiers" [
+    verificationCommand "native-readiness-smoke" verifierCommand
+  ]
+
+taskPattern : Str -> Str
+taskPattern taskId = textConcat ["\"taskId\":\"", taskId, "\""]
+
+hasTask : [SwarmTask] -> Str -> Bool
+hasTask taskValues taskId = textIncludes (encode taskValues) (taskPattern taskId)
+
+toolStepReady : ToolStepResult -> Bool
+toolStepReady step =
+  if step.run.status == "passed" then
+    step.status.task.status == "completed"
+  else
+    false
+
+verificationReady : VerificationPlanResult -> Bool
+verificationReady result =
+  if result.passed then
+    if length result.trace > 0 then
+      result.mailboxSummary.artifactCount > 1
+    else
+      false
+  else
+    false
+
+reviewReady : ReviewStepResult -> Bool
+reviewReady review =
+  if review.mergeDecision.verdict == "pass" then
+    length review.approvals > 0
+  else
+    false
+
+contextPackReady : SwarmContextPack -> Bool
+contextPackReady pack =
+  if pack.task.status == "completed" then
+    if length pack.memoryValues > 1 then
+      if pack.mailboxSummary.runCount > 1 then
+        if length pack.artifactPaths > 1 then
+          textIncludes (encode pack.memoryValues) "native readiness"
+        else
+          false
+      else
+        false
+    else
+      false
+  else
+    false
+
+passSignal : SwarmContextPack -> VerificationPlanResult -> ReviewStepResult -> BenchmarkSignal
+passSignal pack verificationValue review =
+  BenchmarkSignal {
+    suite = "native-swarm-readiness",
+    summary = textConcat [
+      "native readiness passed wave ",
+      encode benchmarkWave,
+      " run ",
+      benchmarkRunId,
+      ": verifier=",
+      verificationValue.mailboxSummary.latestVerifierStatus,
+      ", merge=",
+      review.mergeDecision.verdict,
+      ", contextRuns=",
+      encode pack.mailboxSummary.runCount
+    ],
+    passed = true,
+    meetsTarget = true,
+    scoreName = "nativeReadinessSignals",
+    scoreValue = readinessTarget,
+    targetName = "requiredNativeReadinessSignals",
+    targetValue = readinessTarget
   }
 
-benchmarkSignalFor : ProcessResult -> BenchmarkSignal
-benchmarkSignalFor result =
-  if result.exitCode == 0 then
-    BenchmarkSignal {
-      suite = "swarm-ready-gate",
-      summary = textConcat ["swarm-ready gate passed after wave ", encode benchmarkWave],
-      passed = true,
-      meetsTarget = true,
-      scoreName = "passingWave",
-      scoreValue = benchmarkWave,
-      targetName = "minPassingWave",
-      targetValue = 1
-    }
-  else
-    BenchmarkSignal {
-      suite = "swarm-ready-gate",
-      summary = textConcat ["swarm-ready gate failed: ", result.stderr],
-      passed = false,
-      meetsTarget = false,
-      scoreName = "passingWave",
-      scoreValue = benchmarkWave,
-      targetName = "minPassingWave",
-      targetValue = 1
-    }
+failSignal : Str -> Int -> BenchmarkSignal
+failSignal reason score =
+  BenchmarkSignal {
+    suite = "native-swarm-readiness",
+    summary = textConcat [
+      "native readiness failed wave ",
+      encode benchmarkWave,
+      " run ",
+      benchmarkRunId,
+      ": ",
+      reason
+    ],
+    passed = false,
+    meetsTarget = false,
+    scoreName = "nativeReadinessSignals",
+    scoreValue = score,
+    targetName = "requiredNativeReadinessSignals",
+    targetValue = readinessTarget
+  }
+
+stageError : Str -> Str -> Int -> BenchmarkSignal
+stageError stage message score = failSignal (textConcat [stage, ": ", message]) score
+
+readinessSignal : BenchmarkSignal
+readinessSignal =
+  match mkdirAll benchmarkStateRoot {
+    Ok rootCreated ->
+      match objectiveCreateWithDeadline root objectiveId "Prove native Clasp swarm readiness without shell orchestration." 2 16 deadlineAtMs {
+        Ok objectiveValue ->
+          match taskCreateWithDeadline objective planTaskId "Plan a bounded native swarm repair task." [] 4 deadlineAtMs leaseTimeoutMs {
+            Ok planTaskValue ->
+              match taskCreateWithDeadline objective repairTaskId "Execute, verify, review, and contextualize the native swarm task." [planTaskId] 8 deadlineAtMs leaseTimeoutMs {
+                Ok repairTaskValue ->
+                  match ready objective {
+                    Ok readyBefore ->
+                      if hasTask readyBefore planTaskId then
+                        if hasTask readyBefore repairTaskId then
+                          failSignal "dependent repair task was ready before the plan task completed" 2
+                        else
+                          match policySetForVerificationPlan repairTask "readiness-trunk" ["readiness-review"] readinessVerificationPlan {
+                            Ok policyValue ->
+                              match objectiveMemoryPut objective "readiness-planner" "readiness-context" "objective native readiness lesson for compiler swarm work" {
+                                Ok objectiveMemoryValue ->
+                                  match taskMemoryPut repairTask "readiness-context" "task native readiness memory for compiler verifier context" {
+                                    Ok taskMemoryValue ->
+                                      match runToolStepWithTimeout planTask builderCommand 5000 mailboxLimit {
+                                        Ok planStep ->
+                                          if toolStepReady planStep then
+                                            match ready objective {
+                                              Ok readyAfter ->
+                                                if hasTask readyAfter repairTaskId then
+                                                  match runToolStepWithTimeout repairTask builderCommand 5000 mailboxLimit {
+                                                    Ok repairStep ->
+                                                      if toolStepReady repairStep then
+                                                        match executeVerificationPlanWithTimeout repairTask readinessVerificationPlan 5000 mailboxLimit {
+                                                          Ok verificationValue ->
+                                                            if verificationReady verificationValue then
+                                                              match approveAndMergeVerificationPlan repairTask "readiness-review" "readiness-trunk" readinessVerificationPlan mailboxLimit {
+                                                                Ok reviewValue ->
+                                                                  if reviewReady reviewValue then
+                                                                    match taskContextPack repairTask "native readiness compiler verifier" mailboxLimit {
+                                                                      Ok pack ->
+                                                                        if contextPackReady pack then
+                                                                          passSignal pack verificationValue reviewValue
+                                                                        else
+                                                                          failSignal "context pack did not include completed task state, memory, runs, and artifacts" 9,
+                                                                      Err message ->
+                                                                        stageError "context-pack" message 8
+                                                                    }
+                                                                  else
+                                                                    failSignal "review or mergegate did not reach a passing state" 8,
+                                                                Err message ->
+                                                                  stageError "review-mergegate" message 7
+                                                              }
+                                                            else
+                                                              failSignal "verification plan did not pass with trace and artifacts" 7,
+                                                          Err message ->
+                                                            stageError "verification-plan" message 6
+                                                        }
+                                                      else
+                                                        failSignal "repair tool step did not pass and complete" 6,
+                                                    Err message ->
+                                                      stageError "repair-tool" message 5
+                                                  }
+                                                else
+                                                  failSignal "repair task was not ready after plan completion" 5,
+                                              Err message ->
+                                                stageError "ready-after-plan" message 4
+                                            }
+                                          else
+                                            failSignal "plan tool step did not pass and complete" 4,
+                                        Err message ->
+                                          stageError "plan-tool" message 3
+                                      },
+                                    Err message ->
+                                      stageError "task-memory" message 3
+                                  },
+                                Err message ->
+                                  stageError "objective-memory" message 3
+                              },
+                            Err message ->
+                              stageError "policy" message 3
+                          }
+                      else
+                        failSignal "plan task was not initially ready" 2,
+                    Err message ->
+                      stageError "ready-before" message 2
+                  },
+                Err message ->
+                  stageError "repair-task-create" message 1
+              },
+            Err message ->
+              stageError "plan-task-create" message 1
+          },
+        Err message ->
+          stageError "objective-create" message 1
+      },
+    Err message ->
+      stageError "state-root" message 0
+  }
 
 main : Str
-main = encode (benchmarkSignalFor runGate)
+main = encode readinessSignal
