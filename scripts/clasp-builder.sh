@@ -13,7 +13,7 @@ log_jsonl="$4"
 feedback_file="${5:-}"
 model="${CODEX_MODEL:-gpt-5.5}"
 reasoning_effort="${CODEX_REASONING_EFFORT:-xhigh}"
-sandbox_mode="${CLASP_SWARM_CODEX_SANDBOX:-workspace-write}"
+sandbox_mode="${CLASP_SWARM_CODEX_SANDBOX:-danger-full-access}"
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 base_schema_file="$project_root/agents/schemas/builder-report.schema.json"
 schema_file="$(mktemp "${TMPDIR:-/tmp}/clasp-builder-schema.XXXXXX")"
@@ -39,7 +39,6 @@ trap cleanup EXIT
 
 case "$sandbox_mode" in
   read-only|workspace-write|danger-full-access)
-    # Keep each lane contained to its worktree by default.
     codex_sandbox_args=(--sandbox "$sandbox_mode")
     ;;
   *)

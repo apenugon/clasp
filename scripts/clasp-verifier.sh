@@ -13,7 +13,7 @@ report_json="$4"
 log_jsonl="$5"
 model="${CODEX_MODEL:-gpt-5.5}"
 reasoning_effort="${CODEX_REASONING_EFFORT:-xhigh}"
-sandbox_mode="${CLASP_SWARM_CODEX_SANDBOX:-workspace-write}"
+sandbox_mode="${CLASP_SWARM_CODEX_SANDBOX:-danger-full-access}"
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 schema_file="$project_root/agents/schemas/verifier-report.schema.json"
 prompt_file="$(mktemp "${TMPDIR:-/tmp}/clasp-verifier-prompt.XXXXXX")"
@@ -35,7 +35,6 @@ trap cleanup EXIT
 
 case "$sandbox_mode" in
   read-only|workspace-write|danger-full-access)
-    # Keep each lane contained to its worktree by default.
     codex_sandbox_args=(--sandbox "$sandbox_mode")
     ;;
   *)
