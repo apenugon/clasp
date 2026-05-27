@@ -27,6 +27,7 @@ benchmarks/workspaces/*
 /.clasp-task-workspaces/
 /.clasp-task-baselines/
 /.clasp-test-tmp/
+/.clasp-verify/
 /.clasp-verify-tmp/
 /.codex
 /--help/

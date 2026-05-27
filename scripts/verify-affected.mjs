@@ -312,13 +312,43 @@ const plannerReportDecodeFiles = new Set([
 ]);
 const ignoredChangedFiles = new Set([
   ".workspace-ready",
+  ".clasp-agents",
+  ".clasp-loops",
   ".clasp-manager-workspace-ready",
   ".clasp-manager-workspace-manifest.json",
+  ".clasp-swarm",
+  ".clasp-task-baselines",
+  ".clasp-task-workspaces",
+  ".clasp-test-tmp",
+  ".clasp-verify",
+  ".clasp-verify-tmp",
+  "runtime/.clasp-test-tmp",
+  "runtime/target",
+  "src/native-verify-cache",
 ]);
+const ignoredChangedFilePrefixes = [
+  ".clasp-agents/",
+  ".clasp-loops/",
+  ".clasp-swarm/",
+  ".clasp-task-baselines/",
+  ".clasp-task-workspaces/",
+  ".clasp-test-tmp/",
+  ".clasp-verify/",
+  ".clasp-verify-tmp/",
+  "benchmarks/results/",
+  "benchmarks/workspaces/",
+  "runtime/.clasp-test-tmp/",
+  "runtime/target/",
+  "src/native-verify-cache/",
+];
 const hostRuntimeDocFiles = new Set([
   "docs/autonomous-swarm-build-plan.md",
   "docs/clasp-spec-v0.md",
 ]);
+
+function isIgnoredChangedFile(file) {
+  return ignoredChangedFiles.has(file) || ignoredChangedFilePrefixes.some((prefix) => file.startsWith(prefix));
+}
 
 function fileExists(relativePath) {
   try {
@@ -1621,8 +1651,12 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
 
   let verificationFallbackMode = "none";
   if (changedFiles.length === 0) {
-    verificationFallbackMode = inputFallbackMode === "git-unavailable" ? "git-unavailable-empty-input" : "empty-input";
-    addSelected(selectedByCommand, "verify-fast", COMMANDS.verifyFast, "empty or unavailable changed-file input", "");
+    if (inputFallbackMode === "ignored-input") {
+      verificationFallbackMode = "ignored-input";
+    } else {
+      verificationFallbackMode = inputFallbackMode === "git-unavailable" ? "git-unavailable-empty-input" : "empty-input";
+      addSelected(selectedByCommand, "verify-fast", COMMANDS.verifyFast, "empty or unavailable changed-file input", "");
+    }
   } else if (unmatchedFiles.length > 0) {
     verificationFallbackMode = "unknown-path";
     for (const file of unmatchedFiles) {
@@ -1635,7 +1669,7 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
     routingReasons,
     unmatchedFiles,
     verificationFallbackMode,
-    usedVerifyFastFallback: verificationFallbackMode !== "none",
+    usedVerifyFastFallback: verificationFallbackMode !== "none" && verificationFallbackMode !== "ignored-input",
   };
 }
 
@@ -1739,7 +1773,11 @@ function main() {
     inputFallbackMode = gitFallback.inputFallbackMode;
   }
 
-  const changedFiles = uniqueNormalized(rawChangedFiles).filter((file) => !ignoredChangedFiles.has(file));
+  const normalizedChangedFiles = uniqueNormalized(rawChangedFiles);
+  const changedFiles = normalizedChangedFiles.filter((file) => !isIgnoredChangedFile(file));
+  if (normalizedChangedFiles.length > 0 && changedFiles.length === 0) {
+    inputFallbackMode = "ignored-input";
+  }
   const semanticContexts = collectSemanticContexts(changedFiles);
   const routePlan = routeChangedFiles(changedFiles, inputFallbackMode);
   const planExplanations = args.planOnly ? buildPlanExplanations(changedFiles, routePlan, semanticContexts) : [];

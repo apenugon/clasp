@@ -620,6 +620,18 @@ switch (scenario) {
     assert(report.changedFiles.length === 0, "empty git scenario should have no changed files");
     assert(hasCommand("bash scripts/verify-fast.sh"), "empty git input should run verify-fast");
     break;
+  case "generated-state-noise":
+    assert(report.usedGitFallback === false, "explicit generated state should not use git fallback");
+    assert(report.inputSources.some((source) => source.kind === "argv"), "argv source should be recorded");
+    assert(report.inputFallbackMode === "ignored-input", `expected ignored-input, got ${report.inputFallbackMode}`);
+    assert(report.verificationFallbackMode === "ignored-input", `expected ignored-input verification, got ${report.verificationFallbackMode}`);
+    assert(report.changedFiles.length === 0, `generated noise should be filtered: ${JSON.stringify(report.changedFiles)}`);
+    assert(report.selectedCommands.length === 0, "generated noise should not select commands");
+    assert(report.commandCount === 0, `generated noise command count ${report.commandCount}`);
+    assert(report.executedCommandCount === 0, `generated noise executed count ${report.executedCommandCount}`);
+    assert(report.usedVerifyFastFallback === false, "generated noise should not use verify-fast fallback");
+    assert(log.length === 0, `generated noise should not execute fake commands: ${JSON.stringify(log)}`);
+    break;
   default:
     assert(false, `unknown scenario ${scenario}`);
 }
@@ -946,3 +958,15 @@ empty_git_log="$test_root/empty-git.log"
 CLASP_TEST_FAKE_COMMAND_LOG="$empty_git_log" \
   run_verify_affected > "$empty_git_report"
 assert_report "$empty_git_report" "$empty_git_log" empty-git
+
+generated_state_report="$test_root/generated-state-report.json"
+generated_state_log="$test_root/generated-state.log"
+CLASP_TEST_FAKE_COMMAND_LOG="$generated_state_log" \
+  run_verify_affected \
+    --changed-file .clasp-verify \
+    --changed-file .clasp-verify/jobs/job-1/stdout.log \
+    --changed-file .clasp-loops \
+    --changed-file .clasp-loops/jobs/job-2/status \
+    --changed-file benchmarks/workspaces/generated/noise.txt \
+    --changed-file runtime/target/debug/noise.o > "$generated_state_report"
+assert_report "$generated_state_report" "$generated_state_log" generated-state-noise
