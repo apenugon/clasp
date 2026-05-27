@@ -52,7 +52,7 @@ includes(report.memoryValues, "objective focused compiler verifier lesson", "mem
 assert(report.memoryScores[0] > 0, `first memory score ${report.memoryScores[0]}`);
 includes(report.memoryMatchedText, "task focused compiler verifier should inspect local evidence", "matched text");
 assert(report.mailboxRunCount === 2, `mailbox run count ${report.mailboxRunCount}`);
-assert(report.mailboxArtifactCount === 4, `mailbox artifact count ${report.mailboxArtifactCount}`);
+assert(report.mailboxArtifactCount === 5, `mailbox artifact count ${report.mailboxArtifactCount}`);
 assert(report.latestVerifierStatus === "failed", `latest verifier status ${report.latestVerifierStatus}`);
 assert(report.latestVerifier === "context-pack-fail", `latest verifier ${report.latestVerifier}`);
 includes(report.traceNames, "context-pack-fail", "trace names");
@@ -60,10 +60,19 @@ includes(report.traceStatuses, "failed", "trace statuses");
 includes(report.traceClassifications, "exit-code", "trace classifications");
 includes(report.artifactKinds, "stdout", "artifact kinds");
 includes(report.artifactKinds, "stderr", "artifact kinds");
+includes(report.artifactKinds, "note", "artifact kinds");
 assert(report.artifactExcerptCount >= 2, `artifact excerpt count ${report.artifactExcerptCount}`);
 includes(report.artifactExcerptKinds, "stdout", "artifact excerpt kinds");
 includes(report.artifactExcerptKinds, "stderr", "artifact excerpt kinds");
+includes(report.artifactExcerptKinds, "note", "artifact excerpt kinds");
 includes(report.artifactExcerptTexts, "context-verifier-warning", "artifact excerpt texts");
+includes(report.artifactExcerptTexts, "published context artifact from ordinary clasp", "artifact excerpt texts");
+assert(report.publishedArtifactKind === "note", `published artifact kind ${report.publishedArtifactKind}`);
+assert(
+  report.publishedArtifactReadText === "published context artifact from ordinary clasp",
+  `published artifact text ${JSON.stringify(report.publishedArtifactReadText)}`,
+);
+assert(report.publishedArtifactReadBytes > 0, `published artifact read bytes ${report.publishedArtifactReadBytes}`);
 assert(report.artifactReadKind === "stdout", `artifact read kind ${report.artifactReadKind}`);
 assert(report.artifactReadBytes === 16, `artifact read bytes ${report.artifactReadBytes}`);
 assert(report.artifactReadTotalBytes >= 16, `artifact read total bytes ${report.artifactReadTotalBytes}`);

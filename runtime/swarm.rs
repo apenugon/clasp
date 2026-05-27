@@ -1,7 +1,7 @@
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Map, Value};
 use std::env;
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 #[cfg(unix)]
 use std::os::raw::c_int;
@@ -177,6 +177,7 @@ enum SwarmCommand {
     Runs { root: PathBuf, task_id: Option<String> },
     Artifacts { root: PathBuf, task_id: Option<String> },
     ArtifactRead { root: PathBuf, artifact_id: i64, max_bytes: u64 },
+    ArtifactWrite { root: PathBuf, task_id: String, actor: String, kind: String, text: String },
     MemoryPut {
         root: PathBuf,
         objective_id: String,
@@ -263,7 +264,7 @@ enum SwarmCommand {
 
 fn swarm_usage(program: &str) -> ! {
     eprintln!(
-        "usage: {program} [--json] swarm <start|bootstrap|lease|release|heartbeat|complete|fail|retry|stop|resume|status|history|tasks|summary|tail|runs|artifacts|artifact read|memory put|memory query|memory search|objective create|objective status|objectives|task create|ready|approve|approvals|policy set|manager next|tool|verifier run|mergegate decide> ..."
+        "usage: {program} [--json] swarm <start|bootstrap|lease|release|heartbeat|complete|fail|retry|stop|resume|status|history|tasks|summary|tail|runs|artifacts|artifact read|artifact write|memory put|memory query|memory search|objective create|objective status|objectives|task create|ready|approve|approvals|policy set|manager next|tool|verifier run|mergegate decide> ..."
     );
     std::process::exit(2);
 }
@@ -530,33 +531,62 @@ fn parse_swarm_command(args: &[String]) -> Result<Option<(bool, SwarmCommand)>, 
             }
         }
         "artifact" => {
-            if rest.first().map(|value| value.as_str()) != Some("read") {
-                return Err(
-                    "usage: claspc swarm artifact read <state-root> <artifact-id> [--max-bytes N]".to_owned(),
-                );
-            }
-            if rest.len() < 3 {
-                return Err(
-                    "usage: claspc swarm artifact read <state-root> <artifact-id> [--max-bytes N]".to_owned(),
-                );
-            }
-            let root = parse_root_arg(&rest[1]);
-            let artifact_id = parse_artifact_id(&rest[2])?;
-            let mut max_bytes = DEFAULT_SWARM_ARTIFACT_READ_LIMIT_BYTES;
-            let mut index = 3usize;
-            while index < rest.len() {
-                match rest[index].as_str() {
-                    "--max-bytes" => {
-                        let Some(value) = rest.get(index + 1) else {
-                            return Err("missing value after --max-bytes".to_owned());
-                        };
-                        max_bytes = parse_max_bytes(value)?;
-                        index += 2;
+            let Some(action) = rest.first().map(|value| value.as_str()) else {
+                return Err("usage: claspc swarm artifact <read|write> ...".to_owned());
+            };
+            match action {
+                "read" => {
+                    if rest.len() < 3 {
+                        return Err(
+                            "usage: claspc swarm artifact read <state-root> <artifact-id> [--max-bytes N]".to_owned(),
+                        );
                     }
-                    other => return Err(format!("unknown option `{other}`")),
+                    let root = parse_root_arg(&rest[1]);
+                    let artifact_id = parse_artifact_id(&rest[2])?;
+                    let mut max_bytes = DEFAULT_SWARM_ARTIFACT_READ_LIMIT_BYTES;
+                    let mut index = 3usize;
+                    while index < rest.len() {
+                        match rest[index].as_str() {
+                            "--max-bytes" => {
+                                let Some(value) = rest.get(index + 1) else {
+                                    return Err("missing value after --max-bytes".to_owned());
+                                };
+                                max_bytes = parse_max_bytes(value)?;
+                                index += 2;
+                            }
+                            other => return Err(format!("unknown option `{other}`")),
+                        }
+                    }
+                    SwarmCommand::ArtifactRead { root, artifact_id, max_bytes }
                 }
+                "write" => {
+                    if rest.len() < 5 {
+                        return Err(
+                            "usage: claspc swarm artifact write <state-root> <task-id> <kind> <text> [--actor NAME]".to_owned(),
+                        );
+                    }
+                    let root = parse_root_arg(&rest[1]);
+                    let task_id = rest[2].clone();
+                    let kind = rest[3].clone();
+                    let text = rest[4].clone();
+                    let mut actor = default_actor();
+                    let mut index = 5usize;
+                    while index < rest.len() {
+                        match rest[index].as_str() {
+                            "--actor" => {
+                                let Some(value) = rest.get(index + 1) else {
+                                    return Err("missing value after --actor".to_owned());
+                                };
+                                actor = value.clone();
+                                index += 2;
+                            }
+                            other => return Err(format!("unknown option `{other}`")),
+                        }
+                    }
+                    SwarmCommand::ArtifactWrite { root, task_id, actor, kind, text }
+                }
+                _ => Err("usage: claspc swarm artifact <read|write> ...".to_owned())?,
             }
-            SwarmCommand::ArtifactRead { root, artifact_id, max_bytes }
         }
         "memory" => {
             let Some(action) = rest.first().map(|value| value.as_str()) else {
@@ -3719,9 +3749,77 @@ fn ready_json(connection: &Connection, objective_id: Option<&str>) -> Result<Val
     Ok(Value::Array(values))
 }
 
+struct PublishedArtifactFile {
+    path: PathBuf,
+    bytes_written: u64,
+    total_bytes: u64,
+    truncated: bool,
+}
+
+fn sanitize_artifact_component(value: &str) -> String {
+    let mut sanitized = String::new();
+    for ch in value.chars().take(96) {
+        if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' || ch == '.' {
+            sanitized.push(ch);
+        } else {
+            sanitized.push('-');
+        }
+    }
+    if sanitized.is_empty() {
+        "artifact".to_owned()
+    } else {
+        sanitized
+    }
+}
+
 fn next_artifact_path(paths: &SwarmRuntimePaths, task_id: &str, run_id: i64, kind: &str) -> PathBuf {
-    let sanitized_task = task_id.replace('/', "-");
+    let sanitized_task = sanitize_artifact_component(task_id);
+    let kind = sanitize_artifact_component(kind);
     paths.artifacts_dir.join(format!("{sanitized_task}-{run_id}.{kind}.txt"))
+}
+
+fn write_published_artifact_file(
+    paths: &SwarmRuntimePaths,
+    task_id: &str,
+    kind: &str,
+    text: &str,
+) -> Result<PublishedArtifactFile, String> {
+    fs::create_dir_all(&paths.artifacts_dir).map_err(|err| {
+        format!(
+            "failed to create swarm artifact directory `{}`: {err}",
+            paths.artifacts_dir.display()
+        )
+    })?;
+    let sanitized_task = sanitize_artifact_component(task_id);
+    let sanitized_kind = sanitize_artifact_component(kind);
+    let stamp = now_ms();
+    let bytes = text.as_bytes();
+    let total_bytes = bytes.len() as u64;
+    let bytes_written = total_bytes.min(DEFAULT_SWARM_OUTPUT_LIMIT_BYTES);
+    let truncated = total_bytes > bytes_written;
+    let write_len = bytes_written as usize;
+    for attempt in 0..1000 {
+        let path = paths
+            .artifacts_dir
+            .join(format!("{sanitized_task}-published-{stamp}-{attempt}.{sanitized_kind}.txt"));
+        match OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(mut file) => {
+                file.write_all(&bytes[..write_len])
+                    .map_err(|err| format!("failed to write swarm artifact `{}`: {err}", path.display()))?;
+                return Ok(PublishedArtifactFile {
+                    path,
+                    bytes_written,
+                    total_bytes,
+                    truncated,
+                });
+            }
+            Err(err) if err.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(err) => return Err(format!("failed to create swarm artifact `{}`: {err}", path.display())),
+        }
+    }
+    Err(format!(
+        "failed to allocate a unique swarm artifact path for task `{task_id}` and kind `{kind}`"
+    ))
 }
 
 fn create_artifact(
@@ -5342,6 +5440,53 @@ fn execute_memory_put(
     Ok(memory_json(&memory))
 }
 
+fn execute_artifact_write(
+    root: &Path,
+    task_id: &str,
+    actor: &str,
+    kind: &str,
+    text: &str,
+) -> Result<Value, String> {
+    if kind.is_empty() {
+        return Err("artifact kind must not be empty".to_owned());
+    }
+    let (paths, mut connection) = open_swarm_connection(root)?;
+    if load_task_state(&connection, task_id)?.is_none() {
+        return Err(format!("unknown swarm task `{task_id}`"));
+    }
+    let published = write_published_artifact_file(&paths, task_id, kind, text)?;
+    let metadata = json!({
+        "source": "published",
+        "actor": actor,
+        "kind": kind,
+        "outputLimitBytes": DEFAULT_SWARM_OUTPUT_LIMIT_BYTES,
+        "bytes": published.bytes_written,
+        "totalBytes": published.total_bytes,
+        "truncated": published.truncated,
+    });
+    let artifact_id = create_artifact(&connection, task_id, kind, &published.path, metadata.clone())?;
+    let _ = record_swarm_event(
+        &mut connection,
+        "artifact_published",
+        task_id,
+        actor,
+        &format!("Published artifact `{kind}` for {task_id}."),
+        json!({
+            "artifactId": artifact_id,
+            "kind": kind,
+            "path": published.path.display().to_string(),
+            "outputLimitBytes": DEFAULT_SWARM_OUTPUT_LIMIT_BYTES,
+            "bytes": published.bytes_written,
+            "totalBytes": published.total_bytes,
+            "truncated": published.truncated,
+        }),
+    )?;
+    let Some(record) = load_artifact_record(&connection, artifact_id)? else {
+        return Err(format!("failed to reload swarm artifact `{artifact_id}`"));
+    };
+    Ok(artifact_json(&record))
+}
+
 fn execute_objective_create(
     root: &Path,
     objective_id: &str,
@@ -5814,6 +5959,10 @@ fn execute_command(command: SwarmCommand) -> Result<(ExitCode, Value), String> {
             ExitCode::SUCCESS,
             execute_memory_put(&root, &objective_id, &task_id, &actor, &key, &value)?,
         )),
+        SwarmCommand::ArtifactWrite { root, task_id, actor, kind, text } => Ok((
+            ExitCode::SUCCESS,
+            execute_artifact_write(&root, &task_id, &actor, &kind, &text)?,
+        )),
         SwarmCommand::Status { .. }
         | SwarmCommand::History { .. }
         | SwarmCommand::Tasks { .. }
@@ -6283,6 +6432,22 @@ pub fn builtin_swarm_artifact_read(root: &str, artifact_id: i64, max_bytes: i64)
             (max_bytes as u64).min(DEFAULT_SWARM_OUTPUT_LIMIT_BYTES)
         },
     })
+}
+
+pub fn builtin_swarm_artifact_write(
+    root: &str,
+    task_id: &str,
+    actor: &str,
+    kind: &str,
+    text: &str,
+) -> Result<String, String> {
+    render_builtin_json(execute_artifact_write(
+        Path::new(root),
+        task_id,
+        actor,
+        kind,
+        text,
+    )?)
 }
 
 pub fn builtin_swarm_memory_put(
@@ -7137,6 +7302,90 @@ mod tests {
         let finish_payload: Value = serde_json::from_str(&finish_payload_text).expect("decode finish payload");
         assert_eq!(finish_payload.get("stdoutTruncated").and_then(Value::as_bool), Some(true));
         assert_eq!(finish_payload.get("stderrTruncated").and_then(Value::as_bool), Some(true));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn swarm_artifact_write_publishes_bounded_task_artifacts() {
+        let root = unique_root("artifact-write");
+        let root_text = root.to_string_lossy().to_string();
+        let bootstrap_args = vec![
+            "claspc".to_owned(),
+            "swarm".to_owned(),
+            "bootstrap".to_owned(),
+            root_text.clone(),
+            "publish".to_owned(),
+        ];
+        assert_eq!(maybe_run_swarm(&bootstrap_args), Some(ExitCode::SUCCESS));
+
+        let (write_code, write_json_text) = run_swarm_json_command(&vec![
+            "artifact".to_owned(),
+            "write".to_owned(),
+            root_text.clone(),
+            "publish".to_owned(),
+            "agent-note".to_owned(),
+            "native artifact payload".to_owned(),
+            "--actor".to_owned(),
+            "builder".to_owned(),
+        ])
+        .expect("write published artifact");
+        assert_eq!(write_code, 0);
+        let artifact: Value = serde_json::from_str(&write_json_text).expect("decode artifact json");
+        let artifact_id = artifact
+            .get("artifactId")
+            .and_then(Value::as_i64)
+            .expect("artifact id");
+        assert_eq!(artifact.get("taskId").and_then(Value::as_str), Some("publish"));
+        assert_eq!(artifact.get("kind").and_then(Value::as_str), Some("agent-note"));
+        assert_eq!(
+            artifact.pointer("/metadata/source").and_then(Value::as_str),
+            Some("published")
+        );
+        assert_eq!(
+            artifact.pointer("/metadata/actor").and_then(Value::as_str),
+            Some("builder")
+        );
+        assert_eq!(
+            artifact.pointer("/metadata/truncated").and_then(Value::as_bool),
+            Some(false)
+        );
+
+        let artifact_path = artifact
+            .get("path")
+            .and_then(Value::as_str)
+            .expect("published artifact path");
+        assert_eq!(
+            fs::read_to_string(artifact_path).expect("read published artifact"),
+            "native artifact payload"
+        );
+
+        let (_, read_json_text) = run_swarm_json_command(&vec![
+            "artifact".to_owned(),
+            "read".to_owned(),
+            root_text.clone(),
+            artifact_id.to_string(),
+            "--max-bytes".to_owned(),
+            "64".to_owned(),
+        ])
+        .expect("read published artifact");
+        let content: Value = serde_json::from_str(&read_json_text).expect("decode published artifact content");
+        assert_eq!(content.get("kind").and_then(Value::as_str), Some("agent-note"));
+        assert_eq!(
+            content.get("text").and_then(Value::as_str),
+            Some("native artifact payload")
+        );
+        assert_eq!(content.get("truncated").and_then(Value::as_bool), Some(false));
+
+        let connection = Connection::open(runtime_paths(&root).db_path).expect("open sqlite db");
+        let publish_event_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM swarm_events WHERE task_id = 'publish' AND kind = 'artifact_published'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count publish events");
+        assert_eq!(publish_event_count, 1);
 
         let _ = fs::remove_dir_all(root);
     }

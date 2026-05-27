@@ -36,6 +36,7 @@ foreign swarmMergegateDecideRaw : Str -> Str -> Str -> Str -> [Str] -> Result St
 foreign swarmRunsRaw : Str -> Str -> Result Str = "swarmRunsJson"
 foreign swarmArtifactsRaw : Str -> Str -> Result Str = "swarmArtifactsJson"
 foreign swarmArtifactReadRaw : Str -> Int -> Int -> Result Str = "swarmArtifactReadJson"
+foreign swarmArtifactWriteRaw : Str -> Str -> Str -> Str -> Str -> Result Str = "swarmArtifactWriteJson"
 foreign swarmMemoryPutRaw : Str -> Str -> Str -> Str -> Str -> Str -> Result Str = "swarmMemoryPutJson"
 foreign swarmMemoryQueryRaw : Str -> Str -> Str -> Str -> Int -> Result Str = "swarmMemoryQueryJson"
 foreign swarmMemorySearchRaw : Str -> Str -> Str -> Str -> Int -> Result Str = "swarmMemorySearchJson"
@@ -463,6 +464,9 @@ runListResultError message = Err message
 artifactListResultError : Str -> Result [SwarmArtifact]
 artifactListResultError message = Err message
 
+artifactResultError : Str -> Result SwarmArtifact
+artifactResultError message = Err message
+
 artifactContentResultError : Str -> Result SwarmArtifactContent
 artifactContentResultError message = Err message
 
@@ -594,6 +598,12 @@ artifactListResult : Result Str -> Result [SwarmArtifact]
 artifactListResult value = match value {
   Ok raw -> Ok (decode [SwarmArtifact] raw),
   Err message -> artifactListResultError message
+}
+
+artifactResult : Result Str -> Result SwarmArtifact
+artifactResult value = match value {
+  Ok raw -> Ok (decode SwarmArtifact raw),
+  Err message -> artifactResultError message
 }
 
 artifactContentResult : Result Str -> Result SwarmArtifactContent
@@ -783,6 +793,10 @@ artifacts handle = artifactListResult (swarmArtifactsRaw handle.root.path handle
 artifactRead : SwarmRoot -> Int -> Int -> Result SwarmArtifactContent
 artifactRead root artifactId maxBytes =
   artifactContentResult (swarmArtifactReadRaw root.path artifactId maxBytes)
+
+artifactWrite : TaskHandle -> Str -> Str -> Result SwarmArtifact
+artifactWrite handle kind text =
+  artifactResult (swarmArtifactWriteRaw handle.root.path handle.taskId handle.actor kind text)
 
 readArtifactFrom : SwarmRoot -> SwarmArtifact -> Int -> Result SwarmArtifactContent
 readArtifactFrom root artifact maxBytes =

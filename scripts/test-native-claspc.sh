@@ -1886,6 +1886,39 @@ if (!content.text.startsWith("x\nx\n")) {
   throw new Error(`unexpected artifact content prefix: ${JSON.stringify(content.text)}`);
 }
 EOF
+swarm_sqlite_published_artifact_output="$(CLASP_SWARM_ACTOR=manager "$claspc_bin" --json swarm artifact write "$swarm_sqlite_state_root" repair note 'published-note-from-cli')"
+printf '%s\n' "$swarm_sqlite_published_artifact_output" | grep -F '"kind":"note"' >/dev/null
+printf '%s\n' "$swarm_sqlite_published_artifact_output" | grep -F '"source":"published"' >/dev/null
+swarm_sqlite_published_artifact_id="$(node - "$swarm_sqlite_published_artifact_output" <<'EOF'
+const artifact = JSON.parse(process.argv[2]);
+if (artifact.kind !== "note") {
+  throw new Error(`expected note artifact, got ${artifact.kind}`);
+}
+if (artifact.metadata?.actor !== "manager") {
+  throw new Error(`expected manager actor metadata, got ${JSON.stringify(artifact.metadata)}`);
+}
+if (artifact.metadata?.truncated !== false) {
+  throw new Error(`expected untruncated published artifact, got ${JSON.stringify(artifact.metadata)}`);
+}
+process.stdout.write(String(artifact.artifactId));
+EOF
+)"
+swarm_sqlite_published_artifact_read="$("$claspc_bin" --json swarm artifact read "$swarm_sqlite_state_root" "$swarm_sqlite_published_artifact_id" --max-bytes 64)"
+node - "$swarm_sqlite_published_artifact_read" <<'EOF'
+const content = JSON.parse(process.argv[2]);
+if (content.kind !== "note") {
+  throw new Error(`expected note artifact content, got ${content.kind}`);
+}
+if (content.text !== "published-note-from-cli") {
+  throw new Error(`unexpected published artifact text: ${JSON.stringify(content.text)}`);
+}
+if (content.truncated !== false) {
+  throw new Error("published artifact read should not be truncated");
+}
+if (content.metadata?.source !== "published") {
+  throw new Error(`expected published source metadata, got ${JSON.stringify(content.metadata)}`);
+}
+EOF
 swarm_sqlite_verifier_output="$(CLASP_SWARM_ACTOR=manager "$claspc_bin" --json swarm verifier run "$swarm_sqlite_state_root" repair native-smoke --cwd "$project_root" -- bash -lc 'printf verifier-ok')"
 printf '%s\n' "$swarm_sqlite_verifier_output" | grep -F '"role":"verifier"' >/dev/null
 printf '%s\n' "$swarm_sqlite_verifier_output" | grep -F '"status":"passed"' >/dev/null
