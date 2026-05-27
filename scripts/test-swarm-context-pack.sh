@@ -73,6 +73,14 @@ assert(
   `published artifact text ${JSON.stringify(report.publishedArtifactReadText)}`,
 );
 assert(report.publishedArtifactReadBytes > 0, `published artifact read bytes ${report.publishedArtifactReadBytes}`);
+assert(report.artifactSearchCount >= 1, `artifact search count ${report.artifactSearchCount}`);
+assert(report.artifactSearchTopKind === "note", `artifact search top kind ${report.artifactSearchTopKind}`);
+assert(report.artifactSearchTopScore > 0, `artifact search top score ${report.artifactSearchTopScore}`);
+includes([report.artifactSearchMatchedText], "published context artifact from ordinary clasp", "artifact search match");
+assert(
+  report.artifactSearchExcerptText === "published context artifact from ordinary clasp",
+  `artifact search excerpt ${JSON.stringify(report.artifactSearchExcerptText)}`,
+);
 assert(report.artifactReadKind === "stdout", `artifact read kind ${report.artifactReadKind}`);
 assert(report.artifactReadBytes === 16, `artifact read bytes ${report.artifactReadBytes}`);
 assert(report.artifactReadTotalBytes >= 16, `artifact read total bytes ${report.artifactReadTotalBytes}`);

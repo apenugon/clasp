@@ -29,6 +29,11 @@ record ContextPackHarnessReport = {
   publishedArtifactKind : Str,
   publishedArtifactReadBytes : Int,
   publishedArtifactReadText : Str,
+  artifactSearchCount : Int,
+  artifactSearchTopKind : Str,
+  artifactSearchTopScore : Int,
+  artifactSearchMatchedText : Str,
+  artifactSearchExcerptText : Str,
   artifactReadKind : Str,
   artifactReadBytes : Int,
   artifactReadTotalBytes : Int,
@@ -40,6 +45,14 @@ record ArtifactReadPick = {
   found : Bool,
   artifactId : Int,
   kind : Str
+}
+
+record ArtifactSearchPick = {
+  found : Bool,
+  kind : Str,
+  score : Int,
+  matchedText : Str,
+  excerptText : Str
 }
 
 stateRootPath : Str
@@ -100,11 +113,29 @@ stdoutArtifactPick : [SwarmArtifact] -> ArtifactReadPick
 stdoutArtifactPick artifactValues =
   fold pickStdoutArtifact (ArtifactReadPick { found = false, artifactId = 0, kind = "" }) artifactValues
 
+pickFirstArtifactSearch : ArtifactSearchPick -> SwarmArtifactSearchResult -> ArtifactSearchPick
+pickFirstArtifactSearch current result =
+  if current.found then
+    current
+  else
+    ArtifactSearchPick {
+      found = true,
+      kind = result.artifact.kind,
+      score = result.score,
+      matchedText = result.matchedText,
+      excerptText = result.excerpt.text
+    }
+
+artifactSearchPick : [SwarmArtifactSearchResult] -> ArtifactSearchPick
+artifactSearchPick searchResults =
+  fold pickFirstArtifactSearch (ArtifactSearchPick { found = false, kind = "", score = 0, matchedText = "", excerptText = "" }) searchResults
+
 errorText : Str -> Str
 errorText message = textConcat ["error:", message]
 
-reportContextPack : SwarmContextPack -> VerificationPlanResult -> SwarmArtifactContent -> SwarmArtifactContent -> Str
-reportContextPack pack verificationValue artifactContent publishedArtifactContent =
+reportContextPack : SwarmContextPack -> VerificationPlanResult -> SwarmArtifactContent -> SwarmArtifactContent -> [SwarmArtifactSearchResult] -> Str
+reportContextPack pack verificationValue artifactContent publishedArtifactContent searchResults =
+  let searchPick = artifactSearchPick searchResults in
   encode (ContextPackHarnessReport {
     taskId = pack.task.taskId,
     taskStatus = pack.task.status,
@@ -132,6 +163,11 @@ reportContextPack pack verificationValue artifactContent publishedArtifactConten
     publishedArtifactKind = publishedArtifactContent.kind,
     publishedArtifactReadBytes = publishedArtifactContent.bytesRead,
     publishedArtifactReadText = publishedArtifactContent.text,
+    artifactSearchCount = length searchResults,
+    artifactSearchTopKind = searchPick.kind,
+    artifactSearchTopScore = searchPick.score,
+    artifactSearchMatchedText = searchPick.matchedText,
+    artifactSearchExcerptText = searchPick.excerptText,
     artifactReadKind = artifactContent.kind,
     artifactReadBytes = artifactContent.bytesRead,
     artifactReadTotalBytes = artifactContent.totalBytes,
@@ -163,20 +199,25 @@ main =
                                         Ok publishedArtifact ->
                                           match readArtifactFrom root publishedArtifact 64 {
                                             Ok publishedArtifactContent ->
-                                              match taskContextPack repairTask "focused compiler verifier" 10 {
-                                                Ok pack ->
-                                                  match artifacts repairTask {
-                                                    Ok artifactValues ->
-                                                      let pick = stdoutArtifactPick artifactValues in
-                                                      if pick.found then
-                                                        match artifactRead root pick.artifactId 16 {
-                                                          Ok artifactContent ->
-                                                            reportContextPack pack verificationValue artifactContent publishedArtifactContent,
-                                                          Err message ->
-                                                            errorText message
-                                                        }
-                                                      else
-                                                        errorText "missing stdout artifact",
+                                              match artifactSearch repairTask "note" "ordinary clasp" 5 80 {
+                                                Ok searchResults ->
+                                                  match taskContextPack repairTask "focused compiler verifier" 10 {
+                                                    Ok pack ->
+                                                      match artifacts repairTask {
+                                                        Ok artifactValues ->
+                                                          let pick = stdoutArtifactPick artifactValues in
+                                                          if pick.found then
+                                                            match artifactRead root pick.artifactId 16 {
+                                                              Ok artifactContent ->
+                                                                reportContextPack pack verificationValue artifactContent publishedArtifactContent searchResults,
+                                                              Err message ->
+                                                                errorText message
+                                                            }
+                                                          else
+                                                            errorText "missing stdout artifact",
+                                                        Err message ->
+                                                          errorText message
+                                                      },
                                                     Err message ->
                                                       errorText message
                                                   },

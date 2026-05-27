@@ -1919,6 +1919,30 @@ if (content.metadata?.source !== "published") {
   throw new Error(`expected published source metadata, got ${JSON.stringify(content.metadata)}`);
 }
 EOF
+swarm_sqlite_published_artifact_search="$("$claspc_bin" --json swarm artifact search "$swarm_sqlite_state_root" 'published-note' --task repair --kind note --limit 3 --max-bytes 64)"
+node - "$swarm_sqlite_published_artifact_search" "$swarm_sqlite_published_artifact_id" <<'EOF'
+const results = JSON.parse(process.argv[2]);
+const expectedId = Number.parseInt(process.argv[3], 10);
+if (!Array.isArray(results) || results.length === 0) {
+  throw new Error(`expected artifact search results, got ${JSON.stringify(results)}`);
+}
+const first = results[0];
+if (first.artifact?.artifactId !== expectedId) {
+  throw new Error(`expected published artifact first, got ${JSON.stringify(first)}`);
+}
+if (first.artifact?.kind !== "note") {
+  throw new Error(`expected note artifact search hit, got ${JSON.stringify(first)}`);
+}
+if (first.score <= 0) {
+  throw new Error(`expected positive artifact search score, got ${first.score}`);
+}
+if (first.excerpt?.text !== "published-note-from-cli") {
+  throw new Error(`unexpected artifact search excerpt: ${JSON.stringify(first.excerpt)}`);
+}
+if (first.excerpt?.metadata?.source !== "published") {
+  throw new Error(`expected published search metadata, got ${JSON.stringify(first.excerpt)}`);
+}
+EOF
 swarm_sqlite_verifier_output="$(CLASP_SWARM_ACTOR=manager "$claspc_bin" --json swarm verifier run "$swarm_sqlite_state_root" repair native-smoke --cwd "$project_root" -- bash -lc 'printf verifier-ok')"
 printf '%s\n' "$swarm_sqlite_verifier_output" | grep -F '"role":"verifier"' >/dev/null
 printf '%s\n' "$swarm_sqlite_verifier_output" | grep -F '"status":"passed"' >/dev/null

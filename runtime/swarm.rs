@@ -177,6 +177,14 @@ enum SwarmCommand {
     Runs { root: PathBuf, task_id: Option<String> },
     Artifacts { root: PathBuf, task_id: Option<String> },
     ArtifactRead { root: PathBuf, artifact_id: i64, max_bytes: u64 },
+    ArtifactSearch {
+        root: PathBuf,
+        task_id: Option<String>,
+        kind: Option<String>,
+        query: String,
+        limit: usize,
+        max_bytes: u64,
+    },
     ArtifactWrite { root: PathBuf, task_id: String, actor: String, kind: String, text: String },
     MemoryPut {
         root: PathBuf,
@@ -264,7 +272,7 @@ enum SwarmCommand {
 
 fn swarm_usage(program: &str) -> ! {
     eprintln!(
-        "usage: {program} [--json] swarm <start|bootstrap|lease|release|heartbeat|complete|fail|retry|stop|resume|status|history|tasks|summary|tail|runs|artifacts|artifact read|artifact write|memory put|memory query|memory search|objective create|objective status|objectives|task create|ready|approve|approvals|policy set|manager next|tool|verifier run|mergegate decide> ..."
+        "usage: {program} [--json] swarm <start|bootstrap|lease|release|heartbeat|complete|fail|retry|stop|resume|status|history|tasks|summary|tail|runs|artifacts|artifact read|artifact search|artifact write|memory put|memory query|memory search|objective create|objective status|objectives|task create|ready|approve|approvals|policy set|manager next|tool|verifier run|mergegate decide> ..."
     );
     std::process::exit(2);
 }
@@ -532,7 +540,7 @@ fn parse_swarm_command(args: &[String]) -> Result<Option<(bool, SwarmCommand)>, 
         }
         "artifact" => {
             let Some(action) = rest.first().map(|value| value.as_str()) else {
-                return Err("usage: claspc swarm artifact <read|write> ...".to_owned());
+                return Err("usage: claspc swarm artifact <read|search|write> ...".to_owned());
             };
             match action {
                 "read" => {
@@ -558,6 +566,64 @@ fn parse_swarm_command(args: &[String]) -> Result<Option<(bool, SwarmCommand)>, 
                         }
                     }
                     SwarmCommand::ArtifactRead { root, artifact_id, max_bytes }
+                }
+                "search" => {
+                    if rest.len() < 3 {
+                        return Err(
+                            "usage: claspc swarm artifact search <state-root> <query> [--task ID] [--kind KIND] [--limit N] [--max-bytes N]".to_owned(),
+                        );
+                    }
+                    let root = parse_root_arg(&rest[1]);
+                    let query = rest[2].clone();
+                    let mut task_id = None;
+                    let mut kind = None;
+                    let mut limit = 10usize;
+                    let mut max_bytes = DEFAULT_SWARM_ARTIFACT_READ_LIMIT_BYTES;
+                    let mut index = 3usize;
+                    while index < rest.len() {
+                        match rest[index].as_str() {
+                            "--task" => {
+                                let Some(value) = rest.get(index + 1) else {
+                                    return Err("missing value after --task".to_owned());
+                                };
+                                task_id = Some(value.clone());
+                                index += 2;
+                            }
+                            "--kind" => {
+                                let Some(value) = rest.get(index + 1) else {
+                                    return Err("missing value after --kind".to_owned());
+                                };
+                                kind = Some(value.clone());
+                                index += 2;
+                            }
+                            "--limit" => {
+                                let Some(value) = rest.get(index + 1) else {
+                                    return Err("missing value after --limit".to_owned());
+                                };
+                                limit = value
+                                    .parse::<usize>()
+                                    .map_err(|_| format!("invalid --limit value `{value}`"))?
+                                    .max(1);
+                                index += 2;
+                            }
+                            "--max-bytes" => {
+                                let Some(value) = rest.get(index + 1) else {
+                                    return Err("missing value after --max-bytes".to_owned());
+                                };
+                                max_bytes = parse_max_bytes(value)?;
+                                index += 2;
+                            }
+                            other => return Err(format!("unknown option `{other}`")),
+                        }
+                    }
+                    SwarmCommand::ArtifactSearch {
+                        root,
+                        task_id,
+                        kind,
+                        query,
+                        limit,
+                        max_bytes,
+                    }
                 }
                 "write" => {
                     if rest.len() < 5 {
@@ -585,7 +651,7 @@ fn parse_swarm_command(args: &[String]) -> Result<Option<(bool, SwarmCommand)>, 
                     }
                     SwarmCommand::ArtifactWrite { root, task_id, actor, kind, text }
                 }
-                _ => Err("usage: claspc swarm artifact <read|write> ...".to_owned())?,
+                _ => Err("usage: claspc swarm artifact <read|search|write> ...".to_owned())?,
             }
         }
         "memory" => {
@@ -3091,6 +3157,183 @@ fn artifact_read_json(paths: &SwarmRuntimePaths, connection: &Connection, artifa
     }))
 }
 
+fn truncate_chars(value: &str, max_chars: usize) -> String {
+    value.chars().take(max_chars).collect()
+}
+
+fn artifact_search_score(record: &SwarmArtifactRecord, text: &str, query_lower: &str, tokens: &[String]) -> i64 {
+    let kind = record.kind.to_ascii_lowercase();
+    let task_id = record.task_id.to_ascii_lowercase();
+    let path = record.path.to_ascii_lowercase();
+    let metadata = record.metadata_json.to_ascii_lowercase();
+    let text_lower = text.to_ascii_lowercase();
+    let mut score = 0i64;
+
+    if kind == query_lower {
+        score += 900;
+    }
+    if text_lower == query_lower {
+        score += 800;
+    }
+    if kind.contains(query_lower) {
+        score += 350;
+    }
+    if text_lower.contains(query_lower) {
+        score += 300;
+    }
+    if task_id.contains(query_lower) {
+        score += 80;
+    }
+    if metadata.contains(query_lower) {
+        score += 60;
+    }
+    if path.contains(query_lower) {
+        score += 20;
+    }
+
+    score += token_match_score(&kind, tokens, 90);
+    score += token_match_score(&text_lower, tokens, 70);
+    score += token_match_score(&task_id, tokens, 20);
+    score += token_match_score(&metadata, tokens, 20);
+    score += token_match_score(&path, tokens, 5);
+    score
+}
+
+fn artifact_search_match_text(record: &SwarmArtifactRecord, text: &str, query_lower: &str, tokens: &[String]) -> String {
+    let kind = record.kind.to_ascii_lowercase();
+    let task_id = record.task_id.to_ascii_lowercase();
+    let metadata = record.metadata_json.to_ascii_lowercase();
+    let text_lower = text.to_ascii_lowercase();
+
+    if kind.contains(query_lower) {
+        return record.kind.clone();
+    }
+    if text_lower.contains(query_lower) {
+        return truncate_chars(text, 240);
+    }
+    if task_id.contains(query_lower) {
+        return record.task_id.clone();
+    }
+    if metadata.contains(query_lower) {
+        return truncate_chars(&record.metadata_json, 240);
+    }
+    for token in tokens {
+        if kind.contains(token.as_str()) {
+            return record.kind.clone();
+        }
+        if text_lower.contains(token.as_str()) {
+            return truncate_chars(text, 240);
+        }
+        if task_id.contains(token.as_str()) {
+            return record.task_id.clone();
+        }
+        if metadata.contains(token.as_str()) {
+            return truncate_chars(&record.metadata_json, 240);
+        }
+    }
+    String::new()
+}
+
+fn artifact_content_value(
+    record: &SwarmArtifactRecord,
+    max_bytes: u64,
+    text: String,
+    bytes_read: u64,
+    total_bytes: u64,
+    truncated: bool,
+    lossy_utf8: bool,
+) -> Value {
+    json!({
+        "artifactId": record.artifact_id,
+        "taskId": record.task_id,
+        "kind": record.kind,
+        "path": record.path,
+        "createdAtMs": record.created_at_ms,
+        "metadata": serde_json::from_str::<Value>(&record.metadata_json).unwrap_or(Value::Null),
+        "maxBytes": max_bytes,
+        "bytesRead": bytes_read,
+        "totalBytes": total_bytes,
+        "truncated": truncated,
+        "lossyUtf8": lossy_utf8,
+        "text": text,
+    })
+}
+
+fn artifact_search_json(
+    paths: &SwarmRuntimePaths,
+    connection: &Connection,
+    task_id: Option<&str>,
+    kind: Option<&str>,
+    query: &str,
+    limit: usize,
+    max_bytes: u64,
+) -> Result<Value, String> {
+    let query = query.trim();
+    if query.is_empty() {
+        return Err("swarm artifact search query cannot be empty".to_owned());
+    }
+    let query_lower = query.to_ascii_lowercase();
+    let tokens = memory_search_tokens(query);
+    let task_filter = task_id.unwrap_or_default();
+    let kind_filter = kind.unwrap_or_default();
+    let limit = limit.max(1).min(100);
+    let max_bytes = max_bytes.max(1).min(DEFAULT_SWARM_ARTIFACT_READ_LIMIT_BYTES);
+    let candidate_limit = limit.saturating_mul(20).max(200).min(2_000) as i64;
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT id, task_id, kind, path, created_at_ms, metadata_json
+            FROM swarm_artifacts
+            WHERE (?1 = '' OR task_id = ?1)
+              AND (?2 = '' OR kind = ?2)
+            ORDER BY id DESC
+            LIMIT ?3
+            ",
+        )
+        .map_err(|err| format!("failed to prepare swarm artifact search: {err}"))?;
+    let rows = statement
+        .query_map(params![task_filter, kind_filter, candidate_limit], |row| {
+            Ok(SwarmArtifactRecord {
+                artifact_id: row.get(0)?,
+                task_id: row.get(1)?,
+                kind: row.get(2)?,
+                path: row.get(3)?,
+                created_at_ms: row.get(4)?,
+                metadata_json: row.get(5)?,
+            })
+        })
+        .map_err(|err| format!("failed to search swarm artifacts: {err}"))?;
+    let mut scored = Vec::new();
+    for row in rows {
+        let record = row.map_err(|err| format!("failed to read swarm artifact row: {err}"))?;
+        let path = artifact_file_path(paths, &record)?;
+        let (text, bytes_read, total_bytes, truncated, lossy_utf8) = read_artifact_text(&path, max_bytes)?;
+        let score = artifact_search_score(&record, &text, &query_lower, &tokens);
+        if score > 0 {
+            let matched_text = artifact_search_match_text(&record, &text, &query_lower, &tokens);
+            let excerpt = artifact_content_value(&record, max_bytes, text, bytes_read, total_bytes, truncated, lossy_utf8);
+            scored.push((score, record, matched_text, excerpt));
+        }
+    }
+    scored.sort_by(|left, right| {
+        right
+            .0
+            .cmp(&left.0)
+            .then_with(|| right.1.artifact_id.cmp(&left.1.artifact_id))
+    });
+
+    let mut values = Vec::new();
+    for (score, record, matched_text, excerpt) in scored.into_iter().take(limit) {
+        values.push(json!({
+            "artifact": artifact_json(&record),
+            "score": score,
+            "matchedText": matched_text,
+            "excerpt": excerpt,
+        }));
+    }
+    Ok(Value::Array(values))
+}
+
 fn approvals_json(connection: &Connection, task_id: Option<&str>) -> Result<Value, String> {
     let mut values = Vec::new();
     if let Some(task_id) = task_id {
@@ -5355,6 +5598,7 @@ fn execute_query_command(command: SwarmCommand) -> Result<Value, String> {
         | SwarmCommand::Approvals { root, .. }
         | SwarmCommand::Artifacts { root, .. }
         | SwarmCommand::ArtifactRead { root, .. }
+        | SwarmCommand::ArtifactSearch { root, .. }
         | SwarmCommand::ManagerNext { root, .. } => root,
         _ => unreachable!(),
     };
@@ -5375,6 +5619,8 @@ fn execute_query_command(command: SwarmCommand) -> Result<Value, String> {
         SwarmCommand::Runs { task_id, .. } => runs_json(&connection, task_id.as_deref()),
         SwarmCommand::Artifacts { task_id, .. } => artifacts_json(&connection, task_id.as_deref()),
         SwarmCommand::ArtifactRead { artifact_id, max_bytes, .. } => artifact_read_json(&_paths, &connection, artifact_id, max_bytes),
+        SwarmCommand::ArtifactSearch { task_id, kind, query, limit, max_bytes, .. } =>
+            artifact_search_json(&_paths, &connection, task_id.as_deref(), kind.as_deref(), &query, limit, max_bytes),
         SwarmCommand::MemoryQuery { objective_id, task_id, key, limit, .. } =>
             memory_query_json(&connection, objective_id.as_deref(), task_id.as_deref(), key.as_deref(), limit),
         SwarmCommand::MemorySearch { objective_id, task_id, query, limit, .. } =>
@@ -5977,6 +6223,7 @@ fn execute_command(command: SwarmCommand) -> Result<(ExitCode, Value), String> {
         | SwarmCommand::Approvals { .. }
         | SwarmCommand::Artifacts { .. }
         | SwarmCommand::ArtifactRead { .. }
+        | SwarmCommand::ArtifactSearch { .. }
         | SwarmCommand::ManagerNext { .. } => Ok((ExitCode::SUCCESS, execute_query_command(command)?)),
         SwarmCommand::ToolRun { root, task_id, actor, cwd, timeout_ms, memory_limit_mb, command } => {
             let run = execute_tool_run(&root, &task_id, &actor, &cwd, &command, timeout_ms, memory_limit_mb)?;
@@ -6430,6 +6677,28 @@ pub fn builtin_swarm_artifact_read(root: &str, artifact_id: i64, max_bytes: i64)
             DEFAULT_SWARM_ARTIFACT_READ_LIMIT_BYTES
         } else {
             (max_bytes as u64).min(DEFAULT_SWARM_OUTPUT_LIMIT_BYTES)
+        },
+    })
+}
+
+pub fn builtin_swarm_artifact_search(
+    root: &str,
+    task_id: &str,
+    kind: &str,
+    query: &str,
+    limit: i64,
+    max_bytes: i64,
+) -> Result<String, String> {
+    render_builtin_query(SwarmCommand::ArtifactSearch {
+        root: PathBuf::from(root),
+        task_id: if task_id.is_empty() { None } else { Some(task_id.to_owned()) },
+        kind: if kind.is_empty() { None } else { Some(kind.to_owned()) },
+        query: query.to_owned(),
+        limit: if limit <= 0 { 10 } else { limit as usize },
+        max_bytes: if max_bytes <= 0 {
+            DEFAULT_SWARM_ARTIFACT_READ_LIMIT_BYTES
+        } else {
+            (max_bytes as u64).min(DEFAULT_SWARM_ARTIFACT_READ_LIMIT_BYTES)
         },
     })
 }
@@ -7376,6 +7645,43 @@ mod tests {
             Some("native artifact payload")
         );
         assert_eq!(content.get("truncated").and_then(Value::as_bool), Some(false));
+
+        let (_, search_json_text) = run_swarm_json_command(&vec![
+            "artifact".to_owned(),
+            "search".to_owned(),
+            root_text.clone(),
+            "native payload".to_owned(),
+            "--task".to_owned(),
+            "publish".to_owned(),
+            "--kind".to_owned(),
+            "agent-note".to_owned(),
+            "--limit".to_owned(),
+            "3".to_owned(),
+            "--max-bytes".to_owned(),
+            "64".to_owned(),
+        ])
+        .expect("search published artifact");
+        let search_results: Value = serde_json::from_str(&search_json_text).expect("decode artifact search json");
+        let first = search_results
+            .as_array()
+            .and_then(|values| values.first())
+            .expect("artifact search result");
+        assert_eq!(
+            first.pointer("/artifact/artifactId").and_then(Value::as_i64),
+            Some(artifact_id)
+        );
+        assert_eq!(
+            first.pointer("/artifact/kind").and_then(Value::as_str),
+            Some("agent-note")
+        );
+        assert!(
+            first.get("score").and_then(Value::as_i64).unwrap_or_default() > 0,
+            "artifact search should score the published artifact"
+        );
+        assert_eq!(
+            first.pointer("/excerpt/text").and_then(Value::as_str),
+            Some("native artifact payload")
+        );
 
         let connection = Connection::open(runtime_paths(&root).db_path).expect("open sqlite db");
         let publish_event_count: i64 = connection

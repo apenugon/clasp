@@ -36,6 +36,7 @@ foreign swarmMergegateDecideRaw : Str -> Str -> Str -> Str -> [Str] -> Result St
 foreign swarmRunsRaw : Str -> Str -> Result Str = "swarmRunsJson"
 foreign swarmArtifactsRaw : Str -> Str -> Result Str = "swarmArtifactsJson"
 foreign swarmArtifactReadRaw : Str -> Int -> Int -> Result Str = "swarmArtifactReadJson"
+foreign swarmArtifactSearchRaw : Str -> Str -> Str -> Str -> Int -> Int -> Result Str = "swarmArtifactSearchJson"
 foreign swarmArtifactWriteRaw : Str -> Str -> Str -> Str -> Str -> Result Str = "swarmArtifactWriteJson"
 foreign swarmMemoryPutRaw : Str -> Str -> Str -> Str -> Str -> Str -> Result Str = "swarmMemoryPutJson"
 foreign swarmMemoryQueryRaw : Str -> Str -> Str -> Str -> Int -> Result Str = "swarmMemoryQueryJson"
@@ -150,6 +151,13 @@ record SwarmArtifactContent = {
   truncated : Bool,
   lossyUtf8 : Bool,
   text : Str
+}
+
+record SwarmArtifactSearchResult = {
+  artifact : SwarmArtifact,
+  score : Int,
+  matchedText : Str,
+  excerpt : SwarmArtifactContent
 }
 
 record SwarmMemory = {
@@ -473,6 +481,9 @@ artifactContentResultError message = Err message
 artifactContentListResultError : Str -> Result [SwarmArtifactContent]
 artifactContentListResultError message = Err message
 
+artifactSearchResultListError : Str -> Result [SwarmArtifactSearchResult]
+artifactSearchResultListError message = Err message
+
 memoryResultError : Str -> Result SwarmMemory
 memoryResultError message = Err message
 
@@ -610,6 +621,12 @@ artifactContentResult : Result Str -> Result SwarmArtifactContent
 artifactContentResult value = match value {
   Ok raw -> Ok (decode SwarmArtifactContent raw),
   Err message -> artifactContentResultError message
+}
+
+artifactSearchResultListResult : Result Str -> Result [SwarmArtifactSearchResult]
+artifactSearchResultListResult value = match value {
+  Ok raw -> Ok (decode [SwarmArtifactSearchResult] raw),
+  Err message -> artifactSearchResultListError message
 }
 
 memoryResult : Result Str -> Result SwarmMemory
@@ -793,6 +810,14 @@ artifacts handle = artifactListResult (swarmArtifactsRaw handle.root.path handle
 artifactRead : SwarmRoot -> Int -> Int -> Result SwarmArtifactContent
 artifactRead root artifactId maxBytes =
   artifactContentResult (swarmArtifactReadRaw root.path artifactId maxBytes)
+
+artifactSearch : TaskHandle -> Str -> Str -> Int -> Int -> Result [SwarmArtifactSearchResult]
+artifactSearch handle kind query limit maxBytes =
+  artifactSearchResultListResult (swarmArtifactSearchRaw handle.root.path handle.taskId kind query limit maxBytes)
+
+artifactSearchAll : SwarmRoot -> Str -> Str -> Int -> Int -> Result [SwarmArtifactSearchResult]
+artifactSearchAll root kind query limit maxBytes =
+  artifactSearchResultListResult (swarmArtifactSearchRaw root.path "" kind query limit maxBytes)
 
 artifactWrite : TaskHandle -> Str -> Str -> Result SwarmArtifact
 artifactWrite handle kind text =
