@@ -23,9 +23,9 @@ const defaultNativeImageEntries = [
     outputPath: "src/stage1.hello.native.image.json",
   },
   {
-    source: "examples/swarm-native/TaskWorkspaceRuntimeHarness.clasp",
+    source: "examples/promoted-project/Main.clasp",
     exportName: "nativeImageProjectText",
-    outputPath: "src/stage1.task-workspace-runtime-harness.native.image.json",
+    outputPath: "src/stage1.promoted-project.native.image.json",
   },
 ];
 
@@ -149,6 +149,19 @@ function normalizeSourcePath(sourcePath) {
 
 function parseImports(source) {
   const imports = [];
+  for (const line of source.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    if (trimmed.startsWith("module ")) {
+      const [, importedModules] = trimmed.split(" with ");
+      if (importedModules) {
+        for (const importName of importedModules.split(",").map((value) => value.trim())) {
+          if (importName && !imports.includes(importName)) imports.push(importName);
+        }
+      }
+    }
+    break;
+  }
   for (const line of source.split("\n")) {
     const trimmed = line.trim();
     if (!trimmed.startsWith("import ")) continue;

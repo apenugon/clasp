@@ -33,10 +33,10 @@
       "outputPath": "src/stage1.hello.native.image.json"
     },
     {
-      "source": "examples/swarm-native/TaskWorkspaceRuntimeHarness.clasp",
+      "source": "examples/promoted-project/Main.clasp",
       "exportName": "nativeImageProjectText",
-      "cacheKey": "3b4f2123028f8e9b.cache",
-      "outputPath": "src/stage1.task-workspace-runtime-harness.native.image.json"
+      "cacheKey": "08243056113df9b9.cache",
+      "outputPath": "src/stage1.promoted-project.native.image.json"
     }
   ]
 }

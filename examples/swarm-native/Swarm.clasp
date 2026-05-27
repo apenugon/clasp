@@ -319,6 +319,31 @@ record SwarmContextPack = {
   artifactExcerpts : [SwarmArtifactContent]
 }
 
+record SwarmEvidencePack = {
+  task : SwarmTask,
+  query : Str,
+  mailboxSummary : VerificationPlanMailboxSummary,
+  taskMemoryMatches : [SwarmMemorySearchResult],
+  objectiveMemoryMatches : [SwarmMemorySearchResult],
+  benchmarkMemoryMatches : [SwarmMemorySearchResult],
+  artifactSearchMatches : [SwarmArtifactSearchResult],
+  semanticArtifactMatches : [SwarmArtifactSearchResult],
+  memoryValues : [Str],
+  memoryMatchedText : [Str],
+  memoryScores : [Int],
+  benchmarkValues : [Str],
+  benchmarkMatchedText : [Str],
+  benchmarkScores : [Int],
+  artifactSearchMatchedText : [Str],
+  artifactSearchScores : [Int],
+  semanticArtifactMatchedText : [Str],
+  semanticArtifactScores : [Int],
+  runTrace : [VerificationTraceEntry],
+  artifactKinds : [Str],
+  artifactPaths : [Str],
+  artifactExcerpts : [SwarmArtifactContent]
+}
+
 record VerificationPlanResult = {
   plan : VerificationPlan,
   steps : [VerifierStepResult],
@@ -526,6 +551,9 @@ verificationPlanResultError message = Err message
 
 contextPackResultError : Str -> Result SwarmContextPack
 contextPackResultError message = Err message
+
+evidencePackResultError : Str -> Result SwarmEvidencePack
+evidencePackResultError message = Err message
 
 reviewStepResultError : Str -> Result ReviewStepResult
 reviewStepResultError message = Err message
@@ -994,77 +1022,114 @@ verificationPlanMailboxSummary mailbox =
     artifactPaths = map artifactPath mailbox.artifacts
   }
 
-taskContextPack : TaskHandle -> Str -> Int -> Result SwarmContextPack
-taskContextPack handle query limit =
+taskEvidencePack : TaskHandle -> Str -> Int -> Result SwarmEvidencePack
+taskEvidencePack handle query limit =
   match status handle {
     Ok taskValue ->
       let objective = objectiveHandle handle.root taskValue.objectiveId in
+      match taskMailbox handle limit {
+        Ok mailboxValue ->
+          match taskMemorySearch handle query limit {
+            Ok taskMemoryMatchesValue ->
+              match objectiveMemorySearch objective query limit {
+                Ok objectiveMemoryMatchesValue ->
+                  match benchmarkHistorySearch objective limit {
+                    Ok benchmarkMemoryMatchesValue ->
+                      match artifactSearch handle "" query limit contextPackArtifactReadBytes {
+                        Ok searchResultsValue ->
+                          match artifactSearch handle "" contextPackSemanticIndexQuery limit contextPackArtifactReadBytes {
+                            Ok semanticSearchResultsValue ->
+                              match readArtifactContents handle.root mailboxValue.artifacts contextPackArtifactReadBytes limit {
+                                Ok artifactContentValues ->
+                                  let memoryMatches = append taskMemoryMatchesValue objectiveMemoryMatchesValue in
+                                  let mailboxSummary = verificationPlanMailboxSummary mailboxValue in
+                                  Ok (SwarmEvidencePack {
+                                    task = taskValue,
+                                    query = query,
+                                    mailboxSummary = mailboxSummary,
+                                    taskMemoryMatches = taskMemoryMatchesValue,
+                                    objectiveMemoryMatches = objectiveMemoryMatchesValue,
+                                    benchmarkMemoryMatches = benchmarkMemoryMatchesValue,
+                                    artifactSearchMatches = searchResultsValue,
+                                    semanticArtifactMatches = semanticSearchResultsValue,
+                                    memoryValues = map memorySearchResultMemoryValue memoryMatches,
+                                    memoryMatchedText = map memorySearchResultMatchedText memoryMatches,
+                                    memoryScores = map memorySearchResultScore memoryMatches,
+                                    benchmarkValues = map memorySearchResultMemoryValue benchmarkMemoryMatchesValue,
+                                    benchmarkMatchedText = map memorySearchResultMatchedText benchmarkMemoryMatchesValue,
+                                    benchmarkScores = map memorySearchResultScore benchmarkMemoryMatchesValue,
+                                    artifactSearchMatchedText = map artifactSearchResultMatchedText searchResultsValue,
+                                    artifactSearchScores = map artifactSearchResultScore searchResultsValue,
+                                    semanticArtifactMatchedText = map artifactSearchResultMatchedText semanticSearchResultsValue,
+                                    semanticArtifactScores = map artifactSearchResultScore semanticSearchResultsValue,
+                                    runTrace = map runTraceEntry mailboxValue.runs,
+                                    artifactKinds = mailboxSummary.artifactKinds,
+                                    artifactPaths = mailboxSummary.artifactPaths,
+                                    artifactExcerpts = artifactContentValues
+                                  }),
+                                Err message ->
+                                  evidencePackResultError message
+                              },
+                            Err message ->
+                              evidencePackResultError message
+                          },
+                        Err message ->
+                          evidencePackResultError message
+                      },
+                    Err message ->
+                      evidencePackResultError message
+                  },
+                Err message ->
+                  evidencePackResultError message
+              },
+            Err message ->
+              evidencePackResultError message
+          },
+        Err message ->
+          evidencePackResultError message
+      },
+    Err message ->
+      evidencePackResultError message
+  }
+
+contextPackFromEvidence : SwarmEvidencePack -> [SwarmTask] -> SwarmManagerAction -> SwarmContextPack
+contextPackFromEvidence evidence readyTasks managerActionValue =
+  SwarmContextPack {
+    task = evidence.task,
+    readyTaskIds = map readyTaskId readyTasks,
+    managerAction = managerActionValue,
+    mailboxSummary = evidence.mailboxSummary,
+    taskMemoryMatches = evidence.taskMemoryMatches,
+    objectiveMemoryMatches = evidence.objectiveMemoryMatches,
+    benchmarkMemoryMatches = evidence.benchmarkMemoryMatches,
+    artifactSearchMatches = evidence.artifactSearchMatches,
+    semanticArtifactMatches = evidence.semanticArtifactMatches,
+    memoryValues = evidence.memoryValues,
+    memoryMatchedText = evidence.memoryMatchedText,
+    memoryScores = evidence.memoryScores,
+    benchmarkValues = evidence.benchmarkValues,
+    benchmarkMatchedText = evidence.benchmarkMatchedText,
+    benchmarkScores = evidence.benchmarkScores,
+    artifactSearchMatchedText = evidence.artifactSearchMatchedText,
+    artifactSearchScores = evidence.artifactSearchScores,
+    semanticArtifactMatchedText = evidence.semanticArtifactMatchedText,
+    semanticArtifactScores = evidence.semanticArtifactScores,
+    runTrace = evidence.runTrace,
+    artifactKinds = evidence.artifactKinds,
+    artifactPaths = evidence.artifactPaths,
+    artifactExcerpts = evidence.artifactExcerpts
+  }
+
+taskContextPack : TaskHandle -> Str -> Int -> Result SwarmContextPack
+taskContextPack handle query limit =
+  match taskEvidencePack handle query limit {
+    Ok evidence ->
+      let objective = objectiveHandle handle.root evidence.task.objectiveId in
       match ready objective {
         Ok readyTasks ->
           match managerNext objective {
             Ok managerActionValue ->
-              match taskMailbox handle limit {
-                Ok mailboxValue ->
-                  match taskMemorySearch handle query limit {
-                    Ok taskMemoryMatchesValue ->
-                      match objectiveMemorySearch objective query limit {
-                        Ok objectiveMemoryMatchesValue ->
-                          match benchmarkHistorySearch objective limit {
-                            Ok benchmarkMemoryMatchesValue ->
-                              match artifactSearch handle "" query limit contextPackArtifactReadBytes {
-                                Ok searchResultsValue ->
-                                  match artifactSearch handle "" contextPackSemanticIndexQuery limit contextPackArtifactReadBytes {
-                                    Ok semanticSearchResultsValue ->
-                                      match readArtifactContents handle.root mailboxValue.artifacts contextPackArtifactReadBytes limit {
-                                        Ok artifactContentValues ->
-                                          let memoryMatches = append taskMemoryMatchesValue objectiveMemoryMatchesValue in
-                                          let mailboxSummary = verificationPlanMailboxSummary mailboxValue in
-                                          Ok (SwarmContextPack {
-                                            task = taskValue,
-                                            readyTaskIds = map readyTaskId readyTasks,
-                                            managerAction = managerActionValue,
-                                            mailboxSummary = mailboxSummary,
-                                            taskMemoryMatches = taskMemoryMatchesValue,
-                                            objectiveMemoryMatches = objectiveMemoryMatchesValue,
-                                            benchmarkMemoryMatches = benchmarkMemoryMatchesValue,
-                                            artifactSearchMatches = searchResultsValue,
-                                            semanticArtifactMatches = semanticSearchResultsValue,
-                                            memoryValues = map memorySearchResultMemoryValue memoryMatches,
-                                            memoryMatchedText = map memorySearchResultMatchedText memoryMatches,
-                                            memoryScores = map memorySearchResultScore memoryMatches,
-                                            benchmarkValues = map memorySearchResultMemoryValue benchmarkMemoryMatchesValue,
-                                            benchmarkMatchedText = map memorySearchResultMatchedText benchmarkMemoryMatchesValue,
-                                            benchmarkScores = map memorySearchResultScore benchmarkMemoryMatchesValue,
-                                            artifactSearchMatchedText = map artifactSearchResultMatchedText searchResultsValue,
-                                            artifactSearchScores = map artifactSearchResultScore searchResultsValue,
-                                            semanticArtifactMatchedText = map artifactSearchResultMatchedText semanticSearchResultsValue,
-                                            semanticArtifactScores = map artifactSearchResultScore semanticSearchResultsValue,
-                                            runTrace = map runTraceEntry mailboxValue.runs,
-                                            artifactKinds = mailboxSummary.artifactKinds,
-                                            artifactPaths = mailboxSummary.artifactPaths,
-                                            artifactExcerpts = artifactContentValues
-                                          }),
-                                        Err message ->
-                                          contextPackResultError message
-                                      },
-                                    Err message ->
-                                      contextPackResultError message
-                                  },
-                                Err message ->
-                                  contextPackResultError message
-                              },
-                            Err message ->
-                              contextPackResultError message
-                          },
-                        Err message ->
-                          contextPackResultError message
-                      },
-                    Err message ->
-                      contextPackResultError message
-                  },
-                Err message ->
-                  contextPackResultError message
-              },
+              Ok (contextPackFromEvidence evidence readyTasks managerActionValue),
             Err message ->
               contextPackResultError message
           },

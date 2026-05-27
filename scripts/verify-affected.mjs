@@ -427,7 +427,7 @@ function isPromotedSourceExportCacheFile(file) {
     file === "scripts/generate-promoted-source-export-cache.mjs" ||
     file === "scripts/test-promoted-source-export-cache.sh" ||
     file === "src/stage1.compiler.source-export-cache-v1.json" ||
-    file === "src/stage1.task-workspace-runtime-harness.native.image.json"
+    file === "src/stage1.promoted-project.native.image.json"
   );
 }
 

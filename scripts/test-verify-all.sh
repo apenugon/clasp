@@ -309,7 +309,7 @@ grep -F 'node --check benchmarks/run-benchmark.mjs' "$test_root/scripts/verify-a
 grep -F 'bash benchmarks/test-benchmark-prep-cache.sh' "$test_root/scripts/verify-affected.mjs" >/dev/null
 grep -F 'test-benchmark-prep-cache: ok' "$test_root/benchmarks/test-benchmark-prep-cache.sh" >/dev/null
 grep -F 'source-export-cache-v1' "$test_root/scripts/generate-promoted-source-export-cache.mjs" >/dev/null
-grep -F 'src/stage1.task-workspace-runtime-harness.native.image.json' "$test_root/scripts/generate-promoted-source-export-cache.mjs" >/dev/null
+grep -F 'src/stage1.promoted-project.native.image.json' "$test_root/scripts/generate-promoted-source-export-cache.mjs" >/dev/null
 grep -F 'env -u CLASP_CLASPC -u CLASPC_BIN "$project_root/scripts/resolve-claspc.sh"' "$test_root/scripts/test-promoted-source-export-cache.sh" >/dev/null
 grep -F 'source-export promoted hit export=checkSourceText' "$test_root/scripts/test-promoted-source-export-cache.sh" >/dev/null
 grep -F 'source-export promoted hit export=nativeImageProjectText' "$test_root/scripts/test-promoted-source-export-cache.sh" >/dev/null

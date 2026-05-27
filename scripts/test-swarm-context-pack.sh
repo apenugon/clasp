@@ -110,6 +110,32 @@ assert(
     report.semanticArtifactExcerptText.includes("Shared/Lead.clasp"),
   `semantic artifact excerpt ${JSON.stringify(report.semanticArtifactExcerptText)}`,
 );
+assert(report.evidenceTaskId === "context-repair", `evidence task id ${report.evidenceTaskId}`);
+assert(
+  report.evidenceQuery === "focused compiler verifier ordinary clasp",
+  `evidence query ${JSON.stringify(report.evidenceQuery)}`,
+);
+assert(
+  JSON.stringify(report.evidenceMemoryValues) === JSON.stringify(report.memoryValues),
+  `evidence memory values diverged: ${JSON.stringify(report.evidenceMemoryValues)} vs ${JSON.stringify(report.memoryValues)}`,
+);
+assert(
+  JSON.stringify(report.evidenceBenchmarkValues) === JSON.stringify(report.benchmarkValues),
+  `evidence benchmark values diverged: ${JSON.stringify(report.evidenceBenchmarkValues)} vs ${JSON.stringify(report.benchmarkValues)}`,
+);
+assert(
+  report.evidenceArtifactSearchCount === report.artifactSearchCount,
+  `evidence artifact search count ${report.evidenceArtifactSearchCount} vs ${report.artifactSearchCount}`,
+);
+assert(
+  report.evidenceSemanticArtifactCount === report.semanticArtifactCount,
+  `evidence semantic artifact count ${report.evidenceSemanticArtifactCount} vs ${report.semanticArtifactCount}`,
+);
+assert(
+  report.evidenceArtifactExcerptCount === report.artifactExcerptCount,
+  `evidence artifact excerpt count ${report.evidenceArtifactExcerptCount} vs ${report.artifactExcerptCount}`,
+);
+assert(report.evidenceRunTraceCount === report.traceNames.length, `evidence trace count ${report.evidenceRunTraceCount}`);
 assert(report.artifactReadKind === "stdout", `artifact read kind ${report.artifactReadKind}`);
 assert(report.artifactReadBytes === 16, `artifact read bytes ${report.artifactReadBytes}`);
 assert(report.artifactReadTotalBytes >= 16, `artifact read total bytes ${report.artifactReadTotalBytes}`);

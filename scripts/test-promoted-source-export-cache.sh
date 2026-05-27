@@ -52,8 +52,8 @@ check_output="$test_root/checker.check.json"
 check_log="$test_root/checker.check.log"
 hello_run_log="$test_root/hello.run.log"
 hello_run_output="$test_root/hello.run.out"
-task_workspace_harness_image="$test_root/task-workspace-runtime-harness.native.image.json"
-task_workspace_harness_log="$test_root/task-workspace-runtime-harness.native-image.log"
+promoted_project_image="$test_root/promoted-project.native.image.json"
+promoted_project_image_log="$test_root/promoted-project.native-image.log"
 timeout_secs="${CLASP_PROMOTED_SOURCE_EXPORT_TIMEOUT_SECS:-60}"
 
 (
@@ -93,19 +93,22 @@ const helloImage = JSON.parse(fs.readFileSync(path.join(projectRoot, "src/stage1
 if (helloImage.format !== "clasp-native-image-v1" || helloImage.module !== "Main") {
   throw new Error("hello promoted native image has an unexpected shape");
 }
-const harnessEntry = cache.entries.find((candidate) => candidate.source === "examples/swarm-native/TaskWorkspaceRuntimeHarness.clasp");
-if (!harnessEntry) {
-  throw new Error("missing promoted TaskWorkspaceRuntimeHarness native image entry");
+const projectEntry = cache.entries.find((candidate) => candidate.source === "examples/promoted-project/Main.clasp");
+if (!projectEntry) {
+  throw new Error("missing promoted project fixture native image entry");
 }
-if (harnessEntry.exportName !== "nativeImageProjectText") {
-  throw new Error("TaskWorkspaceRuntimeHarness promoted entry should seed nativeImageProjectText");
+if (projectEntry.exportName !== "nativeImageProjectText") {
+  throw new Error("promoted project fixture entry should seed nativeImageProjectText");
 }
-if (harnessEntry.outputPath !== "src/stage1.task-workspace-runtime-harness.native.image.json") {
-  throw new Error("TaskWorkspaceRuntimeHarness promoted entry should use the native image output path");
+if (projectEntry.outputPath !== "src/stage1.promoted-project.native.image.json") {
+  throw new Error("promoted project fixture entry should use the native image output path");
 }
-const harnessImage = JSON.parse(fs.readFileSync(path.join(projectRoot, "src/stage1.task-workspace-runtime-harness.native.image.json"), "utf8"));
-if (harnessImage.format !== "clasp-native-image-v1") {
-  throw new Error("TaskWorkspaceRuntimeHarness promoted native image has an unexpected format");
+const projectImage = JSON.parse(fs.readFileSync(path.join(projectRoot, "src/stage1.promoted-project.native.image.json"), "utf8"));
+if (projectImage.format !== "clasp-native-image-v1") {
+  throw new Error("promoted project fixture native image has an unexpected format");
+}
+if (JSON.stringify(projectImage).includes("ERROR:")) {
+  throw new Error("promoted project fixture native image should not contain compiler error markers");
 }
 NODE
 grep -F '[claspc-cache] source-export promoted hit export=checkSourceText key=' "$check_log" >/dev/null
@@ -136,11 +139,11 @@ fi
 (
   cd "$project_root"
   timeout "$timeout_secs" env XDG_CACHE_HOME="$test_root/task-workspace-harness-cache" CLASP_PROJECT_ROOT="$project_root" CLASP_NATIVE_TRACE_CACHE=1 \
-    "$claspc_bin" native-image examples/swarm-native/TaskWorkspaceRuntimeHarness.clasp -o "$task_workspace_harness_image" \
-    >/dev/null 2>"$task_workspace_harness_log"
+    "$claspc_bin" native-image examples/promoted-project/Main.clasp -o "$promoted_project_image" \
+    >/dev/null 2>"$promoted_project_image_log"
 )
 
-[[ -s "$task_workspace_harness_image" ]]
-grep -F '[claspc-cache] source-export promoted hit export=nativeImageProjectText key=' "$task_workspace_harness_log" >/dev/null
+[[ -s "$promoted_project_image" ]]
+grep -F '[claspc-cache] source-export promoted hit export=nativeImageProjectText key=' "$promoted_project_image_log" >/dev/null
 
 printf 'test-promoted-source-export-cache: ok\n'

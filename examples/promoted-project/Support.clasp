@@ -1,0 +1,4 @@
+module Support
+
+supportValue : Str
+supportValue = "support"

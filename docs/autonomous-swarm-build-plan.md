@@ -234,7 +234,7 @@ The native `claspc swarm` control plane now also proves:
 The repo now has a supervised single-node ordinary-program path over the durable store. The remaining expansion work is:
 
 1. Native workflow and supervision runtime.
-2. Reusable memory retrieval and higher-level artifact indexing/search.
+2. Higher-level artifact indexing/search beyond the reusable `taskEvidencePack` retrieval surface.
 3. Manager chat and higher-level objective steering over the native control plane.
 4. Benchmark-specialized optimizer loop for `AppBench`.
 

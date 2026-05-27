@@ -1,0 +1,6 @@
+module Main
+
+import Support
+
+main : Str
+main = "promoted project fixture"

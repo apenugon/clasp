@@ -43,6 +43,14 @@ record ContextPackHarnessReport = {
   semanticArtifactTopScore : Int,
   semanticArtifactMatchedText : Str,
   semanticArtifactExcerptText : Str,
+  evidenceTaskId : Str,
+  evidenceQuery : Str,
+  evidenceMemoryValues : [Str],
+  evidenceBenchmarkValues : [Str],
+  evidenceArtifactSearchCount : Int,
+  evidenceSemanticArtifactCount : Int,
+  evidenceArtifactExcerptCount : Int,
+  evidenceRunTraceCount : Int,
   artifactReadKind : Str,
   artifactReadBytes : Int,
   artifactReadTotalBytes : Int,
@@ -148,8 +156,8 @@ artifactSearchPick searchResults =
 errorText : Str -> Str
 errorText message = textConcat ["error:", message]
 
-reportContextPack : SwarmContextPack -> VerificationPlanResult -> SwarmArtifactContent -> SwarmArtifactContent -> Str
-reportContextPack pack verificationValue artifactContent publishedArtifactContent =
+reportContextPack : SwarmContextPack -> SwarmEvidencePack -> VerificationPlanResult -> SwarmArtifactContent -> SwarmArtifactContent -> Str
+reportContextPack pack evidence verificationValue artifactContent publishedArtifactContent =
   let searchPick = artifactSearchPick pack.artifactSearchMatches in
   let semanticPick = artifactSearchPick pack.semanticArtifactMatches in
   encode (ContextPackHarnessReport {
@@ -193,6 +201,14 @@ reportContextPack pack verificationValue artifactContent publishedArtifactConten
     semanticArtifactTopScore = semanticPick.score,
     semanticArtifactMatchedText = semanticPick.matchedText,
     semanticArtifactExcerptText = semanticPick.excerptText,
+    evidenceTaskId = evidence.task.taskId,
+    evidenceQuery = evidence.query,
+    evidenceMemoryValues = evidence.memoryValues,
+    evidenceBenchmarkValues = evidence.benchmarkValues,
+    evidenceArtifactSearchCount = length evidence.artifactSearchMatches,
+    evidenceSemanticArtifactCount = length evidence.semanticArtifactMatches,
+    evidenceArtifactExcerptCount = length evidence.artifactExcerpts,
+    evidenceRunTraceCount = length evidence.runTrace,
     artifactReadKind = artifactContent.kind,
     artifactReadBytes = artifactContent.bytesRead,
     artifactReadTotalBytes = artifactContent.totalBytes,
@@ -230,18 +246,23 @@ main =
                                                     Ok publishedArtifactContent ->
                                                       match taskContextPack repairTask "focused compiler verifier ordinary clasp" 10 {
                                                         Ok pack ->
-                                                          match artifacts repairTask {
-                                                            Ok artifactValues ->
-                                                              let pick = stdoutArtifactPick artifactValues in
-                                                              if pick.found then
-                                                                match artifactRead root pick.artifactId 16 {
-                                                                  Ok artifactContent ->
-                                                                    reportContextPack pack verificationValue artifactContent publishedArtifactContent,
-                                                                  Err message ->
-                                                                    errorText message
-                                                                }
-                                                              else
-                                                                errorText "missing stdout artifact",
+                                                          match taskEvidencePack repairTask "focused compiler verifier ordinary clasp" 10 {
+                                                            Ok evidence ->
+                                                              match artifacts repairTask {
+                                                                Ok artifactValues ->
+                                                                  let pick = stdoutArtifactPick artifactValues in
+                                                                  if pick.found then
+                                                                    match artifactRead root pick.artifactId 16 {
+                                                                      Ok artifactContent ->
+                                                                        reportContextPack pack evidence verificationValue artifactContent publishedArtifactContent,
+                                                                      Err message ->
+                                                                        errorText message
+                                                                    }
+                                                                  else
+                                                                    errorText "missing stdout artifact",
+                                                                Err message ->
+                                                                  errorText message
+                                                              },
                                                             Err message ->
                                                               errorText message
                                                           },
