@@ -22,7 +22,18 @@ record ContextPackHarnessReport = {
   latestVerifierStatus : Str,
   latestVerifier : Str,
   verificationPassed : Bool,
-  failedVerifiers : [Str]
+  failedVerifiers : [Str],
+  artifactReadKind : Str,
+  artifactReadBytes : Int,
+  artifactReadTotalBytes : Int,
+  artifactReadTruncated : Bool,
+  artifactReadText : Str
+}
+
+record ArtifactReadPick = {
+  found : Bool,
+  artifactId : Int,
+  kind : Str
 }
 
 stateRootPath : Str
@@ -64,11 +75,24 @@ traceStatus entry = entry.status
 traceName : VerificationTraceEntry -> Str
 traceName entry = entry.verifierName
 
+pickStdoutArtifact : ArtifactReadPick -> SwarmArtifact -> ArtifactReadPick
+pickStdoutArtifact current artifact =
+  if current.found then
+    current
+  else if artifact.kind == "stdout" then
+    ArtifactReadPick { found = true, artifactId = artifact.artifactId, kind = artifact.kind }
+  else
+    current
+
+stdoutArtifactPick : [SwarmArtifact] -> ArtifactReadPick
+stdoutArtifactPick artifactValues =
+  fold pickStdoutArtifact (ArtifactReadPick { found = false, artifactId = 0, kind = "" }) artifactValues
+
 errorText : Str -> Str
 errorText message = textConcat ["error:", message]
 
-reportContextPack : SwarmContextPack -> VerificationPlanResult -> Str
-reportContextPack pack verificationValue =
+reportContextPack : SwarmContextPack -> VerificationPlanResult -> SwarmArtifactContent -> Str
+reportContextPack pack verificationValue artifactContent =
   encode (ContextPackHarnessReport {
     taskId = pack.task.taskId,
     taskStatus = pack.task.status,
@@ -89,7 +113,12 @@ reportContextPack pack verificationValue =
     latestVerifierStatus = pack.mailboxSummary.latestVerifierStatus,
     latestVerifier = pack.mailboxSummary.latestVerifier,
     verificationPassed = verificationValue.passed,
-    failedVerifiers = verificationValue.failedVerifiers
+    failedVerifiers = verificationValue.failedVerifiers,
+    artifactReadKind = artifactContent.kind,
+    artifactReadBytes = artifactContent.bytesRead,
+    artifactReadTotalBytes = artifactContent.totalBytes,
+    artifactReadTruncated = artifactContent.truncated,
+    artifactReadText = artifactContent.text
   })
 
 main : Str
@@ -114,7 +143,21 @@ main =
                                     Ok verificationValue ->
                                       match taskContextPack repairTask "focused compiler verifier" 10 {
                                         Ok pack ->
-                                          reportContextPack pack verificationValue,
+                                          match artifacts repairTask {
+                                            Ok artifactValues ->
+                                              let pick = stdoutArtifactPick artifactValues in
+                                              if pick.found then
+                                                match artifactRead root pick.artifactId 16 {
+                                                  Ok artifactContent ->
+                                                    reportContextPack pack verificationValue artifactContent,
+                                                  Err message ->
+                                                    errorText message
+                                                }
+                                              else
+                                                errorText "missing stdout artifact",
+                                            Err message ->
+                                              errorText message
+                                          },
                                         Err message ->
                                           errorText message
                                       },

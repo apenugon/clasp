@@ -18,6 +18,7 @@ const SIGTERM: c_int = 15;
 #[cfg(unix)]
 const SIGKILL: c_int = 9;
 const DEFAULT_SWARM_OUTPUT_LIMIT_BYTES: u64 = 4 * 1024 * 1024;
+const DEFAULT_SWARM_ARTIFACT_READ_LIMIT_BYTES: u64 = 64 * 1024;
 
 #[cfg(unix)]
 extern "C" {
@@ -175,6 +176,7 @@ enum SwarmCommand {
     Tail { root: PathBuf, task_id: Option<String>, limit: usize },
     Runs { root: PathBuf, task_id: Option<String> },
     Artifacts { root: PathBuf, task_id: Option<String> },
+    ArtifactRead { root: PathBuf, artifact_id: i64, max_bytes: u64 },
     MemoryPut {
         root: PathBuf,
         objective_id: String,
@@ -261,7 +263,7 @@ enum SwarmCommand {
 
 fn swarm_usage(program: &str) -> ! {
     eprintln!(
-        "usage: {program} [--json] swarm <start|bootstrap|lease|release|heartbeat|complete|fail|retry|stop|resume|status|history|tasks|summary|tail|runs|artifacts|memory put|memory query|memory search|objective create|objective status|objectives|task create|ready|approve|approvals|policy set|manager next|tool|verifier run|mergegate decide> ..."
+        "usage: {program} [--json] swarm <start|bootstrap|lease|release|heartbeat|complete|fail|retry|stop|resume|status|history|tasks|summary|tail|runs|artifacts|artifact read|memory put|memory query|memory search|objective create|objective status|objectives|task create|ready|approve|approvals|policy set|manager next|tool|verifier run|mergegate decide> ..."
     );
     std::process::exit(2);
 }
@@ -324,6 +326,26 @@ fn parse_memory_limit_mb(value: &str) -> Result<i64, String> {
         return Err("--memory-mb must be greater than 0".to_owned());
     }
     Ok(parsed)
+}
+
+fn parse_artifact_id(value: &str) -> Result<i64, String> {
+    let parsed = value
+        .parse::<i64>()
+        .map_err(|_| format!("invalid artifact id `{value}`"))?;
+    if parsed <= 0 {
+        return Err("artifact id must be greater than 0".to_owned());
+    }
+    Ok(parsed)
+}
+
+fn parse_max_bytes(value: &str) -> Result<u64, String> {
+    let parsed = value
+        .parse::<u64>()
+        .map_err(|_| format!("invalid --max-bytes value `{value}`"))?;
+    if parsed == 0 {
+        return Err("--max-bytes must be greater than 0".to_owned());
+    }
+    Ok(parsed.min(DEFAULT_SWARM_OUTPUT_LIMIT_BYTES))
 }
 
 fn parse_named_run_prefix(
@@ -506,6 +528,35 @@ fn parse_swarm_command(args: &[String]) -> Result<Option<(bool, SwarmCommand)>, 
                 root: parse_root_arg(&rest[0]),
                 task_id: rest.get(1).cloned(),
             }
+        }
+        "artifact" => {
+            if rest.first().map(|value| value.as_str()) != Some("read") {
+                return Err(
+                    "usage: claspc swarm artifact read <state-root> <artifact-id> [--max-bytes N]".to_owned(),
+                );
+            }
+            if rest.len() < 3 {
+                return Err(
+                    "usage: claspc swarm artifact read <state-root> <artifact-id> [--max-bytes N]".to_owned(),
+                );
+            }
+            let root = parse_root_arg(&rest[1]);
+            let artifact_id = parse_artifact_id(&rest[2])?;
+            let mut max_bytes = DEFAULT_SWARM_ARTIFACT_READ_LIMIT_BYTES;
+            let mut index = 3usize;
+            while index < rest.len() {
+                match rest[index].as_str() {
+                    "--max-bytes" => {
+                        let Some(value) = rest.get(index + 1) else {
+                            return Err("missing value after --max-bytes".to_owned());
+                        };
+                        max_bytes = parse_max_bytes(value)?;
+                        index += 2;
+                    }
+                    other => return Err(format!("unknown option `{other}`")),
+                }
+            }
+            SwarmCommand::ArtifactRead { root, artifact_id, max_bytes }
         }
         "memory" => {
             let Some(action) = rest.first().map(|value| value.as_str()) else {
@@ -2909,6 +2960,107 @@ fn artifacts_json(connection: &Connection, task_id: Option<&str>) -> Result<Valu
     Ok(Value::Array(values))
 }
 
+fn load_artifact_record(connection: &Connection, artifact_id: i64) -> Result<Option<SwarmArtifactRecord>, String> {
+    connection
+        .query_row(
+            "
+            SELECT id, task_id, kind, path, created_at_ms, metadata_json
+            FROM swarm_artifacts
+            WHERE id = ?1
+            ",
+            params![artifact_id],
+            |row| {
+                Ok(SwarmArtifactRecord {
+                    artifact_id: row.get(0)?,
+                    task_id: row.get(1)?,
+                    kind: row.get(2)?,
+                    path: row.get(3)?,
+                    created_at_ms: row.get(4)?,
+                    metadata_json: row.get(5)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(|err| format!("failed to load swarm artifact {artifact_id}: {err}"))
+}
+
+fn artifact_file_path(paths: &SwarmRuntimePaths, record: &SwarmArtifactRecord) -> Result<PathBuf, String> {
+    let artifact_path = PathBuf::from(&record.path);
+    let canonical_artifact = fs::canonicalize(&artifact_path)
+        .map_err(|err| format!("failed to resolve swarm artifact `{}`: {err}", artifact_path.display()))?;
+    let canonical_artifacts_dir = fs::canonicalize(&paths.artifacts_dir).map_err(|err| {
+        format!(
+            "failed to resolve swarm artifact directory `{}`: {err}",
+            paths.artifacts_dir.display()
+        )
+    })?;
+    if !canonical_artifact.starts_with(&canonical_artifacts_dir) {
+        return Err(format!(
+            "swarm artifact {} points outside artifact store",
+            record.artifact_id
+        ));
+    }
+    let metadata = fs::metadata(&canonical_artifact)
+        .map_err(|err| format!("failed to inspect swarm artifact `{}`: {err}", canonical_artifact.display()))?;
+    if !metadata.is_file() {
+        return Err(format!(
+            "swarm artifact {} is not a regular file",
+            record.artifact_id
+        ));
+    }
+    Ok(canonical_artifact)
+}
+
+fn read_artifact_text(path: &Path, max_bytes: u64) -> Result<(String, u64, u64, bool, bool), String> {
+    let total_bytes = fs::metadata(path)
+        .map_err(|err| format!("failed to inspect swarm artifact `{}`: {err}", path.display()))?
+        .len();
+    let mut file = File::open(path)
+        .map_err(|err| format!("failed to open swarm artifact `{}`: {err}", path.display()))?;
+    let mut bytes = Vec::new();
+    let read_limit = max_bytes.saturating_add(1);
+    let mut limited = Read::by_ref(&mut file).take(read_limit);
+    limited
+        .read_to_end(&mut bytes)
+        .map_err(|err| format!("failed to read swarm artifact `{}`: {err}", path.display()))?;
+    let truncated = bytes.len() as u64 > max_bytes;
+    if truncated {
+        bytes.truncate(max_bytes as usize);
+    }
+    let lossy_utf8 = std::str::from_utf8(&bytes).is_err();
+    let bytes_read = bytes.len() as u64;
+    Ok((
+        String::from_utf8_lossy(&bytes).into_owned(),
+        bytes_read,
+        total_bytes,
+        truncated || total_bytes > bytes_read,
+        lossy_utf8,
+    ))
+}
+
+fn artifact_read_json(paths: &SwarmRuntimePaths, connection: &Connection, artifact_id: i64, max_bytes: u64) -> Result<Value, String> {
+    let Some(record) = load_artifact_record(connection, artifact_id)? else {
+        return Err(format!("unknown swarm artifact `{artifact_id}`"));
+    };
+    let max_bytes = max_bytes.max(1).min(DEFAULT_SWARM_OUTPUT_LIMIT_BYTES);
+    let path = artifact_file_path(paths, &record)?;
+    let (text, bytes_read, total_bytes, truncated, lossy_utf8) = read_artifact_text(&path, max_bytes)?;
+    Ok(json!({
+        "artifactId": record.artifact_id,
+        "taskId": record.task_id,
+        "kind": record.kind,
+        "path": record.path,
+        "createdAtMs": record.created_at_ms,
+        "metadata": serde_json::from_str::<Value>(&record.metadata_json).unwrap_or(Value::Null),
+        "maxBytes": max_bytes,
+        "bytesRead": bytes_read,
+        "totalBytes": total_bytes,
+        "truncated": truncated,
+        "lossyUtf8": lossy_utf8,
+        "text": text,
+    }))
+}
+
 fn approvals_json(connection: &Connection, task_id: Option<&str>) -> Result<Value, String> {
     let mut values = Vec::new();
     if let Some(task_id) = task_id {
@@ -4859,6 +5011,10 @@ fn format_artifact_text(value: &Value) -> String {
     format!("artifact {task_id} {kind} {path}")
 }
 
+fn format_artifact_read_text(value: &Value) -> String {
+    string_field(value, "text").unwrap_or_default().to_owned()
+}
+
 fn format_objective_text(value: &Value) -> String {
     let objective_id = string_field(value, "objectiveId").unwrap_or("unknown");
     let projected_status = string_field(value, "projectedStatus")
@@ -4952,6 +5108,8 @@ fn render_swarm_text(value: &Value) -> String {
                         format_approval_text(entry)
                     } else if entry.get("runId").is_some() {
                         format_run_text(entry)
+                    } else if entry.get("artifactId").is_some() && entry.get("text").is_some() {
+                        format_artifact_read_text(entry)
                     } else if entry.get("artifactId").is_some() {
                         format_artifact_text(entry)
                     } else if entry.get("objectiveId").is_some() && entry.get("projectedStatus").is_some() {
@@ -4976,6 +5134,8 @@ fn render_swarm_text(value: &Value) -> String {
                 format_approval_text(value)
             } else if value.get("runId").is_some() {
                 format_run_text(value)
+            } else if value.get("artifactId").is_some() && value.get("text").is_some() {
+                format_artifact_read_text(value)
             } else if value.get("artifactId").is_some() {
                 format_artifact_text(value)
             } else if value.get("objective").is_some() && value.get("tasks").is_some() {
@@ -5096,6 +5256,7 @@ fn execute_query_command(command: SwarmCommand) -> Result<Value, String> {
         | SwarmCommand::Ready { root, .. }
         | SwarmCommand::Approvals { root, .. }
         | SwarmCommand::Artifacts { root, .. }
+        | SwarmCommand::ArtifactRead { root, .. }
         | SwarmCommand::ManagerNext { root, .. } => root,
         _ => unreachable!(),
     };
@@ -5115,6 +5276,7 @@ fn execute_query_command(command: SwarmCommand) -> Result<Value, String> {
         SwarmCommand::Tail { task_id, limit, .. } => tail_json(&connection, task_id.as_deref(), limit),
         SwarmCommand::Runs { task_id, .. } => runs_json(&connection, task_id.as_deref()),
         SwarmCommand::Artifacts { task_id, .. } => artifacts_json(&connection, task_id.as_deref()),
+        SwarmCommand::ArtifactRead { artifact_id, max_bytes, .. } => artifact_read_json(&_paths, &connection, artifact_id, max_bytes),
         SwarmCommand::MemoryQuery { objective_id, task_id, key, limit, .. } =>
             memory_query_json(&connection, objective_id.as_deref(), task_id.as_deref(), key.as_deref(), limit),
         SwarmCommand::MemorySearch { objective_id, task_id, query, limit, .. } =>
@@ -5665,6 +5827,7 @@ fn execute_command(command: SwarmCommand) -> Result<(ExitCode, Value), String> {
         | SwarmCommand::Ready { .. }
         | SwarmCommand::Approvals { .. }
         | SwarmCommand::Artifacts { .. }
+        | SwarmCommand::ArtifactRead { .. }
         | SwarmCommand::ManagerNext { .. } => Ok((ExitCode::SUCCESS, execute_query_command(command)?)),
         SwarmCommand::ToolRun { root, task_id, actor, cwd, timeout_ms, memory_limit_mb, command } => {
             let run = execute_tool_run(&root, &task_id, &actor, &cwd, &command, timeout_ms, memory_limit_mb)?;
@@ -6107,6 +6270,18 @@ pub fn builtin_swarm_artifacts(root: &str, task_id: &str) -> Result<String, Stri
     render_builtin_query(SwarmCommand::Artifacts {
         root: PathBuf::from(root),
         task_id: Some(task_id.to_owned()),
+    })
+}
+
+pub fn builtin_swarm_artifact_read(root: &str, artifact_id: i64, max_bytes: i64) -> Result<String, String> {
+    render_builtin_query(SwarmCommand::ArtifactRead {
+        root: PathBuf::from(root),
+        artifact_id,
+        max_bytes: if max_bytes <= 0 {
+            DEFAULT_SWARM_ARTIFACT_READ_LIMIT_BYTES
+        } else {
+            (max_bytes as u64).min(DEFAULT_SWARM_OUTPUT_LIMIT_BYTES)
+        },
     })
 }
 
@@ -6909,6 +7084,42 @@ mod tests {
             Some(stderr_total)
         );
         assert_eq!(stdout_metadata.get("stderrTruncated").and_then(Value::as_bool), Some(true));
+
+        let stdout_artifact_id: i64 = connection
+            .query_row(
+                "
+                SELECT id
+                FROM swarm_artifacts
+                WHERE task_id = 'output' AND kind = 'stdout'
+                ORDER BY id DESC
+                LIMIT 1
+                ",
+                [],
+                |row| row.get(0),
+            )
+            .expect("load stdout artifact id");
+        let (read_code, read_json_text) = run_swarm_json_command(&vec![
+            "artifact".to_owned(),
+            "read".to_owned(),
+            root_text.clone(),
+            stdout_artifact_id.to_string(),
+            "--max-bytes".to_owned(),
+            "17".to_owned(),
+        ])
+        .expect("read output artifact");
+        assert_eq!(read_code, 0);
+        let read_json: Value = serde_json::from_str(&read_json_text).expect("decode artifact read json");
+        assert_eq!(read_json.get("artifactId").and_then(Value::as_i64), Some(stdout_artifact_id));
+        assert_eq!(read_json.get("bytesRead").and_then(Value::as_u64), Some(17));
+        assert_eq!(
+            read_json.get("totalBytes").and_then(Value::as_u64),
+            Some(DEFAULT_SWARM_OUTPUT_LIMIT_BYTES)
+        );
+        assert_eq!(read_json.get("truncated").and_then(Value::as_bool), Some(true));
+        assert_eq!(
+            read_json.get("text").and_then(Value::as_str).map(str::len),
+            Some(17)
+        );
 
         let finish_payload_text: String = connection
             .query_row(

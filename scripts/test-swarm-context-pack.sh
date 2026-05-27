@@ -60,6 +60,11 @@ includes(report.traceStatuses, "failed", "trace statuses");
 includes(report.traceClassifications, "exit-code", "trace classifications");
 includes(report.artifactKinds, "stdout", "artifact kinds");
 includes(report.artifactKinds, "stderr", "artifact kinds");
+assert(report.artifactReadKind === "stdout", `artifact read kind ${report.artifactReadKind}`);
+assert(report.artifactReadBytes === 16, `artifact read bytes ${report.artifactReadBytes}`);
+assert(report.artifactReadTotalBytes >= 16, `artifact read total bytes ${report.artifactReadTotalBytes}`);
+assert(report.artifactReadTruncated === true, "artifact read should report truncation");
+assert(report.artifactReadText === "context-verifier", `artifact read text ${JSON.stringify(report.artifactReadText)}`);
 assert(
   report.artifactPaths.some((artifactPath) => artifactPath.endsWith(".stdout.txt")),
   `stdout artifact path missing: ${JSON.stringify(report.artifactPaths)}`,

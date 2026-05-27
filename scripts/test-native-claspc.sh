@@ -1861,6 +1861,31 @@ swarm_sqlite_output_limit_artifacts="$("$claspc_bin" --json swarm artifacts "$sw
 printf '%s\n' "$swarm_sqlite_output_limit_artifacts" | grep -F '"outputLimitBytes":4194304' >/dev/null
 printf '%s\n' "$swarm_sqlite_output_limit_artifacts" | grep -F '"stdoutTruncated":true' >/dev/null
 printf '%s\n' "$swarm_sqlite_output_limit_artifacts" | grep -F '"stderrTruncated":true' >/dev/null
+swarm_sqlite_output_limit_stdout_id="$(node - "$swarm_sqlite_output_limit_artifacts" <<'EOF'
+const artifacts = JSON.parse(process.argv[2]);
+const hit = artifacts.find((artifact) => artifact.kind === "stdout" && artifact.metadata?.stdoutTruncated === true);
+if (!hit) {
+  throw new Error("missing truncated stdout artifact");
+}
+process.stdout.write(String(hit.artifactId));
+EOF
+)"
+swarm_sqlite_output_limit_read="$("$claspc_bin" --json swarm artifact read "$swarm_sqlite_state_root" "$swarm_sqlite_output_limit_stdout_id" --max-bytes 16)"
+node - "$swarm_sqlite_output_limit_read" <<'EOF'
+const content = JSON.parse(process.argv[2]);
+if (content.kind !== "stdout") {
+  throw new Error(`expected stdout artifact content, got ${content.kind}`);
+}
+if (content.bytesRead !== 16) {
+  throw new Error(`expected bounded artifact read of 16 bytes, got ${content.bytesRead}`);
+}
+if (content.truncated !== true) {
+  throw new Error("expected artifact read truncation");
+}
+if (!content.text.startsWith("x\nx\n")) {
+  throw new Error(`unexpected artifact content prefix: ${JSON.stringify(content.text)}`);
+}
+EOF
 swarm_sqlite_verifier_output="$(CLASP_SWARM_ACTOR=manager "$claspc_bin" --json swarm verifier run "$swarm_sqlite_state_root" repair native-smoke --cwd "$project_root" -- bash -lc 'printf verifier-ok')"
 printf '%s\n' "$swarm_sqlite_verifier_output" | grep -F '"role":"verifier"' >/dev/null
 printf '%s\n' "$swarm_sqlite_verifier_output" | grep -F '"status":"passed"' >/dev/null
