@@ -77,7 +77,7 @@ SQLite is the practical first implementation, and the repo now has that as the f
 
 ### 3. Artifact Store
 
-Large outputs should not be passed around as prompt text.
+Large outputs should not be passed around as prompt text or retained without bounds.
 
 The runtime needs native artifact storage for:
 
@@ -124,7 +124,7 @@ Agents need controlled execution of tools and compilers.
 The runtime needs:
 
 - process spawning
-- stdout/stderr capture
+- bounded stdout/stderr artifact capture
 - timeouts
 - environment control
 - working-directory control
@@ -277,7 +277,7 @@ The ordinary Clasp managed loop now records each failed builder/verifier attempt
 
 Native watched processes now launch monitored child commands in an isolated process group when the host supports `setsid`, carry a runtime watch token in the heartbeat, and cancel the verified process group on timeout. This prevents monitored builders or verifiers from leaving nested subprocesses alive after a standalone Clasp loop stops an attempt.
 
-Native swarm tool and verifier runs now also accept a `--memory-mb` limit and expose ordinary Clasp `toolRunWithLimits` / `verifierRunWithLimits` helpers. The runtime applies the limit before executing the child process, records `memoryLimitMb` on run JSON, events, and artifact metadata, and keeps stdout/stderr artifact capture bounded by the same native run surface. Standalone loops can therefore cap risky builders or verifiers without delegating memory safety to a shell wrapper.
+Native swarm tool and verifier runs now also accept a `--memory-mb` limit and expose ordinary Clasp `toolRunWithLimits` / `verifierRunWithLimits` helpers. The runtime applies the limit before executing the child process, records `memoryLimitMb` on run JSON, events, and artifact metadata, and caps stdout/stderr artifacts at 4 MiB per stream while still draining the child pipes. Standalone loops can therefore cap risky builders or verifiers without delegating memory safety to a shell wrapper.
 
 The native feedback loop and managed-loop helpers now consume that surface directly. `CLASP_LOOP_AGENT_MEMORY_MB_JSON` defaults builder and verifier attempts to an 8 GiB cap, with `CLASP_LOOP_BUILDER_MEMORY_MB_JSON` and `CLASP_LOOP_VERIFIER_MEMORY_MB_JSON` available for role-specific overrides; GoalManager propagates those settings into child loops. Memory limits are part of the ordinary Clasp run configuration rather than a shell-only launcher concern.
 

@@ -1850,6 +1850,17 @@ swarm_sqlite_tool_stderr_path="$(printf '%s\n' "$swarm_sqlite_tool_output" | sed
 [[ -f "$swarm_sqlite_tool_stderr_path" ]]
 grep -Fx 'tool-ok' "$swarm_sqlite_tool_stdout_path" >/dev/null
 grep -Fx 'tool-err' "$swarm_sqlite_tool_stderr_path" >/dev/null
+swarm_sqlite_output_limit_output="$(CLASP_SWARM_ACTOR=manager "$claspc_bin" --json swarm tool "$swarm_sqlite_state_root" repair --cwd "$project_root" -- bash -lc 'yes x | head -c 4198400; yes e | head -c 4196352 >&2')"
+printf '%s\n' "$swarm_sqlite_output_limit_output" | grep -F '"role":"tool"' >/dev/null
+printf '%s\n' "$swarm_sqlite_output_limit_output" | grep -F '"status":"passed"' >/dev/null
+swarm_sqlite_output_limit_stdout_path="$(printf '%s\n' "$swarm_sqlite_output_limit_output" | sed -n 's/.*"stdoutArtifactPath":"\([^"]*\)".*/\1/p')"
+swarm_sqlite_output_limit_stderr_path="$(printf '%s\n' "$swarm_sqlite_output_limit_output" | sed -n 's/.*"stderrArtifactPath":"\([^"]*\)".*/\1/p')"
+[[ "$(wc -c < "$swarm_sqlite_output_limit_stdout_path" | tr -d ' ')" = "4194304" ]]
+[[ "$(wc -c < "$swarm_sqlite_output_limit_stderr_path" | tr -d ' ')" = "4194304" ]]
+swarm_sqlite_output_limit_artifacts="$("$claspc_bin" --json swarm artifacts "$swarm_sqlite_state_root" repair)"
+printf '%s\n' "$swarm_sqlite_output_limit_artifacts" | grep -F '"outputLimitBytes":4194304' >/dev/null
+printf '%s\n' "$swarm_sqlite_output_limit_artifacts" | grep -F '"stdoutTruncated":true' >/dev/null
+printf '%s\n' "$swarm_sqlite_output_limit_artifacts" | grep -F '"stderrTruncated":true' >/dev/null
 swarm_sqlite_verifier_output="$(CLASP_SWARM_ACTOR=manager "$claspc_bin" --json swarm verifier run "$swarm_sqlite_state_root" repair native-smoke --cwd "$project_root" -- bash -lc 'printf verifier-ok')"
 printf '%s\n' "$swarm_sqlite_verifier_output" | grep -F '"role":"verifier"' >/dev/null
 printf '%s\n' "$swarm_sqlite_verifier_output" | grep -F '"status":"passed"' >/dev/null

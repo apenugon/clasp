@@ -17,6 +17,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 const SIGTERM: c_int = 15;
 #[cfg(unix)]
 const SIGKILL: c_int = 9;
+const DEFAULT_SWARM_OUTPUT_LIMIT_BYTES: u64 = 4 * 1024 * 1024;
 
 #[cfg(unix)]
 extern "C" {
@@ -3884,7 +3885,26 @@ struct NativeCommandOutcome {
     timed_out: bool,
     stdout_reader_finished: bool,
     stderr_reader_finished: bool,
+    stdout_capture: OutputCapture,
+    stderr_capture: OutputCapture,
     reader_errors: Vec<String>,
+}
+
+#[derive(Clone, Copy)]
+struct OutputCapture {
+    bytes_written: u64,
+    total_bytes: u64,
+    truncated: bool,
+}
+
+impl OutputCapture {
+    fn empty() -> OutputCapture {
+        OutputCapture {
+            bytes_written: 0,
+            total_bytes: 0,
+            truncated: false,
+        }
+    }
 }
 
 fn timeout_duration(timeout_ms: i64) -> Duration {
@@ -4033,17 +4053,24 @@ fn wait_child_until(child: &mut Child, deadline: Instant) -> Result<Option<ExitS
     }
 }
 
-fn spawn_pipe_reader<R>(mut reader: R, path: PathBuf, label: &'static str) -> Receiver<Result<u64, String>>
+fn spawn_pipe_reader<R>(
+    mut reader: R,
+    path: PathBuf,
+    label: &'static str,
+    max_bytes: u64,
+) -> Receiver<Result<OutputCapture, String>>
 where
     R: Read + Send + 'static,
 {
     let (sender, receiver) = mpsc::channel();
     thread::spawn(move || {
-        let result = (|| -> Result<u64, String> {
+        let result = (|| -> Result<OutputCapture, String> {
             let mut file = File::create(&path)
                 .map_err(|err| format!("failed to create swarm {label} artifact `{}`: {err}", path.display()))?;
             let mut buffer = [0u8; 8192];
-            let mut total = 0u64;
+            let mut bytes_written = 0u64;
+            let mut total_bytes = 0u64;
+            let mut truncated = false;
             loop {
                 let read = reader
                     .read(&mut buffer)
@@ -4051,48 +4078,68 @@ where
                 if read == 0 {
                     break;
                 }
-                file.write_all(&buffer[..read])
-                    .map_err(|err| format!("failed to write swarm {label} artifact `{}`: {err}", path.display()))?;
-                file.flush()
-                    .map_err(|err| format!("failed to flush swarm {label} artifact `{}`: {err}", path.display()))?;
-                total += read as u64;
+                total_bytes = total_bytes.saturating_add(read as u64);
+                if bytes_written < max_bytes {
+                    let remaining = max_bytes - bytes_written;
+                    let write_len = read.min(remaining as usize);
+                    if write_len > 0 {
+                        file.write_all(&buffer[..write_len])
+                            .map_err(|err| format!("failed to write swarm {label} artifact `{}`: {err}", path.display()))?;
+                        bytes_written += write_len as u64;
+                    }
+                    if write_len < read {
+                        truncated = true;
+                    }
+                } else {
+                    truncated = true;
+                }
             }
-            Ok(total)
+            file.flush()
+                .map_err(|err| format!("failed to flush swarm {label} artifact `{}`: {err}", path.display()))?;
+            Ok(OutputCapture {
+                bytes_written,
+                total_bytes,
+                truncated,
+            })
         })();
         let _ = sender.send(result);
     });
     receiver
 }
 
-fn try_pipe_reader(receiver: &Receiver<Result<u64, String>>, label: &str) -> Option<(bool, Option<String>)> {
+fn try_pipe_reader(receiver: &Receiver<Result<OutputCapture, String>>, label: &str) -> Option<(OutputCapture, Option<String>)> {
     match receiver.try_recv() {
-        Ok(Ok(_)) => Some((true, None)),
-        Ok(Err(message)) => Some((true, Some(message))),
+        Ok(Ok(capture)) => Some((capture, None)),
+        Ok(Err(message)) => Some((OutputCapture::empty(), Some(message))),
         Err(TryRecvError::Empty) => None,
-        Err(TryRecvError::Disconnected) => Some((true, Some(format!("swarm {label} reader disconnected")))),
+        Err(TryRecvError::Disconnected) => Some((OutputCapture::empty(), Some(format!("swarm {label} reader disconnected")))),
     }
 }
 
 fn wait_pipe_readers_until(
-    stdout_rx: &Receiver<Result<u64, String>>,
-    stderr_rx: &Receiver<Result<u64, String>>,
+    stdout_rx: &Receiver<Result<OutputCapture, String>>,
+    stderr_rx: &Receiver<Result<OutputCapture, String>>,
     deadline: Instant,
     stdout_reader_finished: &mut bool,
     stdout_reader_error: &mut Option<String>,
+    stdout_capture: &mut OutputCapture,
     stderr_reader_finished: &mut bool,
     stderr_reader_error: &mut Option<String>,
+    stderr_capture: &mut OutputCapture,
 ) {
     loop {
         if !*stdout_reader_finished {
-            if let Some((finished, error)) = try_pipe_reader(stdout_rx, "stdout") {
-                *stdout_reader_finished = finished;
+            if let Some((capture, error)) = try_pipe_reader(stdout_rx, "stdout") {
+                *stdout_reader_finished = true;
                 *stdout_reader_error = error;
+                *stdout_capture = capture;
             }
         }
         if !*stderr_reader_finished {
-            if let Some((finished, error)) = try_pipe_reader(stderr_rx, "stderr") {
-                *stderr_reader_finished = finished;
+            if let Some((capture, error)) = try_pipe_reader(stderr_rx, "stderr") {
+                *stderr_reader_finished = true;
                 *stderr_reader_error = error;
+                *stderr_capture = capture;
             }
         }
         if *stdout_reader_finished && *stderr_reader_finished {
@@ -4149,8 +4196,18 @@ fn run_command_with_timeout_to_artifacts(
         .stderr
         .take()
         .ok_or_else(|| "failed to capture swarm stderr".to_owned())?;
-    let stdout_rx = spawn_pipe_reader(stdout, stdout_path.to_path_buf(), "stdout");
-    let stderr_rx = spawn_pipe_reader(stderr, stderr_path.to_path_buf(), "stderr");
+    let stdout_rx = spawn_pipe_reader(
+        stdout,
+        stdout_path.to_path_buf(),
+        "stdout",
+        DEFAULT_SWARM_OUTPUT_LIMIT_BYTES,
+    );
+    let stderr_rx = spawn_pipe_reader(
+        stderr,
+        stderr_path.to_path_buf(),
+        "stderr",
+        DEFAULT_SWARM_OUTPUT_LIMIT_BYTES,
+    );
 
     let deadline = Instant::now() + timeout_duration(timeout_ms);
     let mut timed_out = false;
@@ -4171,21 +4228,21 @@ fn run_command_with_timeout_to_artifacts(
 
     let mut stdout_reader_finished = false;
     let mut stdout_reader_error = None;
+    let mut stdout_capture = OutputCapture::empty();
     let mut stderr_reader_finished = false;
     let mut stderr_reader_error = None;
-    let reader_deadline = if timed_out {
-        Instant::now() + reader_timeout_grace_duration()
-    } else {
-        deadline
-    };
+    let mut stderr_capture = OutputCapture::empty();
+    let reader_deadline = Instant::now() + reader_timeout_grace_duration();
     wait_pipe_readers_until(
         &stdout_rx,
         &stderr_rx,
         reader_deadline,
         &mut stdout_reader_finished,
         &mut stdout_reader_error,
+        &mut stdout_capture,
         &mut stderr_reader_finished,
         &mut stderr_reader_error,
+        &mut stderr_capture,
     );
     if !timed_out && (!stdout_reader_finished || !stderr_reader_finished) {
         timed_out = true;
@@ -4196,8 +4253,10 @@ fn run_command_with_timeout_to_artifacts(
             Instant::now() + reader_timeout_grace_duration(),
             &mut stdout_reader_finished,
             &mut stdout_reader_error,
+            &mut stdout_capture,
             &mut stderr_reader_finished,
             &mut stderr_reader_error,
+            &mut stderr_capture,
         );
     }
     let mut reader_errors = Vec::new();
@@ -4208,13 +4267,18 @@ fn run_command_with_timeout_to_artifacts(
         reader_errors.push(message);
     }
 
+    let reader_failed = !reader_errors.is_empty();
     let exit_code = if timed_out {
         124
+    } else if reader_failed {
+        1
     } else {
         status.and_then(|value| value.code()).unwrap_or(1) as i64
     };
     let status_text = if timed_out {
         "timed_out"
+    } else if reader_failed {
+        "failed"
     } else if exit_code == 0 {
         "passed"
     } else {
@@ -4226,6 +4290,109 @@ fn run_command_with_timeout_to_artifacts(
         timed_out,
         stdout_reader_finished,
         stderr_reader_finished,
+        stdout_capture,
+        stderr_capture,
+        reader_errors,
+    })
+}
+
+fn run_command_to_artifacts(
+    cwd: &Path,
+    command: &[String],
+    stdout_path: &Path,
+    stderr_path: &Path,
+    memory_limit_mb: Option<i64>,
+    network_denied: bool,
+) -> Result<NativeCommandOutcome, String> {
+    let mut process = ProcessCommand::new(&command[0]);
+    process
+        .args(&command[1..])
+        .current_dir(cwd)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    configure_command_process(&mut process, true, memory_limit_mb, network_denied)?;
+
+    let mut child = process
+        .spawn()
+        .map_err(|err| format!("failed to execute swarm command `{}`: {err}", command[0]))?;
+    let child_id = child.id();
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "failed to capture swarm stdout".to_owned())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "failed to capture swarm stderr".to_owned())?;
+    let stdout_rx = spawn_pipe_reader(
+        stdout,
+        stdout_path.to_path_buf(),
+        "stdout",
+        DEFAULT_SWARM_OUTPUT_LIMIT_BYTES,
+    );
+    let stderr_rx = spawn_pipe_reader(
+        stderr,
+        stderr_path.to_path_buf(),
+        "stderr",
+        DEFAULT_SWARM_OUTPUT_LIMIT_BYTES,
+    );
+
+    let status = child
+        .wait()
+        .map_err(|err| format!("failed to wait for swarm command `{}`: {err}", command[0]))?;
+    let mut stdout_reader_finished = false;
+    let mut stdout_reader_error = None;
+    let mut stdout_capture = OutputCapture::empty();
+    let mut stderr_reader_finished = false;
+    let mut stderr_reader_error = None;
+    let mut stderr_capture = OutputCapture::empty();
+    wait_pipe_readers_until(
+        &stdout_rx,
+        &stderr_rx,
+        Instant::now() + reader_timeout_grace_duration(),
+        &mut stdout_reader_finished,
+        &mut stdout_reader_error,
+        &mut stdout_capture,
+        &mut stderr_reader_finished,
+        &mut stderr_reader_error,
+        &mut stderr_capture,
+    );
+    if !stdout_reader_finished || !stderr_reader_finished {
+        terminate_child_tree(&mut child, child_id);
+        wait_pipe_readers_until(
+            &stdout_rx,
+            &stderr_rx,
+            Instant::now() + reader_timeout_grace_duration(),
+            &mut stdout_reader_finished,
+            &mut stdout_reader_error,
+            &mut stdout_capture,
+            &mut stderr_reader_finished,
+            &mut stderr_reader_error,
+            &mut stderr_capture,
+        );
+    }
+    let mut reader_errors = Vec::new();
+    if let Some(message) = stdout_reader_error {
+        reader_errors.push(message);
+    }
+    if let Some(message) = stderr_reader_error {
+        reader_errors.push(message);
+    }
+    let reader_failed = !reader_errors.is_empty();
+    let exit_code = if reader_failed {
+        1
+    } else {
+        status.code().unwrap_or(1) as i64
+    };
+    Ok(NativeCommandOutcome {
+        exit_code,
+        status: if !reader_failed && status.success() { "passed" } else { "failed" }.to_owned(),
+        timed_out: false,
+        stdout_reader_finished,
+        stderr_reader_finished,
+        stdout_capture,
+        stderr_capture,
         reader_errors,
     })
 }
@@ -4402,7 +4569,8 @@ fn run_native_command(
             "command": command,
             "timeoutMs": timeout_ms.unwrap_or(0),
             "memoryLimitMb": memory_limit_mb_value,
-            "networkAccess": network_access.clone()
+            "networkAccess": network_access.clone(),
+            "outputLimitBytes": DEFAULT_SWARM_OUTPUT_LIMIT_BYTES
         }),
     )?;
 
@@ -4411,25 +4579,7 @@ fn run_native_command(
     let outcome = if let Some(timeout_ms) = timeout_ms {
         run_command_with_timeout_to_artifacts(cwd, command, &stdout_path, &stderr_path, timeout_ms, memory_limit_mb, network_denied)?
     } else {
-        let mut process = ProcessCommand::new(&command[0]);
-        process.args(&command[1..]).current_dir(cwd);
-        configure_command_process(&mut process, false, memory_limit_mb, network_denied)?;
-        let output = process
-            .output()
-            .map_err(|err| format!("failed to execute swarm {role} command `{}`: {err}", command[0]))?;
-        fs::write(&stdout_path, &output.stdout)
-            .map_err(|err| format!("failed to write swarm stdout artifact `{}`: {err}", stdout_path.display()))?;
-        fs::write(&stderr_path, &output.stderr)
-            .map_err(|err| format!("failed to write swarm stderr artifact `{}`: {err}", stderr_path.display()))?;
-        let exit_code = output.status.code().unwrap_or(1) as i64;
-        NativeCommandOutcome {
-            exit_code,
-            status: if output.status.success() { "passed" } else { "failed" }.to_owned(),
-            timed_out: false,
-            stdout_reader_finished: true,
-            stderr_reader_finished: true,
-            reader_errors: Vec::new(),
-        }
+        run_command_to_artifacts(cwd, command, &stdout_path, &stderr_path, memory_limit_mb, network_denied)?
     };
     let ended_at_ms = now_ms();
     let artifact_metadata = json!({
@@ -4440,8 +4590,15 @@ fn run_native_command(
         "timeoutMs": timeout_ms.unwrap_or(0),
         "memoryLimitMb": memory_limit_mb_value,
         "networkAccess": network_access.clone(),
+        "outputLimitBytes": DEFAULT_SWARM_OUTPUT_LIMIT_BYTES,
         "stdoutReaderFinished": outcome.stdout_reader_finished,
         "stderrReaderFinished": outcome.stderr_reader_finished,
+        "stdoutBytes": outcome.stdout_capture.bytes_written,
+        "stdoutTotalBytes": outcome.stdout_capture.total_bytes,
+        "stdoutTruncated": outcome.stdout_capture.truncated,
+        "stderrBytes": outcome.stderr_capture.bytes_written,
+        "stderrTotalBytes": outcome.stderr_capture.total_bytes,
+        "stderrTruncated": outcome.stderr_capture.truncated,
         "readerErrors": outcome.reader_errors.clone(),
     });
     let stdout_artifact_id = create_artifact(
@@ -4475,8 +4632,15 @@ fn run_native_command(
             "timeoutMs": timeout_ms.unwrap_or(0),
             "memoryLimitMb": memory_limit_mb_value,
             "networkAccess": network_access.clone(),
+            "outputLimitBytes": DEFAULT_SWARM_OUTPUT_LIMIT_BYTES,
             "stdoutReaderFinished": outcome.stdout_reader_finished,
             "stderrReaderFinished": outcome.stderr_reader_finished,
+            "stdoutBytes": outcome.stdout_capture.bytes_written,
+            "stdoutTotalBytes": outcome.stdout_capture.total_bytes,
+            "stdoutTruncated": outcome.stdout_capture.truncated,
+            "stderrBytes": outcome.stderr_capture.bytes_written,
+            "stderrTotalBytes": outcome.stderr_capture.total_bytes,
+            "stderrTruncated": outcome.stderr_capture.truncated,
             "readerErrors": outcome.reader_errors.clone(),
             "stdoutArtifactPath": stdout_path.display().to_string(),
             "stderrArtifactPath": stderr_path.display().to_string()
@@ -6029,7 +6193,10 @@ pub fn maybe_run_swarm(args: &[String]) -> Option<ExitCode> {
 
 #[cfg(test)]
 mod tests {
-    use super::{maybe_run_swarm, render_swarm_text, run_swarm_json_command, runtime_paths};
+    use super::{
+        maybe_run_swarm, render_swarm_text, run_swarm_json_command, runtime_paths,
+        DEFAULT_SWARM_OUTPUT_LIMIT_BYTES,
+    };
     use std::process::ExitCode;
     use rusqlite::Connection;
     use serde_json::{json, Value};
@@ -6661,6 +6828,104 @@ mod tests {
             )
             .expect("load memory-limited finish event");
         assert!(finish_payload.contains("\"memoryLimitMb\":512"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn swarm_run_output_artifacts_are_bounded() {
+        let root = unique_root("output-limit");
+        let root_text = root.to_string_lossy().to_string();
+        let bootstrap_args = vec!["claspc".to_owned(), "swarm".to_owned(), "bootstrap".to_owned(), root_text.clone(), "output".to_owned()];
+        let lease_args = vec!["claspc".to_owned(), "swarm".to_owned(), "lease".to_owned(), root_text.clone(), "output".to_owned()];
+        assert_eq!(maybe_run_swarm(&bootstrap_args), Some(ExitCode::SUCCESS));
+        assert_eq!(maybe_run_swarm(&lease_args), Some(ExitCode::SUCCESS));
+
+        let stdout_total = DEFAULT_SWARM_OUTPUT_LIMIT_BYTES + 4096;
+        let stderr_total = DEFAULT_SWARM_OUTPUT_LIMIT_BYTES + 2048;
+        let (_, run_json_text) = run_swarm_json_command(&vec![
+            "tool".to_owned(),
+            root_text.clone(),
+            "output".to_owned(),
+            "--".to_owned(),
+            "bash".to_owned(),
+            "-lc".to_owned(),
+            format!("yes x | head -c {stdout_total}; yes e | head -c {stderr_total} >&2"),
+        ])
+        .expect("run output-limited tool");
+        let run: Value = serde_json::from_str(&run_json_text).expect("decode run json");
+        assert_eq!(run.get("status").and_then(Value::as_str), Some("passed"));
+        let stdout_path = run
+            .get("stdoutArtifactPath")
+            .and_then(Value::as_str)
+            .expect("stdout artifact path");
+        let stderr_path = run
+            .get("stderrArtifactPath")
+            .and_then(Value::as_str)
+            .expect("stderr artifact path");
+        assert_eq!(
+            fs::metadata(stdout_path).expect("stdout metadata").len(),
+            DEFAULT_SWARM_OUTPUT_LIMIT_BYTES
+        );
+        assert_eq!(
+            fs::metadata(stderr_path).expect("stderr metadata").len(),
+            DEFAULT_SWARM_OUTPUT_LIMIT_BYTES
+        );
+
+        let connection = Connection::open(runtime_paths(&root).db_path).expect("open sqlite db");
+        let stdout_metadata_text: String = connection
+            .query_row(
+                "
+                SELECT metadata_json
+                FROM swarm_artifacts
+                WHERE task_id = 'output' AND kind = 'stdout'
+                ORDER BY id DESC
+                LIMIT 1
+                ",
+                [],
+                |row| row.get(0),
+            )
+            .expect("load stdout artifact metadata");
+        let stdout_metadata: Value = serde_json::from_str(&stdout_metadata_text).expect("decode stdout artifact metadata");
+        assert_eq!(
+            stdout_metadata.get("outputLimitBytes").and_then(Value::as_u64),
+            Some(DEFAULT_SWARM_OUTPUT_LIMIT_BYTES)
+        );
+        assert_eq!(
+            stdout_metadata.get("stdoutBytes").and_then(Value::as_u64),
+            Some(DEFAULT_SWARM_OUTPUT_LIMIT_BYTES)
+        );
+        assert_eq!(
+            stdout_metadata.get("stdoutTotalBytes").and_then(Value::as_u64),
+            Some(stdout_total)
+        );
+        assert_eq!(stdout_metadata.get("stdoutTruncated").and_then(Value::as_bool), Some(true));
+        assert_eq!(
+            stdout_metadata.get("stderrBytes").and_then(Value::as_u64),
+            Some(DEFAULT_SWARM_OUTPUT_LIMIT_BYTES)
+        );
+        assert_eq!(
+            stdout_metadata.get("stderrTotalBytes").and_then(Value::as_u64),
+            Some(stderr_total)
+        );
+        assert_eq!(stdout_metadata.get("stderrTruncated").and_then(Value::as_bool), Some(true));
+
+        let finish_payload_text: String = connection
+            .query_row(
+                "
+                SELECT payload_json
+                FROM swarm_events
+                WHERE task_id = 'output' AND kind = 'tool_run_finished'
+                ORDER BY id DESC
+                LIMIT 1
+                ",
+                [],
+                |row| row.get(0),
+            )
+            .expect("load output-limited finish event");
+        let finish_payload: Value = serde_json::from_str(&finish_payload_text).expect("decode finish payload");
+        assert_eq!(finish_payload.get("stdoutTruncated").and_then(Value::as_bool), Some(true));
+        assert_eq!(finish_payload.get("stderrTruncated").and_then(Value::as_bool), Some(true));
 
         let _ = fs::remove_dir_all(root);
     }
