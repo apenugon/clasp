@@ -25,6 +25,10 @@ extern "C" {
 }
 
 #[cfg(target_os = "linux")]
+const CLONE_NEWUSER: c_int = 0x10000000;
+#[cfg(target_os = "linux")]
+const CLONE_NEWNET: c_int = 0x40000000;
+#[cfg(target_os = "linux")]
 const RLIMIT_AS: c_int = 9;
 
 #[cfg(target_os = "linux")]
@@ -37,6 +41,7 @@ struct RLimit {
 #[cfg(target_os = "linux")]
 extern "C" {
     fn setrlimit(resource: c_int, rlim: *const RLimit) -> c_int;
+    fn unshare(flags: c_int) -> c_int;
 }
 
 #[derive(Clone)]
@@ -138,6 +143,7 @@ struct SwarmMergePolicyRecord {
     required_verifiers_json: String,
     allowed_processes_json: String,
     allowed_workspace_roots_json: String,
+    network_access: String,
     created_at_ms: i64,
     updated_at_ms: i64,
 }
@@ -221,6 +227,7 @@ enum SwarmCommand {
         required_verifiers: Vec<String>,
         allowed_processes: Vec<String>,
         allowed_workspace_roots: Vec<String>,
+        network_access: String,
     },
     ManagerNext { root: PathBuf, objective_id: String },
     ToolRun {
@@ -862,13 +869,13 @@ fn parse_swarm_command(args: &[String]) -> Result<Option<(bool, SwarmCommand)>, 
         "policy" => {
             if rest.first().map(|value| value.as_str()) != Some("set") {
                 return Err(
-                    "usage: claspc swarm policy set <state-root> <task-id> <mergegate-name> [--require-approval NAME]... [--require-verifier NAME]... [--allow-process NAME]... [--allow-workspace DIR]..."
+                    "usage: claspc swarm policy set <state-root> <task-id> <mergegate-name> [--require-approval NAME]... [--require-verifier NAME]... [--allow-process NAME]... [--allow-workspace DIR]... [--deny-network]"
                         .to_owned(),
                 );
             }
             if rest.len() < 4 {
                 return Err(
-                    "usage: claspc swarm policy set <state-root> <task-id> <mergegate-name> [--require-approval NAME]... [--require-verifier NAME]... [--allow-process NAME]... [--allow-workspace DIR]..."
+                    "usage: claspc swarm policy set <state-root> <task-id> <mergegate-name> [--require-approval NAME]... [--require-verifier NAME]... [--allow-process NAME]... [--allow-workspace DIR]... [--deny-network]"
                         .to_owned(),
                 );
             }
@@ -879,6 +886,7 @@ fn parse_swarm_command(args: &[String]) -> Result<Option<(bool, SwarmCommand)>, 
             let mut required_verifiers = Vec::new();
             let mut allowed_processes = Vec::new();
             let mut allowed_workspace_roots = Vec::new();
+            let mut network_access = "ambient".to_owned();
             let mut index = 4usize;
             while index < rest.len() {
                 match rest[index].as_str() {
@@ -910,6 +918,10 @@ fn parse_swarm_command(args: &[String]) -> Result<Option<(bool, SwarmCommand)>, 
                         allowed_workspace_roots.push(value.clone());
                         index += 2;
                     }
+                    "--deny-network" => {
+                        network_access = "denied".to_owned();
+                        index += 1;
+                    }
                     other => return Err(format!("unknown option `{other}`")),
                 }
             }
@@ -921,6 +933,7 @@ fn parse_swarm_command(args: &[String]) -> Result<Option<(bool, SwarmCommand)>, 
                 required_verifiers,
                 allowed_processes,
                 allowed_workspace_roots,
+                network_access,
             }
         }
         "manager" => {
@@ -1147,6 +1160,7 @@ fn open_swarm_connection(root: &Path) -> Result<(SwarmRuntimePaths, Connection),
               required_verifiers_json TEXT NOT NULL DEFAULT '[]',
               allowed_processes_json TEXT NOT NULL DEFAULT '[]',
               allowed_workspace_roots_json TEXT NOT NULL DEFAULT '[]',
+              network_access TEXT NOT NULL DEFAULT 'ambient',
               created_at_ms INTEGER NOT NULL,
               updated_at_ms INTEGER NOT NULL
             );
@@ -1170,6 +1184,12 @@ fn open_swarm_connection(root: &Path) -> Result<(SwarmRuntimePaths, Connection),
         "swarm_merge_policies",
         "allowed_workspace_roots_json",
         "TEXT NOT NULL DEFAULT '[]'",
+    )?;
+    ensure_table_column(
+        &connection,
+        "swarm_merge_policies",
+        "network_access",
+        "TEXT NOT NULL DEFAULT 'ambient'",
     )?;
     Ok((paths, connection))
 }
@@ -1429,7 +1449,7 @@ fn load_merge_policy(connection: &Connection, task_id: &str) -> Result<Option<Sw
     connection
         .query_row(
             "
-            SELECT task_id, mergegate_name, required_approvals_json, required_verifiers_json, allowed_processes_json, allowed_workspace_roots_json, created_at_ms, updated_at_ms
+            SELECT task_id, mergegate_name, required_approvals_json, required_verifiers_json, allowed_processes_json, allowed_workspace_roots_json, network_access, created_at_ms, updated_at_ms
             FROM swarm_merge_policies
             WHERE task_id = ?1
             ",
@@ -1442,8 +1462,9 @@ fn load_merge_policy(connection: &Connection, task_id: &str) -> Result<Option<Sw
                     required_verifiers_json: row.get(3)?,
                     allowed_processes_json: row.get(4)?,
                     allowed_workspace_roots_json: row.get(5)?,
-                    created_at_ms: row.get(6)?,
-                    updated_at_ms: row.get(7)?,
+                    network_access: row.get(6)?,
+                    created_at_ms: row.get(7)?,
+                    updated_at_ms: row.get(8)?,
                 })
             },
         )
@@ -1459,6 +1480,7 @@ fn store_merge_policy(
     required_verifiers: &[String],
     allowed_processes: &[String],
     allowed_workspace_roots: &[String],
+    network_access: &str,
 ) -> Result<SwarmMergePolicyRecord, String> {
     if load_task_state(connection, task_id)?.is_none() {
         return Err(format!("unknown swarm task `{task_id}`"));
@@ -1476,18 +1498,20 @@ fn store_merge_policy(
     let normalized_workspace_roots = normalize_allowed_workspace_roots(allowed_workspace_roots)?;
     let allowed_workspace_roots_json =
         serde_json::to_string(&normalized_workspace_roots).map_err(|err| format!("failed to encode allowed workspace roots: {err}"))?;
+    let network_access = normalize_network_access(network_access)?;
     connection
         .execute(
             "
             INSERT INTO swarm_merge_policies (
-              task_id, mergegate_name, required_approvals_json, required_verifiers_json, allowed_processes_json, allowed_workspace_roots_json, created_at_ms, updated_at_ms
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+              task_id, mergegate_name, required_approvals_json, required_verifiers_json, allowed_processes_json, allowed_workspace_roots_json, network_access, created_at_ms, updated_at_ms
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
             ON CONFLICT(task_id) DO UPDATE SET
               mergegate_name = excluded.mergegate_name,
               required_approvals_json = excluded.required_approvals_json,
               required_verifiers_json = excluded.required_verifiers_json,
               allowed_processes_json = excluded.allowed_processes_json,
               allowed_workspace_roots_json = excluded.allowed_workspace_roots_json,
+              network_access = excluded.network_access,
               updated_at_ms = excluded.updated_at_ms
             ",
             params![
@@ -1497,6 +1521,7 @@ fn store_merge_policy(
                 required_verifiers_json,
                 allowed_processes_json,
                 allowed_workspace_roots_json,
+                network_access,
                 created_at_ms,
                 updated_at_ms
             ],
@@ -1509,6 +1534,7 @@ fn store_merge_policy(
         required_verifiers_json,
         allowed_processes_json,
         allowed_workspace_roots_json,
+        network_access,
         created_at_ms,
         updated_at_ms,
     })
@@ -2690,6 +2716,20 @@ fn normalize_allowed_workspace_roots(roots: &[String]) -> Result<Vec<String>, St
     Ok(normalized)
 }
 
+fn normalize_network_access(value: &str) -> Result<String, String> {
+    match value {
+        "" | "ambient" => Ok("ambient".to_owned()),
+        "denied" => Ok("denied".to_owned()),
+        other => Err(format!(
+            "invalid network access `{other}`; expected `ambient` or `denied`"
+        )),
+    }
+}
+
+fn network_access_denied(value: &str) -> bool {
+    value == "denied"
+}
+
 fn granted_approval_names(connection: &Connection, task_id: &str) -> Result<Vec<String>, String> {
     let mut statement = connection
         .prepare(
@@ -2799,6 +2839,7 @@ fn merge_policy_status_json(connection: &Connection, task_id: &str) -> Result<Op
         "failedVerifiers": failed_verifiers,
         "allowedProcesses": allowed_processes,
         "allowedWorkspaceRoots": allowed_workspace_roots,
+        "networkAccess": normalize_network_access(&policy.network_access)?,
         "mergegate": mergegate_payload.unwrap_or_else(|| json!({
             "mergegateName": policy.mergegate_name,
             "verdict": "missing",
@@ -3890,10 +3931,30 @@ fn apply_virtual_memory_limit(_limit_bytes: u64) -> io::Result<()> {
     ))
 }
 
+#[cfg(target_os = "linux")]
+fn apply_network_isolation() -> io::Result<()> {
+    unsafe {
+        if unshare(CLONE_NEWUSER | CLONE_NEWNET) < 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn apply_network_isolation() -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "swarm command --deny-network is currently supported only on Linux",
+    ))
+}
+
 fn configure_command_process(
     command: &mut ProcessCommand,
     killable_group: bool,
     memory_limit_mb: Option<i64>,
+    network_denied: bool,
 ) -> Result<(), String> {
     let memory_limit_bytes = memory_limit_bytes(memory_limit_mb)?;
     #[cfg(unix)]
@@ -3905,6 +3966,9 @@ fn configure_command_process(
                 if let Some(limit_bytes) = memory_limit_bytes {
                     apply_virtual_memory_limit(limit_bytes)?;
                 }
+                if network_denied {
+                    apply_network_isolation()?;
+                }
                 Ok(())
             }
         });
@@ -3913,6 +3977,9 @@ fn configure_command_process(
     {
         if memory_limit_bytes.is_some() {
             return Err("swarm command --memory-mb is currently supported only on Unix-like hosts".to_owned());
+        }
+        if network_denied {
+            return Err("swarm command --deny-network is currently supported only on Unix-like hosts".to_owned());
         }
         let _ = killable_group;
         let _ = command;
@@ -4054,6 +4121,7 @@ fn run_command_with_timeout_to_artifacts(
     stderr_path: &Path,
     timeout_ms: i64,
     memory_limit_mb: Option<i64>,
+    network_denied: bool,
 ) -> Result<NativeCommandOutcome, String> {
     fs::write(stdout_path, [])
         .map_err(|err| format!("failed to initialize swarm stdout artifact `{}`: {err}", stdout_path.display()))?;
@@ -4067,7 +4135,7 @@ fn run_command_with_timeout_to_artifacts(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    configure_command_process(&mut process, true, memory_limit_mb)?;
+    configure_command_process(&mut process, true, memory_limit_mb, network_denied)?;
 
     let mut child = process
         .spawn()
@@ -4270,6 +4338,13 @@ fn enforce_workspace_policy(
     ))
 }
 
+fn network_access_for_task(connection: &Connection, task_id: &str) -> Result<String, String> {
+    let Some(policy) = load_merge_policy(connection, task_id)? else {
+        return Ok("ambient".to_owned());
+    };
+    normalize_network_access(&policy.network_access)
+}
+
 fn run_native_command(
     connection: &mut Connection,
     paths: &SwarmRuntimePaths,
@@ -4307,6 +4382,8 @@ fn run_native_command(
 
     enforce_process_policy(connection, task_id, actor, role, name, command)?;
     enforce_workspace_policy(connection, task_id, actor, role, name, cwd)?;
+    let network_access = network_access_for_task(connection, task_id)?;
+    let network_denied = network_access_denied(&network_access);
 
     let memory_limit_mb_value = memory_limit_mb.unwrap_or(0);
     let run_id = insert_run(connection, task_id, role, actor, name, cwd, command, memory_limit_mb_value)?;
@@ -4324,18 +4401,19 @@ fn run_native_command(
             "cwd": cwd.display().to_string(),
             "command": command,
             "timeoutMs": timeout_ms.unwrap_or(0),
-            "memoryLimitMb": memory_limit_mb_value
+            "memoryLimitMb": memory_limit_mb_value,
+            "networkAccess": network_access.clone()
         }),
     )?;
 
     let stdout_path = next_artifact_path(paths, task_id, run_id, "stdout");
     let stderr_path = next_artifact_path(paths, task_id, run_id, "stderr");
     let outcome = if let Some(timeout_ms) = timeout_ms {
-        run_command_with_timeout_to_artifacts(cwd, command, &stdout_path, &stderr_path, timeout_ms, memory_limit_mb)?
+        run_command_with_timeout_to_artifacts(cwd, command, &stdout_path, &stderr_path, timeout_ms, memory_limit_mb, network_denied)?
     } else {
         let mut process = ProcessCommand::new(&command[0]);
         process.args(&command[1..]).current_dir(cwd);
-        configure_command_process(&mut process, false, memory_limit_mb)?;
+        configure_command_process(&mut process, false, memory_limit_mb, network_denied)?;
         let output = process
             .output()
             .map_err(|err| format!("failed to execute swarm {role} command `{}`: {err}", command[0]))?;
@@ -4361,6 +4439,7 @@ fn run_native_command(
         "timedOut": outcome.timed_out,
         "timeoutMs": timeout_ms.unwrap_or(0),
         "memoryLimitMb": memory_limit_mb_value,
+        "networkAccess": network_access.clone(),
         "stdoutReaderFinished": outcome.stdout_reader_finished,
         "stderrReaderFinished": outcome.stderr_reader_finished,
         "readerErrors": outcome.reader_errors.clone(),
@@ -4395,6 +4474,7 @@ fn run_native_command(
             "timedOut": outcome.timed_out,
             "timeoutMs": timeout_ms.unwrap_or(0),
             "memoryLimitMb": memory_limit_mb_value,
+            "networkAccess": network_access.clone(),
             "stdoutReaderFinished": outcome.stdout_reader_finished,
             "stderrReaderFinished": outcome.stderr_reader_finished,
             "readerErrors": outcome.reader_errors.clone(),
@@ -5051,6 +5131,7 @@ fn execute_policy_set_with_process_access(
         required_verifiers,
         allowed_processes,
         &[],
+        "ambient",
     )
 }
 
@@ -5062,6 +5143,7 @@ fn execute_policy_set_with_access(
     required_verifiers: &[String],
     allowed_processes: &[String],
     allowed_workspace_roots: &[String],
+    network_access: &str,
 ) -> Result<Value, String> {
     let (_paths, mut connection) = open_swarm_connection(root)?;
     let policy = store_merge_policy(
@@ -5072,8 +5154,10 @@ fn execute_policy_set_with_access(
         required_verifiers,
         allowed_processes,
         allowed_workspace_roots,
+        network_access,
     )?;
     let normalized_workspace_roots = decode_string_list(&policy.allowed_workspace_roots_json);
+    let network_access = normalize_network_access(&policy.network_access)?;
     let _ = record_swarm_event(
         &mut connection,
         "merge_policy_set",
@@ -5086,6 +5170,7 @@ fn execute_policy_set_with_access(
             "requiredVerifiers": required_verifiers,
             "allowedProcesses": allowed_processes,
             "allowedWorkspaceRoots": normalized_workspace_roots,
+            "networkAccess": network_access.clone(),
         }),
     );
     Ok(json!({
@@ -5095,6 +5180,7 @@ fn execute_policy_set_with_access(
         "requiredVerifiers": decode_string_list(&policy.required_verifiers_json),
         "allowedProcesses": decode_string_list(&policy.allowed_processes_json),
         "allowedWorkspaceRoots": decode_string_list(&policy.allowed_workspace_roots_json),
+        "networkAccess": normalize_network_access(&policy.network_access)?,
         "createdAtMs": policy.created_at_ms,
         "updatedAtMs": policy.updated_at_ms,
     }))
@@ -5384,6 +5470,7 @@ fn execute_command(command: SwarmCommand) -> Result<(ExitCode, Value), String> {
             required_verifiers,
             allowed_processes,
             allowed_workspace_roots,
+            network_access,
         } => Ok((
             ExitCode::SUCCESS,
             execute_policy_set_with_access(
@@ -5394,6 +5481,7 @@ fn execute_command(command: SwarmCommand) -> Result<(ExitCode, Value), String> {
                 &required_verifiers,
                 &allowed_processes,
                 &allowed_workspace_roots,
+                &network_access,
             )?,
         )),
         SwarmCommand::MemoryPut { root, objective_id, task_id, actor, key, value } => Ok((
@@ -5689,6 +5777,29 @@ pub fn builtin_swarm_policy_set_with_access(
         required_verifiers,
         allowed_processes,
         allowed_workspace_roots,
+        "ambient",
+    )?)
+}
+
+pub fn builtin_swarm_policy_set_with_capabilities(
+    root: &str,
+    task_id: &str,
+    mergegate_name: &str,
+    required_approvals: &[String],
+    required_verifiers: &[String],
+    allowed_processes: &[String],
+    allowed_workspace_roots: &[String],
+    network_access: &str,
+) -> Result<String, String> {
+    render_builtin_json(execute_policy_set_with_access(
+        Path::new(root),
+        task_id,
+        mergegate_name,
+        required_approvals,
+        required_verifiers,
+        allowed_processes,
+        allowed_workspace_roots,
+        network_access,
     )?)
 }
 
@@ -6278,6 +6389,80 @@ mod tests {
             )
             .expect("count denied events");
         assert_eq!(denied_events, 1);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn swarm_policy_network_denial_isolates_child_network_namespace() {
+        let root = unique_root("network-policy");
+        let root_text = root.to_string_lossy().to_string();
+        assert_eq!(
+            maybe_run_swarm(&vec![
+                "claspc".to_owned(),
+                "swarm".to_owned(),
+                "bootstrap".to_owned(),
+                root_text.clone(),
+                "repair".to_owned()
+            ]),
+            Some(ExitCode::SUCCESS)
+        );
+        assert_eq!(
+            maybe_run_swarm(&vec![
+                "claspc".to_owned(),
+                "swarm".to_owned(),
+                "lease".to_owned(),
+                root_text.clone(),
+                "repair".to_owned()
+            ]),
+            Some(ExitCode::SUCCESS)
+        );
+
+        let (policy_code, policy_json_text) = run_swarm_json_command(&vec![
+            "policy".to_owned(),
+            "set".to_owned(),
+            root_text.clone(),
+            "repair".to_owned(),
+            "trunk".to_owned(),
+            "--require-verifier".to_owned(),
+            "native-smoke".to_owned(),
+            "--allow-process".to_owned(),
+            "bash".to_owned(),
+            "--deny-network".to_owned(),
+        ])
+        .expect("set network policy");
+        assert_eq!(policy_code, 0);
+        let policy_json: Value = serde_json::from_str(&policy_json_text).expect("decode policy json");
+        assert_eq!(policy_json.get("networkAccess"), Some(&json!("denied")));
+
+        let verifier_args = vec![
+            "claspc".to_owned(),
+            "swarm".to_owned(),
+            "verifier".to_owned(),
+            "run".to_owned(),
+            root_text.clone(),
+            "repair".to_owned(),
+            "native-smoke".to_owned(),
+            "--".to_owned(),
+            "bash".to_owned(),
+            "-lc".to_owned(),
+            "non_lo=$(awk 'NR>2 {gsub(\":\", \"\", $1); if ($1 != \"lo\") count++} END {print count+0}' /proc/net/dev); test \"$non_lo\" = 0; printf no-network".to_owned(),
+        ];
+        assert_eq!(maybe_run_swarm(&verifier_args), Some(ExitCode::SUCCESS));
+
+        let connection = Connection::open(runtime_paths(&root).db_path).expect("open sqlite db");
+        let run_count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM swarm_runs WHERE task_id = 'repair'", [], |row| row.get(0))
+            .expect("count runs");
+        assert_eq!(run_count, 1);
+        let policy_network_access: String = connection
+            .query_row(
+                "SELECT network_access FROM swarm_merge_policies WHERE task_id = 'repair'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("load network access");
+        assert_eq!(policy_network_access, "denied");
 
         let _ = fs::remove_dir_all(root);
     }

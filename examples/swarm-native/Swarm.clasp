@@ -23,6 +23,7 @@ foreign swarmTaskCreateWithDeadlineRaw : Str -> Str -> Str -> Str -> [Str] -> In
 foreign swarmPolicySetRaw : Str -> Str -> Str -> [Str] -> [Str] -> Result Str = "swarmPolicySetJson"
 foreign swarmPolicySetWithProcessAccessRaw : Str -> Str -> Str -> [Str] -> [Str] -> [Str] -> Result Str = "swarmPolicySetWithProcessAccessJson"
 foreign swarmPolicySetWithAccessRaw : Str -> Str -> Str -> [Str] -> [Str] -> [Str] -> [Str] -> Result Str = "swarmPolicySetWithAccessJson"
+foreign swarmPolicySetWithCapabilitiesRaw : Str -> Str -> Str -> [Str] -> [Str] -> [Str] -> [Str] -> Str -> Result Str = "swarmPolicySetWithCapabilitiesJson"
 foreign swarmToolRunRaw : Str -> Str -> Str -> Str -> [Str] -> Result Str = "swarmToolRunJson"
 foreign swarmToolRunWithTimeoutRaw : Str -> Str -> Str -> Str -> Int -> [Str] -> Result Str = "swarmToolRunWithTimeoutJson"
 foreign swarmToolRunWithLimitsRaw : Str -> Str -> Str -> Str -> Int -> Int -> [Str] -> Result Str = "swarmToolRunWithLimitsJson"
@@ -90,6 +91,7 @@ record SwarmPolicy = {
   requiredVerifiers : [Str],
   allowedProcesses : [Str],
   allowedWorkspaceRoots : [Str],
+  networkAccess : Str,
   updatedAtMs : Int
 }
 
@@ -686,6 +688,10 @@ policySetWithProcessAccess handle mergegateName requiredApprovals requiredVerifi
 policySetWithAccess : TaskHandle -> Str -> [Str] -> [Str] -> [Str] -> [Str] -> Result SwarmPolicy
 policySetWithAccess handle mergegateName requiredApprovals requiredVerifiers allowedProcesses allowedWorkspaceRoots =
   policyResult (swarmPolicySetWithAccessRaw handle.root.path handle.taskId mergegateName requiredApprovals requiredVerifiers allowedProcesses allowedWorkspaceRoots)
+
+policySetWithCapabilities : TaskHandle -> Str -> [Str] -> [Str] -> [Str] -> [Str] -> Str -> Result SwarmPolicy
+policySetWithCapabilities handle mergegateName requiredApprovals requiredVerifiers allowedProcesses allowedWorkspaceRoots networkAccess =
+  policyResult (swarmPolicySetWithCapabilitiesRaw handle.root.path handle.taskId mergegateName requiredApprovals requiredVerifiers allowedProcesses allowedWorkspaceRoots networkAccess)
 
 toolRun : TaskHandle -> SwarmCommand -> Result SwarmRun
 toolRun handle spec =
@@ -1292,6 +1298,10 @@ policySetForVerificationPlanWithProcessAccess handle mergegateName requiredAppro
 policySetForVerificationPlanWithAccess : TaskHandle -> Str -> [Str] -> VerificationPlan -> [Str] -> [Str] -> Result SwarmPolicy
 policySetForVerificationPlanWithAccess handle mergegateName requiredApprovals plan allowedProcesses allowedWorkspaceRoots =
   policySetWithAccess handle mergegateName requiredApprovals plan.requiredVerifierNames allowedProcesses allowedWorkspaceRoots
+
+policySetForVerificationPlanWithCapabilities : TaskHandle -> Str -> [Str] -> VerificationPlan -> [Str] -> [Str] -> Str -> Result SwarmPolicy
+policySetForVerificationPlanWithCapabilities handle mergegateName requiredApprovals plan allowedProcesses allowedWorkspaceRoots networkAccess =
+  policySetWithCapabilities handle mergegateName requiredApprovals plan.requiredVerifierNames allowedProcesses allowedWorkspaceRoots networkAccess
 
 mergegateDecideVerificationPlan : TaskHandle -> Str -> VerificationPlan -> Result SwarmMergeDecision
 mergegateDecideVerificationPlan handle mergegateName plan =
