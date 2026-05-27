@@ -1922,10 +1922,11 @@ printf '%s\n' "$swarm_sqlite_task_plan_output" | grep -F '"ready":true' >/dev/nu
 swarm_sqlite_task_repair_output="$("$claspc_bin" --json swarm task create "$swarm_sqlite_state_root" appbench repair-2 --detail 'Repair runtime path' --depends-on plan --max-runs 1)"
 printf '%s\n' "$swarm_sqlite_task_repair_output" | grep -F '"taskId":"repair-2"' >/dev/null
 printf '%s\n' "$swarm_sqlite_task_repair_output" | grep -F '"ready":false' >/dev/null
-swarm_sqlite_policy_output="$("$claspc_bin" --json swarm policy set "$swarm_sqlite_state_root" repair-2 trunk --require-approval merge-ready --require-verifier native-smoke --allow-process bash)"
+swarm_sqlite_policy_output="$("$claspc_bin" --json swarm policy set "$swarm_sqlite_state_root" repair-2 trunk --require-approval merge-ready --require-verifier native-smoke --allow-process bash --allow-workspace "$project_root")"
 printf '%s\n' "$swarm_sqlite_policy_output" | grep -F '"taskId":"repair-2"' >/dev/null
 printf '%s\n' "$swarm_sqlite_policy_output" | grep -F '"mergegateName":"trunk"' >/dev/null
 printf '%s\n' "$swarm_sqlite_policy_output" | grep -F '"allowedProcesses":["bash"]' >/dev/null
+printf '%s\n' "$swarm_sqlite_policy_output" | grep -F '"allowedWorkspaceRoots":[' >/dev/null
 swarm_sqlite_manager_initial_output="$("$claspc_bin" --json swarm manager next "$swarm_sqlite_state_root" appbench)"
 printf '%s\n' "$swarm_sqlite_manager_initial_output" | grep -F '"action":"run-task"' >/dev/null
 printf '%s\n' "$swarm_sqlite_manager_initial_output" | grep -F '"taskId":"plan"' >/dev/null
@@ -1969,6 +1970,13 @@ expect_command_failure_contains 'process `sh` is not allowed by task policy' env
 swarm_sqlite_process_policy_tail_output="$("$claspc_bin" --json swarm tail "$swarm_sqlite_state_root" repair-2 --limit 5)"
 printf '%s\n' "$swarm_sqlite_process_policy_tail_output" | grep -F '"kind":"process_permission_denied"' >/dev/null
 printf '%s\n' "$swarm_sqlite_process_policy_tail_output" | grep -F '"processName":"sh"' >/dev/null
+swarm_sqlite_denied_workspace_root="$test_root_abs/swarm-sqlite-denied-workspace"
+mkdir -p "$swarm_sqlite_denied_workspace_root"
+expect_command_failure_contains 'is outside allowed workspace roots' env CLASP_SWARM_ACTOR=manager "$claspc_bin" --json swarm verifier run "$swarm_sqlite_state_root" repair-2 native-smoke --cwd "$swarm_sqlite_denied_workspace_root" -- bash -lc 'printf denied-workspace > denied-workspace.marker'
+[[ ! -e "$swarm_sqlite_denied_workspace_root/denied-workspace.marker" ]]
+swarm_sqlite_workspace_policy_tail_output="$("$claspc_bin" --json swarm tail "$swarm_sqlite_state_root" repair-2 --limit 8)"
+printf '%s\n' "$swarm_sqlite_workspace_policy_tail_output" | grep -F '"kind":"workspace_permission_denied"' >/dev/null
+printf '%s\n' "$swarm_sqlite_workspace_policy_tail_output" | grep -F '"allowedWorkspaceRoots":[' >/dev/null
 swarm_sqlite_repair_verifier_output="$(CLASP_SWARM_ACTOR=manager "$claspc_bin" --json swarm verifier run "$swarm_sqlite_state_root" repair-2 native-smoke --cwd "$project_root" -- bash -lc 'printf verifier-ok')"
 printf '%s\n' "$swarm_sqlite_repair_verifier_output" | grep -F '"taskId":"repair-2"' >/dev/null
 swarm_sqlite_manager_after_verifier_output="$("$claspc_bin" --json swarm manager next "$swarm_sqlite_state_root" appbench)"

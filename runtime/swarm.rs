@@ -137,6 +137,7 @@ struct SwarmMergePolicyRecord {
     required_approvals_json: String,
     required_verifiers_json: String,
     allowed_processes_json: String,
+    allowed_workspace_roots_json: String,
     created_at_ms: i64,
     updated_at_ms: i64,
 }
@@ -219,6 +220,7 @@ enum SwarmCommand {
         required_approvals: Vec<String>,
         required_verifiers: Vec<String>,
         allowed_processes: Vec<String>,
+        allowed_workspace_roots: Vec<String>,
     },
     ManagerNext { root: PathBuf, objective_id: String },
     ToolRun {
@@ -860,13 +862,13 @@ fn parse_swarm_command(args: &[String]) -> Result<Option<(bool, SwarmCommand)>, 
         "policy" => {
             if rest.first().map(|value| value.as_str()) != Some("set") {
                 return Err(
-                    "usage: claspc swarm policy set <state-root> <task-id> <mergegate-name> [--require-approval NAME]... [--require-verifier NAME]... [--allow-process NAME]..."
+                    "usage: claspc swarm policy set <state-root> <task-id> <mergegate-name> [--require-approval NAME]... [--require-verifier NAME]... [--allow-process NAME]... [--allow-workspace DIR]..."
                         .to_owned(),
                 );
             }
             if rest.len() < 4 {
                 return Err(
-                    "usage: claspc swarm policy set <state-root> <task-id> <mergegate-name> [--require-approval NAME]... [--require-verifier NAME]... [--allow-process NAME]..."
+                    "usage: claspc swarm policy set <state-root> <task-id> <mergegate-name> [--require-approval NAME]... [--require-verifier NAME]... [--allow-process NAME]... [--allow-workspace DIR]..."
                         .to_owned(),
                 );
             }
@@ -876,6 +878,7 @@ fn parse_swarm_command(args: &[String]) -> Result<Option<(bool, SwarmCommand)>, 
             let mut required_approvals = Vec::new();
             let mut required_verifiers = Vec::new();
             let mut allowed_processes = Vec::new();
+            let mut allowed_workspace_roots = Vec::new();
             let mut index = 4usize;
             while index < rest.len() {
                 match rest[index].as_str() {
@@ -900,6 +903,13 @@ fn parse_swarm_command(args: &[String]) -> Result<Option<(bool, SwarmCommand)>, 
                         allowed_processes.push(value.clone());
                         index += 2;
                     }
+                    "--allow-workspace" => {
+                        let Some(value) = rest.get(index + 1) else {
+                            return Err("missing value after --allow-workspace".to_owned());
+                        };
+                        allowed_workspace_roots.push(value.clone());
+                        index += 2;
+                    }
                     other => return Err(format!("unknown option `{other}`")),
                 }
             }
@@ -910,6 +920,7 @@ fn parse_swarm_command(args: &[String]) -> Result<Option<(bool, SwarmCommand)>, 
                 required_approvals,
                 required_verifiers,
                 allowed_processes,
+                allowed_workspace_roots,
             }
         }
         "manager" => {
@@ -1135,6 +1146,7 @@ fn open_swarm_connection(root: &Path) -> Result<(SwarmRuntimePaths, Connection),
               required_approvals_json TEXT NOT NULL DEFAULT '[]',
               required_verifiers_json TEXT NOT NULL DEFAULT '[]',
               allowed_processes_json TEXT NOT NULL DEFAULT '[]',
+              allowed_workspace_roots_json TEXT NOT NULL DEFAULT '[]',
               created_at_ms INTEGER NOT NULL,
               updated_at_ms INTEGER NOT NULL
             );
@@ -1151,6 +1163,12 @@ fn open_swarm_connection(root: &Path) -> Result<(SwarmRuntimePaths, Connection),
         &connection,
         "swarm_merge_policies",
         "allowed_processes_json",
+        "TEXT NOT NULL DEFAULT '[]'",
+    )?;
+    ensure_table_column(
+        &connection,
+        "swarm_merge_policies",
+        "allowed_workspace_roots_json",
         "TEXT NOT NULL DEFAULT '[]'",
     )?;
     Ok((paths, connection))
@@ -1411,7 +1429,7 @@ fn load_merge_policy(connection: &Connection, task_id: &str) -> Result<Option<Sw
     connection
         .query_row(
             "
-            SELECT task_id, mergegate_name, required_approvals_json, required_verifiers_json, allowed_processes_json, created_at_ms, updated_at_ms
+            SELECT task_id, mergegate_name, required_approvals_json, required_verifiers_json, allowed_processes_json, allowed_workspace_roots_json, created_at_ms, updated_at_ms
             FROM swarm_merge_policies
             WHERE task_id = ?1
             ",
@@ -1423,8 +1441,9 @@ fn load_merge_policy(connection: &Connection, task_id: &str) -> Result<Option<Sw
                     required_approvals_json: row.get(2)?,
                     required_verifiers_json: row.get(3)?,
                     allowed_processes_json: row.get(4)?,
-                    created_at_ms: row.get(5)?,
-                    updated_at_ms: row.get(6)?,
+                    allowed_workspace_roots_json: row.get(5)?,
+                    created_at_ms: row.get(6)?,
+                    updated_at_ms: row.get(7)?,
                 })
             },
         )
@@ -1439,6 +1458,7 @@ fn store_merge_policy(
     required_approvals: &[String],
     required_verifiers: &[String],
     allowed_processes: &[String],
+    allowed_workspace_roots: &[String],
 ) -> Result<SwarmMergePolicyRecord, String> {
     if load_task_state(connection, task_id)?.is_none() {
         return Err(format!("unknown swarm task `{task_id}`"));
@@ -1453,17 +1473,21 @@ fn store_merge_policy(
         serde_json::to_string(required_verifiers).map_err(|err| format!("failed to encode required verifiers: {err}"))?;
     let allowed_processes_json =
         serde_json::to_string(allowed_processes).map_err(|err| format!("failed to encode allowed processes: {err}"))?;
+    let normalized_workspace_roots = normalize_allowed_workspace_roots(allowed_workspace_roots)?;
+    let allowed_workspace_roots_json =
+        serde_json::to_string(&normalized_workspace_roots).map_err(|err| format!("failed to encode allowed workspace roots: {err}"))?;
     connection
         .execute(
             "
             INSERT INTO swarm_merge_policies (
-              task_id, mergegate_name, required_approvals_json, required_verifiers_json, allowed_processes_json, created_at_ms, updated_at_ms
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+              task_id, mergegate_name, required_approvals_json, required_verifiers_json, allowed_processes_json, allowed_workspace_roots_json, created_at_ms, updated_at_ms
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
             ON CONFLICT(task_id) DO UPDATE SET
               mergegate_name = excluded.mergegate_name,
               required_approvals_json = excluded.required_approvals_json,
               required_verifiers_json = excluded.required_verifiers_json,
               allowed_processes_json = excluded.allowed_processes_json,
+              allowed_workspace_roots_json = excluded.allowed_workspace_roots_json,
               updated_at_ms = excluded.updated_at_ms
             ",
             params![
@@ -1472,6 +1496,7 @@ fn store_merge_policy(
                 required_approvals_json,
                 required_verifiers_json,
                 allowed_processes_json,
+                allowed_workspace_roots_json,
                 created_at_ms,
                 updated_at_ms
             ],
@@ -1483,6 +1508,7 @@ fn store_merge_policy(
         required_approvals_json,
         required_verifiers_json,
         allowed_processes_json,
+        allowed_workspace_roots_json,
         created_at_ms,
         updated_at_ms,
     })
@@ -2637,6 +2663,33 @@ fn decode_string_list(raw: &str) -> Vec<String> {
     serde_json::from_str::<Vec<String>>(raw).unwrap_or_default()
 }
 
+fn canonical_workspace_root_text(root: &str) -> Result<String, String> {
+    if root.trim().is_empty() {
+        return Err("allowed workspace root must be a non-empty path".to_owned());
+    }
+    let root_path = Path::new(root);
+    let canonical = fs::canonicalize(root_path)
+        .map_err(|err| format!("failed to resolve allowed workspace root `{}`: {err}", root_path.display()))?;
+    if !canonical.is_dir() {
+        return Err(format!(
+            "allowed workspace root `{}` is not a directory",
+            canonical.display()
+        ));
+    }
+    Ok(canonical.to_string_lossy().into_owned())
+}
+
+fn normalize_allowed_workspace_roots(roots: &[String]) -> Result<Vec<String>, String> {
+    let mut normalized = Vec::new();
+    for root in roots {
+        let canonical = canonical_workspace_root_text(root)?;
+        if !normalized.iter().any(|existing| existing == &canonical) {
+            normalized.push(canonical);
+        }
+    }
+    Ok(normalized)
+}
+
 fn granted_approval_names(connection: &Connection, task_id: &str) -> Result<Vec<String>, String> {
     let mut statement = connection
         .prepare(
@@ -2689,6 +2742,7 @@ fn merge_policy_status_json(connection: &Connection, task_id: &str) -> Result<Op
     let required_approvals = decode_string_list(&policy.required_approvals_json);
     let required_verifiers = decode_string_list(&policy.required_verifiers_json);
     let allowed_processes = decode_string_list(&policy.allowed_processes_json);
+    let allowed_workspace_roots = decode_string_list(&policy.allowed_workspace_roots_json);
     let granted_approvals = granted_approval_names(connection, task_id)?;
     let missing_approvals = required_approvals
         .iter()
@@ -2744,6 +2798,7 @@ fn merge_policy_status_json(connection: &Connection, task_id: &str) -> Result<Op
         "missingVerifiers": missing_verifiers,
         "failedVerifiers": failed_verifiers,
         "allowedProcesses": allowed_processes,
+        "allowedWorkspaceRoots": allowed_workspace_roots,
         "mergegate": mergegate_payload.unwrap_or_else(|| json!({
             "mergegateName": policy.mergegate_name,
             "verdict": "missing",
@@ -4163,6 +4218,58 @@ fn enforce_process_policy(
     ))
 }
 
+fn cwd_allowed_by_policy(allowed_workspace_roots: &[String], cwd: &Path) -> Result<(bool, String), String> {
+    let canonical_cwd = fs::canonicalize(cwd)
+        .map_err(|err| format!("failed to resolve swarm run cwd `{}`: {err}", cwd.display()))?;
+    if !canonical_cwd.is_dir() {
+        return Err(format!("swarm run cwd `{}` is not a directory", canonical_cwd.display()));
+    }
+    let cwd_text = canonical_cwd.to_string_lossy().into_owned();
+    if allowed_workspace_roots.is_empty() {
+        return Ok((true, cwd_text));
+    }
+    let allowed = allowed_workspace_roots
+        .iter()
+        .any(|root| canonical_cwd.starts_with(Path::new(root)));
+    Ok((allowed, cwd_text))
+}
+
+fn enforce_workspace_policy(
+    connection: &mut Connection,
+    task_id: &str,
+    actor: &str,
+    role: &str,
+    name: &str,
+    cwd: &Path,
+) -> Result<(), String> {
+    let Some(policy) = load_merge_policy(connection, task_id)? else {
+        return Ok(());
+    };
+    let allowed_workspace_roots = decode_string_list(&policy.allowed_workspace_roots_json);
+    let (allowed, canonical_cwd) = cwd_allowed_by_policy(&allowed_workspace_roots, cwd)?;
+    if allowed {
+        return Ok(());
+    }
+    let _ = record_swarm_event(
+        connection,
+        "workspace_permission_denied",
+        task_id,
+        actor,
+        &format!("Denied {role} `{name}` cwd `{canonical_cwd}` by task policy."),
+        json!({
+            "role": role,
+            "name": name,
+            "cwd": cwd.display().to_string(),
+            "canonicalCwd": canonical_cwd.clone(),
+            "allowedWorkspaceRoots": allowed_workspace_roots,
+            "mergegateName": policy.mergegate_name,
+        }),
+    );
+    Err(format!(
+        "swarm task `{task_id}` cannot run {role} `{name}`: cwd `{canonical_cwd}` is outside allowed workspace roots"
+    ))
+}
+
 fn run_native_command(
     connection: &mut Connection,
     paths: &SwarmRuntimePaths,
@@ -4199,6 +4306,7 @@ fn run_native_command(
     }
 
     enforce_process_policy(connection, task_id, actor, role, name, command)?;
+    enforce_workspace_policy(connection, task_id, actor, role, name, cwd)?;
 
     let memory_limit_mb_value = memory_limit_mb.unwrap_or(0);
     let run_id = insert_run(connection, task_id, role, actor, name, cwd, command, memory_limit_mb_value)?;
@@ -4935,6 +5043,26 @@ fn execute_policy_set_with_process_access(
     required_verifiers: &[String],
     allowed_processes: &[String],
 ) -> Result<Value, String> {
+    execute_policy_set_with_access(
+        root,
+        task_id,
+        mergegate_name,
+        required_approvals,
+        required_verifiers,
+        allowed_processes,
+        &[],
+    )
+}
+
+fn execute_policy_set_with_access(
+    root: &Path,
+    task_id: &str,
+    mergegate_name: &str,
+    required_approvals: &[String],
+    required_verifiers: &[String],
+    allowed_processes: &[String],
+    allowed_workspace_roots: &[String],
+) -> Result<Value, String> {
     let (_paths, mut connection) = open_swarm_connection(root)?;
     let policy = store_merge_policy(
         &connection,
@@ -4943,7 +5071,9 @@ fn execute_policy_set_with_process_access(
         required_approvals,
         required_verifiers,
         allowed_processes,
+        allowed_workspace_roots,
     )?;
+    let normalized_workspace_roots = decode_string_list(&policy.allowed_workspace_roots_json);
     let _ = record_swarm_event(
         &mut connection,
         "merge_policy_set",
@@ -4955,6 +5085,7 @@ fn execute_policy_set_with_process_access(
             "requiredApprovals": required_approvals,
             "requiredVerifiers": required_verifiers,
             "allowedProcesses": allowed_processes,
+            "allowedWorkspaceRoots": normalized_workspace_roots,
         }),
     );
     Ok(json!({
@@ -4963,6 +5094,7 @@ fn execute_policy_set_with_process_access(
         "requiredApprovals": decode_string_list(&policy.required_approvals_json),
         "requiredVerifiers": decode_string_list(&policy.required_verifiers_json),
         "allowedProcesses": decode_string_list(&policy.allowed_processes_json),
+        "allowedWorkspaceRoots": decode_string_list(&policy.allowed_workspace_roots_json),
         "createdAtMs": policy.created_at_ms,
         "updatedAtMs": policy.updated_at_ms,
     }))
@@ -5244,15 +5376,24 @@ fn execute_command(command: SwarmCommand) -> Result<(ExitCode, Value), String> {
             ExitCode::SUCCESS,
             execute_task_create(&root, &objective_id, &task_id, &detail, &dependencies, max_runs, deadline_at_ms, lease_timeout_ms)?,
         )),
-        SwarmCommand::PolicySet { root, task_id, mergegate_name, required_approvals, required_verifiers, allowed_processes } => Ok((
+        SwarmCommand::PolicySet {
+            root,
+            task_id,
+            mergegate_name,
+            required_approvals,
+            required_verifiers,
+            allowed_processes,
+            allowed_workspace_roots,
+        } => Ok((
             ExitCode::SUCCESS,
-            execute_policy_set_with_process_access(
+            execute_policy_set_with_access(
                 &root,
                 &task_id,
                 &mergegate_name,
                 &required_approvals,
                 &required_verifiers,
                 &allowed_processes,
+                &allowed_workspace_roots,
             )?,
         )),
         SwarmCommand::MemoryPut { root, objective_id, task_id, actor, key, value } => Ok((
@@ -5528,6 +5669,26 @@ pub fn builtin_swarm_policy_set_with_process_access(
         required_approvals,
         required_verifiers,
         allowed_processes,
+    )?)
+}
+
+pub fn builtin_swarm_policy_set_with_access(
+    root: &str,
+    task_id: &str,
+    mergegate_name: &str,
+    required_approvals: &[String],
+    required_verifiers: &[String],
+    allowed_processes: &[String],
+    allowed_workspace_roots: &[String],
+) -> Result<String, String> {
+    render_builtin_json(execute_policy_set_with_access(
+        Path::new(root),
+        task_id,
+        mergegate_name,
+        required_approvals,
+        required_verifiers,
+        allowed_processes,
+        allowed_workspace_roots,
     )?)
 }
 
@@ -6005,6 +6166,118 @@ mod tests {
             )
             .expect("load allowed processes");
         assert_eq!(policy_json, "[\"bash\"]");
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn swarm_policy_workspace_allowlist_blocks_unapproved_cwd() {
+        let root = unique_root("workspace-policy");
+        let allowed_workspace = root.join("allowed-workspace");
+        let allowed_child = allowed_workspace.join("child");
+        let denied_workspace = root.join("denied-workspace");
+        fs::create_dir_all(&allowed_child).expect("create allowed workspace");
+        fs::create_dir_all(&denied_workspace).expect("create denied workspace");
+        let root_text = root.to_string_lossy().to_string();
+        let allowed_text = allowed_workspace.to_string_lossy().to_string();
+        let canonical_allowed_text = fs::canonicalize(&allowed_workspace)
+            .expect("canonical allowed workspace")
+            .to_string_lossy()
+            .to_string();
+        let allowed_child_text = allowed_child.to_string_lossy().to_string();
+        let denied_text = denied_workspace.to_string_lossy().to_string();
+        assert_eq!(
+            maybe_run_swarm(&vec![
+                "claspc".to_owned(),
+                "swarm".to_owned(),
+                "bootstrap".to_owned(),
+                root_text.clone(),
+                "repair".to_owned()
+            ]),
+            Some(ExitCode::SUCCESS)
+        );
+        assert_eq!(
+            maybe_run_swarm(&vec![
+                "claspc".to_owned(),
+                "swarm".to_owned(),
+                "lease".to_owned(),
+                root_text.clone(),
+                "repair".to_owned()
+            ]),
+            Some(ExitCode::SUCCESS)
+        );
+
+        let (policy_code, policy_json_text) = run_swarm_json_command(&vec![
+            "policy".to_owned(),
+            "set".to_owned(),
+            root_text.clone(),
+            "repair".to_owned(),
+            "trunk".to_owned(),
+            "--require-verifier".to_owned(),
+            "native-smoke".to_owned(),
+            "--allow-process".to_owned(),
+            "bash".to_owned(),
+            "--allow-workspace".to_owned(),
+            allowed_text.clone(),
+        ])
+        .expect("set workspace policy");
+        assert_eq!(policy_code, 0);
+        let policy_json: Value = serde_json::from_str(&policy_json_text).expect("decode policy json");
+        assert_eq!(policy_json.get("allowedProcesses"), Some(&json!(["bash"])));
+        assert_eq!(policy_json.get("allowedWorkspaceRoots"), Some(&json!([canonical_allowed_text])));
+
+        let denied_args = vec![
+            "claspc".to_owned(),
+            "swarm".to_owned(),
+            "verifier".to_owned(),
+            "run".to_owned(),
+            root_text.clone(),
+            "repair".to_owned(),
+            "native-smoke".to_owned(),
+            "--cwd".to_owned(),
+            denied_text.clone(),
+            "--".to_owned(),
+            "bash".to_owned(),
+            "-lc".to_owned(),
+            "printf denied > denied.txt".to_owned(),
+        ];
+        assert_eq!(maybe_run_swarm(&denied_args), Some(ExitCode::from(1)));
+        assert!(!denied_workspace.join("denied.txt").exists());
+
+        let allowed_args = vec![
+            "claspc".to_owned(),
+            "swarm".to_owned(),
+            "verifier".to_owned(),
+            "run".to_owned(),
+            root_text.clone(),
+            "repair".to_owned(),
+            "native-smoke".to_owned(),
+            "--cwd".to_owned(),
+            allowed_child_text,
+            "--".to_owned(),
+            "bash".to_owned(),
+            "-lc".to_owned(),
+            "printf ok > allowed.txt".to_owned(),
+        ];
+        assert_eq!(maybe_run_swarm(&allowed_args), Some(ExitCode::SUCCESS));
+        assert_eq!(
+            fs::read_to_string(allowed_child.join("allowed.txt")).expect("read allowed marker"),
+            "ok"
+        );
+
+        let connection = Connection::open(runtime_paths(&root).db_path).expect("open sqlite db");
+        let run_count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM swarm_runs WHERE task_id = 'repair'", [], |row| row.get(0))
+            .expect("count runs");
+        assert_eq!(run_count, 1);
+        let denied_events: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM swarm_events WHERE task_id = 'repair' AND kind = 'workspace_permission_denied'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count denied events");
+        assert_eq!(denied_events, 1);
 
         let _ = fs::remove_dir_all(root);
     }
