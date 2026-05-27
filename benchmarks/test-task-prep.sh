@@ -338,6 +338,7 @@ check_lead_host_binding_manifest() {
   assert_contains "$workspace/LANGUAGE_GUIDE.md" '`benchmark-prep/host-bindings.manifest.json`'
   assert_contains "$workspace/LANGUAGE_GUIDE.md" '`benchmark-prep/Main.surfaces.json`'
   assert_contains "$workspace/LANGUAGE_GUIDE.md" '`benchmark-prep/Main.agent-pack.json`'
+  assert_contains "$workspace/LANGUAGE_GUIDE.md" 'semanticIndex.entries'
   assert_contains "$workspace/LANGUAGE_GUIDE.md" 'App-owned edit surface'
   assert_contains "$workspace/LANGUAGE_GUIDE.md" '`Shared/Lead.clasp`'
   assert_contains "$workspace/LANGUAGE_GUIDE.md" 'route host inputs, host/runtime binding contracts, model JSON shapes, and runtime-owned failure behavior'
@@ -391,6 +392,20 @@ assert.ok(
   ),
   "agent pack should point agents at the app-owned Shared/Lead.clasp source module"
 );
+assert.ok(Array.isArray(agentPack.semanticIndex?.entries), "agent pack should expose semantic index entries");
+const leadSchemaIndex = agentPack.semanticIndex.entries.find((entry) => entry.id === "schema:LeadIntake");
+assert.ok(leadSchemaIndex, "semantic index should include LeadIntake schema");
+assert.ok(
+  leadSchemaIndex.editFiles?.includes("Shared/Lead.clasp"),
+  "LeadIntake semantic index entry should point to the app-owned edit file"
+);
+assert.ok(
+  leadSchemaIndex.queryText.includes("company:Str") &&
+    leadSchemaIndex.artifactRefs?.includes("benchmark-prep/Main.context.json"),
+  "LeadIntake semantic index entry should be searchable and artifact-backed"
+);
+const sharedLeadIndex = agentPack.semanticIndex.byEditFile.find((entry) => entry.path === "Shared/Lead.clasp");
+assert.ok(sharedLeadIndex?.entryIds.includes("schema:LeadIntake"), "semantic index should map Shared/Lead.clasp to LeadIntake");
 assert.ok(
   agentPack.compilerContext.surfaceIndex.routes.includes("route:createLeadRoute"),
   "agent pack should retain compiler-owned surfaceIndex route ids"
@@ -952,9 +967,18 @@ for (const task of publicAppTasks) {
   assert.equal(agentPack.artifacts.agentPack, "benchmark-prep/Main.agent-pack.json");
   assert.deepEqual(agentPack.verifier.command, ["bash", "scripts/verify.sh"]);
   assert.deepEqual(agentPack.summaries, surfaces.summaries);
+  assert.ok(
+    agentPack.semanticIndex.entries.some((entry) => entry.kind === "source-module"),
+    `${task.id} semantic index should include source-module entries`
+  );
+  assert.ok(
+    agentPack.semanticIndex.artifactRefs.includes("benchmark-prep/Main.agent-pack.json"),
+    `${task.id} semantic index should link back to the agent pack artifact`
+  );
 
   assert.match(guide, /App-owned edit surface/);
   assert.match(guide, /Do-not-edit runtime\/test surfaces/);
+  assert.match(guide, /semanticIndex\.entries/);
   for (const appPath of task.appOwned) {
     assert.ok(guide.includes(`\`${appPath}\``), `${task.id} guide missing app-owned surface ${appPath}`);
   }

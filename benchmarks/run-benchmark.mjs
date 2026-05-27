@@ -1023,6 +1023,17 @@ function synthesizeClaspAgentActionPack({
   const packTypes = collectAgentPackTypes(surfaces, context);
   const packBoundaries = collectAgentPackBoundaries(surfaces, context, hostBindingManifest);
   const referencedSurfaceIds = collectAgentPackSurfaceIds(packRoutes, packSchemas, packTypes, packBoundaries);
+  const packSourceModules = collectAgentPackSourceModules(surfaces, context, entry);
+  const packActionItems = collectAgentPackActionItems(surfaces, context, task);
+  const semanticIndex = collectAgentPackSemanticIndex({
+    artifacts,
+    sourceModules: packSourceModules,
+    routes: packRoutes,
+    schemas: packSchemas,
+    types: packTypes,
+    boundaries: packBoundaries,
+    actionItems: packActionItems
+  });
 
   return {
     format: "clasp-benchmark-agent-pack-v1",
@@ -1039,7 +1050,7 @@ function synthesizeClaspAgentActionPack({
     editTargets: {
       primary: surfaces.appOwnedEditSurface ?? [],
       doNotEdit: surfaces.doNotEditSurface ?? [],
-      sourceModules: collectAgentPackSourceModules(surfaces, context, entry)
+      sourceModules: packSourceModules
     },
     compilerContext: {
       contextFormat: context.format ?? null,
@@ -1047,6 +1058,7 @@ function synthesizeClaspAgentActionPack({
       surfaceIndex: summarizeAgentPackSurfaceIndex(context),
       airNodes: collectAgentPackAirNodes(air, referencedSurfaceIds)
     },
+    semanticIndex,
     surfaces: {
       routes: packRoutes,
       schemas: packSchemas,
@@ -1058,7 +1070,7 @@ function synthesizeClaspAgentActionPack({
     },
     summaries: surfaces.summaries ?? {},
     contractGaps: surfaces.contractGaps ?? [],
-    actionItems: collectAgentPackActionItems(surfaces, context, task),
+    actionItems: packActionItems,
     verifier: {
       command: normalizeTaskCommand(task.verify),
       scenarioSignals: hostBindingManifest?.acceptanceSignals ?? []
@@ -1701,6 +1713,266 @@ function collectAgentPackActionItems(surfaces, context, task) {
   });
 }
 
+function collectAgentPackSemanticIndex({
+  artifacts,
+  sourceModules,
+  routes,
+  schemas,
+  types,
+  boundaries,
+  actionItems
+}) {
+  const artifactRefs = uniqueStrings(Object.values(artifacts ?? {}));
+  const entries = [];
+
+  for (const sourceModule of sourceModules ?? []) {
+    const surfaceIds = sourceModuleSemanticSurfaceIds(sourceModule);
+    entries.push(semanticIndexEntry({
+      id: sourceModule.sourceId ?? `source-file:${sourceModule.path}`,
+      kind: "source-module",
+      title: sourceModule.path,
+      sourceFiles: [sourceModule.path],
+      editFiles: sourceModule.role === "app-owned-edit-surface" ? [sourceModule.path] : [],
+      symbols: [sourceModule.moduleName, sourceModule.role],
+      surfaceIds,
+      artifactRefs: [artifacts.context, artifacts.surfaces, artifacts.agentPack],
+      summaryParts: surfaceIds
+    }));
+  }
+
+  for (const route of routes ?? []) {
+    const sourceFiles = sourceFilesForSurface(sourceModules, route.id);
+    const surfaceIds = uniqueStrings([
+      route.id,
+      route.requestSchemaId,
+      route.responseSchemaId,
+      ...(route.affectedSurfaces ?? []),
+      ...(route.affectedRoutes ?? []),
+      ...(route.affectedSchemas ?? []),
+      ...(route.affectedForeignBoundaries ?? [])
+    ]);
+    entries.push(semanticIndexEntry({
+      id: route.id,
+      kind: "route",
+      title: `${route.method} ${route.path}`,
+      sourceFiles,
+      editFiles: appOwnedFilesForSourceFiles(sourceModules, sourceFiles),
+      symbols: [route.name, route.handler, route.requestType, route.responseType, route.responseKind],
+      surfaceIds,
+      artifactRefs: [artifacts.context, artifacts.air, artifacts.surfaces, artifacts.agentPack],
+      summaryParts: [
+        route.method,
+        route.path,
+        route.hostInput ? "host-input" : "",
+        ...(route.runtimeOwnedFailures ?? [])
+      ]
+    }));
+  }
+
+  for (const schema of schemas ?? []) {
+    const sourceFiles = sourceFilesForSurface(sourceModules, schema.id);
+    const fieldNames = [
+      ...((schema.fields ?? []).map((field) => `${field.name}:${field.type}`)),
+      ...((schema.expectedFields ?? []).map((field) => `${field.name}:${field.type}`))
+    ];
+    const surfaceIds = uniqueStrings([
+      schema.id,
+      schema.airNodeId,
+      ...(schema.affectedSurfaces ?? []),
+      ...(schema.affectedRoutes ?? []),
+      ...(schema.affectedForeignBoundaries ?? [])
+    ]);
+    entries.push(semanticIndexEntry({
+      id: schema.id,
+      kind: "schema",
+      title: schema.name,
+      sourceFiles,
+      editFiles: uniqueStrings([
+        ...appOwnedFilesForSourceFiles(sourceModules, sourceFiles),
+        ...((schema.missingFields ?? []).flatMap((field) => field.editFiles ?? []))
+      ]),
+      symbols: [schema.name, schema.kind, ...fieldNames],
+      surfaceIds,
+      artifactRefs: [artifacts.context, artifacts.air, artifacts.surfaces, artifacts.agentPack],
+      summaryParts: [
+        schema.present ? "present" : "missing",
+        ...(schema.missingFields ?? []).map((field) => `missing-field:${field.name}:${field.expected}`)
+      ]
+    }));
+  }
+
+  for (const typeSurface of types ?? []) {
+    const surfaceIds = uniqueStrings([
+      typeSurface.id,
+      typeSurface.airNodeId,
+      ...(typeSurface.affectedSurfaces ?? []),
+      ...(typeSurface.affectedRoutes ?? []),
+      ...(typeSurface.affectedForeignBoundaries ?? [])
+    ]);
+    entries.push(semanticIndexEntry({
+      id: typeSurface.id,
+      kind: "type",
+      title: typeSurface.name,
+      symbols: [
+        typeSurface.name,
+        typeSurface.kind,
+        ...(typeSurface.constructors ?? []),
+        ...(typeSurface.wireValues ?? []),
+        ...(typeSurface.expectedWireValues ?? [])
+      ],
+      surfaceIds,
+      artifactRefs: [artifacts.context, artifacts.air, artifacts.surfaces, artifacts.agentPack],
+      summaryParts: [
+        typeSurface.present ? "present" : "missing",
+        ...(typeSurface.missingWireValues ?? []).map((value) => `missing-wire-value:${value}`)
+      ]
+    }));
+  }
+
+  for (const boundary of boundaries ?? []) {
+    const sourceFiles = sourceFilesForSurface(sourceModules, boundary.id);
+    entries.push(semanticIndexEntry({
+      id: boundary.id,
+      kind: "host-boundary",
+      title: boundary.name,
+      sourceFiles,
+      editFiles: appOwnedFilesForSourceFiles(sourceModules, sourceFiles),
+      symbols: [
+        boundary.name,
+        boundary.boundaryKind,
+        boundary.role,
+        boundary.type,
+        boundary.runtimeName,
+        boundary.inputType,
+        boundary.decodedAs,
+        boundary.expectedJsonShape
+      ],
+      surfaceIds: [boundary.id, boundary.airNodeId],
+      artifactRefs: [artifacts.context, artifacts.surfaces, artifacts.agentPack, artifacts.hostBindingManifest],
+      summaryParts: boundary.runtimeOwnedFailures ?? []
+    }));
+  }
+
+  for (const [index, actionItem] of (actionItems ?? []).entries()) {
+    const actionId = `action:${index + 1}:${actionItem.kind}:${actionItem.schema ?? actionItem.gapKind ?? "item"}`;
+    entries.push(semanticIndexEntry({
+      id: actionId,
+      kind: "action-item",
+      title: actionItem.kind,
+      editFiles: actionItem.editFiles ?? [],
+      symbols: [
+        actionItem.kind,
+        actionItem.gapKind,
+        actionItem.schema,
+        actionItem.field,
+        actionItem.expected
+      ],
+      surfaceIds: uniqueStrings([
+        ...(actionItem.affectedSurfaces ?? []),
+        ...(actionItem.affectedRoutes ?? []),
+        ...(actionItem.affectedForeignBoundaries ?? [])
+      ]),
+      artifactRefs: [artifacts.surfaces, artifacts.agentPack, artifacts.hostBindingManifest],
+      summaryParts: actionItem.verifierCommand ?? []
+    }));
+  }
+
+  return {
+    entries,
+    byEditFile: semanticIndexByEditFile(entries),
+    artifactRefs
+  };
+}
+
+function semanticIndexEntry({
+  id,
+  kind,
+  title,
+  sourceFiles = [],
+  editFiles = [],
+  symbols = [],
+  surfaceIds = [],
+  artifactRefs = [],
+  summaryParts = []
+}) {
+  const cleanedSourceFiles = uniqueStrings(sourceFiles);
+  const cleanedEditFiles = uniqueStrings(editFiles);
+  const cleanedSymbols = uniqueStrings(symbols);
+  const cleanedSurfaceIds = uniqueStrings(surfaceIds);
+  const cleanedArtifactRefs = uniqueStrings(artifactRefs);
+  const queryText = uniqueStrings([
+    id,
+    kind,
+    title,
+    ...cleanedSourceFiles,
+    ...cleanedEditFiles,
+    ...cleanedSymbols,
+    ...cleanedSurfaceIds,
+    ...cleanedArtifactRefs,
+    ...summaryParts
+  ]).join(" ");
+
+  return compactObject({
+    id,
+    kind,
+    title,
+    sourceFiles: cleanedSourceFiles.length > 0 ? cleanedSourceFiles : null,
+    editFiles: cleanedEditFiles.length > 0 ? cleanedEditFiles : null,
+    symbols: cleanedSymbols.length > 0 ? cleanedSymbols : null,
+    surfaceIds: cleanedSurfaceIds.length > 0 ? cleanedSurfaceIds : null,
+    artifactRefs: cleanedArtifactRefs.length > 0 ? cleanedArtifactRefs : null,
+    queryText
+  });
+}
+
+function sourceModuleSemanticSurfaceIds(sourceModule) {
+  return uniqueStrings([
+    ...(sourceModule.schemas ?? []),
+    ...(sourceModule.routes ?? []),
+    ...(sourceModule.foreignBoundaries ?? [])
+  ]);
+}
+
+function sourceFilesForSurface(sourceModules, surfaceId) {
+  if (typeof surfaceId !== "string" || surfaceId.length === 0) {
+    return [];
+  }
+
+  return uniqueStrings((sourceModules ?? [])
+    .filter((sourceModule) => sourceModuleSemanticSurfaceIds(sourceModule).includes(surfaceId))
+    .map((sourceModule) => sourceModule.path));
+}
+
+function appOwnedFilesForSourceFiles(sourceModules, sourceFiles) {
+  const sourceFileSet = new Set(sourceFiles ?? []);
+  return uniqueStrings((sourceModules ?? [])
+    .filter((sourceModule) =>
+      sourceFileSet.has(sourceModule.path) &&
+      sourceModule.role === "app-owned-edit-surface"
+    )
+    .map((sourceModule) => sourceModule.path));
+}
+
+function semanticIndexByEditFile(entries) {
+  const byEditFile = new Map();
+
+  for (const entry of entries) {
+    for (const editFile of entry.editFiles ?? []) {
+      if (!byEditFile.has(editFile)) {
+        byEditFile.set(editFile, []);
+      }
+      byEditFile.get(editFile).push(entry.id);
+    }
+  }
+
+  return [...byEditFile.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([pathName, entryIds]) => ({
+      path: pathName,
+      entryIds: uniqueStrings(entryIds)
+    }));
+}
+
 function collectAgentPackSurfaceIds(routes, schemas, types, boundaries) {
   const ids = new Set();
 
@@ -1831,6 +2103,12 @@ function addString(target, value) {
   if (typeof value === "string" && value.length > 0) {
     target.add(value);
   }
+}
+
+function uniqueStrings(values) {
+  return [...new Set(
+    (values ?? []).filter((value) => typeof value === "string" && value.length > 0)
+  )];
 }
 
 function normalizeTaskCommand(command) {
@@ -2007,6 +2285,7 @@ function renderClaspLanguageGuide({
     "",
     "## Agent action pack",
     "",
+    `- \`${path.relative(workspace, agentPackPath)}\` includes \`semanticIndex.entries\`, a compact lookup from routes, schemas, host boundaries, and action items to edit files and artifact refs.`,
     `- \`${path.relative(workspace, agentPackPath)}\` joins compiler context/AIR, surface index entries, app-owned edit files, host contracts, contract gaps, and verifier commands for benchmark agents.`
   );
 

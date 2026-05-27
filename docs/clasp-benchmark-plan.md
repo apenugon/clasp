@@ -341,6 +341,10 @@ That means the next focused implementation wave should prioritize:
 - benchmark-prep semantic packs and acceptance helpers that keep ordinary product tasks out of runtime or test-only mutation surfaces
 - repeated benchmark automation so the repo can measure whether those changes are actually improving the result
 
+Current benchmark prep agent packs include `semanticIndex.entries`, a compact
+machine-readable lookup from source modules, routes, schemas, host boundaries,
+and action items to relevant edit files and compiler artifact refs.
+
 This is especially important for `Clasp`, because shared types and strong static semantics are part of the language value proposition.
 
 ### Boundary safety catch rate

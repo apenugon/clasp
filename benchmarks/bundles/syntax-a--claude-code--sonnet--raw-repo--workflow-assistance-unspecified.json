@@ -62,8 +62,8 @@
     },
     {
       "path": "benchmarks/run-benchmark.mjs",
-      "size": 134848,
-      "sha256": "7a2359719868dfdc1b16991ed14d37134d0f3db809ad7402cf58ac5e6434a6ef"
+      "size": 143866,
+      "sha256": "54f89f07f343662f007332114e99f711bf23d187b33f6e75f72ad79d816a203c"
     },
     {
       "path": "benchmarks/run-claude-harness.sh",
