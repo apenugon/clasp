@@ -160,6 +160,23 @@ record SwarmArtifactSearchResult = {
   excerpt : SwarmArtifactContent
 }
 
+record SwarmSemanticIndexEntry = {
+  id : Str,
+  kind : Str,
+  editFiles : [Str],
+  artifactRefs : [Str],
+  surfaceIds : [Str],
+  queryText : Str
+}
+
+record SwarmSemanticIndex = {
+  entries : [SwarmSemanticIndexEntry]
+}
+
+record SwarmSemanticIndexArtifact = {
+  semanticIndex : SwarmSemanticIndex
+}
+
 record SwarmMemory = {
   actor : Str,
   createdAtMs : Int,
@@ -861,6 +878,37 @@ artifactWrite : TaskHandle -> Str -> Str -> Result SwarmArtifact
 artifactWrite handle kind text =
   artifactResult (swarmArtifactWriteRaw handle.root.path handle.taskId handle.actor kind text)
 
+semanticIndexArtifactKind : Str
+semanticIndexArtifactKind = "agent-pack"
+
+semanticIndexEntry : Str -> Str -> [Str] -> [Str] -> [Str] -> Str -> SwarmSemanticIndexEntry
+semanticIndexEntry id kind editFiles artifactRefs surfaceIds queryText =
+  SwarmSemanticIndexEntry {
+    id = id,
+    kind = kind,
+    editFiles = editFiles,
+    artifactRefs = artifactRefs,
+    surfaceIds = surfaceIds,
+    queryText = queryText
+  }
+
+semanticIndexArtifactText : [SwarmSemanticIndexEntry] -> Str
+semanticIndexArtifactText entries =
+  encode
+    (SwarmSemanticIndexArtifact {
+      semanticIndex = SwarmSemanticIndex {
+        entries = entries
+      }
+    })
+
+artifactWriteSemanticIndex : TaskHandle -> [SwarmSemanticIndexEntry] -> Result SwarmArtifact
+artifactWriteSemanticIndex handle entries =
+  artifactWrite handle semanticIndexArtifactKind (semanticIndexArtifactText entries)
+
+semanticArtifactSearch : TaskHandle -> Str -> Int -> Int -> Result [SwarmArtifactSearchResult]
+semanticArtifactSearch handle query limit maxBytes =
+  artifactSearch handle semanticIndexArtifactKind query limit maxBytes
+
 readArtifactFrom : SwarmRoot -> SwarmArtifact -> Int -> Result SwarmArtifactContent
 readArtifactFrom root artifact maxBytes =
   artifactRead root artifact.artifactId maxBytes
@@ -1037,7 +1085,7 @@ taskEvidencePack handle query limit =
                     Ok benchmarkMemoryMatchesValue ->
                       match artifactSearch handle "" query limit contextPackArtifactReadBytes {
                         Ok searchResultsValue ->
-                          match artifactSearch handle "" contextPackSemanticIndexQuery limit contextPackArtifactReadBytes {
+                          match semanticArtifactSearch handle contextPackSemanticIndexQuery limit contextPackArtifactReadBytes {
                             Ok semanticSearchResultsValue ->
                               match readArtifactContents handle.root mailboxValue.artifacts contextPackArtifactReadBytes limit {
                                 Ok artifactContentValues ->
@@ -1357,7 +1405,7 @@ contextPackArtifactReadBytes : Int
 contextPackArtifactReadBytes = 4096
 
 contextPackSemanticIndexQuery : Str
-contextPackSemanticIndexQuery = "semanticIndex entries editFiles artifactRefs route schema host-boundary action-item"
+contextPackSemanticIndexQuery = "semanticIndex entries editFiles artifactRefs surfaceIds queryText route schema host-boundary action-item"
 
 contextPackBenchmarkQuery : Str
 contextPackBenchmarkQuery = "benchmark score target suite wave meetsTarget summary regression improvement"

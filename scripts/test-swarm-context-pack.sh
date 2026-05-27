@@ -102,12 +102,15 @@ assert(report.semanticArtifactTopScore > 0, `semantic artifact top score ${repor
 assert(
   report.semanticArtifactMatchedText.includes("semanticIndex") ||
     report.semanticArtifactMatchedText.includes("editFiles") ||
-    report.semanticArtifactMatchedText.includes("artifactRefs"),
+    report.semanticArtifactMatchedText.includes("artifactRefs") ||
+    report.semanticArtifactMatchedText.includes("queryText"),
   `semantic artifact match ${JSON.stringify(report.semanticArtifactMatchedText)}`,
 );
 assert(
   report.semanticArtifactExcerptText.includes("semanticIndex") &&
-    report.semanticArtifactExcerptText.includes("Shared/Lead.clasp"),
+    report.semanticArtifactExcerptText.includes("Shared/Lead.clasp") &&
+    report.semanticArtifactExcerptText.includes("surfaceIds") &&
+    report.semanticArtifactExcerptText.includes("queryText"),
   `semantic artifact excerpt ${JSON.stringify(report.semanticArtifactExcerptText)}`,
 );
 assert(report.evidenceTaskId === "context-repair", `evidence task id ${report.evidenceTaskId}`);

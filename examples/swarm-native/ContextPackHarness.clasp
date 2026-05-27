@@ -91,8 +91,16 @@ planTask = taskHandle root "context-plan" "context-agent"
 repairTask : TaskHandle
 repairTask = taskHandle root "context-repair" "context-agent"
 
-semanticIndexArtifactText : Str
-semanticIndexArtifactText = "{\"semanticIndex\":{\"entries\":[{\"id\":\"schema:LeadIntake\",\"kind\":\"schema\",\"editFiles\":[\"Shared/Lead.clasp\"],\"artifactRefs\":[\"benchmark-prep/Main.agent-pack.json\"],\"surfaceIds\":[\"route:createLeadRoute\",\"foreign:mockLeadSummaryModel\"],\"queryText\":\"semanticIndex entries editFiles artifactRefs route schema host-boundary action-item\"}]}}"
+semanticIndexEntries : [SwarmSemanticIndexEntry]
+semanticIndexEntries = [
+  semanticIndexEntry
+    "schema:LeadIntake"
+    "schema"
+    ["Shared/Lead.clasp"]
+    ["benchmark-prep/Main.agent-pack.json"]
+    ["route:createLeadRoute", "foreign:mockLeadSummaryModel"]
+    "semanticIndex entries editFiles artifactRefs surfaceIds queryText route schema host-boundary action-item"
+]
 
 benchmarkContextText : Str
 benchmarkContextText = "{\"kind\":\"benchmark-result\",\"suite\":\"context-pack-benchmark\",\"wave\":2,\"summary\":\"benchmark score target suite wave meetsTarget history should reach standalone agents\",\"passed\":true,\"meetsTarget\":false,\"scoreName\":\"contextSignals\",\"scoreValue\":9,\"targetName\":\"contextSignals\",\"targetValue\":10}"
@@ -240,7 +248,7 @@ main =
                                         Ok verificationValue ->
                                           match artifactWrite repairTask "note" "published context artifact from ordinary clasp" {
                                             Ok publishedArtifact ->
-                                              match artifactWrite repairTask "agent-pack" semanticIndexArtifactText {
+                                              match artifactWriteSemanticIndex repairTask semanticIndexEntries {
                                                 Ok semanticArtifact ->
                                                   match readArtifactFrom root publishedArtifact 64 {
                                                     Ok publishedArtifactContent ->
