@@ -301,11 +301,14 @@ record SwarmContextPack = {
   taskMemoryMatches : [SwarmMemorySearchResult],
   objectiveMemoryMatches : [SwarmMemorySearchResult],
   artifactSearchMatches : [SwarmArtifactSearchResult],
+  semanticArtifactMatches : [SwarmArtifactSearchResult],
   memoryValues : [Str],
   memoryMatchedText : [Str],
   memoryScores : [Int],
   artifactSearchMatchedText : [Str],
   artifactSearchScores : [Int],
+  semanticArtifactMatchedText : [Str],
+  semanticArtifactScores : [Int],
   runTrace : [VerificationTraceEntry],
   artifactKinds : [Str],
   artifactPaths : [Str],
@@ -989,28 +992,36 @@ taskContextPack handle query limit =
                         Ok objectiveMemoryMatchesValue ->
                           match artifactSearch handle "" query limit contextPackArtifactReadBytes {
                             Ok searchResultsValue ->
-                              match readArtifactContents handle.root mailboxValue.artifacts contextPackArtifactReadBytes limit {
-                                Ok artifactContentValues ->
-                                  let memoryMatches = append taskMemoryMatchesValue objectiveMemoryMatchesValue in
-                                  let mailboxSummary = verificationPlanMailboxSummary mailboxValue in
-                                  Ok (SwarmContextPack {
-                                    task = taskValue,
-                                    readyTaskIds = map readyTaskId readyTasks,
-                                    managerAction = managerActionValue,
-                                    mailboxSummary = mailboxSummary,
-                                    taskMemoryMatches = taskMemoryMatchesValue,
-                                    objectiveMemoryMatches = objectiveMemoryMatchesValue,
-                                    artifactSearchMatches = searchResultsValue,
-                                    memoryValues = map memorySearchResultMemoryValue memoryMatches,
-                                    memoryMatchedText = map memorySearchResultMatchedText memoryMatches,
-                                    memoryScores = map memorySearchResultScore memoryMatches,
-                                    artifactSearchMatchedText = map artifactSearchResultMatchedText searchResultsValue,
-                                    artifactSearchScores = map artifactSearchResultScore searchResultsValue,
-                                    runTrace = map runTraceEntry mailboxValue.runs,
-                                    artifactKinds = mailboxSummary.artifactKinds,
-                                    artifactPaths = mailboxSummary.artifactPaths,
-                                    artifactExcerpts = artifactContentValues
-                                  }),
+                              match artifactSearch handle "" contextPackSemanticIndexQuery limit contextPackArtifactReadBytes {
+                                Ok semanticSearchResultsValue ->
+                                  match readArtifactContents handle.root mailboxValue.artifacts contextPackArtifactReadBytes limit {
+                                    Ok artifactContentValues ->
+                                      let memoryMatches = append taskMemoryMatchesValue objectiveMemoryMatchesValue in
+                                      let mailboxSummary = verificationPlanMailboxSummary mailboxValue in
+                                      Ok (SwarmContextPack {
+                                        task = taskValue,
+                                        readyTaskIds = map readyTaskId readyTasks,
+                                        managerAction = managerActionValue,
+                                        mailboxSummary = mailboxSummary,
+                                        taskMemoryMatches = taskMemoryMatchesValue,
+                                        objectiveMemoryMatches = objectiveMemoryMatchesValue,
+                                        artifactSearchMatches = searchResultsValue,
+                                        semanticArtifactMatches = semanticSearchResultsValue,
+                                        memoryValues = map memorySearchResultMemoryValue memoryMatches,
+                                        memoryMatchedText = map memorySearchResultMatchedText memoryMatches,
+                                        memoryScores = map memorySearchResultScore memoryMatches,
+                                        artifactSearchMatchedText = map artifactSearchResultMatchedText searchResultsValue,
+                                        artifactSearchScores = map artifactSearchResultScore searchResultsValue,
+                                        semanticArtifactMatchedText = map artifactSearchResultMatchedText semanticSearchResultsValue,
+                                        semanticArtifactScores = map artifactSearchResultScore semanticSearchResultsValue,
+                                        runTrace = map runTraceEntry mailboxValue.runs,
+                                        artifactKinds = mailboxSummary.artifactKinds,
+                                        artifactPaths = mailboxSummary.artifactPaths,
+                                        artifactExcerpts = artifactContentValues
+                                      }),
+                                    Err message ->
+                                      contextPackResultError message
+                                  },
                                 Err message ->
                                   contextPackResultError message
                               },
@@ -1251,6 +1262,9 @@ emptyArtifactContents = []
 
 contextPackArtifactReadBytes : Int
 contextPackArtifactReadBytes = 4096
+
+contextPackSemanticIndexQuery : Str
+contextPackSemanticIndexQuery = "semanticIndex entries editFiles artifactRefs route schema host-boundary action-item"
 
 readArtifactContents : SwarmRoot -> [SwarmArtifact] -> Int -> Int -> Result [SwarmArtifactContent]
 readArtifactContents root artifactValues maxBytes limit = {

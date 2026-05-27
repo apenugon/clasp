@@ -175,6 +175,7 @@ The implemented native primitives now include:
 - SQLite-backed task/event state in the native launcher
 - native artifact capture for tool and verifier runs
 - bounded native artifact search over stored task evidence
+- dedicated context-pack semantic-index artifact search over compiler-owned `semanticIndex.entries`
 - native mergegate decisions over stored verifier runs
 
 These are available through the self-hosted native compiler/runtime path and are exercised by the native examples at [`examples/swarm-kernel/Main.clasp`](/home/akul_medexfinance_com/clasp/examples/swarm-kernel/Main.clasp) and [`examples/host-runtime/Main.clasp`](/home/akul_medexfinance_com/clasp/examples/host-runtime/Main.clasp).

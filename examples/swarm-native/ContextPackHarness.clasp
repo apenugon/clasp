@@ -34,6 +34,11 @@ record ContextPackHarnessReport = {
   artifactSearchTopScore : Int,
   artifactSearchMatchedText : Str,
   artifactSearchExcerptText : Str,
+  semanticArtifactCount : Int,
+  semanticArtifactTopKind : Str,
+  semanticArtifactTopScore : Int,
+  semanticArtifactMatchedText : Str,
+  semanticArtifactExcerptText : Str,
   artifactReadKind : Str,
   artifactReadBytes : Int,
   artifactReadTotalBytes : Int,
@@ -73,6 +78,9 @@ planTask = taskHandle root "context-plan" "context-agent"
 
 repairTask : TaskHandle
 repairTask = taskHandle root "context-repair" "context-agent"
+
+semanticIndexArtifactText : Str
+semanticIndexArtifactText = "{\"semanticIndex\":{\"entries\":[{\"id\":\"schema:LeadIntake\",\"kind\":\"schema\",\"editFiles\":[\"Shared/Lead.clasp\"],\"artifactRefs\":[\"benchmark-prep/Main.agent-pack.json\"],\"surfaceIds\":[\"route:createLeadRoute\",\"foreign:mockLeadSummaryModel\"],\"queryText\":\"semanticIndex entries editFiles artifactRefs route schema host-boundary action-item\"}]}}"
 
 builderCommand : SwarmCommand
 builderCommand =
@@ -136,6 +144,7 @@ errorText message = textConcat ["error:", message]
 reportContextPack : SwarmContextPack -> VerificationPlanResult -> SwarmArtifactContent -> SwarmArtifactContent -> Str
 reportContextPack pack verificationValue artifactContent publishedArtifactContent =
   let searchPick = artifactSearchPick pack.artifactSearchMatches in
+  let semanticPick = artifactSearchPick pack.semanticArtifactMatches in
   encode (ContextPackHarnessReport {
     taskId = pack.task.taskId,
     taskStatus = pack.task.status,
@@ -168,6 +177,11 @@ reportContextPack pack verificationValue artifactContent publishedArtifactConten
     artifactSearchTopScore = searchPick.score,
     artifactSearchMatchedText = searchPick.matchedText,
     artifactSearchExcerptText = searchPick.excerptText,
+    semanticArtifactCount = length pack.semanticArtifactMatches,
+    semanticArtifactTopKind = semanticPick.kind,
+    semanticArtifactTopScore = semanticPick.score,
+    semanticArtifactMatchedText = semanticPick.matchedText,
+    semanticArtifactExcerptText = semanticPick.excerptText,
     artifactReadKind = artifactContent.kind,
     artifactReadBytes = artifactContent.bytesRead,
     artifactReadTotalBytes = artifactContent.totalBytes,
@@ -197,22 +211,27 @@ main =
                                     Ok verificationValue ->
                                       match artifactWrite repairTask "note" "published context artifact from ordinary clasp" {
                                         Ok publishedArtifact ->
-                                          match readArtifactFrom root publishedArtifact 64 {
-                                            Ok publishedArtifactContent ->
-                                              match taskContextPack repairTask "focused compiler verifier ordinary clasp" 10 {
-                                                Ok pack ->
-                                                  match artifacts repairTask {
-                                                    Ok artifactValues ->
-                                                      let pick = stdoutArtifactPick artifactValues in
-                                                      if pick.found then
-                                                        match artifactRead root pick.artifactId 16 {
-                                                          Ok artifactContent ->
-                                                            reportContextPack pack verificationValue artifactContent publishedArtifactContent,
-                                                          Err message ->
-                                                            errorText message
-                                                        }
-                                                      else
-                                                        errorText "missing stdout artifact",
+                                          match artifactWrite repairTask "agent-pack" semanticIndexArtifactText {
+                                            Ok semanticArtifact ->
+                                              match readArtifactFrom root publishedArtifact 64 {
+                                                Ok publishedArtifactContent ->
+                                                  match taskContextPack repairTask "focused compiler verifier ordinary clasp" 10 {
+                                                    Ok pack ->
+                                                      match artifacts repairTask {
+                                                        Ok artifactValues ->
+                                                          let pick = stdoutArtifactPick artifactValues in
+                                                          if pick.found then
+                                                            match artifactRead root pick.artifactId 16 {
+                                                              Ok artifactContent ->
+                                                                reportContextPack pack verificationValue artifactContent publishedArtifactContent,
+                                                              Err message ->
+                                                                errorText message
+                                                            }
+                                                          else
+                                                            errorText "missing stdout artifact",
+                                                        Err message ->
+                                                          errorText message
+                                                      },
                                                     Err message ->
                                                       errorText message
                                                   },

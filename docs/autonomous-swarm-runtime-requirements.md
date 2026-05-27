@@ -225,7 +225,7 @@ The self-hosted/native compiler must own these surfaces:
 
 No backend semantics should depend on JS helper files.
 
-The ordinary Clasp swarm library now has a first context-pack surface that lets an agent assemble compact task evidence from native swarm state without scraping logs by hand. That covers local ranked memory, query-ranked artifact search matches, verifier run traces, artifact references, bounded artifact excerpts, mailbox summaries, ready-set projection, and manager next-action projection. The native FeedbackLoop now renders those context packs directly into builder and verifier prompt artifacts and persists verifier feedback into swarm memory, so standalone Clasp agent backends receive the same durable state projection as Codex-backed agents.
+The ordinary Clasp swarm library now has a first context-pack surface that lets an agent assemble compact task evidence from native swarm state without scraping logs by hand. That covers local ranked memory, query-ranked artifact search matches, dedicated semantic-index artifact matches for compiler-owned `semanticIndex.entries`, verifier run traces, artifact references, bounded artifact excerpts, mailbox summaries, ready-set projection, and manager next-action projection. The native FeedbackLoop and GoalManager planner now render those context packs directly into builder, verifier, and planner prompt artifacts, and persist verifier feedback into swarm memory, so standalone Clasp agent backends receive the same durable state projection as Codex-backed agents.
 
 ### 4. Better Compiler-Authoring Ergonomics
 

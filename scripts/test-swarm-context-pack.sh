@@ -52,7 +52,7 @@ includes(report.memoryValues, "objective focused compiler verifier lesson", "mem
 assert(report.memoryScores[0] > 0, `first memory score ${report.memoryScores[0]}`);
 includes(report.memoryMatchedText, "task focused compiler verifier should inspect local evidence", "matched text");
 assert(report.mailboxRunCount === 2, `mailbox run count ${report.mailboxRunCount}`);
-assert(report.mailboxArtifactCount === 5, `mailbox artifact count ${report.mailboxArtifactCount}`);
+assert(report.mailboxArtifactCount === 6, `mailbox artifact count ${report.mailboxArtifactCount}`);
 assert(report.latestVerifierStatus === "failed", `latest verifier status ${report.latestVerifierStatus}`);
 assert(report.latestVerifier === "context-pack-fail", `latest verifier ${report.latestVerifier}`);
 includes(report.traceNames, "context-pack-fail", "trace names");
@@ -61,6 +61,7 @@ includes(report.traceClassifications, "exit-code", "trace classifications");
 includes(report.artifactKinds, "stdout", "artifact kinds");
 includes(report.artifactKinds, "stderr", "artifact kinds");
 includes(report.artifactKinds, "note", "artifact kinds");
+includes(report.artifactKinds, "agent-pack", "artifact kinds");
 assert(report.artifactExcerptCount >= 2, `artifact excerpt count ${report.artifactExcerptCount}`);
 includes(report.artifactExcerptKinds, "stdout", "artifact excerpt kinds");
 includes(report.artifactExcerptKinds, "stderr", "artifact excerpt kinds");
@@ -80,6 +81,20 @@ includes([report.artifactSearchMatchedText], "published context artifact from or
 assert(
   report.artifactSearchExcerptText === "published context artifact from ordinary clasp",
   `artifact search excerpt ${JSON.stringify(report.artifactSearchExcerptText)}`,
+);
+assert(report.semanticArtifactCount >= 1, `semantic artifact count ${report.semanticArtifactCount}`);
+assert(report.semanticArtifactTopKind === "agent-pack", `semantic artifact top kind ${report.semanticArtifactTopKind}`);
+assert(report.semanticArtifactTopScore > 0, `semantic artifact top score ${report.semanticArtifactTopScore}`);
+assert(
+  report.semanticArtifactMatchedText.includes("semanticIndex") ||
+    report.semanticArtifactMatchedText.includes("editFiles") ||
+    report.semanticArtifactMatchedText.includes("artifactRefs"),
+  `semantic artifact match ${JSON.stringify(report.semanticArtifactMatchedText)}`,
+);
+assert(
+  report.semanticArtifactExcerptText.includes("semanticIndex") &&
+    report.semanticArtifactExcerptText.includes("Shared/Lead.clasp"),
+  `semantic artifact excerpt ${JSON.stringify(report.semanticArtifactExcerptText)}`,
 );
 assert(report.artifactReadKind === "stdout", `artifact read kind ${report.artifactReadKind}`);
 assert(report.artifactReadBytes === 16, `artifact read bytes ${report.artifactReadBytes}`);

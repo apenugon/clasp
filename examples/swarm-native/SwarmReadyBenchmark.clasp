@@ -78,6 +78,9 @@ mailboxLimit = 20
 readinessTarget : Int
 readinessTarget = 10
 
+readinessSemanticIndexArtifactText : Str
+readinessSemanticIndexArtifactText = "{\"semanticIndex\":{\"entries\":[{\"id\":\"schema:NativeReadiness\",\"kind\":\"schema\",\"editFiles\":[\"examples/swarm-native/Swarm.clasp\"],\"artifactRefs\":[\"benchmark-prep/Main.agent-pack.json\"],\"surfaceIds\":[\"route:nativeReadiness\",\"foreign:verifier\"],\"queryText\":\"semanticIndex entries editFiles artifactRefs route schema host-boundary action-item native readiness\"}]}}"
+
 builderCommand : SwarmCommand
 builderCommand = commandSpec benchmarkRoot ["printf", "builder-ok"]
 
@@ -128,7 +131,10 @@ contextPackReady pack =
         if length pack.artifactPaths > 1 then
           if length pack.artifactExcerpts > 1 then
             if length pack.artifactSearchMatches > 0 then
-              textIncludes (encode pack.memoryValues) "native readiness"
+              if length pack.semanticArtifactMatches > 0 then
+                textIncludes (encode pack.memoryValues) "native readiness"
+              else
+                false
             else
               false
           else
@@ -226,14 +232,19 @@ readinessSignal =
                                                               match approveAndMergeVerificationPlan repairTask "readiness-review" "readiness-trunk" readinessVerificationPlan mailboxLimit {
                                                                 Ok reviewValue ->
                                                                   if reviewReady reviewValue then
-                                                                    match taskContextPack repairTask "native readiness compiler verifier" mailboxLimit {
-                                                                      Ok pack ->
-                                                                        if contextPackReady pack then
-                                                                          passSignal pack verificationValue reviewValue
-                                                                        else
-                                                                          failSignal "context pack did not include completed task state, memory, runs, and artifacts" 9,
+                                                                    match artifactWrite repairTask "agent-pack" readinessSemanticIndexArtifactText {
+                                                                      Ok semanticArtifact ->
+                                                                        match taskContextPack repairTask "native readiness compiler verifier" mailboxLimit {
+                                                                          Ok pack ->
+                                                                            if contextPackReady pack then
+                                                                              passSignal pack verificationValue reviewValue
+                                                                            else
+                                                                              failSignal "context pack did not include completed task state, memory, runs, artifacts, and semantic index evidence" 9,
+                                                                          Err message ->
+                                                                            stageError "context-pack" message 8
+                                                                        },
                                                                       Err message ->
-                                                                        stageError "context-pack" message 8
+                                                                        stageError "semantic-artifact" message 8
                                                                     }
                                                                   else
                                                                     failSignal "review or mergegate did not reach a passing state" 8,
