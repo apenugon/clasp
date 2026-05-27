@@ -112,6 +112,23 @@ plannerContextTraceLine entry =
     entry.failedVerifierClassification
   ]
 
+plannerContextArtifactExcerptLine : SwarmArtifactContent -> Str
+plannerContextArtifactExcerptLine excerpt =
+  textConcat [
+    "- id=",
+    encode excerpt.artifactId,
+    " kind=",
+    excerpt.kind,
+    " bytes=",
+    encode excerpt.bytesRead,
+    "/",
+    encode excerpt.totalBytes,
+    " truncated=",
+    plannerContextBoolText excerpt.truncated,
+    " text=",
+    excerpt.text
+  ]
+
 plannerContextListSection : Str -> [Str] -> Str
 plannerContextListSection title values =
   if length values == 0 then
@@ -126,6 +143,10 @@ plannerMemorySection title values =
 plannerTraceSection : Str -> [VerificationTraceEntry] -> Str
 plannerTraceSection title values =
   plannerContextListSection title (map plannerContextTraceLine values)
+
+plannerArtifactExcerptSection : Str -> [SwarmArtifactContent] -> Str
+plannerArtifactExcerptSection title values =
+  plannerContextListSection title (map plannerContextArtifactExcerptLine values)
 
 plannerContextPackQuery : Str
 plannerContextPackQuery = "planner task child loop verifier feedback benchmark evidence"
@@ -174,7 +195,8 @@ renderPlannerContextPack pack =
     plannerMemorySection "planner task memory matches:" pack.taskMemoryMatches,
     plannerMemorySection "objective memory matches:" pack.objectiveMemoryMatches,
     plannerTraceSection "planner run trace:" pack.runTrace,
-    plannerContextListSection "artifact paths:" pack.artifactPaths
+    plannerContextListSection "artifact paths:" pack.artifactPaths,
+    plannerArtifactExcerptSection "artifact excerpts:" pack.artifactExcerpts
   ]
 
 plannerContextSectionFor : Int -> Str

@@ -330,6 +330,23 @@ runTracePromptLine entry =
     entry.stderrArtifactPath
   ]
 
+artifactExcerptPromptLine : SwarmArtifactContent -> Str
+artifactExcerptPromptLine excerpt =
+  textConcat [
+    "- id=",
+    encode excerpt.artifactId,
+    " kind=",
+    excerpt.kind,
+    " bytes=",
+    encode excerpt.bytesRead,
+    "/",
+    encode excerpt.totalBytes,
+    " truncated=",
+    promptBoolText excerpt.truncated,
+    " text=",
+    excerpt.text
+  ]
+
 promptListSection : Str -> [Str] -> Str
 promptListSection title values =
   if length values == 0 then
@@ -344,6 +361,10 @@ memorySearchPromptSection title matches =
 runTracePromptSection : Str -> [VerificationTraceEntry] -> Str
 runTracePromptSection title trace =
   promptListSection title (map runTracePromptLine trace)
+
+artifactExcerptPromptSection : Str -> [SwarmArtifactContent] -> Str
+artifactExcerptPromptSection title excerpts =
+  promptListSection title (map artifactExcerptPromptLine excerpts)
 
 renderContextPackPrompt : SwarmContextPack -> Str
 renderContextPackPrompt pack =
@@ -390,7 +411,8 @@ renderContextPackPrompt pack =
     memorySearchPromptSection "objective memory matches:" pack.objectiveMemoryMatches,
     runTracePromptSection "run trace:" pack.runTrace,
     promptListSection "artifact kinds:" pack.artifactKinds,
-    promptListSection "artifact paths:" pack.artifactPaths
+    promptListSection "artifact paths:" pack.artifactPaths,
+    artifactExcerptPromptSection "artifact excerpts:" pack.artifactExcerpts
   ]
 
 taskContextPromptSection : TaskHandle -> Str -> Int -> Str

@@ -35,7 +35,7 @@
     {
       "source": "examples/swarm-native/TaskWorkspaceRuntimeHarness.clasp",
       "exportName": "nativeImageProjectText",
-      "cacheKey": "4a05f75b6fa73f74.cache",
+      "cacheKey": "34cabcd8c36eb48a.cache",
       "outputPath": "src/stage1.task-workspace-runtime-harness.native.image.json"
     }
   ]

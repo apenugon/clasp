@@ -126,7 +126,10 @@ contextPackReady pack =
     if length pack.memoryValues > 1 then
       if pack.mailboxSummary.runCount > 1 then
         if length pack.artifactPaths > 1 then
-          textIncludes (encode pack.memoryValues) "native readiness"
+          if length pack.artifactExcerpts > 1 then
+            textIncludes (encode pack.memoryValues) "native readiness"
+          else
+            false
         else
           false
       else

@@ -296,7 +296,8 @@ record SwarmContextPack = {
   memoryScores : [Int],
   runTrace : [VerificationTraceEntry],
   artifactKinds : [Str],
-  artifactPaths : [Str]
+  artifactPaths : [Str],
+  artifactExcerpts : [SwarmArtifactContent]
 }
 
 record VerificationPlanResult = {
@@ -464,6 +465,9 @@ artifactListResultError message = Err message
 
 artifactContentResultError : Str -> Result SwarmArtifactContent
 artifactContentResultError message = Err message
+
+artifactContentListResultError : Str -> Result [SwarmArtifactContent]
+artifactContentListResultError message = Err message
 
 memoryResultError : Str -> Result SwarmMemory
 memoryResultError message = Err message
@@ -935,22 +939,28 @@ taskContextPack handle query limit =
                     Ok taskMemoryMatchesValue ->
                       match objectiveMemorySearch objective query limit {
                         Ok objectiveMemoryMatchesValue ->
-                          let memoryMatches = append taskMemoryMatchesValue objectiveMemoryMatchesValue in
-                          let mailboxSummary = verificationPlanMailboxSummary mailboxValue in
-                          Ok (SwarmContextPack {
-                            task = taskValue,
-                            readyTaskIds = map readyTaskId readyTasks,
-                            managerAction = managerActionValue,
-                            mailboxSummary = mailboxSummary,
-                            taskMemoryMatches = taskMemoryMatchesValue,
-                            objectiveMemoryMatches = objectiveMemoryMatchesValue,
-                            memoryValues = map memorySearchResultMemoryValue memoryMatches,
-                            memoryMatchedText = map memorySearchResultMatchedText memoryMatches,
-                            memoryScores = map memorySearchResultScore memoryMatches,
-                            runTrace = map runTraceEntry mailboxValue.runs,
-                            artifactKinds = mailboxSummary.artifactKinds,
-                            artifactPaths = mailboxSummary.artifactPaths
-                          }),
+                          match readArtifactContents handle.root mailboxValue.artifacts contextPackArtifactReadBytes limit {
+                            Ok artifactContentValues ->
+                              let memoryMatches = append taskMemoryMatchesValue objectiveMemoryMatchesValue in
+                              let mailboxSummary = verificationPlanMailboxSummary mailboxValue in
+                              Ok (SwarmContextPack {
+                                task = taskValue,
+                                readyTaskIds = map readyTaskId readyTasks,
+                                managerAction = managerActionValue,
+                                mailboxSummary = mailboxSummary,
+                                taskMemoryMatches = taskMemoryMatchesValue,
+                                objectiveMemoryMatches = objectiveMemoryMatchesValue,
+                                memoryValues = map memorySearchResultMemoryValue memoryMatches,
+                                memoryMatchedText = map memorySearchResultMatchedText memoryMatches,
+                                memoryScores = map memorySearchResultScore memoryMatches,
+                                runTrace = map runTraceEntry mailboxValue.runs,
+                                artifactKinds = mailboxSummary.artifactKinds,
+                                artifactPaths = mailboxSummary.artifactPaths,
+                                artifactExcerpts = artifactContentValues
+                              }),
+                            Err message ->
+                              contextPackResultError message
+                          },
                         Err message ->
                           contextPackResultError message
                       },
@@ -1179,6 +1189,42 @@ emptyVerifierNames = []
 
 emptyVerificationTraceEntries : [VerificationTraceEntry]
 emptyVerificationTraceEntries = []
+
+emptyArtifactContents : [SwarmArtifactContent]
+emptyArtifactContents = []
+
+contextPackArtifactReadBytes : Int
+contextPackArtifactReadBytes = 4096
+
+readArtifactContents : SwarmRoot -> [SwarmArtifact] -> Int -> Int -> Result [SwarmArtifactContent]
+readArtifactContents root artifactValues maxBytes limit = {
+  let mut contents = emptyArtifactContents;
+  let mut remaining = limit;
+  let mut error = "";
+  for artifact in artifactValues {
+    if error != "" then
+      error
+    else if remaining <= 0 then
+      error
+    else {
+      match readArtifactFrom root artifact maxBytes {
+        Ok content -> {
+          contents = append contents [content];
+          remaining = intSubtract remaining 1;
+          error
+        },
+        Err message -> {
+          error = message;
+          error
+        }
+      }
+    }
+  };
+  if error == "" then
+    Ok contents
+  else
+    artifactContentListResultError error
+}
 
 emptyVerificationPlanExecution : TaskHandle -> Int -> Int -> Bool -> Int -> VerificationPlanExecution
 emptyVerificationPlanExecution handle mailboxLimit timeoutMs useTimeout memoryLimitMb =
