@@ -292,6 +292,27 @@ setsid env \
       awk '"'"'/MemAvailable:/ { printf "%d\n", int($2 / 1024); found = 1 } END { if (!found) print 0 }'"'"' /proc/meminfo 2>/dev/null || printf "0\n"
     }
 
+    preflight_host_memory_reserve() {
+      local min_available_memory_mb="${CLASP_MANAGED_JOB_MIN_AVAILABLE_MEMORY_MB:-}"
+      local memory_exceeded_path="$job_dir/memory-exceeded"
+      local available_memory_mb=""
+
+      if [[ "$min_available_memory_mb" =~ ^[0-9]+$ && "$min_available_memory_mb" -gt 0 ]]; then
+        available_memory_mb="$(host_available_memory_mb)"
+        if [[ "$available_memory_mb" =~ ^[0-9]+$ ]] && (( available_memory_mb < min_available_memory_mb )); then
+          {
+            printf "min_available_memory_mb=%s\n" "$min_available_memory_mb"
+            printf "available_memory_mb=%s\n" "$available_memory_mb"
+            printf "reason=host-available-memory-reserve\n"
+            printf "phase=preflight\n"
+            date -u +"detected_at=%Y-%m-%dT%H:%M:%SZ"
+          } >"$memory_exceeded_path"
+          printf "memory-exceeded\n" >"$job_dir/status"
+          finish_managed_job 137
+        fi
+      fi
+    }
+
     watch_stop_request() {
       local sid="$1"
       local stop_file="$CLASP_MANAGED_JOB_STOP_REQUEST"
@@ -494,6 +515,7 @@ setsid env \
     ulimit -c 0 >/dev/null 2>&1 || true
 
     record_runner_metadata
+    preflight_host_memory_reserve
     if [[ -n "${CLASP_MANAGED_JOB_MEMORY_MB:-}" ]]; then
       apply_virtual_memory_limit
     fi
