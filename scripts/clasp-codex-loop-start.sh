@@ -18,8 +18,8 @@ runtime_dir="$(mkdir -p "$runtime_dir" && cd "$runtime_dir" && pwd)"
 pid_file="$runtime_dir/loop.pid"
 job_file="$runtime_dir/loop.job"
 log_file="$runtime_dir/loop.log"
-memory_mb="${CLASP_CODEX_LOOP_MEMORY_MB:-10240}"
-min_available_memory_mb="${CLASP_CODEX_LOOP_MIN_AVAILABLE_MEMORY_MB:-32768}"
+memory_mb="${CLASP_CODEX_LOOP_MEMORY_MB:-8192}"
+min_available_memory_mb="${CLASP_CODEX_LOOP_MIN_AVAILABLE_MEMORY_MB:-40960}"
 
 source "$project_root/scripts/clasp-swarm-common.sh"
 

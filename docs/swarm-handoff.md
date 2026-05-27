@@ -86,7 +86,7 @@ bash scripts/verify-all.sh
 ```
 
 `verify-all` runs under the managed memory guard by default, including a 16 GiB
-job cap, a 32 GiB host memory reserve, serial native image/export settings, and
+job cap, a 40 GiB host memory reserve, serial native image/export settings, and
 a single top-level parallel job. Use `CLASP_VERIFY_MANAGED=0` only for harness
 tests that need to inspect the unwrapped script behavior.
 The managed runner also preflights the job cap plus host memory reserve before

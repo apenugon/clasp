@@ -6,8 +6,8 @@ runtime_root="$project_root/.clasp-agents"
 log_file="$runtime_root/logs/autopilot.log"
 pid_file="$runtime_root/autopilot.pid"
 job_file="$runtime_root/autopilot.job"
-memory_mb="${CLASP_AUTOPILOT_MEMORY_MB:-10240}"
-min_available_memory_mb="${CLASP_AUTOPILOT_MIN_AVAILABLE_MEMORY_MB:-32768}"
+memory_mb="${CLASP_AUTOPILOT_MEMORY_MB:-8192}"
+min_available_memory_mb="${CLASP_AUTOPILOT_MIN_AVAILABLE_MEMORY_MB:-40960}"
 
 mkdir -p "$runtime_root/logs"
 
