@@ -133,9 +133,9 @@ artifactSearchPick searchResults =
 errorText : Str -> Str
 errorText message = textConcat ["error:", message]
 
-reportContextPack : SwarmContextPack -> VerificationPlanResult -> SwarmArtifactContent -> SwarmArtifactContent -> [SwarmArtifactSearchResult] -> Str
-reportContextPack pack verificationValue artifactContent publishedArtifactContent searchResults =
-  let searchPick = artifactSearchPick searchResults in
+reportContextPack : SwarmContextPack -> VerificationPlanResult -> SwarmArtifactContent -> SwarmArtifactContent -> Str
+reportContextPack pack verificationValue artifactContent publishedArtifactContent =
+  let searchPick = artifactSearchPick pack.artifactSearchMatches in
   encode (ContextPackHarnessReport {
     taskId = pack.task.taskId,
     taskStatus = pack.task.status,
@@ -163,7 +163,7 @@ reportContextPack pack verificationValue artifactContent publishedArtifactConten
     publishedArtifactKind = publishedArtifactContent.kind,
     publishedArtifactReadBytes = publishedArtifactContent.bytesRead,
     publishedArtifactReadText = publishedArtifactContent.text,
-    artifactSearchCount = length searchResults,
+    artifactSearchCount = length pack.artifactSearchMatches,
     artifactSearchTopKind = searchPick.kind,
     artifactSearchTopScore = searchPick.score,
     artifactSearchMatchedText = searchPick.matchedText,
@@ -199,25 +199,20 @@ main =
                                         Ok publishedArtifact ->
                                           match readArtifactFrom root publishedArtifact 64 {
                                             Ok publishedArtifactContent ->
-                                              match artifactSearch repairTask "note" "ordinary clasp" 5 80 {
-                                                Ok searchResults ->
-                                                  match taskContextPack repairTask "focused compiler verifier" 10 {
-                                                    Ok pack ->
-                                                      match artifacts repairTask {
-                                                        Ok artifactValues ->
-                                                          let pick = stdoutArtifactPick artifactValues in
-                                                          if pick.found then
-                                                            match artifactRead root pick.artifactId 16 {
-                                                              Ok artifactContent ->
-                                                                reportContextPack pack verificationValue artifactContent publishedArtifactContent searchResults,
-                                                              Err message ->
-                                                                errorText message
-                                                            }
-                                                          else
-                                                            errorText "missing stdout artifact",
-                                                        Err message ->
-                                                          errorText message
-                                                      },
+                                              match taskContextPack repairTask "focused compiler verifier ordinary clasp" 10 {
+                                                Ok pack ->
+                                                  match artifacts repairTask {
+                                                    Ok artifactValues ->
+                                                      let pick = stdoutArtifactPick artifactValues in
+                                                      if pick.found then
+                                                        match artifactRead root pick.artifactId 16 {
+                                                          Ok artifactContent ->
+                                                            reportContextPack pack verificationValue artifactContent publishedArtifactContent,
+                                                          Err message ->
+                                                            errorText message
+                                                        }
+                                                      else
+                                                        errorText "missing stdout artifact",
                                                     Err message ->
                                                       errorText message
                                                   },

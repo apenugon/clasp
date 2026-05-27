@@ -5039,6 +5039,28 @@ fn json_root_value(bytes: &[u8]) -> Option<JsonSlice> {
     Some(JsonSlice { start, end })
 }
 
+fn json_hex_digit(byte: u8) -> Option<u32> {
+    match byte {
+        b'0'..=b'9' => Some((byte - b'0') as u32),
+        b'a'..=b'f' => Some((byte - b'a' + 10) as u32),
+        b'A'..=b'F' => Some((byte - b'A' + 10) as u32),
+        _ => None,
+    }
+}
+
+fn json_decode_u16_escape(bytes: &[u8], mut cursor: usize, limit: usize) -> Option<(u16, usize)> {
+    if cursor.checked_add(4)? > limit {
+        return None;
+    }
+
+    let mut value = 0u32;
+    for _ in 0..4 {
+        value = (value << 4) | json_hex_digit(*bytes.get(cursor)?)?;
+        cursor += 1;
+    }
+    Some((value as u16, cursor))
+}
+
 fn json_decode_string(bytes: &[u8], string_slice: JsonSlice) -> Option<Vec<u8>> {
     if bytes.get(string_slice.start) != Some(&b'"')
         || string_slice.end <= string_slice.start + 1
@@ -5048,8 +5070,9 @@ fn json_decode_string(bytes: &[u8], string_slice: JsonSlice) -> Option<Vec<u8>> 
     }
 
     let mut cursor = string_slice.start + 1;
+    let string_end = string_slice.end - 1;
     let mut decoded = Vec::with_capacity(string_slice.end - string_slice.start);
-    while cursor < string_slice.end - 1 {
+    while cursor < string_end {
         let mut value = bytes[cursor];
         if value == b'\\' {
             cursor += 1;
@@ -5060,6 +5083,29 @@ fn json_decode_string(bytes: &[u8], string_slice: JsonSlice) -> Option<Vec<u8>> 
                 b'n' => b'\n',
                 b'r' => b'\r',
                 b't' => b'\t',
+                b'u' => {
+                    let (unit, next_cursor) = json_decode_u16_escape(bytes, cursor + 1, string_end)?;
+                    let codepoint = if (0xD800..=0xDBFF).contains(&unit) {
+                        if bytes.get(next_cursor) != Some(&b'\\') || bytes.get(next_cursor + 1) != Some(&b'u') {
+                            return None;
+                        }
+                        let (low, after_low) = json_decode_u16_escape(bytes, next_cursor + 2, string_end)?;
+                        if !(0xDC00..=0xDFFF).contains(&low) {
+                            return None;
+                        }
+                        cursor = after_low;
+                        0x10000 + ((((unit as u32) - 0xD800) << 10) | ((low as u32) - 0xDC00))
+                    } else if (0xDC00..=0xDFFF).contains(&unit) {
+                        return None;
+                    } else {
+                        cursor = next_cursor;
+                        unit as u32
+                    };
+                    let character = char::from_u32(codepoint)?;
+                    let mut buffer = [0u8; 4];
+                    decoded.extend_from_slice(character.encode_utf8(&mut buffer).as_bytes());
+                    continue;
+                }
                 _ => return None,
             };
         }
@@ -12279,6 +12325,38 @@ mod tests {
 
     unsafe fn result_string_text(result: *mut ClaspRtResultString) -> String {
         String::from_utf8_lossy(string_bytes((*result).value)).into_owned()
+    }
+
+    #[test]
+    fn json_decode_string_supports_unicode_escapes() {
+        let text = br#""context-verifier-output\u001b]0;\u0007""#;
+        let slice = json_root_value(text).expect("expected string root");
+        let decoded = json_decode_string(text, slice).expect("expected unicode escape decode");
+
+        assert_eq!(
+            String::from_utf8(decoded).expect("expected utf8"),
+            "context-verifier-output\u{001b}]0;\u{0007}"
+        );
+    }
+
+    #[test]
+    fn json_decode_string_supports_surrogate_pairs() {
+        let text = br#""music-\uD834\uDD1E""#;
+        let slice = json_root_value(text).expect("expected string root");
+        let decoded = json_decode_string(text, slice).expect("expected surrogate pair decode");
+
+        assert_eq!(String::from_utf8(decoded).expect("expected utf8"), "music-\u{1D11E}");
+    }
+
+    #[test]
+    fn json_decode_string_rejects_invalid_surrogates() {
+        let high_only = br#""bad-\uD834""#;
+        let high_slice = json_root_value(high_only).expect("expected string root");
+        assert!(json_decode_string(high_only, high_slice).is_none());
+
+        let low_only = br#""bad-\uDD1E""#;
+        let low_slice = json_root_value(low_only).expect("expected string root");
+        assert!(json_decode_string(low_only, low_slice).is_none());
     }
 
     #[test]

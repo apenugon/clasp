@@ -148,6 +148,27 @@ plannerArtifactExcerptSection : Str -> [SwarmArtifactContent] -> Str
 plannerArtifactExcerptSection title values =
   plannerContextListSection title (map plannerContextArtifactExcerptLine values)
 
+plannerContextArtifactSearchLine : SwarmArtifactSearchResult -> Str
+plannerContextArtifactSearchLine item =
+  textConcat [
+    "- artifact#",
+    encode item.artifact.artifactId,
+    " task=",
+    item.artifact.taskId,
+    " kind=",
+    item.artifact.kind,
+    " score=",
+    encode item.score,
+    " matched=",
+    item.matchedText,
+    " excerpt=",
+    item.excerpt.text
+  ]
+
+plannerArtifactSearchSection : Str -> [SwarmArtifactSearchResult] -> Str
+plannerArtifactSearchSection title values =
+  plannerContextListSection title (map plannerContextArtifactSearchLine values)
+
 plannerContextPackQuery : Str
 plannerContextPackQuery = "planner task child loop verifier feedback benchmark evidence"
 
@@ -194,6 +215,7 @@ renderPlannerContextPack pack =
     ],
     plannerMemorySection "planner task memory matches:" pack.taskMemoryMatches,
     plannerMemorySection "objective memory matches:" pack.objectiveMemoryMatches,
+    plannerArtifactSearchSection "artifact search matches:" pack.artifactSearchMatches,
     plannerTraceSection "planner run trace:" pack.runTrace,
     plannerContextListSection "artifact paths:" pack.artifactPaths,
     plannerArtifactExcerptSection "artifact excerpts:" pack.artifactExcerpts

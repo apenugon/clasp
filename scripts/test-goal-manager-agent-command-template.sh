@@ -100,6 +100,10 @@ if [[ "$prompt" != *"Planner context pack:"* || "$prompt" != *"task: planner-1"*
   printf 'planner prompt missing native context pack\n' >&2
   exit 68
 fi
+if [[ "$prompt" != *"artifact search matches:"* ]]; then
+  printf 'planner prompt missing artifact search context\n' >&2
+  exit 69
+fi
 
 mkdir -p "$(dirname "$report_path")" "$workspace_root"
 printf '{"role":%s,"reportPath":%s,"promptPath":%s,"schemaPath":%s,"workspaceRoot":%s}\n' \

@@ -366,6 +366,27 @@ artifactExcerptPromptSection : Str -> [SwarmArtifactContent] -> Str
 artifactExcerptPromptSection title excerpts =
   promptListSection title (map artifactExcerptPromptLine excerpts)
 
+artifactSearchPromptLine : SwarmArtifactSearchResult -> Str
+artifactSearchPromptLine item =
+  textConcat [
+    "- artifact#",
+    encode item.artifact.artifactId,
+    " task=",
+    item.artifact.taskId,
+    " kind=",
+    item.artifact.kind,
+    " score=",
+    encode item.score,
+    " matched=",
+    item.matchedText,
+    " excerpt=",
+    item.excerpt.text
+  ]
+
+artifactSearchPromptSection : Str -> [SwarmArtifactSearchResult] -> Str
+artifactSearchPromptSection title matches =
+  promptListSection title (map artifactSearchPromptLine matches)
+
 renderContextPackPrompt : SwarmContextPack -> Str
 renderContextPackPrompt pack =
   textJoin "\n" [
@@ -409,6 +430,7 @@ renderContextPackPrompt pack =
     ],
     memorySearchPromptSection "task memory matches:" pack.taskMemoryMatches,
     memorySearchPromptSection "objective memory matches:" pack.objectiveMemoryMatches,
+    artifactSearchPromptSection "artifact search matches:" pack.artifactSearchMatches,
     runTracePromptSection "run trace:" pack.runTrace,
     promptListSection "artifact kinds:" pack.artifactKinds,
     promptListSection "artifact paths:" pack.artifactPaths,

@@ -426,6 +426,7 @@ assert(secondVerifier.tests_run?.includes("clasp-local-agent-task-file-prompt"),
 assert(secondBuilderPrompt.includes("Verifier feedback from the previous attempt:"), "second builder prompt should be persisted for prompt-path agents");
 assert(secondBuilderPrompt.includes("force-close-category"), "second builder prompt should include persisted verifier feedback");
 assert(secondBuilderPrompt.includes("Swarm context pack:"), "second builder prompt should include native context pack evidence");
+assert(secondBuilderPrompt.includes("artifact search matches:"), "second builder prompt should include artifact search evidence");
 assert(secondBuilderPrompt.includes("task: builder-2"), "second builder prompt should identify the builder task context");
 assert(secondBuilderPrompt.includes("verifier-feedback"), "second builder prompt should include persisted verifier feedback memory");
 assert(secondBuilderPrompt.includes("Task file content:"), "second builder prompt should include inlined task file content");
@@ -435,6 +436,7 @@ assert(
 );
 assert(secondVerifierPrompt.includes("verifier subagent"), "second verifier prompt should be persisted for prompt-path agents");
 assert(secondVerifierPrompt.includes("Swarm context pack:"), "second verifier prompt should include native context pack evidence");
+assert(secondVerifierPrompt.includes("artifact search matches:"), "second verifier prompt should include artifact search evidence");
 assert(secondVerifierPrompt.includes("task: verifier-2"), "second verifier prompt should identify the verifier task context");
 assert(secondVerifierPrompt.includes("run trace:"), "second verifier prompt should include run trace context");
 assert(secondVerifierPrompt.includes("Task file content:"), "second verifier prompt should include inlined task file content");
