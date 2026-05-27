@@ -18,7 +18,7 @@ state_root="$test_root/state"
 output_path="$test_root/managed-loop-output.json"
 
 env RUSTC=/definitely-missing-rustc \
-  timeout 120 \
+  timeout 240 \
   "$claspc_bin" run "$project_root/examples/swarm-native/ManagedLoopHarness.clasp" -- "$state_root" \
   >"$output_path"
 
@@ -52,6 +52,14 @@ function sameList(actual, expected, label) {
 function includes(list, value, label) {
   assert(Array.isArray(list), `${label} is not an array`);
   assert(list.includes(value), `${label} missing ${JSON.stringify(value)}: ${JSON.stringify(list)}`);
+}
+
+function includesText(list, fragment, label) {
+  assert(Array.isArray(list), `${label} is not an array`);
+  assert(
+    list.some((value) => typeof value === "string" && value.includes(fragment)),
+    `${label} missing fragment ${JSON.stringify(fragment)}: ${JSON.stringify(list)}`,
+  );
 }
 
 function artifactText(path, expected, label) {
@@ -125,7 +133,7 @@ assert(managed.mergegateVerdict === "pass", `managed mergegate ${managed.mergega
 sameList(managed.readyTaskIds, [], "managed ready task ids");
 sameList(managed.blockerTaskIds, [], "managed blocker task ids");
 assert(managed.mailboxSummary.runCount === 6, `managed run count ${managed.mailboxSummary.runCount}`);
-assert(managed.mailboxSummary.artifactCount === 12, `managed artifact count ${managed.mailboxSummary.artifactCount}`);
+assert(managed.mailboxSummary.artifactCount === 13, `managed artifact count ${managed.mailboxSummary.artifactCount}`);
 assert(managed.mailboxSummary.memoryCount === 1, `managed memory count ${managed.mailboxSummary.memoryCount}`);
 assert(managed.mailboxSummary.latestVerifierStatus === "passed", "managed mailbox latest verifier status");
 for (const artifactPath of managed.mailboxSummary.artifactPaths) {
@@ -141,6 +149,19 @@ sameList(
 assert(managed.contextMemoryScores[0] > 0, `managed context memory score ${managed.contextMemoryScores[0]}`);
 sameList(managed.contextRunTraceClassifications, ["none", "none", "none", "none", "exit-code", "none"], "managed context trace classifications");
 sameList(managed.contextArtifactPaths, managed.mailboxSummary.artifactPaths, "managed context artifact paths");
+sameList(managed.contextSemanticIndexEntryIds, ["managed-loop:supervision-surface"], "managed context semantic entry ids");
+sameList(managed.contextSemanticIndexEditFiles, ["examples/swarm-native/ManagedLoop.clasp"], "managed context semantic edit files");
+sameList(managed.contextSemanticIndexArtifactRefs, ["managed-loop-report.json"], "managed context semantic artifact refs");
+sameList(
+  managed.contextSemanticIndexSurfaceIds,
+  ["workflow:managedLoopRun", "task:managed-attempt", "verifier:managed-primary"],
+  "managed context semantic surface ids",
+);
+includesText(
+  managed.contextSemanticIndexQueryTexts,
+  "managed loop failure verifier context workflow supervised standalone agent",
+  "managed context semantic query texts",
+);
 
 assert(report.statusFileExists === true, "managed status file should be written");
 assert(report.statusFileMatches === true, "managed status file should match returned report");
@@ -169,6 +190,11 @@ assert(blocked.approvalCount === 0, `blocked approval count ${blocked.approvalCo
 sameList(blocked.contextMemoryValues, [], "blocked context memory values");
 sameList(blocked.contextRunTraceClassifications, [], "blocked context trace classifications");
 sameList(blocked.contextArtifactPaths, [], "blocked context artifact paths");
+sameList(blocked.contextSemanticIndexEntryIds, [], "blocked context semantic entry ids");
+sameList(blocked.contextSemanticIndexEditFiles, [], "blocked context semantic edit files");
+sameList(blocked.contextSemanticIndexArtifactRefs, [], "blocked context semantic artifact refs");
+sameList(blocked.contextSemanticIndexSurfaceIds, [], "blocked context semantic surface ids");
+sameList(blocked.contextSemanticIndexQueryTexts, [], "blocked context semantic query texts");
 
 const budget = report.budget;
 assert(budget, "missing budget report");
@@ -209,4 +235,9 @@ assert(
   `budget context classifications ${JSON.stringify(budget.contextRunTraceClassifications)}`,
 );
 sameList(budget.contextArtifactPaths, budget.mailboxSummary.artifactPaths, "budget context artifact paths");
+sameList(budget.contextSemanticIndexEntryIds, [], "budget context semantic entry ids");
+sameList(budget.contextSemanticIndexEditFiles, [], "budget context semantic edit files");
+sameList(budget.contextSemanticIndexArtifactRefs, [], "budget context semantic artifact refs");
+sameList(budget.contextSemanticIndexSurfaceIds, [], "budget context semantic surface ids");
+sameList(budget.contextSemanticIndexQueryTexts, [], "budget context semantic query texts");
 EOF

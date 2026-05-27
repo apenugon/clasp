@@ -273,7 +273,7 @@ The goal-manager fixture extends that proof to planning with [`examples/swarm-na
 
 The readiness benchmark is now an ordinary Clasp runtime probe instead of a shell wrapper around the structural ready gate. [`examples/swarm-native/SwarmReadyBenchmark.clasp`](/home/akul_medexfinance_com/clasp/examples/swarm-native/SwarmReadyBenchmark.clasp) creates a native objective/task DAG with deadlines, applies verifier and approval policy, runs native tool and verifier steps with timeouts, records native memory, drives mergegate approval, and validates the resulting context pack before emitting a `BenchmarkSignal`.
 
-The ordinary Clasp managed loop now records each failed builder/verifier attempt into native swarm memory and builds its status report from `taskContextPack`, so a standalone loop carries forward prior failure classifications, failed verifier names, trace references, and artifact paths without a Codex-specific wrapper.
+The ordinary Clasp managed loop now records each failed builder/verifier attempt into native swarm memory and builds its status report from `taskContextPack`, so a standalone loop carries forward prior failure classifications, failed verifier names, trace references, artifact paths, and semantic-index source/surface routing hints without a Codex-specific wrapper.
 
 Native watched processes now launch monitored child commands in an isolated process group when the host supports `setsid`, carry a runtime watch token in the heartbeat, and cancel the verified process group on timeout. This prevents monitored builders or verifiers from leaving nested subprocesses alive after a standalone Clasp loop stops an attempt.
 

@@ -91,6 +91,20 @@ budgetFailingBuilderCommand : SwarmCommand
 budgetFailingBuilderCommand =
   commandSpec "." ["bash", "-c", "printf budget-builder-fail; exit 7"]
 
+managedSemanticIndexEntries : [SwarmSemanticIndexEntry]
+managedSemanticIndexEntries = [
+  semanticIndexEntry
+    "managed-loop:supervision-surface"
+    "workflow"
+    ["examples/swarm-native/ManagedLoop.clasp"]
+    ["managed-loop-report.json"]
+    ["workflow:managedLoopRun", "task:managed-attempt", "verifier:managed-primary"]
+    "semanticIndex entries editFiles artifactRefs surfaceIds queryText managed loop failure verifier context workflow supervised standalone agent"
+]
+
+emptyHarnessDependencies : [Str]
+emptyHarnessDependencies = []
+
 managedSpec : ManagedLoopSpec
 managedSpec =
   ManagedLoopSpec {
@@ -192,22 +206,32 @@ main : Str
 main =
   match mkdirAll stateRootPath {
     Ok rootCreated ->
-      match managedLoopRun managedSpec {
-        Ok managedReport ->
-          match managedLoopEnsureDAG blockedSpec ["missing-parent"] {
-            Ok blockedPolicy ->
-              match managedLoopInspect blockedSpec {
-                Ok blockedReport ->
-                  match managedLoopRun budgetSpec {
-                    Ok budgetReport ->
-                      encode (ManagedLoopHarnessReport {
-                        managed = managedReport,
-                        blocked = blockedReport,
-                        budget = budgetReport,
-                        statusPath = managedStatusPath,
-                        statusFileExists = fileExists managedStatusPath,
-                        statusFileMatches = readStatusReport == encode managedReport
-                      }),
+      match managedLoopEnsureDAG managedSpec emptyHarnessDependencies {
+        Ok managedPolicy ->
+          match artifactWriteSemanticIndex (managedLoopTaskHandle managedSpec) managedSemanticIndexEntries {
+            Ok semanticArtifact ->
+              match managedLoopRun managedSpec {
+                Ok managedReport ->
+                  match managedLoopEnsureDAG blockedSpec ["missing-parent"] {
+                    Ok blockedPolicy ->
+                      match managedLoopInspect blockedSpec {
+                        Ok blockedReport ->
+                          match managedLoopRun budgetSpec {
+                            Ok budgetReport ->
+                              encode (ManagedLoopHarnessReport {
+                                managed = managedReport,
+                                blocked = blockedReport,
+                                budget = budgetReport,
+                                statusPath = managedStatusPath,
+                                statusFileExists = fileExists managedStatusPath,
+                                statusFileMatches = readStatusReport == encode managedReport
+                              }),
+                            Err message ->
+                              errorText message
+                          },
+                        Err message ->
+                          errorText message
+                      },
                     Err message ->
                       errorText message
                   },
