@@ -218,6 +218,11 @@ renderPlannerContextPack pack =
     plannerMemorySection "benchmark history matches:" pack.benchmarkMemoryMatches,
     plannerArtifactSearchSection "artifact search matches:" pack.artifactSearchMatches,
     plannerArtifactSearchSection "semantic index artifact matches:" pack.semanticArtifactMatches,
+    plannerContextListSection "semantic index entry ids:" pack.semanticIndexEntryIds,
+    plannerContextListSection "semantic index edit files:" pack.semanticIndexEditFiles,
+    plannerContextListSection "semantic index artifact refs:" pack.semanticIndexArtifactRefs,
+    plannerContextListSection "semantic index surface ids:" pack.semanticIndexSurfaceIds,
+    plannerContextListSection "semantic index query texts:" pack.semanticIndexQueryTexts,
     plannerTraceSection "planner run trace:" pack.runTrace,
     plannerContextListSection "artifact paths:" pack.artifactPaths,
     plannerArtifactExcerptSection "artifact excerpts:" pack.artifactExcerpts

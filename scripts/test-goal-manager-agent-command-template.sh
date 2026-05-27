@@ -108,6 +108,10 @@ if [[ "$prompt" != *"semantic index artifact matches:"* ]]; then
   printf 'planner prompt missing semantic index context\n' >&2
   exit 70
 fi
+if [[ "$prompt" != *"semantic index edit files:"* || "$prompt" != *"semantic index surface ids:"* ]]; then
+  printf 'planner prompt missing semantic index projection context\n' >&2
+  exit 84
+fi
 if [[ "$prompt" != *"benchmark history matches:"* ]]; then
   printf 'planner prompt missing benchmark history context\n' >&2
   exit 83

@@ -113,6 +113,15 @@ assert(
     report.semanticArtifactExcerptText.includes("queryText"),
   `semantic artifact excerpt ${JSON.stringify(report.semanticArtifactExcerptText)}`,
 );
+includes(report.semanticIndexEntryIds, "schema:LeadIntake", "semantic index entry ids");
+includes(report.semanticIndexEditFiles, "Shared/Lead.clasp", "semantic index edit files");
+includes(report.semanticIndexArtifactRefs, "benchmark-prep/Main.agent-pack.json", "semantic index artifact refs");
+includes(report.semanticIndexSurfaceIds, "route:createLeadRoute", "semantic index surface ids");
+includes(report.semanticIndexSurfaceIds, "foreign:mockLeadSummaryModel", "semantic index surface ids");
+assert(
+  report.semanticIndexQueryTexts.some((value) => value.includes("host-boundary") && value.includes("action-item")),
+  `semantic index query texts ${JSON.stringify(report.semanticIndexQueryTexts)}`,
+);
 assert(report.evidenceTaskId === "context-repair", `evidence task id ${report.evidenceTaskId}`);
 assert(
   report.evidenceQuery === "focused compiler verifier ordinary clasp",
@@ -133,6 +142,14 @@ assert(
 assert(
   report.evidenceSemanticArtifactCount === report.semanticArtifactCount,
   `evidence semantic artifact count ${report.evidenceSemanticArtifactCount} vs ${report.semanticArtifactCount}`,
+);
+assert(
+  JSON.stringify(report.evidenceSemanticIndexEntryIds) === JSON.stringify(report.semanticIndexEntryIds),
+  `evidence semantic index entry ids diverged: ${JSON.stringify(report.evidenceSemanticIndexEntryIds)} vs ${JSON.stringify(report.semanticIndexEntryIds)}`,
+);
+assert(
+  JSON.stringify(report.evidenceSemanticIndexEditFiles) === JSON.stringify(report.semanticIndexEditFiles),
+  `evidence semantic index edit files diverged: ${JSON.stringify(report.evidenceSemanticIndexEditFiles)} vs ${JSON.stringify(report.semanticIndexEditFiles)}`,
 );
 assert(
   report.evidenceArtifactExcerptCount === report.artifactExcerptCount,

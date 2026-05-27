@@ -428,6 +428,8 @@ assert(secondBuilderPrompt.includes("force-close-category"), "second builder pro
 assert(secondBuilderPrompt.includes("Swarm context pack:"), "second builder prompt should include native context pack evidence");
 assert(secondBuilderPrompt.includes("artifact search matches:"), "second builder prompt should include artifact search evidence");
 assert(secondBuilderPrompt.includes("semantic index artifact matches:"), "second builder prompt should include semantic index evidence");
+assert(secondBuilderPrompt.includes("semantic index edit files:"), "second builder prompt should include semantic edit-file evidence");
+assert(secondBuilderPrompt.includes("semantic index surface ids:"), "second builder prompt should include semantic surface evidence");
 assert(secondBuilderPrompt.includes("benchmark history matches:"), "second builder prompt should include benchmark history context");
 assert(secondBuilderPrompt.includes("task: builder-2"), "second builder prompt should identify the builder task context");
 assert(secondBuilderPrompt.includes("verifier-feedback"), "second builder prompt should include persisted verifier feedback memory");
@@ -440,6 +442,8 @@ assert(secondVerifierPrompt.includes("verifier subagent"), "second verifier prom
 assert(secondVerifierPrompt.includes("Swarm context pack:"), "second verifier prompt should include native context pack evidence");
 assert(secondVerifierPrompt.includes("artifact search matches:"), "second verifier prompt should include artifact search evidence");
 assert(secondVerifierPrompt.includes("semantic index artifact matches:"), "second verifier prompt should include semantic index evidence");
+assert(secondVerifierPrompt.includes("semantic index edit files:"), "second verifier prompt should include semantic edit-file evidence");
+assert(secondVerifierPrompt.includes("semantic index surface ids:"), "second verifier prompt should include semantic surface evidence");
 assert(secondVerifierPrompt.includes("benchmark history matches:"), "second verifier prompt should include benchmark history context");
 assert(secondVerifierPrompt.includes("task: verifier-2"), "second verifier prompt should identify the verifier task context");
 assert(secondVerifierPrompt.includes("run trace:"), "second verifier prompt should include run trace context");

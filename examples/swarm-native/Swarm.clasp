@@ -330,6 +330,12 @@ record SwarmContextPack = {
   artifactSearchScores : [Int],
   semanticArtifactMatchedText : [Str],
   semanticArtifactScores : [Int],
+  semanticIndexEntries : [SwarmSemanticIndexEntry],
+  semanticIndexEntryIds : [Str],
+  semanticIndexEditFiles : [Str],
+  semanticIndexArtifactRefs : [Str],
+  semanticIndexSurfaceIds : [Str],
+  semanticIndexQueryTexts : [Str],
   runTrace : [VerificationTraceEntry],
   artifactKinds : [Str],
   artifactPaths : [Str],
@@ -355,6 +361,12 @@ record SwarmEvidencePack = {
   artifactSearchScores : [Int],
   semanticArtifactMatchedText : [Str],
   semanticArtifactScores : [Int],
+  semanticIndexEntries : [SwarmSemanticIndexEntry],
+  semanticIndexEntryIds : [Str],
+  semanticIndexEditFiles : [Str],
+  semanticIndexArtifactRefs : [Str],
+  semanticIndexSurfaceIds : [Str],
+  semanticIndexQueryTexts : [Str],
   runTrace : [VerificationTraceEntry],
   artifactKinds : [Str],
   artifactPaths : [Str],
@@ -909,6 +921,54 @@ semanticArtifactSearch : TaskHandle -> Str -> Int -> Int -> Result [SwarmArtifac
 semanticArtifactSearch handle query limit maxBytes =
   artifactSearch handle semanticIndexArtifactKind query limit maxBytes
 
+emptySwarmSemanticIndexEntries : [SwarmSemanticIndexEntry]
+emptySwarmSemanticIndexEntries = []
+
+emptySwarmTexts : [Str]
+emptySwarmTexts = []
+
+semanticIndexSearchResultEntries : SwarmArtifactSearchResult -> [SwarmSemanticIndexEntry]
+semanticIndexSearchResultEntries result =
+  (decode SwarmSemanticIndexArtifact result.excerpt.text).semanticIndex.entries
+
+appendSemanticIndexSearchResultEntries : [SwarmSemanticIndexEntry] -> SwarmArtifactSearchResult -> [SwarmSemanticIndexEntry]
+appendSemanticIndexSearchResultEntries entries result =
+  append entries (semanticIndexSearchResultEntries result)
+
+semanticIndexEntriesFromSearchResults : [SwarmArtifactSearchResult] -> [SwarmSemanticIndexEntry]
+semanticIndexEntriesFromSearchResults results =
+  fold appendSemanticIndexSearchResultEntries emptySwarmSemanticIndexEntries results
+
+semanticIndexEntryId : SwarmSemanticIndexEntry -> Str
+semanticIndexEntryId entry = entry.id
+
+semanticIndexEntryQueryText : SwarmSemanticIndexEntry -> Str
+semanticIndexEntryQueryText entry = entry.queryText
+
+appendSemanticIndexEntryEditFiles : [Str] -> SwarmSemanticIndexEntry -> [Str]
+appendSemanticIndexEntryEditFiles values entry =
+  append values entry.editFiles
+
+appendSemanticIndexEntryArtifactRefs : [Str] -> SwarmSemanticIndexEntry -> [Str]
+appendSemanticIndexEntryArtifactRefs values entry =
+  append values entry.artifactRefs
+
+appendSemanticIndexEntrySurfaceIds : [Str] -> SwarmSemanticIndexEntry -> [Str]
+appendSemanticIndexEntrySurfaceIds values entry =
+  append values entry.surfaceIds
+
+semanticIndexEntryEditFiles : [SwarmSemanticIndexEntry] -> [Str]
+semanticIndexEntryEditFiles entries =
+  fold appendSemanticIndexEntryEditFiles emptySwarmTexts entries
+
+semanticIndexEntryArtifactRefs : [SwarmSemanticIndexEntry] -> [Str]
+semanticIndexEntryArtifactRefs entries =
+  fold appendSemanticIndexEntryArtifactRefs emptySwarmTexts entries
+
+semanticIndexEntrySurfaceIds : [SwarmSemanticIndexEntry] -> [Str]
+semanticIndexEntrySurfaceIds entries =
+  fold appendSemanticIndexEntrySurfaceIds emptySwarmTexts entries
+
 readArtifactFrom : SwarmRoot -> SwarmArtifact -> Int -> Result SwarmArtifactContent
 readArtifactFrom root artifact maxBytes =
   artifactRead root artifact.artifactId maxBytes
@@ -1091,6 +1151,7 @@ taskEvidencePack handle query limit =
                                 Ok artifactContentValues ->
                                   let memoryMatches = append taskMemoryMatchesValue objectiveMemoryMatchesValue in
                                   let mailboxSummary = verificationPlanMailboxSummary mailboxValue in
+                                  let semanticIndexEntriesValue = semanticIndexEntriesFromSearchResults semanticSearchResultsValue in
                                   Ok (SwarmEvidencePack {
                                     task = taskValue,
                                     query = query,
@@ -1110,6 +1171,12 @@ taskEvidencePack handle query limit =
                                     artifactSearchScores = map artifactSearchResultScore searchResultsValue,
                                     semanticArtifactMatchedText = map artifactSearchResultMatchedText semanticSearchResultsValue,
                                     semanticArtifactScores = map artifactSearchResultScore semanticSearchResultsValue,
+                                    semanticIndexEntries = semanticIndexEntriesValue,
+                                    semanticIndexEntryIds = map semanticIndexEntryId semanticIndexEntriesValue,
+                                    semanticIndexEditFiles = semanticIndexEntryEditFiles semanticIndexEntriesValue,
+                                    semanticIndexArtifactRefs = semanticIndexEntryArtifactRefs semanticIndexEntriesValue,
+                                    semanticIndexSurfaceIds = semanticIndexEntrySurfaceIds semanticIndexEntriesValue,
+                                    semanticIndexQueryTexts = map semanticIndexEntryQueryText semanticIndexEntriesValue,
                                     runTrace = map runTraceEntry mailboxValue.runs,
                                     artifactKinds = mailboxSummary.artifactKinds,
                                     artifactPaths = mailboxSummary.artifactPaths,
@@ -1162,6 +1229,12 @@ contextPackFromEvidence evidence readyTasks managerActionValue =
     artifactSearchScores = evidence.artifactSearchScores,
     semanticArtifactMatchedText = evidence.semanticArtifactMatchedText,
     semanticArtifactScores = evidence.semanticArtifactScores,
+    semanticIndexEntries = evidence.semanticIndexEntries,
+    semanticIndexEntryIds = evidence.semanticIndexEntryIds,
+    semanticIndexEditFiles = evidence.semanticIndexEditFiles,
+    semanticIndexArtifactRefs = evidence.semanticIndexArtifactRefs,
+    semanticIndexSurfaceIds = evidence.semanticIndexSurfaceIds,
+    semanticIndexQueryTexts = evidence.semanticIndexQueryTexts,
     runTrace = evidence.runTrace,
     artifactKinds = evidence.artifactKinds,
     artifactPaths = evidence.artifactPaths,
