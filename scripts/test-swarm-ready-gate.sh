@@ -23,7 +23,7 @@ reject_pattern() {
   fi
 }
 
-bash -n "$project_root/scripts/test-native-claspc.sh" "$project_root/scripts/test-native-claspc-smoke.sh" "$project_root/scripts/test-int-builtins.sh" "$project_root/scripts/test-dict-builtins.sh" "$project_root/scripts/test-native-runtime-smoke.sh" "$project_root/scripts/test-verify-all-smoke.sh" "$project_root/scripts/test-agent-command-template.sh" "$project_root/scripts/test-goal-manager-agent-command-template.sh" "$project_root/scripts/test-goal-manager-default-planner-command.sh" "$project_root/scripts/test-swarm-ready-benchmark.sh" "$project_root/scripts/test-swarm-memory.sh" "$project_root/scripts/test-swarm-context-pack.sh" "$project_root/benchmarks/test-benchmark-prep-cache.sh"
+bash -n "$project_root/scripts/test-native-claspc.sh" "$project_root/scripts/test-native-claspc-smoke.sh" "$project_root/scripts/test-int-builtins.sh" "$project_root/scripts/test-dict-builtins.sh" "$project_root/scripts/test-native-runtime-smoke.sh" "$project_root/scripts/test-verify-all-smoke.sh" "$project_root/scripts/test-agent-command-template.sh" "$project_root/scripts/test-goal-manager-agent-command-template.sh" "$project_root/scripts/test-goal-manager-default-planner-command.sh" "$project_root/scripts/test-swarm-ready-benchmark.sh" "$project_root/scripts/test-swarm-memory.sh" "$project_root/scripts/test-swarm-context-pack.sh" "$project_root/scripts/test-swarm-semantic-summary-index.sh" "$project_root/benchmarks/test-benchmark-prep-cache.sh"
 bash -n "$project_root/scripts/test-goal-manager-planner-report-decode.sh"
 bash -n "$project_root/examples/swarm-kernel/scripts/verify.sh"
 node "$project_root/scripts/check-promoted-native-image-exports.mjs" >/dev/null
@@ -64,6 +64,9 @@ require_pattern "scripts/verify-affected.mjs" 'bash scripts/test-swarm-ready-ben
 require_pattern "scripts/verify-all.sh" 'bash scripts/test-swarm-context-pack.sh'
 require_pattern "scripts/verify-fast.sh" 'bash scripts/test-swarm-context-pack.sh'
 require_pattern "scripts/verify-affected.mjs" 'bash scripts/test-swarm-context-pack.sh'
+require_pattern "scripts/verify-all.sh" 'bash scripts/test-swarm-semantic-summary-index.sh'
+require_pattern "scripts/verify-fast.sh" 'bash scripts/test-swarm-semantic-summary-index.sh'
+require_pattern "scripts/verify-affected.mjs" 'bash scripts/test-swarm-semantic-summary-index.sh'
 require_pattern "examples/swarm-native/Swarm.clasp" 'memoryPut : SwarmRoot -> Str -> Str -> Str -> Str -> Str -> Result SwarmMemory'
 require_pattern "examples/swarm-native/Swarm.clasp" 'memorySearch : SwarmRoot -> Str -> Str -> Str -> Int -> Result [SwarmMemorySearchResult]'
 require_pattern "examples/swarm-native/Swarm.clasp" 'record SwarmArtifactContent ='
@@ -87,6 +90,13 @@ require_pattern "examples/swarm-native/Swarm.clasp" 'semanticIndexEditFiles : [S
 require_pattern "examples/swarm-native/Swarm.clasp" 'semanticIndexSurfaceIds : [Str]'
 require_pattern "examples/swarm-native/Swarm.clasp" 'semanticIndexArtifactText : [SwarmSemanticIndexEntry] -> Str'
 require_pattern "examples/swarm-native/Swarm.clasp" 'artifactWriteSemanticIndex : TaskHandle -> [SwarmSemanticIndexEntry] -> Result SwarmArtifact'
+require_pattern "examples/swarm-native/Swarm.clasp" 'semanticIndexEntriesFromSearchResultsRoot'
+require_pattern "examples/swarm-native/Swarm.clasp" 'contextPackSemanticIndexReadBytes'
+require_pattern "examples/swarm-native/SemanticSummaryIndex.clasp" 'record SwarmSemanticSummary'
+require_pattern "examples/swarm-native/SemanticSummaryIndex.clasp" 'record SwarmSemanticSummaryModule'
+require_pattern "examples/swarm-native/SemanticSummaryIndex.clasp" 'record SwarmSemanticSummaryDefinition'
+require_pattern "examples/swarm-native/SemanticSummaryIndex.clasp" 'semanticSummaryIndexEntries : Str -> Str -> [SwarmSemanticIndexEntry]'
+require_pattern "examples/swarm-native/SemanticSummaryIndex.clasp" 'artifactWriteSemanticSummaryIndex : TaskHandle -> Str -> Str -> Result SwarmArtifact'
 require_pattern "examples/swarm-native/Swarm.clasp" 'semanticArtifactSearch : TaskHandle -> Str -> Int -> Int -> Result [SwarmArtifactSearchResult]'
 require_pattern "examples/swarm-native/Swarm.clasp" 'semanticIndexEntriesFromSearchResults'
 require_pattern "examples/swarm-native/Swarm.clasp" 'taskContextPack : TaskHandle -> Str -> Int -> Result SwarmContextPack'
@@ -139,6 +149,8 @@ require_pattern "examples/swarm-native/ContextPackHarness.clasp" 'pack.semanticA
 require_pattern "examples/swarm-native/ContextPackHarness.clasp" 'pack.benchmarkMemoryMatches'
 require_pattern "examples/swarm-native/ContextPackHarness.clasp" 'artifactRead root pick.artifactId 16'
 require_pattern "examples/swarm-native/ContextPackHarness.clasp" 'artifactExcerptTexts = map artifactExcerptText pack.artifactExcerpts'
+require_pattern "examples/swarm-native/SemanticSummaryIndexHarness.clasp" 'artifactWriteSemanticSummaryIndex indexTask summaryPath summaryText'
+require_pattern "examples/swarm-native/SemanticSummaryIndexHarness.clasp" 'taskContextPack indexTask'
 require_pattern "scripts/test-swarm-context-pack.sh" 'artifact read should report truncation'
 require_pattern "scripts/test-swarm-context-pack.sh" 'context-verifier-warning'
 require_pattern "scripts/test-swarm-context-pack.sh" 'published context artifact from ordinary clasp'
@@ -147,6 +159,9 @@ require_pattern "scripts/test-swarm-context-pack.sh" 'semantic artifact top kind
 require_pattern "scripts/test-swarm-context-pack.sh" 'benchmark history count'
 require_pattern "scripts/test-swarm-context-pack.sh" 'evidence memory values diverged'
 require_pattern "scripts/test-swarm-context-pack.sh" 'evidence artifact search count'
+require_pattern "scripts/test-swarm-semantic-summary-index.sh" '--json semantic'
+require_pattern "scripts/test-swarm-semantic-summary-index.sh" 'SemanticSummaryIndexHarness.clasp'
+require_pattern "scripts/test-swarm-semantic-summary-index.sh" 'swarm-semantic-summary-index-ok'
 require_pattern "examples/swarm-native/ManagedLoop.clasp" 'managedLoopRecordFailureMemory'
 require_pattern "examples/swarm-native/ManagedLoop.clasp" 'taskContextPack (managedLoopTaskHandle spec) "managed loop failure verifier context"'
 require_pattern "examples/swarm-native/ManagedLoop.clasp" 'runToolStepWithOptionalLimits'

@@ -257,6 +257,7 @@ const COMMANDS = {
   swarmReadyBenchmark: "bash scripts/test-swarm-ready-benchmark.sh",
   swarmMemory: "bash scripts/test-swarm-memory.sh",
   swarmContextPack: "bash scripts/test-swarm-context-pack.sh",
+  swarmSemanticSummaryIndex: "bash scripts/test-swarm-semantic-summary-index.sh",
   agentCommandTemplate: "bash scripts/test-agent-command-template.sh",
   monitoredLoop: "bash scripts/test-monitored-loop.sh",
   monitoredStep: "bash scripts/test-monitored-step.sh",
@@ -798,9 +799,12 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
     const isSwarmContextPackPath =
       file === "examples/swarm-native/Swarm.clasp" ||
       file === "examples/swarm-native/ContextPackHarness.clasp" ||
+      file === "examples/swarm-native/SemanticSummaryIndex.clasp" ||
+      file === "examples/swarm-native/SemanticSummaryIndexHarness.clasp" ||
       file === "docs/autonomous-swarm-runtime-requirements.md" ||
       file === "docs/autonomous-swarm-near-term-roadmap.md" ||
-      file === "scripts/test-swarm-context-pack.sh";
+      file === "scripts/test-swarm-context-pack.sh" ||
+      file === "scripts/test-swarm-semantic-summary-index.sh";
     const isSwarmFeedbackLoopProgramPath =
       file === "examples/swarm-native/FeedbackLoop.clasp" ||
       file === "examples/swarm-native/AttemptLoop.clasp" ||
@@ -926,6 +930,13 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
         "swarm-context-pack",
         COMMANDS.swarmContextPack,
         "swarm context-pack path",
+        file,
+      );
+      addSelected(
+        selectedByCommand,
+        "swarm-semantic-summary-index",
+        COMMANDS.swarmSemanticSummaryIndex,
+        "swarm semantic-summary index path",
         file,
       );
     }

@@ -1,0 +1,175 @@
+module SemanticSummaryIndex
+
+import Swarm
+
+record SwarmSemanticSummaryModule = {
+  module : Str,
+  moduleId : Str,
+  sourceId : Str,
+  role : Str,
+  file : Str,
+  sourceFingerprint : Str,
+  imports : [Str],
+  declaredSurfaces : [Str],
+  affectedSurfaces : [Str],
+  affectedRoutes : [Str],
+  affectedSchemas : [Str],
+  affectedForeignBoundaries : [Str]
+}
+
+record SwarmSemanticSummaryDefinition = {
+  id : Str,
+  kind : Str,
+  name : Str,
+  module : Str,
+  file : Str,
+  typeSummary : Str
+}
+
+record SwarmSemanticSummary = {
+  format : Str,
+  status : Str,
+  input : Str,
+  modules : [SwarmSemanticSummaryModule],
+  definitions : [SwarmSemanticSummaryDefinition]
+}
+
+record SemanticSummaryTextSearch = {
+  wanted : Str,
+  found : Bool
+}
+
+emptySemanticSummaryTexts : [Str]
+emptySemanticSummaryTexts = []
+
+semanticSummaryTextSearchStep : SemanticSummaryTextSearch -> Str -> SemanticSummaryTextSearch
+semanticSummaryTextSearchStep state value =
+  if state.found then
+    state
+  else
+    SemanticSummaryTextSearch { wanted = state.wanted, found = value == state.wanted }
+
+semanticSummaryTextListHas : Str -> [Str] -> Bool
+semanticSummaryTextListHas wanted values =
+  (fold semanticSummaryTextSearchStep (SemanticSummaryTextSearch { wanted = wanted, found = false }) values).found
+
+semanticSummaryAppendUniqueText : [Str] -> Str -> [Str]
+semanticSummaryAppendUniqueText values value =
+  if value == "" then
+    values
+  else if semanticSummaryTextListHas value values then
+    values
+  else
+    append values [value]
+
+semanticSummaryAppendUniqueTexts : [Str] -> [Str] -> [Str]
+semanticSummaryAppendUniqueTexts values additions = {
+  let mut rendered = values;
+  for value in additions {
+    rendered = semanticSummaryAppendUniqueText rendered value;
+    rendered
+  };
+  rendered
+}
+
+semanticSummaryTextListWhenPresent : Str -> [Str]
+semanticSummaryTextListWhenPresent value =
+  if value == "" then
+    emptySemanticSummaryTexts
+  else
+    [value]
+
+semanticSummaryStandardQueryTokens : Str
+semanticSummaryStandardQueryTokens = "semanticIndex entries editFiles artifactRefs surfaceIds queryText semantic-summary route schema host-boundary action-item compiler-owned"
+
+semanticSummaryModuleSurfaceIds : SwarmSemanticSummaryModule -> [Str]
+semanticSummaryModuleSurfaceIds moduleInfo = {
+  let mut surfaceIds = emptySemanticSummaryTexts;
+  surfaceIds = semanticSummaryAppendUniqueTexts surfaceIds moduleInfo.declaredSurfaces;
+  surfaceIds = semanticSummaryAppendUniqueTexts surfaceIds moduleInfo.affectedSurfaces;
+  surfaceIds = semanticSummaryAppendUniqueTexts surfaceIds moduleInfo.affectedRoutes;
+  surfaceIds = semanticSummaryAppendUniqueTexts surfaceIds moduleInfo.affectedSchemas;
+  surfaceIds = semanticSummaryAppendUniqueTexts surfaceIds moduleInfo.affectedForeignBoundaries;
+  surfaceIds
+}
+
+semanticSummaryModuleQueryText : SwarmSemanticSummaryModule -> Str
+semanticSummaryModuleQueryText moduleInfo =
+  textJoin " " [
+    semanticSummaryStandardQueryTokens,
+    "module",
+    moduleInfo.module,
+    moduleInfo.moduleId,
+    moduleInfo.sourceId,
+    moduleInfo.role,
+    moduleInfo.file,
+    moduleInfo.sourceFingerprint,
+    textJoin " " moduleInfo.imports,
+    textJoin " " moduleInfo.declaredSurfaces,
+    textJoin " " moduleInfo.affectedSurfaces,
+    textJoin " " moduleInfo.affectedRoutes,
+    textJoin " " moduleInfo.affectedSchemas,
+    textJoin " " moduleInfo.affectedForeignBoundaries
+  ]
+
+semanticSummaryModuleIndexEntry : Str -> SwarmSemanticSummaryModule -> SwarmSemanticIndexEntry
+semanticSummaryModuleIndexEntry artifactRef moduleInfo =
+  semanticIndexEntry
+    moduleInfo.sourceId
+    "module"
+    (semanticSummaryTextListWhenPresent moduleInfo.file)
+    (semanticSummaryTextListWhenPresent artifactRef)
+    (semanticSummaryModuleSurfaceIds moduleInfo)
+    (semanticSummaryModuleQueryText moduleInfo)
+
+semanticSummaryDefinitionQueryText : SwarmSemanticSummaryDefinition -> Str
+semanticSummaryDefinitionQueryText definition =
+  textJoin " " [
+    semanticSummaryStandardQueryTokens,
+    "definition",
+    definition.id,
+    definition.kind,
+    definition.name,
+    definition.module,
+    definition.file,
+    definition.typeSummary
+  ]
+
+semanticSummaryDefinitionIndexEntry : Str -> SwarmSemanticSummaryDefinition -> SwarmSemanticIndexEntry
+semanticSummaryDefinitionIndexEntry artifactRef definition =
+  semanticIndexEntry
+    definition.id
+    definition.kind
+    (semanticSummaryTextListWhenPresent definition.file)
+    (semanticSummaryTextListWhenPresent artifactRef)
+    (semanticSummaryTextListWhenPresent definition.id)
+    (semanticSummaryDefinitionQueryText definition)
+
+semanticSummaryIndexEntriesFromSummary : Str -> SwarmSemanticSummary -> [SwarmSemanticIndexEntry]
+semanticSummaryIndexEntriesFromSummary artifactRef summary = {
+  let effectiveArtifactRef = if artifactRef == "" then summary.input else artifactRef;
+  let mut entries = emptySwarmSemanticIndexEntries;
+  if summary.format == "clasp-semantic-summary-v1" then
+    if summary.status == "ok" then {
+      for moduleInfo in summary.modules {
+        entries = append entries [semanticSummaryModuleIndexEntry effectiveArtifactRef moduleInfo];
+        entries
+      };
+      for definition in summary.definitions {
+        entries = append entries [semanticSummaryDefinitionIndexEntry effectiveArtifactRef definition];
+        entries
+      };
+      entries
+    } else
+      entries
+  else
+    entries
+}
+
+semanticSummaryIndexEntries : Str -> Str -> [SwarmSemanticIndexEntry]
+semanticSummaryIndexEntries artifactRef summaryText =
+  semanticSummaryIndexEntriesFromSummary artifactRef (decode SwarmSemanticSummary summaryText)
+
+artifactWriteSemanticSummaryIndex : TaskHandle -> Str -> Str -> Result SwarmArtifact
+artifactWriteSemanticSummaryIndex handle artifactRef summaryText =
+  artifactWriteSemanticIndex handle (semanticSummaryIndexEntries artifactRef summaryText)

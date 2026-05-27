@@ -66,6 +66,7 @@ bash scripts/test-swarm-ready-gate.sh
 bash scripts/test-swarm-ready-benchmark.sh
 bash scripts/test-swarm-memory.sh
 bash scripts/test-swarm-context-pack.sh
+bash scripts/test-swarm-semantic-summary-index.sh
 bash scripts/test-swarm-native-managed-loop.sh
 bash scripts/test-swarm-native-feedback-loop.sh
 bash scripts/test-monitored-loop.sh
@@ -121,6 +122,7 @@ bash scripts/test-promoted-source-export-cache.sh
 bash scripts/test-record-update-parity.sh
 bash scripts/test-managed-job.sh
 bash scripts/test-dict-builtins.sh
+bash scripts/test-swarm-semantic-summary-index.sh
 bash examples/agent-metadata/scripts/verify.sh
 bash examples/agent-task-scenario/scripts/verify.sh
 bash examples/agent-loop-scenario/scripts/verify.sh

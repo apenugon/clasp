@@ -931,6 +931,13 @@ semanticIndexSearchResultEntries : SwarmArtifactSearchResult -> [SwarmSemanticIn
 semanticIndexSearchResultEntries result =
   (decode SwarmSemanticIndexArtifact result.excerpt.text).semanticIndex.entries
 
+semanticIndexArtifactContentEntries : SwarmArtifactContent -> [SwarmSemanticIndexEntry]
+semanticIndexArtifactContentEntries content =
+  if content.truncated then
+    emptySwarmSemanticIndexEntries
+  else
+    (decode SwarmSemanticIndexArtifact content.text).semanticIndex.entries
+
 appendSemanticIndexSearchResultEntries : [SwarmSemanticIndexEntry] -> SwarmArtifactSearchResult -> [SwarmSemanticIndexEntry]
 appendSemanticIndexSearchResultEntries entries result =
   append entries (semanticIndexSearchResultEntries result)
@@ -938,6 +945,25 @@ appendSemanticIndexSearchResultEntries entries result =
 semanticIndexEntriesFromSearchResults : [SwarmArtifactSearchResult] -> [SwarmSemanticIndexEntry]
 semanticIndexEntriesFromSearchResults results =
   fold appendSemanticIndexSearchResultEntries emptySwarmSemanticIndexEntries results
+
+semanticIndexEntriesFromSearchResultsRoot : SwarmRoot -> [SwarmArtifactSearchResult] -> [SwarmSemanticIndexEntry]
+semanticIndexEntriesFromSearchResultsRoot root results = {
+  let mut entries = emptySwarmSemanticIndexEntries;
+  for result in results {
+    match artifactRead root result.artifact.artifactId contextPackSemanticIndexReadBytes {
+      Ok content ->
+        if content.truncated then
+          entries
+        else {
+          entries = append entries (semanticIndexArtifactContentEntries content);
+          entries
+        },
+      Err message ->
+        entries
+    }
+  };
+  entries
+}
 
 semanticIndexEntryId : SwarmSemanticIndexEntry -> Str
 semanticIndexEntryId entry = entry.id
@@ -1147,11 +1173,11 @@ taskEvidencePack handle query limit =
                         Ok searchResultsValue ->
                           match semanticArtifactSearch handle contextPackSemanticIndexQuery limit contextPackArtifactReadBytes {
                             Ok semanticSearchResultsValue ->
+                              let semanticIndexEntriesValue = semanticIndexEntriesFromSearchResultsRoot handle.root semanticSearchResultsValue in
                               match readArtifactContents handle.root mailboxValue.artifacts contextPackArtifactReadBytes limit {
                                 Ok artifactContentValues ->
                                   let memoryMatches = append taskMemoryMatchesValue objectiveMemoryMatchesValue in
                                   let mailboxSummary = verificationPlanMailboxSummary mailboxValue in
-                                  let semanticIndexEntriesValue = semanticIndexEntriesFromSearchResults semanticSearchResultsValue in
                                   Ok (SwarmEvidencePack {
                                     task = taskValue,
                                     query = query,
@@ -1476,6 +1502,9 @@ emptyArtifactContents = []
 
 contextPackArtifactReadBytes : Int
 contextPackArtifactReadBytes = 4096
+
+contextPackSemanticIndexReadBytes : Int
+contextPackSemanticIndexReadBytes = 65536
 
 contextPackSemanticIndexQuery : Str
 contextPackSemanticIndexQuery = "semanticIndex entries editFiles artifactRefs surfaceIds queryText route schema host-boundary action-item"

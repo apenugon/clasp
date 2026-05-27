@@ -176,6 +176,7 @@ The implemented native primitives now include:
 - native artifact capture for tool and verifier runs
 - bounded native artifact search over stored task evidence
 - dedicated context-pack semantic-index artifact search over compiler-owned `semanticIndex.entries`
+- ordinary Clasp conversion from `claspc semantic` summary artifacts into typed swarm semantic-index artifacts
 - objective-scoped benchmark result recording and context-pack benchmark history
 - native mergegate decisions over stored verifier runs
 
@@ -234,7 +235,7 @@ The native `claspc swarm` control plane now also proves:
 The repo now has a supervised single-node ordinary-program path over the durable store. The remaining expansion work is:
 
 1. Native workflow and supervision runtime.
-2. Higher-level artifact indexing/search beyond the reusable `taskEvidencePack` retrieval surface. The first typed ordinary-Clasp publication API now exists for semantic index artifacts, and context packs project those entries into direct edit-file, artifact-ref, and surface-id fields, but embedding-backed indexing and richer graph-aware search remain open.
+2. Higher-level artifact indexing/search beyond the reusable `taskEvidencePack` retrieval surface. The typed ordinary-Clasp publication API now covers both hand-authored semantic index entries and compiler-owned `claspc semantic` summaries, and context packs project those entries into direct edit-file, artifact-ref, and surface-id fields, but embedding-backed indexing and richer graph-aware search remain open.
 3. Manager chat and higher-level objective steering over the native control plane.
 4. Benchmark-specialized optimizer loop for `AppBench`.
 

@@ -1,0 +1,106 @@
+module Main
+
+import Swarm
+import SemanticSummaryIndex
+
+record SemanticSummaryIndexHarnessReport = {
+  summaryFormat : Str,
+  summaryStatus : Str,
+  summaryInput : Str,
+  generatedEntryCount : Int,
+  generatedEntryIds : [Str],
+  generatedEditFiles : [Str],
+  generatedArtifactRefs : [Str],
+  generatedSurfaceIds : [Str],
+  generatedQueryTexts : [Str],
+  contextSemanticArtifactCount : Int,
+  contextSemanticIndexEntryIds : [Str],
+  contextSemanticIndexEditFiles : [Str],
+  contextSemanticIndexArtifactRefs : [Str],
+  contextSemanticIndexSurfaceIds : [Str],
+  contextSemanticIndexQueryTexts : [Str]
+}
+
+stateRootPath : Str
+stateRootPath =
+  if textJoin "" argv == "" then
+    "swarm-native-semantic-summary-index-state"
+  else
+    pathJoin argv
+
+summaryPath : Str
+summaryPath = match envVar "CLASP_SEMANTIC_SUMMARY_PATH" {
+  Ok value -> value,
+  Err message -> ""
+}
+
+root : SwarmRoot
+root = swarmRoot stateRootPath
+
+objective : ObjectiveHandle
+objective = objectiveHandle root "semantic-summary-index-objective"
+
+indexTask : TaskHandle
+indexTask = taskHandle root "semantic-summary-index-task" "semantic-indexer"
+
+errorText : Str -> Str
+errorText message = textConcat ["error:", message]
+
+reportSummaryIndex : Str -> SwarmSemanticSummary -> [SwarmSemanticIndexEntry] -> SwarmContextPack -> Str
+reportSummaryIndex artifactRef summary entries pack =
+  encode (SemanticSummaryIndexHarnessReport {
+    summaryFormat = summary.format,
+    summaryStatus = summary.status,
+    summaryInput = summary.input,
+    generatedEntryCount = length entries,
+    generatedEntryIds = map semanticIndexEntryId entries,
+    generatedEditFiles = semanticIndexEntryEditFiles entries,
+    generatedArtifactRefs = semanticIndexEntryArtifactRefs entries,
+    generatedSurfaceIds = semanticIndexEntrySurfaceIds entries,
+    generatedQueryTexts = map semanticIndexEntryQueryText entries,
+    contextSemanticArtifactCount = length pack.semanticArtifactMatches,
+    contextSemanticIndexEntryIds = pack.semanticIndexEntryIds,
+    contextSemanticIndexEditFiles = pack.semanticIndexEditFiles,
+    contextSemanticIndexArtifactRefs = pack.semanticIndexArtifactRefs,
+    contextSemanticIndexSurfaceIds = pack.semanticIndexSurfaceIds,
+    contextSemanticIndexQueryTexts = pack.semanticIndexQueryTexts
+  })
+
+main : Str
+main =
+  if summaryPath == "" then
+    errorText "missing CLASP_SEMANTIC_SUMMARY_PATH"
+  else
+    match readFile summaryPath {
+      Ok summaryText ->
+        let summary = decode SwarmSemanticSummary summaryText in
+        let entries = semanticSummaryIndexEntries summaryPath summaryText in
+        match mkdirAll stateRootPath {
+          Ok rootCreated ->
+            match objectiveCreate root objective.objectiveId "Publish compiler semantic summary entries into swarm context." 1 4 {
+              Ok objectiveValue ->
+                match taskCreate objective indexTask.taskId "Publish semantic summary index artifact." [] 2 60000 {
+                  Ok taskValue ->
+                    match artifactWriteSemanticSummaryIndex indexTask summaryPath summaryText {
+                      Ok artifactValue ->
+                        match taskContextPack indexTask "LeadIntake createLeadRoute mockLeadSummaryModel workflow tool schema route" 20 {
+                          Ok pack ->
+                            reportSummaryIndex summaryPath summary entries pack,
+                          Err message ->
+                            errorText message
+                        },
+                      Err message ->
+                        errorText message
+                    },
+                  Err message ->
+                    errorText message
+                },
+              Err message ->
+                errorText message
+            },
+          Err message ->
+            errorText message
+        },
+      Err message ->
+        errorText message
+    }
