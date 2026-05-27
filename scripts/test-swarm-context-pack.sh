@@ -47,10 +47,24 @@ assert(report.verificationPassed === false, "verification should fail to prove f
 includes(report.failedVerifiers, "context-pack-fail", "failed verifiers");
 assert(report.taskMemoryCount === 1, `task memory count ${report.taskMemoryCount}`);
 assert(report.objectiveMemoryCount === 1, `objective memory count ${report.objectiveMemoryCount}`);
+assert(report.benchmarkHistoryCount === 1, `benchmark history count ${report.benchmarkHistoryCount}`);
 assert(report.memoryValues[0] === "task focused compiler verifier should inspect local evidence", "task memory should be first");
 includes(report.memoryValues, "objective focused compiler verifier lesson", "memory values");
 assert(report.memoryScores[0] > 0, `first memory score ${report.memoryScores[0]}`);
 includes(report.memoryMatchedText, "task focused compiler verifier should inspect local evidence", "matched text");
+assert(
+  report.benchmarkValues.some((value) => value.includes('"suite":"context-pack-benchmark"')),
+  `benchmark values missing suite: ${JSON.stringify(report.benchmarkValues)}`,
+);
+assert(
+  report.benchmarkValues.some((value) => value.includes('"scoreValue":9') && value.includes('"targetValue":10')),
+  `benchmark values missing score and target: ${JSON.stringify(report.benchmarkValues)}`,
+);
+assert(report.benchmarkScores[0] > 0, `benchmark score ${report.benchmarkScores[0]}`);
+assert(
+  report.benchmarkMatchedText.some((value) => value.includes("benchmark")),
+  `benchmark matched text missing benchmark token: ${JSON.stringify(report.benchmarkMatchedText)}`,
+);
 assert(report.mailboxRunCount === 2, `mailbox run count ${report.mailboxRunCount}`);
 assert(report.mailboxArtifactCount === 6, `mailbox artifact count ${report.mailboxArtifactCount}`);
 assert(report.latestVerifierStatus === "failed", `latest verifier status ${report.latestVerifierStatus}`);

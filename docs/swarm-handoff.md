@@ -89,9 +89,9 @@ bash scripts/verify-all.sh
 job cap, a 32 GiB host memory reserve, serial native image/export settings, and
 a single top-level parallel job. Use `CLASP_VERIFY_MANAGED=0` only for harness
 tests that need to inspect the unwrapped script behavior.
-The managed runner also preflights the host memory reserve before spawning the
-workload, so an already-low-memory VM fails the job before a builder or verifier
-can start.
+The managed runner also preflights the job cap plus host memory reserve before
+spawning the workload, so an already-low-memory VM fails the job before a
+builder or verifier can start.
 
 For builder iteration before the final gate, use the documented fast entrypoint:
 

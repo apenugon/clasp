@@ -10,6 +10,10 @@ record ContextPackHarnessReport = {
   memoryValues : [Str],
   memoryMatchedText : [Str],
   memoryScores : [Int],
+  benchmarkValues : [Str],
+  benchmarkMatchedText : [Str],
+  benchmarkScores : [Int],
+  benchmarkHistoryCount : Int,
   taskMemoryCount : Int,
   objectiveMemoryCount : Int,
   traceNames : [Str],
@@ -82,6 +86,9 @@ repairTask = taskHandle root "context-repair" "context-agent"
 semanticIndexArtifactText : Str
 semanticIndexArtifactText = "{\"semanticIndex\":{\"entries\":[{\"id\":\"schema:LeadIntake\",\"kind\":\"schema\",\"editFiles\":[\"Shared/Lead.clasp\"],\"artifactRefs\":[\"benchmark-prep/Main.agent-pack.json\"],\"surfaceIds\":[\"route:createLeadRoute\",\"foreign:mockLeadSummaryModel\"],\"queryText\":\"semanticIndex entries editFiles artifactRefs route schema host-boundary action-item\"}]}}"
 
+benchmarkContextText : Str
+benchmarkContextText = "{\"kind\":\"benchmark-result\",\"suite\":\"context-pack-benchmark\",\"wave\":2,\"summary\":\"benchmark score target suite wave meetsTarget history should reach standalone agents\",\"passed\":true,\"meetsTarget\":false,\"scoreName\":\"contextSignals\",\"scoreValue\":9,\"targetName\":\"contextSignals\",\"targetValue\":10}"
+
 builderCommand : SwarmCommand
 builderCommand =
   commandSpec "." ["bash", "-lc", "printf context-builder-output; >&2 printf context-builder-warning"]
@@ -153,6 +160,10 @@ reportContextPack pack verificationValue artifactContent publishedArtifactConten
     memoryValues = pack.memoryValues,
     memoryMatchedText = pack.memoryMatchedText,
     memoryScores = pack.memoryScores,
+    benchmarkValues = pack.benchmarkValues,
+    benchmarkMatchedText = pack.benchmarkMatchedText,
+    benchmarkScores = pack.benchmarkScores,
+    benchmarkHistoryCount = length pack.benchmarkMemoryMatches,
     taskMemoryCount = length pack.taskMemoryMatches,
     objectiveMemoryCount = length pack.objectiveMemoryMatches,
     traceNames = map traceName pack.runTrace,
@@ -201,34 +212,39 @@ main =
                 Ok repairTaskValue ->
                   match objectiveMemoryPut objective "planner" "context-lesson" "objective focused compiler verifier lesson" {
                     Ok objectiveMemoryValue ->
-                      match taskMemoryPut repairTask "context-lesson" "task focused compiler verifier should inspect local evidence" {
-                        Ok taskMemoryValue ->
-                          match runToolStep planTask builderCommand 10 {
-                            Ok planStep ->
-                              match runToolStep repairTask builderCommand 10 {
-                                Ok repairStep ->
-                                  match executeVerificationPlanWithTimeout repairTask contextVerificationPlan 5000 10 {
-                                    Ok verificationValue ->
-                                      match artifactWrite repairTask "note" "published context artifact from ordinary clasp" {
-                                        Ok publishedArtifact ->
-                                          match artifactWrite repairTask "agent-pack" semanticIndexArtifactText {
-                                            Ok semanticArtifact ->
-                                              match readArtifactFrom root publishedArtifact 64 {
-                                                Ok publishedArtifactContent ->
-                                                  match taskContextPack repairTask "focused compiler verifier ordinary clasp" 10 {
-                                                    Ok pack ->
-                                                      match artifacts repairTask {
-                                                        Ok artifactValues ->
-                                                          let pick = stdoutArtifactPick artifactValues in
-                                                          if pick.found then
-                                                            match artifactRead root pick.artifactId 16 {
-                                                              Ok artifactContent ->
-                                                                reportContextPack pack verificationValue artifactContent publishedArtifactContent,
-                                                              Err message ->
-                                                                errorText message
-                                                            }
-                                                          else
-                                                            errorText "missing stdout artifact",
+                      match benchmarkRecord objective benchmarkContextText {
+                        Ok benchmarkMemoryValue ->
+                          match taskMemoryPut repairTask "context-lesson" "task focused compiler verifier should inspect local evidence" {
+                            Ok taskMemoryValue ->
+                              match runToolStep planTask builderCommand 10 {
+                                Ok planStep ->
+                                  match runToolStep repairTask builderCommand 10 {
+                                    Ok repairStep ->
+                                      match executeVerificationPlanWithTimeout repairTask contextVerificationPlan 5000 10 {
+                                        Ok verificationValue ->
+                                          match artifactWrite repairTask "note" "published context artifact from ordinary clasp" {
+                                            Ok publishedArtifact ->
+                                              match artifactWrite repairTask "agent-pack" semanticIndexArtifactText {
+                                                Ok semanticArtifact ->
+                                                  match readArtifactFrom root publishedArtifact 64 {
+                                                    Ok publishedArtifactContent ->
+                                                      match taskContextPack repairTask "focused compiler verifier ordinary clasp" 10 {
+                                                        Ok pack ->
+                                                          match artifacts repairTask {
+                                                            Ok artifactValues ->
+                                                              let pick = stdoutArtifactPick artifactValues in
+                                                              if pick.found then
+                                                                match artifactRead root pick.artifactId 16 {
+                                                                  Ok artifactContent ->
+                                                                    reportContextPack pack verificationValue artifactContent publishedArtifactContent,
+                                                                  Err message ->
+                                                                    errorText message
+                                                                }
+                                                              else
+                                                                errorText "missing stdout artifact",
+                                                            Err message ->
+                                                              errorText message
+                                                          },
                                                         Err message ->
                                                           errorText message
                                                       },

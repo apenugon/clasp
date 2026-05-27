@@ -430,6 +430,7 @@ renderContextPackPrompt pack =
     ],
     memorySearchPromptSection "task memory matches:" pack.taskMemoryMatches,
     memorySearchPromptSection "objective memory matches:" pack.objectiveMemoryMatches,
+    memorySearchPromptSection "benchmark history matches:" pack.benchmarkMemoryMatches,
     artifactSearchPromptSection "artifact search matches:" pack.artifactSearchMatches,
     artifactSearchPromptSection "semantic index artifact matches:" pack.semanticArtifactMatches,
     runTracePromptSection "run trace:" pack.runTrace,

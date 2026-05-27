@@ -27,13 +27,20 @@ latestBenchmarkTargetMet = match readBenchmarkCheckpointPath benchmarkLatestPath
   Err message -> false
 }
 
+recordBenchmarkCheckpoint : Str -> Str
+recordBenchmarkCheckpoint checkpointText =
+  match benchmarkRecord objectiveRef checkpointText {
+    Ok memoryValue -> "",
+    Err message -> message
+  }
+
 writeBenchmarkCheckpoint : BenchmarkCheckpoint -> Str
 writeBenchmarkCheckpoint checkpoint = {
   let checkpointText = encode checkpoint in
   match writeFile (benchmarkCheckpointPathFor checkpoint.wave) checkpointText {
     Ok written ->
       match writeFile benchmarkLatestPath checkpointText {
-        Ok latestWritten -> "",
+        Ok latestWritten -> recordBenchmarkCheckpoint checkpointText,
         Err message -> message
       },
     Err message -> message

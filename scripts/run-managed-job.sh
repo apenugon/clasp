@@ -129,6 +129,7 @@ setsid env \
     set +e
     watcher_pid=""
     memory_watcher_pid=""
+    workload_started=0
     job_dir="$CLASP_MANAGED_JOB_ROOT/$CLASP_MANAGED_JOB_ID"
     expected_job_id="$CLASP_MANAGED_JOB_ID"
     expected_job_root="$CLASP_MANAGED_JOB_ROOT"
@@ -144,16 +145,31 @@ setsid env \
 
     session_member_pids() {
       local sid="$1"
-      ps -eo pid=,sid= |
-        awk -v want="$sid" '"'"'
-          {
-            pid = $1
-            sid = $2
-            gsub(/[[:space:]]/, "", pid)
-            gsub(/[[:space:]]/, "", sid)
-            if (sid == want && pid != "") print pid
-          }
-        '"'"'
+      if command -v setsid >/dev/null 2>&1; then
+        setsid sh -c '"'"'
+          ps -eo pid=,sid= |
+            awk -v want="$1" '"'"'"'"'"'"'"'"'
+              {
+                pid = $1
+                sid = $2
+                gsub(/[[:space:]]/, "", pid)
+                gsub(/[[:space:]]/, "", sid)
+                if (sid == want && pid != "") print pid
+              }
+            '"'"'"'"'"'"'"'"'
+        '"'"' managed-session-scan "$sid"
+      else
+        ps -eo pid=,sid= |
+          awk -v want="$sid" '"'"'
+            {
+              pid = $1
+              sid = $2
+              gsub(/[[:space:]]/, "", pid)
+              gsub(/[[:space:]]/, "", sid)
+              if (sid == want && pid != "") print pid
+            }
+          '"'"'
+      fi
     }
 
     internal_watcher_pid() {
@@ -202,10 +218,8 @@ setsid env \
 
     job_member_pids() {
       local sid="$1"
-      {
-        session_member_pids "$sid"
-        marked_job_pids
-      } | awk '"'"'NF && !seen[$1]++ { print $1 }'"'"'
+
+      session_member_pids "$sid"
     }
 
     job_has_stoppable_members() {
@@ -245,6 +259,26 @@ setsid env \
           fi
         fi
       done < <(job_member_pids "$sid")
+    }
+
+    stop_job_members() {
+      local sid="$1"
+
+      signal_job_members TERM "$sid"
+      for _ in $(seq 1 10); do
+        if ! job_has_stoppable_members "$sid"; then
+          return 0
+        fi
+        sleep 0.05
+      done
+      signal_job_members KILL "$sid"
+      for _ in $(seq 1 10); do
+        if ! job_has_stoppable_members "$sid"; then
+          return 0
+        fi
+        sleep 0.05
+      done
+      return 0
     }
 
     session_rss_kb() {
@@ -295,13 +329,22 @@ setsid env \
     preflight_host_memory_reserve() {
       local min_available_memory_mb="${CLASP_MANAGED_JOB_MIN_AVAILABLE_MEMORY_MB:-}"
       local memory_exceeded_path="$job_dir/memory-exceeded"
+      local required_available_memory_mb=""
       local available_memory_mb=""
 
       if [[ "$min_available_memory_mb" =~ ^[0-9]+$ && "$min_available_memory_mb" -gt 0 ]]; then
+        required_available_memory_mb="$min_available_memory_mb"
+        if [[ "${CLASP_MANAGED_JOB_MEMORY_MB:-}" =~ ^[0-9]+$ && "$CLASP_MANAGED_JOB_MEMORY_MB" -gt 0 ]]; then
+          required_available_memory_mb="$((required_available_memory_mb + CLASP_MANAGED_JOB_MEMORY_MB))"
+        fi
         available_memory_mb="$(host_available_memory_mb)"
-        if [[ "$available_memory_mb" =~ ^[0-9]+$ ]] && (( available_memory_mb < min_available_memory_mb )); then
+        if [[ "$available_memory_mb" =~ ^[0-9]+$ ]] && (( available_memory_mb < required_available_memory_mb )); then
           {
             printf "min_available_memory_mb=%s\n" "$min_available_memory_mb"
+            if [[ "${CLASP_MANAGED_JOB_MEMORY_MB:-}" =~ ^[0-9]+$ && "$CLASP_MANAGED_JOB_MEMORY_MB" -gt 0 ]]; then
+              printf "memory_mb=%s\n" "$CLASP_MANAGED_JOB_MEMORY_MB"
+            fi
+            printf "required_available_memory_mb=%s\n" "$required_available_memory_mb"
             printf "available_memory_mb=%s\n" "$available_memory_mb"
             printf "reason=host-available-memory-reserve\n"
             printf "phase=preflight\n"
@@ -319,14 +362,7 @@ setsid env \
       while true; do
         if [[ -f "$stop_file" ]]; then
           printf "stopping\n" >"$job_dir/status"
-          signal_job_members TERM "$sid"
-          for _ in $(seq 1 50); do
-            if ! job_has_stoppable_members "$sid"; then
-              return 0
-            fi
-            sleep 0.1
-          done
-          signal_job_members KILL "$sid"
+          stop_job_members "$sid"
           return 0
         fi
         sleep 0.2
@@ -363,14 +399,7 @@ setsid env \
             date -u +"detected_at=%Y-%m-%dT%H:%M:%SZ"
           } >"$memory_exceeded_path"
           printf "memory-exceeded\n" >"$job_dir/status"
-          signal_job_members TERM "$sid"
-          for _ in $(seq 1 50); do
-            if ! job_has_stoppable_members "$sid"; then
-              return 0
-            fi
-            sleep 0.1
-          done
-          signal_job_members KILL "$sid"
+          stop_job_members "$sid"
           return 0
         fi
 
@@ -384,14 +413,7 @@ setsid env \
               date -u +"detected_at=%Y-%m-%dT%H:%M:%SZ"
             } >"$memory_exceeded_path"
             printf "memory-exceeded\n" >"$job_dir/status"
-            signal_job_members TERM "$sid"
-            for _ in $(seq 1 50); do
-              if ! job_has_stoppable_members "$sid"; then
-                return 0
-              fi
-              sleep 0.1
-            done
-            signal_job_members KILL "$sid"
+            stop_job_members "$sid"
             return 0
           fi
         fi
@@ -477,7 +499,15 @@ setsid env \
 
     finish_managed_job() {
       local status="$1"
+      local cleanup_sid=""
 
+      if [[ "${workload_started:-0}" == "1" ]] &&
+         { [[ -f "$job_dir/memory-exceeded" ]] || [[ -f "$CLASP_MANAGED_JOB_STOP_REQUEST" ]]; }; then
+        cleanup_sid="${managed_sid:-$(current_sid)}"
+        if [[ -n "$cleanup_sid" ]]; then
+          stop_job_members "$cleanup_sid"
+        fi
+      fi
       if [[ -n "${watcher_pid:-}" ]]; then
         kill "$watcher_pid" >/dev/null 2>&1 || true
         wait "$watcher_pid" >/dev/null 2>&1 || true
@@ -521,6 +551,7 @@ setsid env \
     fi
 
     start_workload "$@"
+    workload_started=1
     managed_sid="$(current_sid)"
     watch_stop_request "$managed_sid" &
     watcher_pid="$!"
@@ -535,7 +566,18 @@ setsid env \
   >"$stdout_path" 2>"$stderr_path" &
 pid="$!"
 
-sleep 0.05
+for _ in $(seq 1 50); do
+  if [[ -f "$job_dir/pid" && -f "$job_dir/pgid" && -f "$job_dir/sid" && -f "$job_dir/cwd" ]]; then
+    break
+  fi
+  if ! kill -0 "$pid" >/dev/null 2>&1; then
+    if [[ -f "$job_dir/pid" && -f "$job_dir/pgid" && -f "$job_dir/sid" && -f "$job_dir/cwd" && -f "$job_dir/exit-status" ]]; then
+      printf '%s\n' "$job_dir"
+      exit 0
+    fi
+  fi
+  sleep 0.02
+done
 if ! kill -0 "$pid" >/dev/null 2>&1; then
   if [[ -f "$job_dir/pid" && -f "$job_dir/pgid" && -f "$job_dir/sid" && -f "$job_dir/cwd" && -f "$job_dir/exit-status" ]]; then
     printf '%s\n' "$job_dir"
@@ -547,6 +589,18 @@ fi
 
 pgid="$(tr -d '[:space:]' <"$job_dir/pgid" 2>/dev/null || ps -o pgid= -p "$pid" | tr -d '[:space:]')"
 sid="$(tr -d '[:space:]' <"$job_dir/sid" 2>/dev/null || ps -o sid= -p "$pid" | tr -d '[:space:]')"
+if [[ -z "$pgid" || -z "$sid" ]]; then
+  for _ in $(seq 1 50); do
+    if [[ -f "$job_dir/pgid" && -f "$job_dir/sid" ]]; then
+      pgid="$(tr -d '[:space:]' <"$job_dir/pgid" 2>/dev/null)"
+      sid="$(tr -d '[:space:]' <"$job_dir/sid" 2>/dev/null)"
+      if [[ -n "$pgid" && -n "$sid" ]]; then
+        break
+      fi
+    fi
+    sleep 0.02
+  done
+fi
 if [[ -z "$pgid" || -z "$sid" ]]; then
   if [[ -f "$job_dir/pid" && -f "$job_dir/pgid" && -f "$job_dir/sid" && -f "$job_dir/cwd" && -f "$job_dir/exit-status" ]]; then
     printf '%s\n' "$job_dir"

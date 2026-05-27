@@ -108,6 +108,10 @@ if [[ "$prompt" != *"semantic index artifact matches:"* ]]; then
   printf 'planner prompt missing semantic index context\n' >&2
   exit 70
 fi
+if [[ "$prompt" != *"benchmark history matches:"* ]]; then
+  printf 'planner prompt missing benchmark history context\n' >&2
+  exit 83
+fi
 
 mkdir -p "$(dirname "$report_path")" "$workspace_root"
 printf '{"role":%s,"reportPath":%s,"promptPath":%s,"schemaPath":%s,"workspaceRoot":%s}\n' \

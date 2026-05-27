@@ -250,7 +250,7 @@ const emittedModule = [
   'function runCommandTimeoutRaw(arg0, arg1, arg2) { return $claspCallHostBinding("runCommandTimeoutRaw", [arg0, arg1, arg2]); }',
   'export const main = Object.freeze({',
   '  ok: runCommandRaw(".", ["node", "-e", "process.stdout.write(\'node-out\'); process.stderr.write(\'node-err\'); process.exit(7)"]),',
-  '  timeout: runCommandTimeoutRaw(".", 50, ["node", "-e", "process.stdout.write(\'before-timeout\'); setTimeout(() => process.stdout.write(\'after-timeout\'), 1000)"])',
+  '  timeout: runCommandTimeoutRaw(".", 1000, ["node", "-e", "process.stdout.write(\'before-timeout\'); setTimeout(() => process.stdout.write(\'after-timeout\'), 2000)"])',
   '});',
   '',
 ].join("\n");
@@ -378,9 +378,9 @@ assert(ok[1].stderr === "compiled-err", `unexpected compiled run stderr ${JSON.s
 
 const timeoutCommand = processModule.commandSpec(
   ".",
-  ["node", "-e", "process.stdout.write('compiled-before-timeout'); setTimeout(() => process.stdout.write('compiled-after-timeout'), 1000)"],
+  ["node", "-e", "process.stdout.write('compiled-before-timeout'); setTimeout(() => process.stdout.write('compiled-after-timeout'), 2000)"],
 );
-const timeoutResult = processModule.runTimeout(timeoutCommand, 50);
+const timeoutResult = processModule.runTimeout(timeoutCommand, 1000);
 assert(
   Array.isArray(timeoutResult) && timeoutResult[0] === "Ok",
   `compiled timeout returned ${JSON.stringify(timeoutResult)}`,

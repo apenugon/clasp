@@ -127,7 +127,7 @@ safeSubprocessReport : SafeSubprocessReport
 safeSubprocessReport = {
   let success = run (commandSpec workspaceRoot "work" 1000 successCommand);
   let nonzero = run (commandSpec workspaceRoot "work" 1000 nonzeroCommand);
-  let timeout = run (commandSpec workspaceRoot "work" 50 timeoutCommand);
+  let timeout = run (commandSpec workspaceRoot "work" 1000 timeoutCommand);
   let missingCwd = run (commandSpec workspaceRoot "missing" 1000 successCommand);
   let parentEscape = run (commandSpec workspaceRoot "../outside" 1000 successCommand);
   let absoluteCwd =

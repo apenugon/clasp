@@ -31,7 +31,7 @@ chmod +x "$project_root/scripts/run-managed-job.sh" "$project_root/scripts/stop-
 
 wait_for_file() {
   local path="$1"
-  for _ in $(seq 1 50); do
+  for _ in $(seq 1 150); do
     if [[ -f "$path" ]]; then
       return 0
     fi
@@ -242,6 +242,40 @@ done
 if session_has_members "$host_reserve_sid"; then
   printf 'host-reserve managed job still has session members\n' >&2
   ps -eo pid,ppid,pgid,sid,rss,comm,args | awk -v sid="$host_reserve_sid" '$4 == sid { print }' >&2
+  exit 1
+fi
+
+headroom_started="$test_root/headroom-started"
+headroom_job_dir="$(
+  "$project_root/scripts/run-managed-job.sh" \
+    --jobs-root "$jobs_root" \
+    --job-id host-reserve-headroom-smoke \
+    --memory-mb 999999999 \
+    --min-available-memory-mb 1 \
+    -- bash -c 'printf started >"$1"; while true; do sleep 1; done' _ "$headroom_started"
+)"
+[[ "$headroom_job_dir" == "$jobs_root/host-reserve-headroom-smoke" ]]
+headroom_sid="$(tr -d '[:space:]' <"$headroom_job_dir/sid")"
+wait_for_file "$headroom_job_dir/exit-status"
+[[ "$(cat "$headroom_job_dir/exit-status")" == "137" ]]
+[[ "$(cat "$headroom_job_dir/status")" == "failed" ]]
+[[ "$(cat "$headroom_job_dir/memory-mb")" == "999999999" ]]
+[[ "$(cat "$headroom_job_dir/min-available-memory-mb")" == "1" ]]
+[[ ! -e "$headroom_started" ]]
+grep -F 'min_available_memory_mb=1' "$headroom_job_dir/memory-exceeded" >/dev/null
+grep -F 'memory_mb=999999999' "$headroom_job_dir/memory-exceeded" >/dev/null
+grep -F 'required_available_memory_mb=1000000000' "$headroom_job_dir/memory-exceeded" >/dev/null
+grep -F 'reason=host-available-memory-reserve' "$headroom_job_dir/memory-exceeded" >/dev/null
+grep -F 'phase=preflight' "$headroom_job_dir/memory-exceeded" >/dev/null
+for _ in $(seq 1 50); do
+  if ! session_has_members "$headroom_sid"; then
+    break
+  fi
+  sleep 0.1
+done
+if session_has_members "$headroom_sid"; then
+  printf 'host-reserve headroom managed job still has session members\n' >&2
+  ps -eo pid,ppid,pgid,sid,rss,comm,args | awk -v sid="$headroom_sid" '$4 == sid { print }' >&2
   exit 1
 fi
 

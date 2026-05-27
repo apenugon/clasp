@@ -215,6 +215,7 @@ renderPlannerContextPack pack =
     ],
     plannerMemorySection "planner task memory matches:" pack.taskMemoryMatches,
     plannerMemorySection "objective memory matches:" pack.objectiveMemoryMatches,
+    plannerMemorySection "benchmark history matches:" pack.benchmarkMemoryMatches,
     plannerArtifactSearchSection "artifact search matches:" pack.artifactSearchMatches,
     plannerArtifactSearchSection "semantic index artifact matches:" pack.semanticArtifactMatches,
     plannerTraceSection "planner run trace:" pack.runTrace,

@@ -176,6 +176,7 @@ The implemented native primitives now include:
 - native artifact capture for tool and verifier runs
 - bounded native artifact search over stored task evidence
 - dedicated context-pack semantic-index artifact search over compiler-owned `semanticIndex.entries`
+- objective-scoped benchmark result recording and context-pack benchmark history
 - native mergegate decisions over stored verifier runs
 
 These are available through the self-hosted native compiler/runtime path and are exercised by the native examples at [`examples/swarm-kernel/Main.clasp`](/home/akul_medexfinance_com/clasp/examples/swarm-kernel/Main.clasp) and [`examples/host-runtime/Main.clasp`](/home/akul_medexfinance_com/clasp/examples/host-runtime/Main.clasp).
@@ -226,7 +227,7 @@ The native `claspc swarm` control plane now also proves:
 - persisted merge-policy state with approval/verifier tracking
 - objective-driven next-action projection for the manager loop
 - ordinary Clasp programs can drive the same substrate directly through `runCommandJson`'s internal `@swarm` runtime lane without shell wrapper scripts or external `claspc swarm ...` subprocesses
-- the ordinary-program path can create objectives and tasks, acquire leases, run native tool and verifier commands, record approvals, decide merge gates, publish/read/search bounded artifacts, and inspect runs/artifacts/summary state from Clasp itself
+- the ordinary-program path can create objectives and tasks, acquire leases, run native tool and verifier commands, record approvals, record benchmark results, decide merge gates, publish/read/search bounded artifacts, and inspect runs/artifacts/summary state from Clasp itself
 
 ## Remaining Expansion Work
 
