@@ -259,8 +259,8 @@ assert(launcherOutput.includes(`supervisor_state=${launcherStateRoot}`), "launch
 assert(jobPointer === launcherJob, `state job pointer ${jobPointer}`);
 assert(jobStatus === "completed", `job status ${jobStatus}`);
 assert(exitStatus === "0", `job exit ${exitStatus}`);
-assert(memoryMb === "2048", `job memory ${memoryMb}`);
-assert(effectiveMemoryMb === "2048", `effective job memory ${effectiveMemoryMb}`);
+assert(memoryMb === "4096", `job memory ${memoryMb}`);
+assert(effectiveMemoryMb === "4096", `effective job memory ${effectiveMemoryMb}`);
 assert(command.includes("SwarmSupervisor.clasp"), "managed command should run the Clasp supervisor");
 assert(command.includes("claspc"), "managed command should use claspc run");
 assert(report.supervisorStatus === "completed", `supervisor status ${report.supervisorStatus}`);
