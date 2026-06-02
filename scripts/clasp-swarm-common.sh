@@ -783,6 +783,7 @@ clasp_swarm_select_next_ready_task() {
   local task_batch=""
   local task_dependencies=""
   local task_dependency_labels=""
+  local task_full_id=""
   local manifest_row=""
   local project_root=""
   local main_branch="${CLASP_SWARM_MAIN_BRANCH:-main}"
@@ -812,7 +813,8 @@ clasp_swarm_select_next_ready_task() {
       continue
     fi
 
-    if [[ -f "$blocked_root/$task_id.json" ]]; then
+    task_full_id="$(basename "$task_file" .md)"
+    if [[ -f "$blocked_root/$task_id.json" || -f "$blocked_root/$task_full_id.json" ]]; then
       printf '__BLOCKED__:%s\n' "$task_file"
       return 0
     fi

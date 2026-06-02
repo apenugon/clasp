@@ -133,6 +133,51 @@ lane_runtime_is_running() {
   return 1
 }
 
+start_task_id_of() {
+  basename "$1" .md
+}
+
+blocked_report_for_task() {
+  local blocked_root="$1"
+  local task_file="$2"
+  local task_id=""
+  local task_key=""
+
+  task_id="$(start_task_id_of "$task_file")"
+  task_key="$(clasp_swarm_completion_key "$task_id")"
+
+  if [[ -f "$blocked_root/$task_id.json" ]]; then
+    printf '%s\n' "$blocked_root/$task_id.json"
+    return 0
+  fi
+  if [[ -f "$blocked_root/$task_key.json" ]]; then
+    printf '%s\n' "$blocked_root/$task_key.json"
+    return 0
+  fi
+
+  return 1
+}
+
+blocked_report_is_resource_guard() {
+  local report_file="$1"
+
+  [[ -f "$report_file" ]] || return 1
+
+  node - <<'EOF' "$report_file"
+const fs = require("fs");
+const reportPath = process.argv[2];
+try {
+  const report = JSON.parse(fs.readFileSync(reportPath, "utf8"));
+  const summary = String(report.summary || "");
+  const findings = Array.isArray(report.findings) ? report.findings.map((finding) => String(finding || "")) : [];
+  const evidence = [summary, ...findings].join("\n");
+  process.exit(/managed job hit the (memory|disk) resource guard/.test(evidence) || /resource-guard-(reason|phase)=/.test(evidence) ? 0 : 1);
+} catch (_) {
+  process.exit(1);
+}
+EOF
+}
+
 running_lane_count_for_wave() {
   local count=0
   local lane_dir=""
@@ -298,8 +343,18 @@ while IFS= read -r lane_dir; do
     continue
   fi
   if [[ "$selected_task" == __BLOCKED__:* ]]; then
-    echo "lane $lane_name is blocked; not starting"
-    continue
+    task_file="${selected_task#__BLOCKED__:}"
+    task_id="$(start_task_id_of "$task_file")"
+    blocked_report="$(blocked_report_for_task "$blocked_root" "$task_file" || true)"
+    if [[ "${CLASP_SWARM_RESOURCE_GUARD_BLOCK_MODE:-fail-closed}" == "retryable" ]] &&
+       blocked_report_is_resource_guard "$blocked_report"; then
+      rm -f "$blocked_report"
+      echo "lane $lane_name cleared retryable resource guard block for $task_id"
+      selected_task="$task_file"
+    else
+      echo "lane $lane_name is blocked; not starting"
+      continue
+    fi
   fi
 
   if (( max_running_lanes > 0 && running_lanes >= max_running_lanes )); then

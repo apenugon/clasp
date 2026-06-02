@@ -1167,6 +1167,9 @@ grep -F --quiet 'blocked on $task_id after builder resource guard' "$project_roo
 grep -F --quiet 'resource_guard_block_mode="${CLASP_SWARM_RESOURCE_GUARD_BLOCK_MODE:-fail-closed}"' "$project_root/scripts/clasp-swarm-lane.sh"
 grep -F --quiet 'deferred retry for $task_id after builder resource guard' "$project_root/scripts/clasp-swarm-lane.sh"
 grep -F --quiet 'export CLASP_SWARM_RESOURCE_GUARD_BLOCK_MODE=retryable' "$project_root/scripts/clasp-swarm-start.sh"
+grep -F --quiet 'cleared retryable resource guard block for $task_id' "$project_root/scripts/clasp-swarm-start.sh"
+grep -F --quiet 'task_full_id="$(basename "$task_file" .md)"' "$project_root/scripts/clasp-swarm-common.sh"
+grep -F --quiet 'blocked_report_for_task()' "$project_root/scripts/clasp-swarm-start.sh"
 grep -F --quiet 'CLASP_MANAGED_JOB_MEMORY_BUDGET_SCOPE=current-root scripts/run-managed-job.sh --jobs-root "$PWD/.clasp-swarm/test-wave/01-foundation-a/jobs"' "$project_root/scripts/test-swarm-control.sh"
 grep -F --quiet 'CLASP_MANAGED_JOB_MEMORY_BUDGET_SCOPE=current-root scripts/run-managed-job.sh --jobs-root "$PWD/.clasp-swarm/test-wave/02-foundation-b/jobs"' "$project_root/scripts/test-swarm-control.sh"
 grep -F --quiet 'CLASP_MANAGED_JOB_MEMORY_BUDGET_SCOPE=current-root scripts/run-managed-job.sh --jobs-root "$PWD/.clasp-swarm/test-wave/01-foundation-a/child-jobs"' "$project_root/scripts/test-swarm-control.sh"
@@ -2611,6 +2614,43 @@ bash -lc "
   [[ -n \"\$child_job\" ]]
   [[ \$(sed -n '1p' \"\$child_job/status\") == 'memory-exceeded' ]]
   [[ -f \"\$child_job/memory-exceeded\" ]]
+
+  cp \"\$verifier_report\" .clasp-swarm/test-wave/01-foundation-a/blocked/BA-001-foundation-a.json
+  scripts/stop-managed-job.sh --jobs-root \"\$PWD/.clasp-swarm/test-wave/01-foundation-a/child-jobs\" child-budget-holder >/dev/null 2>&1 || true
+  deadline=\$((SECONDS + 10))
+  while [[ \$(sed -n '1p' \"\$holder_job/status\" 2>/dev/null || true) == 'started' ]]; do
+    if (( SECONDS >= deadline )); then
+      echo 'timed out waiting for retryable child budget holder to stop' >&2
+      exit 1
+    fi
+    sleep 0.1
+  done
+  output=\$(CLASP_SWARM_ALLOW_DIRTY=1 CLASP_SWARM_MAX_RUNNING_LANES=1 CLASP_SWARM_RESOURCE_GUARD_BLOCK_MODE=retryable CLASP_SWARM_LANE_MEMORY_MB=1024 CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB=1 CLASP_SWARM_MIN_AVAILABLE_DISK_MB=0 CLASP_SWARM_MIN_DISK_HEADROOM_MB=0 bash scripts/clasp-swarm-start.sh --batch foundation test-wave 2>&1)
+  if [[ \"\$output\" != *'lane 01-foundation-a cleared retryable resource guard block for BA-001-foundation-a'* ]]; then
+    printf 'missing retryable clear output:\n%s\n' \"\$output\" >&2
+    exit 1
+  fi
+  if [[ \"\$output\" != *'started lane=01-foundation-a'* && \"\$output\" != *'lane=01-foundation-a batch=foundation completed before launch settled'* ]]; then
+    printf 'missing retryable start output:\n%s\n' \"\$output\" >&2
+    exit 1
+  fi
+  deadline=\$((SECONDS + \${CLASP_SWARM_TEST_LANE_WAIT_SECS:-60}))
+  while [[ -f .clasp-swarm/test-wave/01-foundation-a/pid ]]; do
+    if (( SECONDS >= deadline )); then
+      echo 'timed out waiting for retryable resource-guard retry lane to finish' >&2
+      exit 1
+    fi
+    sleep 0.2
+  done
+  if [[ -f .clasp-swarm/test-wave/01-foundation-a/blocked/BA-001-foundation-a.json ]]; then
+    echo 'retryable resource block marker still exists after retry' >&2
+    exit 1
+  fi
+  if [[ ! -f .clasp-swarm/test-wave/01-foundation-a/completed/BA-001 || ! -f BA-001-foundation-a.txt ]]; then
+    echo 'retryable retry did not complete BA-001' >&2
+    find .clasp-swarm/test-wave/01-foundation-a -maxdepth 4 -type f -printf '%p -> ' -exec sh -c 'sed -n \"1p\" \"\$1\" 2>/dev/null || true' _ {} \; >&2
+    exit 1
+  fi
 	" >/dev/null
 
 prompt_test_root="$(mktemp -d)"
