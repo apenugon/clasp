@@ -97,6 +97,10 @@ text_output="$(
 [[ "$text_output" == *"swarm-preflight=admitted reason=managed-preflight-passed"* ]]
 [[ "$text_output" == *"selected_lane=01-foundation"* ]]
 [[ "$text_output" == *"managed_preflight_job="* ]]
+[[ "$text_output" == *"resource_pressure:"* ]]
+[[ "$text_output" == *"resource_pressure_kind=none"* ]]
+[[ "$text_output" == *"external_agent_process_count=0"* ]]
+[[ "$text_output" == *"external_agent_reserved_memory_mb=0"* ]]
 [[ -d .clasp-swarm/preflight-jobs ]]
 [[ ! -e builder-events.log ]]
 
@@ -121,10 +125,62 @@ if (!report.managedPreflight || report.managedPreflight.status !== "completed") 
 if (!report.resourcePressure || report.resourcePressure.kind !== "none") {
   throw new Error(`admitted preflight should report no resource pressure: ${JSON.stringify(report)}`);
 }
+if (report.resourcePressure.externalAgentProcessCount !== 0) {
+  throw new Error(`reserve-disabled preflight should report zero external agents: ${JSON.stringify(report)}`);
+}
+if (report.resourcePressure.externalAgentRssMb !== 0) {
+  throw new Error(`reserve-disabled preflight should report zero external RSS: ${JSON.stringify(report)}`);
+}
+if (report.resourcePressure.externalAgentReservePerProcessMb !== 0) {
+  throw new Error(`reserve-disabled preflight should report zero external reserve: ${JSON.stringify(report)}`);
+}
+if (report.resourcePressure.externalAgentReservedMemoryMb !== 0) {
+  throw new Error(`reserve-disabled preflight should report zero external reserved memory: ${JSON.stringify(report)}`);
+}
 if (!report.repositoryGate || report.repositoryGate.checked !== false) {
   throw new Error(`direct preflight should leave repository gate unchecked: ${JSON.stringify(report)}`);
 }
 ' "$json_output"
+[[ ! -e builder-events.log ]]
+
+sleep 30 &
+external_pressure_pid="$!"
+external_admitted_json="$(
+  CLASP_MANAGED_JOB_EXTERNAL_AGENT_PROCESS_NAMES=sleep \
+  CLASP_MANAGED_JOB_EXTERNAL_AGENT_RESERVE_MB=1 \
+  CLASP_MANAGED_JOB_MEMORY_BUDGET_SCOPE=current-root \
+  CLASP_SWARM_MAX_RUNNING_LANES=2 \
+  CLASP_SWARM_LANE_MEMORY_MB=1 \
+  CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB=1 \
+  CLASP_SWARM_MIN_AVAILABLE_DISK_MB=0 \
+  CLASP_SWARM_MIN_DISK_HEADROOM_MB=0 \
+    bash scripts/clasp-swarm-preflight.sh --json --batch foundation test-wave
+)"
+node -e '
+const report = JSON.parse(process.argv[1]);
+if (report.status !== "admitted") throw new Error(`external stats fixture should still admit: ${JSON.stringify(report)}`);
+if (!report.resourcePressure || report.resourcePressure.kind !== "none") {
+  throw new Error(`external stats alone should not be classified as pressure: ${JSON.stringify(report)}`);
+}
+if (!(report.resourcePressure.externalAgentProcessCount >= 1)) {
+  throw new Error(`admitted preflight should count the live external sleep process: ${JSON.stringify(report)}`);
+}
+if (!(report.resourcePressure.externalAgentRssMb >= 0)) {
+  throw new Error(`admitted preflight should report external RSS: ${JSON.stringify(report)}`);
+}
+if (report.resourcePressure.externalAgentReservePerProcessMb !== 1) {
+  throw new Error(`admitted preflight should report configured external reserve: ${JSON.stringify(report)}`);
+}
+if (!(report.resourcePressure.externalAgentReservedMemoryMb >= report.resourcePressure.externalAgentProcessCount)) {
+  throw new Error(`admitted preflight should report total external reserved memory: ${JSON.stringify(report)}`);
+}
+if (report.resourcePressure.externalAgentProcessNames !== "sleep") {
+  throw new Error(`admitted preflight should report external process names: ${JSON.stringify(report)}`);
+}
+' "$external_admitted_json"
+kill "$external_pressure_pid" >/dev/null 2>&1 || true
+wait "$external_pressure_pid" >/dev/null 2>&1 || true
+external_pressure_pid=""
 [[ ! -e builder-events.log ]]
 
 set +e
@@ -197,6 +253,8 @@ set -e
 [[ "$external_pressure_output" == *"recommended_action=wait-for-external-agent-pressure-or-lower-concurrency-and-lane-memory-budget"* ]]
 [[ "$external_pressure_output" == *"safe_stop_policy=stop-only-managed-jobs-by-metadata; do-not-kill-unmanaged-agent-processes"* ]]
 [[ "$external_pressure_output" == *"external_agent_process_count="* ]]
+[[ "$external_pressure_output" == *"external_agent_rss_mb="* ]]
+[[ "$external_pressure_output" == *"external_agent_reserve_per_process_mb=999999999"* ]]
 [[ "$external_pressure_output" == *"external_agent_reserved_memory_mb="* ]]
 [[ "$external_pressure_output" == *"launch_adjustment:"* ]]
 [[ "$external_pressure_output" == *"candidate_profile=bounded-low-memory"* ]]
@@ -360,8 +418,46 @@ set -e
 
 mkdir -p .clasp-swarm/test-wave/01-foundation
 printf '%s\n' "$$" > .clasp-swarm/test-wave/01-foundation/pid
+sleep 30 &
+external_pressure_pid="$!"
+set +e
+blocked_json="$(
+  CLASP_MANAGED_JOB_EXTERNAL_AGENT_PROCESS_NAMES=sleep \
+  CLASP_MANAGED_JOB_EXTERNAL_AGENT_RESERVE_MB=1 \
+  CLASP_SWARM_MAX_RUNNING_LANES=1 \
+  CLASP_SWARM_LANE_MEMORY_MB=1 \
+  CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB=1 \
+  CLASP_SWARM_MIN_AVAILABLE_DISK_MB=0 \
+  CLASP_SWARM_MIN_DISK_HEADROOM_MB=0 \
+    bash scripts/clasp-swarm-preflight.sh --json --batch foundation test-wave
+)"
+blocked_json_status="$?"
+set -e
+[[ "$blocked_json_status" == "75" ]]
+node -e '
+const report = JSON.parse(process.argv[1]);
+if (report.status !== "blocked") throw new Error(`max-running-lanes should block: ${JSON.stringify(report)}`);
+if (report.reason !== "max-running-lanes") throw new Error(`expected max-running-lanes reason: ${JSON.stringify(report)}`);
+if (!report.resourcePressure || report.resourcePressure.kind !== "none") {
+  throw new Error(`max-running-lanes is not a resource-pressure guard: ${JSON.stringify(report)}`);
+}
+if (!(report.resourcePressure.externalAgentProcessCount >= 1)) {
+  throw new Error(`max-running-lanes preflight should still report live external agents: ${JSON.stringify(report)}`);
+}
+if (report.resourcePressure.externalAgentReservePerProcessMb !== 1) {
+  throw new Error(`max-running-lanes preflight should report configured external reserve: ${JSON.stringify(report)}`);
+}
+if (!(report.resourcePressure.externalAgentReservedMemoryMb >= report.resourcePressure.externalAgentProcessCount)) {
+  throw new Error(`max-running-lanes preflight should report total external reserved memory: ${JSON.stringify(report)}`);
+}
+' "$blocked_json"
+kill "$external_pressure_pid" >/dev/null 2>&1 || true
+wait "$external_pressure_pid" >/dev/null 2>&1 || true
+external_pressure_pid=""
+
 set +e
 blocked_output="$(
+  CLASP_MANAGED_JOB_EXTERNAL_AGENT_RESERVE_MB=0 \
   CLASP_SWARM_MAX_RUNNING_LANES=1 \
   CLASP_SWARM_LANE_MEMORY_MB=1 \
   CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB=1 \

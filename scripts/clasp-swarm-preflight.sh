@@ -18,6 +18,8 @@ min_available_disk_mb="${CLASP_SWARM_MIN_AVAILABLE_DISK_MB:-16384}"
 min_disk_headroom_mb="${CLASP_SWARM_MIN_DISK_HEADROOM_MB:-${CLASP_GENERATED_STATE_MIN_HEADROOM_MB:-1024}}"
 candidate_lane_memory_mb="${CLASP_SWARM_PREFLIGHT_CANDIDATE_LANE_MEMORY_MB:-4096}"
 candidate_min_available_memory_mb="${CLASP_SWARM_PREFLIGHT_CANDIDATE_MIN_AVAILABLE_MEMORY_MB:-32768}"
+external_agent_process_names="${CLASP_MANAGED_JOB_EXTERNAL_AGENT_PROCESS_NAMES:-codex}"
+external_agent_reserve_per_process_mb="${CLASP_MANAGED_JOB_EXTERNAL_AGENT_RESERVE_MB:-1024}"
 
 usage() {
   cat <<'EOF' >&2
@@ -131,6 +133,7 @@ validate_non_negative_integer "CLASP_SWARM_MIN_AVAILABLE_DISK_MB" "$min_availabl
 validate_non_negative_integer "CLASP_SWARM_MIN_DISK_HEADROOM_MB" "$min_disk_headroom_mb"
 validate_non_negative_integer "CLASP_SWARM_PREFLIGHT_CANDIDATE_LANE_MEMORY_MB" "$candidate_lane_memory_mb"
 validate_non_negative_integer "CLASP_SWARM_PREFLIGHT_CANDIDATE_MIN_AVAILABLE_MEMORY_MB" "$candidate_min_available_memory_mb"
+validate_non_negative_integer "CLASP_MANAGED_JOB_EXTERNAL_AGENT_RESERVE_MB" "$external_agent_reserve_per_process_mb"
 
 repository_gate_status="not-checked"
 repository_gate_reason="not-requested"
@@ -336,6 +339,93 @@ guard_recommended_action() {
   esac
 }
 
+read_proc_environ() {
+  local environ_path="$1"
+
+  [[ -r "$environ_path" ]] || return 1
+  { tr "\0" "\n" <"$environ_path"; } 2>/dev/null
+}
+
+process_has_any_managed_job_marker() {
+  local candidate_pid="$1"
+  local environ
+
+  environ="$(read_proc_environ "/proc/$candidate_pid/environ")" || return 1
+  grep -E "^CLASP_MANAGED_JOB_ID=.+" <<<"$environ" >/dev/null &&
+    grep -E "^CLASP_MANAGED_JOB_ROOT=.+" <<<"$environ" >/dev/null &&
+    grep -E "^CLASP_MANAGED_JOB_TOKEN=.+" <<<"$environ" >/dev/null
+}
+
+external_agent_name_matches() {
+  local process_name="$1"
+  local normalized_names
+  local wanted_name
+
+  normalized_names="${external_agent_process_names//,/ }"
+  for wanted_name in $normalized_names; do
+    if [[ -n "$wanted_name" && "$process_name" == "$wanted_name" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+live_external_agent_process_count() {
+  local candidate_pid=""
+  local process_name=""
+  local count=0
+
+  if (( external_agent_reserve_per_process_mb < 1 )); then
+    printf '0\n'
+    return 0
+  fi
+
+  while read -r candidate_pid process_name; do
+    [[ -n "$candidate_pid" && "$candidate_pid" =~ ^[0-9]+$ && -n "$process_name" ]] || continue
+    external_agent_name_matches "$process_name" || continue
+    process_has_any_managed_job_marker "$candidate_pid" && continue
+    count=$((count + 1))
+  done < <(ps -eo pid=,comm= 2>/dev/null || true)
+
+  printf '%d\n' "$count"
+}
+
+live_external_agent_rss_mb() {
+  local candidate_pid=""
+  local process_name=""
+  local rss_kb=""
+  local total_kb=0
+
+  if (( external_agent_reserve_per_process_mb < 1 )); then
+    printf '0\n'
+    return 0
+  fi
+
+  while read -r candidate_pid process_name rss_kb; do
+    [[ -n "$candidate_pid" && "$candidate_pid" =~ ^[0-9]+$ && -n "$process_name" ]] || continue
+    [[ "$rss_kb" =~ ^[0-9]+$ ]] || rss_kb=0
+    external_agent_name_matches "$process_name" || continue
+    process_has_any_managed_job_marker "$candidate_pid" && continue
+    total_kb=$((total_kb + rss_kb))
+  done < <(ps -eo pid=,comm=,rss= 2>/dev/null || true)
+
+  printf '%d\n' "$(((total_kb + 1023) / 1024))"
+}
+
+guard_or_default_int_field() {
+  local guard_details="$1"
+  local key="$2"
+  local fallback="$3"
+  local value=""
+
+  value="$(guard_field "$guard_details" "$key")"
+  if [[ "$value" =~ ^[0-9]+$ ]]; then
+    printf '%s\n' "$value"
+  else
+    printf '%s\n' "$fallback"
+  fi
+}
+
 nonnegative_mb() {
   local value="$1"
   if (( value > 0 )); then
@@ -410,6 +500,48 @@ guard_candidate_admissible_text() {
 guard_candidate_env_text() {
   printf 'CLASP_SWARM_LANE_MEMORY_MB=%s CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB=%s\n' \
     "$candidate_lane_memory_mb" "$candidate_min_available_memory_mb"
+}
+
+refresh_resource_report_fields() {
+  external_agent_process_count="$(live_external_agent_process_count)"
+  external_agent_rss_mb="0"
+  external_agent_reserved_memory_mb="0"
+
+  if [[ "$external_agent_process_count" =~ ^[0-9]+$ && "$external_agent_process_count" -gt 0 ]]; then
+    external_agent_rss_mb="$(live_external_agent_rss_mb)"
+    [[ "$external_agent_rss_mb" =~ ^[0-9]+$ ]] || external_agent_rss_mb="0"
+    external_agent_reserved_memory_mb="$((external_agent_rss_mb + external_agent_process_count * external_agent_reserve_per_process_mb))"
+  else
+    external_agent_process_count="0"
+  fi
+
+  resource_pressure_kind="none"
+  resource_shortfall_mb="0"
+  recommended_action="none"
+  same_reserve_max_lane_memory_mb="0"
+  same_lane_max_min_available_memory_mb="0"
+  candidate_required_available_memory_mb="0"
+  candidate_shortfall_mb="0"
+  candidate_admissible="false"
+  candidate_env=""
+
+  if [[ -n "$guard_details" ]]; then
+    resource_pressure_kind="$(guard_pressure_kind "$guard_details")"
+    resource_shortfall_mb="$(guard_shortfall_mb "$guard_details")"
+    recommended_action="$(guard_recommended_action "$guard_details")"
+    external_agent_process_count="$(guard_or_default_int_field "$guard_details" "external_agent_process_count" "$external_agent_process_count")"
+    external_agent_rss_mb="$(guard_or_default_int_field "$guard_details" "external_agent_rss_mb" "$external_agent_rss_mb")"
+    external_agent_reserve_per_process_mb="$(guard_or_default_int_field "$guard_details" "external_agent_reserve_per_process_mb" "$external_agent_reserve_per_process_mb")"
+    external_agent_reserved_memory_mb="$(guard_or_default_int_field "$guard_details" "external_agent_reserved_memory_mb" "$external_agent_reserved_memory_mb")"
+    if [[ "$resource_pressure_kind" == "memory" ]]; then
+      same_reserve_max_lane_memory_mb="$(guard_same_reserve_max_lane_memory_mb "$guard_details")"
+      same_lane_max_min_available_memory_mb="$(guard_same_lane_max_min_available_memory_mb "$guard_details")"
+      candidate_required_available_memory_mb="$(guard_candidate_required_available_memory_mb "$guard_details")"
+      candidate_shortfall_mb="$(guard_candidate_shortfall_mb "$guard_details")"
+      candidate_admissible="$(guard_candidate_admissible_text "$guard_details")"
+      candidate_env="$(guard_candidate_env_text)"
+    fi
+  fi
 }
 
 lane_runtime_is_running() {
@@ -539,7 +671,10 @@ const [
   resourceShortfallMb,
   recommendedAction,
   externalAgentProcessCount,
+  externalAgentRssMb,
+  externalAgentReservePerProcessMb,
   externalAgentReservedMemoryMb,
+  externalAgentProcessNames,
   sameReserveMaxLaneMemoryMb,
   sameLaneMaxMinAvailableMemoryMb,
   candidateLaneMemoryMb,
@@ -584,7 +719,10 @@ process.stdout.write(`${JSON.stringify({
     recommendedAction: recommendedAction || "none",
     safeStopPolicy: "stop-only-managed-jobs-by-metadata; do-not-kill-unmanaged-agent-processes",
     externalAgentProcessCount: Number(externalAgentProcessCount || 0),
+    externalAgentRssMb: Number(externalAgentRssMb || 0),
+    externalAgentReservePerProcessMb: Number(externalAgentReservePerProcessMb || 0),
     externalAgentReservedMemoryMb: Number(externalAgentReservedMemoryMb || 0),
+    externalAgentProcessNames: externalAgentProcessNames || "",
   },
   launchAdjustment: {
     sameReserveMaxLaneMemoryMb: Number(sameReserveMaxLaneMemoryMb || 0),
@@ -621,17 +759,6 @@ print_text_report() {
   local job_status="$6"
   local job_exit_status="$7"
   local guard_details="$8"
-  local resource_pressure_kind=""
-  local resource_shortfall_mb=""
-  local recommended_action=""
-  local external_agent_process_count=""
-  local external_agent_reserved_memory_mb=""
-  local same_reserve_max_lane_memory_mb=""
-  local same_lane_max_min_available_memory_mb=""
-  local candidate_required_available_memory_mb=""
-  local candidate_shortfall_mb=""
-  local candidate_admissible=""
-  local candidate_env=""
 
   printf 'swarm-preflight=%s reason=%s wave=%s batch=%s running_lanes=%s max_running_lanes=%s lane_memory_mb=%s min_available_memory_mb=%s min_available_disk_mb=%s min_disk_headroom_mb=%s\n' \
     "$status" "$reason" "$wave_name" "${batch_filter:-}" "$running_lanes" "$max_running_lanes" "$lane_memory_mb" "$min_available_memory_mb" "$min_available_disk_mb" "$min_disk_headroom_mb"
@@ -654,27 +781,29 @@ print_text_report() {
     printf 'dirty_entries=%s\n' "$repository_gate_dirty_entries"
     printf 'recommended_action=%s\n' "$repository_gate_recommended_action"
   fi
+  printf 'resource_pressure:\n'
+  printf 'resource_pressure_kind=%s\n' "$resource_pressure_kind"
+  printf 'resource_shortfall_mb=%s\n' "$resource_shortfall_mb"
+  printf 'recommended_action=%s\n' "$recommended_action"
+  printf 'safe_stop_policy=stop-only-managed-jobs-by-metadata; do-not-kill-unmanaged-agent-processes\n'
+  printf 'external_agent_process_names=%s\n' "$external_agent_process_names"
+  printf 'external_agent_process_count=%s\n' "$external_agent_process_count"
+  printf 'external_agent_rss_mb=%s\n' "$external_agent_rss_mb"
+  printf 'external_agent_reserve_per_process_mb=%s\n' "$external_agent_reserve_per_process_mb"
+  printf 'external_agent_reserved_memory_mb=%s\n' "$external_agent_reserved_memory_mb"
   if [[ -n "$guard_details" ]]; then
     printf 'managed_preflight_guard:\n%s\n' "$guard_details"
-    resource_pressure_kind="$(guard_pressure_kind "$guard_details")"
-    resource_shortfall_mb="$(guard_shortfall_mb "$guard_details")"
-    recommended_action="$(guard_recommended_action "$guard_details")"
-    external_agent_process_count="$(guard_int_field "$guard_details" "external_agent_process_count")"
-    external_agent_reserved_memory_mb="$(guard_int_field "$guard_details" "external_agent_reserved_memory_mb")"
     printf 'managed_preflight_recovery:\n'
     printf 'resource_pressure_kind=%s\n' "$resource_pressure_kind"
     printf 'resource_shortfall_mb=%s\n' "$resource_shortfall_mb"
     printf 'recommended_action=%s\n' "$recommended_action"
     printf 'safe_stop_policy=stop-only-managed-jobs-by-metadata; do-not-kill-unmanaged-agent-processes\n'
+    printf 'external_agent_process_names=%s\n' "$external_agent_process_names"
     printf 'external_agent_process_count=%s\n' "$external_agent_process_count"
+    printf 'external_agent_rss_mb=%s\n' "$external_agent_rss_mb"
+    printf 'external_agent_reserve_per_process_mb=%s\n' "$external_agent_reserve_per_process_mb"
     printf 'external_agent_reserved_memory_mb=%s\n' "$external_agent_reserved_memory_mb"
     if [[ "$resource_pressure_kind" == "memory" ]]; then
-      same_reserve_max_lane_memory_mb="$(guard_same_reserve_max_lane_memory_mb "$guard_details")"
-      same_lane_max_min_available_memory_mb="$(guard_same_lane_max_min_available_memory_mb "$guard_details")"
-      candidate_required_available_memory_mb="$(guard_candidate_required_available_memory_mb "$guard_details")"
-      candidate_shortfall_mb="$(guard_candidate_shortfall_mb "$guard_details")"
-      candidate_admissible="$(guard_candidate_admissible_text "$guard_details")"
-      candidate_env="$(guard_candidate_env_text)"
       printf 'launch_adjustment:\n'
       printf 'same_reserve_max_lane_memory_mb=%s\n' "$same_reserve_max_lane_memory_mb"
       printf 'same_lane_max_min_available_memory_mb=%s\n' "$same_lane_max_min_available_memory_mb"
@@ -809,39 +938,28 @@ if [[ "$repository_gate_status" == "blocked" ]]; then
   exit_code=75
 fi
 
+resource_pressure_kind="none"
+resource_shortfall_mb="0"
+recommended_action="none"
+external_agent_process_count="0"
+external_agent_rss_mb="0"
+external_agent_reserved_memory_mb="0"
+same_reserve_max_lane_memory_mb="0"
+same_lane_max_min_available_memory_mb="0"
+candidate_required_available_memory_mb="0"
+candidate_shortfall_mb="0"
+candidate_admissible="false"
+candidate_env=""
+refresh_resource_report_fields
+
 if (( json_output )); then
-  resource_pressure_kind="none"
-  resource_shortfall_mb="0"
-  recommended_action="none"
-  external_agent_process_count="0"
-  external_agent_reserved_memory_mb="0"
-  same_reserve_max_lane_memory_mb="0"
-  same_lane_max_min_available_memory_mb="0"
-  candidate_required_available_memory_mb="0"
-  candidate_shortfall_mb="0"
-  candidate_admissible="false"
-  candidate_env=""
-  if [[ -n "$guard_details" ]]; then
-    resource_pressure_kind="$(guard_pressure_kind "$guard_details")"
-    resource_shortfall_mb="$(guard_shortfall_mb "$guard_details")"
-    recommended_action="$(guard_recommended_action "$guard_details")"
-    external_agent_process_count="$(guard_int_field "$guard_details" "external_agent_process_count")"
-    external_agent_reserved_memory_mb="$(guard_int_field "$guard_details" "external_agent_reserved_memory_mb")"
-    if [[ "$resource_pressure_kind" == "memory" ]]; then
-      same_reserve_max_lane_memory_mb="$(guard_same_reserve_max_lane_memory_mb "$guard_details")"
-      same_lane_max_min_available_memory_mb="$(guard_same_lane_max_min_available_memory_mb "$guard_details")"
-      candidate_required_available_memory_mb="$(guard_candidate_required_available_memory_mb "$guard_details")"
-      candidate_shortfall_mb="$(guard_candidate_shortfall_mb "$guard_details")"
-      candidate_admissible="$(guard_candidate_admissible_text "$guard_details")"
-      candidate_env="$(guard_candidate_env_text)"
-    fi
-  fi
   print_json_report \
     "$status" "$reason" "$wave_name" "$batch_filter" "$running_lanes" "$max_running_lanes" \
     "$lane_memory_mb" "$min_available_memory_mb" "$min_available_disk_mb" "$min_disk_headroom_mb" \
     "$selected_lane" "$selected_task" "$job_dir" "$job_status" "$job_exit_status" "$guard_details" \
     "$resource_pressure_kind" "$resource_shortfall_mb" "$recommended_action" \
-    "$external_agent_process_count" "$external_agent_reserved_memory_mb" \
+    "$external_agent_process_count" "$external_agent_rss_mb" "$external_agent_reserve_per_process_mb" \
+    "$external_agent_reserved_memory_mb" "$external_agent_process_names" \
     "$same_reserve_max_lane_memory_mb" "$same_lane_max_min_available_memory_mb" \
     "$candidate_lane_memory_mb" "$candidate_min_available_memory_mb" \
     "$candidate_required_available_memory_mb" "$candidate_shortfall_mb" \
