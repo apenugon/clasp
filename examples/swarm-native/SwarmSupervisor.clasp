@@ -1,0 +1,466 @@
+module Main
+
+foreign runCommandTimeoutRaw : Str -> Int -> [Str] -> Result Str = "runCommandTimeoutJson"
+
+record TimedProcessResult = {
+  exitCode : Int,
+  stdout : Str,
+  stderr : Str,
+  timedOut : Bool,
+  error : Str
+}
+
+record SwarmStatusSummary = {
+  laneCount : Int,
+  runningCount : Int,
+  stoppedCount : Int,
+  completedCount : Int,
+  blockedCount : Int
+}
+
+record SwarmStatusDocument = {
+  wave : Str,
+  summary : SwarmStatusSummary
+}
+
+record SwarmPreflightDocument = {
+  schemaVersion : Int,
+  status : Str,
+  reason : Str,
+  waveName : Str,
+  runningLanes : Int,
+  maxRunningLanes : Int
+}
+
+record SupervisorEvent = {
+  iteration : Int,
+  action : Str,
+  reason : Str,
+  runningCount : Int,
+  blockedCount : Int,
+  statusExitCode : Int,
+  preflightStatus : Str,
+  preflightReason : Str,
+  startExitCode : Int,
+  timedOut : Bool,
+  atMs : Int
+}
+
+record SupervisorReport = {
+  supervisorStatus : Str,
+  waveName : Str,
+  profileName : Str,
+  maxIterations : Int,
+  pollMs : Int,
+  dryRun : Bool,
+  admittedStarts : Int,
+  lastAction : Str,
+  lastReason : Str,
+  observedRunningCount : Int,
+  observedBlockedCount : Int,
+  events : [SupervisorEvent]
+}
+
+emptyEvents : [SupervisorEvent]
+emptyEvents = []
+
+stateRootPath : Str
+stateRootPath =
+  if textJoin "" argv == "" then
+    ".clasp-swarm-supervisor"
+  else
+    pathJoin argv
+
+reportPath : Str
+reportPath = pathJoin [stateRootPath, "supervisor-report.json"]
+
+readEnvText : Str -> Str -> Str
+readEnvText name fallback = match envVar name {
+  Ok raw -> if raw == "" then fallback else decode Str raw,
+  Err message -> fallback
+}
+
+readEnvInt : Str -> Int -> Int
+readEnvInt name fallback = match envVar name {
+  Ok raw -> if raw == "" then fallback else decode Int raw,
+  Err message -> fallback
+}
+
+readEnvBool : Str -> Bool -> Bool
+readEnvBool name fallback = match envVar name {
+  Ok raw -> if raw == "" then fallback else decode Bool raw,
+  Err message -> fallback
+}
+
+readEnvCommand : Str -> [Str] -> [Str]
+readEnvCommand name fallback = match envVar name {
+  Ok raw -> if raw == "" then fallback else decode [Str] raw,
+  Err message -> fallback
+}
+
+workspaceRoot : Str
+workspaceRoot = readEnvText "CLASP_SWARM_SUPERVISOR_WORKSPACE_JSON" "."
+
+waveName : Str
+waveName = readEnvText "CLASP_SWARM_SUPERVISOR_WAVE_JSON" "full"
+
+profileName : Str
+profileName = readEnvText "CLASP_SWARM_SUPERVISOR_PROFILE_JSON" "bounded-memory-pressure"
+
+maxIterations : Int
+maxIterations = readEnvInt "CLASP_SWARM_SUPERVISOR_MAX_ITERATIONS_JSON" 120
+
+pollMs : Int
+pollMs = readEnvInt "CLASP_SWARM_SUPERVISOR_POLL_MS_JSON" 30000
+
+commandTimeoutMs : Int
+commandTimeoutMs = readEnvInt "CLASP_SWARM_SUPERVISOR_COMMAND_TIMEOUT_MS_JSON" 120000
+
+dryRun : Bool
+dryRun = readEnvBool "CLASP_SWARM_SUPERVISOR_DRY_RUN_JSON" false
+
+statusCommand : [Str]
+statusCommand =
+  readEnvCommand
+    "CLASP_SWARM_SUPERVISOR_STATUS_COMMAND_JSON"
+    ["bash", "scripts/clasp-swarm-status.sh", "--json", waveName]
+
+preflightCommand : [Str]
+preflightCommand =
+  readEnvCommand
+    "CLASP_SWARM_SUPERVISOR_PREFLIGHT_COMMAND_JSON"
+    ["bash", "scripts/clasp-swarm-start.sh", "--preflight-json", "--profile", profileName, waveName]
+
+startCommand : [Str]
+startCommand =
+  readEnvCommand
+    "CLASP_SWARM_SUPERVISOR_START_COMMAND_JSON"
+    ["bash", "scripts/clasp-swarm-start.sh", "--profile", profileName, waveName]
+
+timedProcessResultError : Str -> Result TimedProcessResult
+timedProcessResultError message = Err message
+
+timedProcessResult : Result Str -> Result TimedProcessResult
+timedProcessResult value = match value {
+  Ok raw -> tryDecode TimedProcessResult raw,
+  Err message -> timedProcessResultError message
+}
+
+runSupervisorCommand : [Str] -> Result TimedProcessResult
+runSupervisorCommand command =
+  timedProcessResult (runCommandTimeoutRaw workspaceRoot commandTimeoutMs command)
+
+supervisorEvent : Int -> Str -> Str -> Int -> Int -> Int -> Str -> Str -> Int -> Bool -> SupervisorEvent
+supervisorEvent iteration action reason runningCount blockedCount statusExitCode preflightStatus preflightReason startExitCode timedOut =
+  SupervisorEvent {
+    iteration = iteration,
+    action = action,
+    reason = reason,
+    runningCount = runningCount,
+    blockedCount = blockedCount,
+    statusExitCode = statusExitCode,
+    preflightStatus = preflightStatus,
+    preflightReason = preflightReason,
+    startExitCode = startExitCode,
+    timedOut = timedOut,
+    atMs = timeUnixMs
+  }
+
+emptyReport : SupervisorReport
+emptyReport =
+  SupervisorReport {
+    supervisorStatus = "running",
+    waveName = waveName,
+    profileName = profileName,
+    maxIterations = maxIterations,
+    pollMs = pollMs,
+    dryRun = dryRun,
+    admittedStarts = 0,
+    lastAction = "none",
+    lastReason = "",
+    observedRunningCount = 0,
+    observedBlockedCount = 0,
+    events = emptyEvents
+  }
+
+appendEvent : SupervisorReport -> SupervisorEvent -> SupervisorReport
+appendEvent report event =
+  SupervisorReport {
+    supervisorStatus = report.supervisorStatus,
+    waveName = report.waveName,
+    profileName = report.profileName,
+    maxIterations = report.maxIterations,
+    pollMs = report.pollMs,
+    dryRun = report.dryRun,
+    admittedStarts = report.admittedStarts,
+    lastAction = event.action,
+    lastReason = event.reason,
+    observedRunningCount = event.runningCount,
+    observedBlockedCount = event.blockedCount,
+    events = append report.events [event]
+  }
+
+markReportStatus : SupervisorReport -> Str -> SupervisorReport
+markReportStatus report status =
+  SupervisorReport {
+    supervisorStatus = status,
+    waveName = report.waveName,
+    profileName = report.profileName,
+    maxIterations = report.maxIterations,
+    pollMs = report.pollMs,
+    dryRun = report.dryRun,
+    admittedStarts = report.admittedStarts,
+    lastAction = report.lastAction,
+    lastReason = report.lastReason,
+    observedRunningCount = report.observedRunningCount,
+    observedBlockedCount = report.observedBlockedCount,
+    events = report.events
+  }
+
+incrementAdmittedStarts : SupervisorReport -> SupervisorReport
+incrementAdmittedStarts report =
+  SupervisorReport {
+    supervisorStatus = report.supervisorStatus,
+    waveName = report.waveName,
+    profileName = report.profileName,
+    maxIterations = report.maxIterations,
+    pollMs = report.pollMs,
+    dryRun = report.dryRun,
+    admittedStarts = intAdd report.admittedStarts 1,
+    lastAction = report.lastAction,
+    lastReason = report.lastReason,
+    observedRunningCount = report.observedRunningCount,
+    observedBlockedCount = report.observedBlockedCount,
+    events = report.events
+  }
+
+runStartCommand : Int -> SwarmStatusDocument -> SwarmPreflightDocument -> SupervisorReport
+runStartCommand iteration statusDoc preflight = {
+  if dryRun then
+    appendEvent
+      emptyReport
+      (supervisorEvent
+        iteration
+        "would-start-lane"
+        preflight.reason
+        statusDoc.summary.runningCount
+        statusDoc.summary.blockedCount
+        0
+        preflight.status
+        preflight.reason
+        0
+        false)
+  else
+    match runSupervisorCommand startCommand {
+      Err message ->
+        appendEvent
+          emptyReport
+          (supervisorEvent
+            iteration
+            "start-command-error"
+            message
+            statusDoc.summary.runningCount
+            statusDoc.summary.blockedCount
+            0
+            preflight.status
+            preflight.reason
+            127
+            false),
+      Ok startResult ->
+        if startResult.timedOut then
+          appendEvent
+            emptyReport
+            (supervisorEvent
+              iteration
+              "start-timeout"
+              startResult.error
+              statusDoc.summary.runningCount
+              statusDoc.summary.blockedCount
+              0
+              preflight.status
+              preflight.reason
+              startResult.exitCode
+              true)
+        else if startResult.exitCode == 0 then
+          incrementAdmittedStarts
+            (appendEvent
+              emptyReport
+              (supervisorEvent
+                iteration
+                "started-lane"
+                "admitted"
+                statusDoc.summary.runningCount
+                statusDoc.summary.blockedCount
+                0
+                preflight.status
+                preflight.reason
+                startResult.exitCode
+                false))
+        else
+          appendEvent
+            emptyReport
+            (supervisorEvent
+              iteration
+              "start-failed"
+              startResult.stderr
+              statusDoc.summary.runningCount
+              statusDoc.summary.blockedCount
+              0
+              preflight.status
+              preflight.reason
+              startResult.exitCode
+              false)
+    }
+}
+
+runPreflightStep : Int -> SwarmStatusDocument -> SupervisorReport
+runPreflightStep iteration statusDoc =
+  match runSupervisorCommand preflightCommand {
+    Err message ->
+      appendEvent
+        emptyReport
+        (supervisorEvent iteration "preflight-command-error" message statusDoc.summary.runningCount statusDoc.summary.blockedCount 0 "" "" 0 false),
+    Ok preflightResult ->
+      if preflightResult.timedOut then
+        appendEvent
+          emptyReport
+          (supervisorEvent iteration "preflight-timeout" preflightResult.error statusDoc.summary.runningCount statusDoc.summary.blockedCount 0 "" "" 0 true)
+      else if preflightResult.exitCode != 0 then
+        appendEvent
+          emptyReport
+          (supervisorEvent iteration "preflight-failed" preflightResult.stderr statusDoc.summary.runningCount statusDoc.summary.blockedCount 0 "" "" 0 false)
+      else
+        match tryDecode SwarmPreflightDocument preflightResult.stdout {
+          Err message ->
+            appendEvent
+              emptyReport
+              (supervisorEvent iteration "preflight-decode-failed" message statusDoc.summary.runningCount statusDoc.summary.blockedCount 0 "" "" 0 false),
+          Ok preflight ->
+            if preflight.status == "admitted" then
+              runStartCommand iteration statusDoc preflight
+            else
+              appendEvent
+                emptyReport
+                (supervisorEvent
+                  iteration
+                  "preflight-blocked"
+                  preflight.reason
+                  statusDoc.summary.runningCount
+                  statusDoc.summary.blockedCount
+                  0
+                  preflight.status
+                  preflight.reason
+                  0
+                  false)
+        }
+  }
+
+runSupervisorStep : Int -> SupervisorReport
+runSupervisorStep iteration =
+  match runSupervisorCommand statusCommand {
+    Err message ->
+      appendEvent emptyReport (supervisorEvent iteration "status-command-error" message 0 0 127 "" "" 0 false),
+    Ok statusResult ->
+      if statusResult.timedOut then
+        appendEvent emptyReport (supervisorEvent iteration "status-timeout" statusResult.error 0 0 statusResult.exitCode "" "" 0 true)
+      else if statusResult.exitCode != 0 then
+        appendEvent emptyReport (supervisorEvent iteration "status-failed" statusResult.stderr 0 0 statusResult.exitCode "" "" 0 false)
+      else
+        match tryDecode SwarmStatusDocument statusResult.stdout {
+          Err message ->
+            appendEvent emptyReport (supervisorEvent iteration "status-decode-failed" message 0 0 statusResult.exitCode "" "" 0 false),
+          Ok statusDoc ->
+            if statusDoc.summary.runningCount > 0 then
+              appendEvent
+                emptyReport
+                (supervisorEvent
+                  iteration
+                  "observed-running"
+                  "running-lanes-present"
+                  statusDoc.summary.runningCount
+                  statusDoc.summary.blockedCount
+                  statusResult.exitCode
+                  ""
+                  ""
+                  0
+                  false)
+            else
+              runPreflightStep iteration statusDoc
+        }
+  }
+
+mergeStepReport : SupervisorReport -> SupervisorReport -> SupervisorReport
+mergeStepReport report step =
+  SupervisorReport {
+    supervisorStatus = report.supervisorStatus,
+    waveName = report.waveName,
+    profileName = report.profileName,
+    maxIterations = report.maxIterations,
+    pollMs = report.pollMs,
+    dryRun = report.dryRun,
+    admittedStarts = intAdd report.admittedStarts step.admittedStarts,
+    lastAction = step.lastAction,
+    lastReason = step.lastReason,
+    observedRunningCount = step.observedRunningCount,
+    observedBlockedCount = step.observedBlockedCount,
+    events = append report.events step.events
+  }
+
+shouldSleepAfter : Int -> Int -> Bool
+shouldSleepAfter iteration limit =
+  if pollMs <= 0 then
+    false
+  else
+    iteration < limit
+
+sleepIfNeeded : Int -> Str
+sleepIfNeeded iteration =
+  if shouldSleepAfter iteration maxIterations then
+    match sleepMs pollMs {
+      Ok slept -> "",
+      Err message -> message
+    }
+  else
+    ""
+
+runSupervisorLoop : Int -> SupervisorReport -> SupervisorReport
+runSupervisorLoop iteration report =
+  if iteration > maxIterations then
+    markReportStatus report "completed"
+  else {
+    let step = runSupervisorStep iteration;
+    let merged = mergeStepReport report step;
+    let slept = sleepIfNeeded iteration;
+    runSupervisorLoop (intAdd iteration 1) merged
+  }
+
+runSupervisor : SupervisorReport
+runSupervisor = runSupervisorLoop 1 emptyReport
+
+main : Str
+main =
+  match mkdirAll stateRootPath {
+    Err message ->
+      encode
+        (SupervisorReport {
+          supervisorStatus = "error",
+          waveName = waveName,
+          profileName = profileName,
+          maxIterations = maxIterations,
+          pollMs = pollMs,
+          dryRun = dryRun,
+          admittedStarts = 0,
+          lastAction = "mkdir-failed",
+          lastReason = message,
+          observedRunningCount = 0,
+          observedBlockedCount = 0,
+          events = emptyEvents
+        }),
+    Ok created -> {
+      let report = runSupervisor;
+      match writeFile reportPath (encode report) {
+        Ok written -> encode report,
+        Err message -> encode (markReportStatus report (textConcat ["write-report-error:", message]))
+      }
+    }
+  }

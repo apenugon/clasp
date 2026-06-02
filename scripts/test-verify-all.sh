@@ -103,6 +103,7 @@ cp "$project_root/scripts/test-swarm-ready-benchmark.sh" "$test_root/scripts/tes
 cp "$project_root/scripts/test-swarm-policy-helpers.sh" "$test_root/scripts/test-swarm-policy-helpers.sh"
 cp "$project_root/scripts/test-swarm-destructive-policy.sh" "$test_root/scripts/test-swarm-destructive-policy.sh"
 cp "$project_root/scripts/test-swarm-filesystem-kernel-policy.sh" "$test_root/scripts/test-swarm-filesystem-kernel-policy.sh"
+cp "$project_root/scripts/test-swarm-native-supervisor.sh" "$test_root/scripts/test-swarm-native-supervisor.sh"
 cp "$project_root/scripts/test-swarm-native-feedback-loop.sh" "$test_root/scripts/test-swarm-native-feedback-loop.sh"
 cp "$project_root/scripts/test-feedback-loop-resume.sh" "$test_root/scripts/test-feedback-loop-resume.sh"
 cp "$project_root/scripts/test-feedback-loop-routing.sh" "$test_root/scripts/test-feedback-loop-routing.sh"
@@ -306,6 +307,7 @@ grep -F 'bash scripts/test-swarm-policy-helpers.sh' "$test_root/scripts/verify-a
 grep -F 'bash scripts/test-swarm-preflight.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-swarm-destructive-policy.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-swarm-filesystem-kernel-policy.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'bash scripts/test-swarm-native-supervisor.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-swarm-native-feedback-loop.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-monitored-step.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-monitored-run-log.sh' "$test_root/scripts/verify-all.sh" >/dev/null

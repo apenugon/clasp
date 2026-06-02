@@ -116,6 +116,7 @@ bash scripts/test-swarm-priority.sh
 bash scripts/test-swarm-spawn-policy.sh
 bash scripts/test-swarm-context-pack.sh
 bash scripts/test-swarm-semantic-summary-index.sh
+bash scripts/test-swarm-native-supervisor.sh
 bash scripts/test-managed-job.sh
 bash scripts/test-resolve-claspc.sh
 bash scripts/test-resource-guard-policy.sh
@@ -167,6 +168,7 @@ bash scripts/test-swarm-preflight.sh
 bash scripts/test-swarm-priority.sh
 bash scripts/test-swarm-spawn-policy.sh
 bash scripts/test-swarm-semantic-summary-index.sh
+bash scripts/test-swarm-native-supervisor.sh
 bash scripts/test-promoted-source-export-cache.sh
 bash scripts/test-promote-selfhost-managed.sh
 bash scripts/test-unsafe-quarantine.sh

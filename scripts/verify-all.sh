@@ -206,6 +206,7 @@ bash scripts/test-swarm-priority.sh
 bash scripts/test-swarm-spawn-policy.sh
 bash scripts/test-swarm-context-pack.sh
 bash scripts/test-swarm-semantic-summary-index.sh
+bash scripts/test-swarm-native-supervisor.sh
 bash scripts/test-swarm-native-managed-loop.sh
 CLASP_SWARM_FEEDBACK_LOOP_TIMEOUT_SECS=700 bash scripts/test-swarm-native-feedback-loop.sh
 bash scripts/test-monitored-loop.sh
