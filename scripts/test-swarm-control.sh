@@ -37,6 +37,7 @@ lane_worktree_retry_test_root=""
 batch_start_test_root=""
 swarm_managed_admission_test_root=""
 swarm_child_admission_test_root=""
+swarm_child_retryable_admission_test_root=""
 prompt_test_root=""
 prompt_test_root_2=""
 task_file_drain_test_root=""
@@ -80,7 +81,7 @@ cleanup() {
         "$child_job_dir" >/dev/null 2>&1 || true
     done < <(find "$stop_child_runtime_root/child-jobs" -mindepth 1 -maxdepth 1 -type d 2>/dev/null || true)
   fi
-  rm -rf "${runs_root:-}" "${markers_root:-}" "${repo_root:-}" "${lane_root:-}" "${completed_root:-}" "${blocked_root:-}" "${global_completed_root:-}" "${spawn_root:-}" "${spawn_path_root:-}" "${invalid_lane_root:-}" "${autopilot_test_root:-}" "${autopilot_test_root_2:-}" "${autopilot_test_root_3:-}" "${lane_merge_test_root:-}" "${lane_merge_gate_snapshot_test_root:-}" "${lane_cleanup_test_root:-}" "${lane_worktree_retry_test_root:-}" "${batch_start_test_root:-}" "${swarm_managed_admission_test_root:-}" "${swarm_child_admission_test_root:-}" "${prompt_test_root:-}" "${prompt_test_root_2:-}" "${task_file_drain_test_root:-}" "${status_lane_root_1:-}" "${status_lane_root_2:-}" "${status_lane_root_3:-}" "${status_lane_root_4:-}" "${status_lane_root_5:-}" "${status_lane_root_6:-}" "${status_runtime_root_1:-}" "${status_runtime_root_2:-}" "${status_runtime_root_3:-}" "${status_runtime_root_4:-}" "${status_runtime_root_5:-}" "${status_runtime_root_6:-}" "${stop_child_lane_root:-}" "${stop_child_runtime_root:-}" "${summary_lane_root_1:-}" "${summary_lane_root_2:-}" "${summary_runtime_root_1:-}" "${summary_runtime_root_2:-}"
+  rm -rf "${runs_root:-}" "${markers_root:-}" "${repo_root:-}" "${lane_root:-}" "${completed_root:-}" "${blocked_root:-}" "${global_completed_root:-}" "${spawn_root:-}" "${spawn_path_root:-}" "${invalid_lane_root:-}" "${autopilot_test_root:-}" "${autopilot_test_root_2:-}" "${autopilot_test_root_3:-}" "${lane_merge_test_root:-}" "${lane_merge_gate_snapshot_test_root:-}" "${lane_cleanup_test_root:-}" "${lane_worktree_retry_test_root:-}" "${batch_start_test_root:-}" "${swarm_managed_admission_test_root:-}" "${swarm_child_admission_test_root:-}" "${swarm_child_retryable_admission_test_root:-}" "${prompt_test_root:-}" "${prompt_test_root_2:-}" "${task_file_drain_test_root:-}" "${status_lane_root_1:-}" "${status_lane_root_2:-}" "${status_lane_root_3:-}" "${status_lane_root_4:-}" "${status_lane_root_5:-}" "${status_lane_root_6:-}" "${status_runtime_root_1:-}" "${status_runtime_root_2:-}" "${status_runtime_root_3:-}" "${status_runtime_root_4:-}" "${status_runtime_root_5:-}" "${status_runtime_root_6:-}" "${stop_child_lane_root:-}" "${stop_child_runtime_root:-}" "${summary_lane_root_1:-}" "${summary_lane_root_2:-}" "${summary_runtime_root_1:-}" "${summary_runtime_root_2:-}"
   rm -f "${status_text_output:-}" "${status_json_output:-}" "${summary_text_output:-}" "${summary_json_output:-}" "${summary_markdown_output:-}"
 }
 
@@ -1163,6 +1164,9 @@ grep -F --quiet 'active_child_job_dir="$job_dir"' "$project_root/scripts/clasp-s
 grep -F --quiet 'last_child_job_is_resource_guard_failure' "$project_root/scripts/clasp-swarm-lane.sh"
 grep -F --quiet 'write_resource_guard_failure_report' "$project_root/scripts/clasp-swarm-lane.sh"
 grep -F --quiet 'blocked on $task_id after builder resource guard' "$project_root/scripts/clasp-swarm-lane.sh"
+grep -F --quiet 'resource_guard_block_mode="${CLASP_SWARM_RESOURCE_GUARD_BLOCK_MODE:-fail-closed}"' "$project_root/scripts/clasp-swarm-lane.sh"
+grep -F --quiet 'deferred retry for $task_id after builder resource guard' "$project_root/scripts/clasp-swarm-lane.sh"
+grep -F --quiet 'export CLASP_SWARM_RESOURCE_GUARD_BLOCK_MODE=retryable' "$project_root/scripts/clasp-swarm-start.sh"
 grep -F --quiet 'CLASP_MANAGED_JOB_MEMORY_BUDGET_SCOPE=current-root scripts/run-managed-job.sh --jobs-root "$PWD/.clasp-swarm/test-wave/01-foundation-a/jobs"' "$project_root/scripts/test-swarm-control.sh"
 grep -F --quiet 'CLASP_MANAGED_JOB_MEMORY_BUDGET_SCOPE=current-root scripts/run-managed-job.sh --jobs-root "$PWD/.clasp-swarm/test-wave/02-foundation-b/jobs"' "$project_root/scripts/test-swarm-control.sh"
 grep -F --quiet 'CLASP_MANAGED_JOB_MEMORY_BUDGET_SCOPE=current-root scripts/run-managed-job.sh --jobs-root "$PWD/.clasp-swarm/test-wave/01-foundation-a/child-jobs"' "$project_root/scripts/test-swarm-control.sh"
@@ -1396,6 +1400,8 @@ mkdir -p \
   "$status_runtime_root_1/runs/20260314T121500Z-AA-100-sample-attempt2" \
   "$status_runtime_root_2/completed" \
   "$status_runtime_root_2/blocked" \
+  "$status_runtime_root_2/child-jobs/clasp-verifier-20260314T122500Z" \
+  "$status_runtime_root_2/child-jobs/clasp-builder-20260314T122600Z" \
   "$status_runtime_root_2/runs/20260314T122000Z-BB-200-sample-attempt1" \
   "$status_runtime_root_3/completed" \
   "$status_runtime_root_3/blocked" \
@@ -1488,6 +1494,10 @@ cat > "$status_runtime_root_2/runs/20260314T122000Z-BB-200-sample-attempt1/build
   "residual_risks": []
 }
 EOF
+printf '%s\n' "2026-03-14T12:25:00Z" > "$status_runtime_root_2/child-jobs/clasp-verifier-20260314T122500Z/started-at"
+printf '%s\n' "memory-exceeded" > "$status_runtime_root_2/child-jobs/clasp-verifier-20260314T122500Z/status"
+printf '%s\n' "2026-03-14T12:26:00Z" > "$status_runtime_root_2/child-jobs/clasp-builder-20260314T122600Z/started-at"
+printf '%s\n' "started" > "$status_runtime_root_2/child-jobs/clasp-builder-20260314T122600Z/status"
 cat > "$status_runtime_root_2/lane.log" <<'EOF'
 idle line 1
 idle line 2
@@ -1576,6 +1586,8 @@ bash -lc "
   [[ \"\$text\" == *'run summary: latest verifier summary'* ]]
   [[ \"\$text\" == *'lane: 02-idle'* ]]
   [[ \"\$text\" == *'pid: $status_live_pid'* ]]
+  [[ \"\$text\" == *'latest child job: clasp-builder-20260314T122600Z'* ]]
+  [[ \"\$text\" == *'child job status: started'* ]]
   [[ \"\$text\" == *'run status: builder-complete'* ]]
   [[ \"\$text\" == *'run summary: builder summary only'* ]]
   [[ \"\$text\" == *'lane: 03-interrupted'* ]]
@@ -1669,6 +1681,12 @@ if (active.latestRun?.status !== 'pass' || active.latestRun?.summary !== 'latest
 }
 if (idle.status !== 'running' || String(idle.pid) !== livePid) {
   throw new Error('unexpected idle-lane pid state');
+}
+if (!idle.latestChildJob || idle.latestChildJob.name !== 'clasp-builder-20260314T122600Z') {
+  throw new Error('running lane should report newest child by start time, not lexical name order');
+}
+if (idle.latestChildJob.status !== 'started') {
+  throw new Error('unexpected idle-lane latest child status');
 }
 if (idle.latestRun?.status !== 'builder-complete' || idle.latestRun?.summary !== 'builder summary only') {
   throw new Error('unexpected idle-lane run summary');
@@ -2368,7 +2386,7 @@ bash -lc "
   [[ \"\$output\" == *'lane=02-foundation-b'* ]]
   [[ \"\$output\" != *'lane=03-follow-up'* ]]
 
-  deadline=\$((SECONDS + 20))
+  deadline=\$((SECONDS + \${CLASP_SWARM_TEST_LANE_WAIT_SECS:-60}))
   while [[ -f .clasp-swarm/test-wave/01-foundation-a/pid || -f .clasp-swarm/test-wave/02-foundation-b/pid ]]; do
     if (( SECONDS >= deadline )); then
       echo 'timed out waiting for foundation batch lanes to finish' >&2
@@ -2383,7 +2401,7 @@ bash -lc "
   [[ \$(sort builder-events.log | tr '\n' ' ') == 'BA-001-foundation-a BA-002-foundation-b ' ]]
 
   CLASP_SWARM_ALLOW_DIRTY=1 CLASP_SWARM_LANE_MEMORY_MB=1024 CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB=1 CLASP_SWARM_MIN_AVAILABLE_DISK_MB=0 CLASP_SWARM_MIN_DISK_HEADROOM_MB=0 bash scripts/clasp-swarm-start.sh test-wave >/dev/null
-  deadline=\$((SECONDS + 20))
+  deadline=\$((SECONDS + \${CLASP_SWARM_TEST_LANE_WAIT_SECS:-60}))
   while [[ -f .clasp-swarm/test-wave/03-follow-up/pid ]]; do
     if (( SECONDS >= deadline )); then
       echo 'timed out waiting for follow-up lane to finish' >&2
@@ -2410,7 +2428,7 @@ bash -lc "
   first_job=\$(sed -n '1p' .clasp-swarm/test-wave/01-foundation-a/job)
   [[ \$(cat \"\$first_job/memory-mb\") == '1024' ]]
 
-  deadline=\$((SECONDS + 20))
+  deadline=\$((SECONDS + \${CLASP_SWARM_TEST_LANE_WAIT_SECS:-60}))
   while [[ -f .clasp-swarm/test-wave/01-foundation-a/pid ]]; do
     if (( SECONDS >= deadline )); then
       echo 'timed out waiting for capped foundation lane to finish' >&2
@@ -2422,7 +2440,7 @@ bash -lc "
   output=\$(CLASP_SWARM_ALLOW_DIRTY=1 CLASP_SWARM_MAX_RUNNING_LANES=1 CLASP_SWARM_LANE_MEMORY_MB=1024 CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB=1 CLASP_SWARM_MIN_AVAILABLE_DISK_MB=0 CLASP_SWARM_MIN_DISK_HEADROOM_MB=0 bash scripts/clasp-swarm-start.sh --batch foundation test-wave)
   [[ \"\$output\" == *'started lane=02-foundation-b'* ]]
 
-  deadline=\$((SECONDS + 20))
+  deadline=\$((SECONDS + \${CLASP_SWARM_TEST_LANE_WAIT_SECS:-60}))
   while [[ -f .clasp-swarm/test-wave/02-foundation-b/pid ]]; do
     if (( SECONDS >= deadline )); then
       echo 'timed out waiting for second capped foundation lane to finish' >&2
@@ -2554,6 +2572,43 @@ bash -lc "
   child_job=\$(find .clasp-swarm/test-wave/01-foundation-a/child-jobs -mindepth 1 -maxdepth 1 -type d ! -name child-budget-holder -print | sort | tail -1)
   [[ -n \"\$child_job\" ]]
   [[ \$(find .clasp-swarm/test-wave/01-foundation-a/child-jobs -mindepth 1 -maxdepth 1 -type d ! -name child-budget-holder | wc -l | tr -d '[:space:]') == '1' ]]
+  [[ \$(sed -n '1p' \"\$child_job/status\") == 'memory-exceeded' ]]
+  [[ -f \"\$child_job/memory-exceeded\" ]]
+	" >/dev/null
+
+swarm_child_retryable_admission_test_root="$(mktemp -d)"
+swarm_child_retryable_admission_project_root="$(make_batch_start_test_project "$swarm_child_retryable_admission_test_root")"
+
+bash -lc "
+  set -euo pipefail
+  cd '$swarm_child_retryable_admission_project_root'
+
+  holder_job=\$(CLASP_MANAGED_JOB_MAX_MEMORY_MB=0 CLASP_MANAGED_JOB_DEFAULT_MIN_AVAILABLE_MEMORY_MB=0 CLASP_MANAGED_JOB_USE_SYSTEMD_SCOPE=never CLASP_MANAGED_JOB_MEMORY_BUDGET_SCOPE=current-root scripts/run-managed-job.sh --jobs-root \"\$PWD/.clasp-swarm/test-wave/01-foundation-a/child-jobs\" --job-id child-budget-holder --memory-mb 999999999 -- bash -c 'while true; do sleep 1; done')
+  trap 'scripts/stop-managed-job.sh --jobs-root \"\$PWD/.clasp-swarm/test-wave/01-foundation-a/child-jobs\" child-budget-holder >/dev/null 2>&1 || true' EXIT
+  deadline=\$((SECONDS + 5))
+  while [[ ! -f \"\$holder_job/pid\" ]]; do
+    if (( SECONDS >= deadline )); then
+      echo 'timed out waiting for retryable child budget holder to start' >&2
+      exit 1
+    fi
+    sleep 0.05
+  done
+  [[ \$(sed -n '1p' \"\$holder_job/status\") == 'started' ]]
+
+  set +e
+  output=\$(CLASP_MANAGED_JOB_MAX_MEMORY_MB=0 CLASP_SWARM_RETRY_LIMIT=3 CLASP_SWARM_RESOURCE_GUARD_BLOCK_MODE=retryable CLASP_SWARM_CHILD_MEMORY_MB=1 CLASP_SWARM_CHILD_MIN_AVAILABLE_MEMORY_MB=1 CLASP_SWARM_CHILD_MIN_AVAILABLE_DISK_MB=0 CLASP_SWARM_CHILD_MIN_DISK_HEADROOM_MB=0 CLASP_MANAGED_JOB_MEMORY_BUDGET_SCOPE=current-root bash scripts/clasp-swarm-lane.sh agents/swarm/test-wave/01-foundation-a 2>&1)
+  lane_status=\$?
+  set -e
+  [[ \"\$lane_status\" -eq 0 ]]
+  [[ \"\$output\" == *'lane subprocess clasp-builder managed job failed: status=memory-exceeded'* ]]
+  [[ \"\$output\" == *'deferred retry for BA-001-foundation-a after builder resource guard: status=memory-exceeded mode=retryable'* ]]
+  [[ ! -f builder-events.log ]]
+  verifier_report=\$(find .clasp-swarm/test-wave/01-foundation-a/runs -name verifier-report.json -print | sort | tail -1)
+  [[ -n \"\$verifier_report\" ]]
+  grep -F 'Builder managed job hit the memory resource guard before the task could be verified.' \"\$verifier_report\" >/dev/null
+  [[ ! -f .clasp-swarm/test-wave/01-foundation-a/blocked/BA-001-foundation-a.json ]]
+  child_job=\$(find .clasp-swarm/test-wave/01-foundation-a/child-jobs -mindepth 1 -maxdepth 1 -type d ! -name child-budget-holder -print | sort | tail -1)
+  [[ -n \"\$child_job\" ]]
   [[ \$(sed -n '1p' \"\$child_job/status\") == 'memory-exceeded' ]]
   [[ -f \"\$child_job/memory-exceeded\" ]]
 	" >/dev/null

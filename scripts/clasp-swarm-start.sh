@@ -74,6 +74,9 @@ apply_launch_profile() {
       if [[ -z "${CLASP_SWARM_CHILD_MIN_AVAILABLE_MEMORY_MB:-}" ]]; then
         export CLASP_SWARM_CHILD_MIN_AVAILABLE_MEMORY_MB=28672
       fi
+      if [[ -z "${CLASP_SWARM_RESOURCE_GUARD_BLOCK_MODE:-}" ]]; then
+        export CLASP_SWARM_RESOURCE_GUARD_BLOCK_MODE=retryable
+      fi
       ;;
     *)
       printf 'clasp-swarm-start: unknown launch profile: %s\n' "$launch_profile" >&2

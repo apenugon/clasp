@@ -45,6 +45,28 @@ marker_value() {
   ' "$marker_file"
 }
 
+latest_child_job_dir() {
+  local child_jobs_root="$1"
+
+  if [[ ! -d "$child_jobs_root" ]]; then
+    return 0
+  fi
+
+  while IFS= read -r child_dir; do
+    local started_at=""
+    local started_epoch="0"
+    local modified_at="0"
+
+    if [[ -f "$child_dir/started-at" ]]; then
+      started_at="$(sed -n '1p' "$child_dir/started-at")"
+      started_epoch="$(date -u -d "$started_at" +%s 2>/dev/null || printf '0')"
+    fi
+
+    modified_at="$(find "$child_dir" -maxdepth 0 -printf '%T@\n' 2>/dev/null || printf '0')"
+    printf '%s\t%s\t%s\n' "$started_epoch" "$modified_at" "$child_dir"
+  done < <(find "$child_jobs_root" -mindepth 1 -maxdepth 1 -type d)
+}
+
 collect_latest_run_state() {
   local runs_root="$1"
   local lane_name="$2"
@@ -299,7 +321,7 @@ while IFS= read -r lane_dir; do
   fi
 
   if [[ -d "$child_jobs_root" ]]; then
-    child_job_dir="$(find "$child_jobs_root" -mindepth 1 -maxdepth 1 -type d | sort | tail -n 1 || true)"
+    child_job_dir="$(latest_child_job_dir "$child_jobs_root" | sort -n -k1,1 -k2,2 | tail -n 1 | cut -f3- || true)"
     if [[ -n "$child_job_dir" ]]; then
       child_job_name="$(basename "$child_job_dir")"
       if [[ -f "$child_job_dir/status" ]]; then

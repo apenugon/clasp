@@ -48,6 +48,7 @@ verifier_timeout_seconds="${CLASP_SWARM_VERIFIER_TIMEOUT_SECONDS:-7200}"
 merge_timeout_seconds="${CLASP_SWARM_MERGE_TIMEOUT_SECONDS:-900}"
 dependency_poll_seconds="${CLASP_SWARM_DEPENDENCY_POLL_SECONDS:-20}"
 infra_retry_delay_seconds="${CLASP_SWARM_INFRA_RETRY_DELAY_SECONDS:-5}"
+resource_guard_block_mode="${CLASP_SWARM_RESOURCE_GUARD_BLOCK_MODE:-fail-closed}"
 batch_filter="${CLASP_SWARM_BATCH:-}"
 owns_runtime_state=0
 manage_child_subprocesses="${CLASP_SWARM_MANAGE_CHILD_SUBPROCESSES:-1}"
@@ -75,6 +76,15 @@ validate_non_negative_integer_config "CLASP_SWARM_CHILD_MEMORY_MB" "$child_memor
 validate_non_negative_integer_config "CLASP_SWARM_CHILD_MIN_AVAILABLE_MEMORY_MB" "$child_min_available_memory_mb"
 validate_non_negative_integer_config "CLASP_SWARM_CHILD_MIN_AVAILABLE_DISK_MB" "$child_min_available_disk_mb"
 validate_non_negative_integer_config "CLASP_SWARM_CHILD_MIN_DISK_HEADROOM_MB" "$child_min_disk_headroom_mb"
+
+case "$resource_guard_block_mode" in
+  fail-closed|block|retryable)
+    ;;
+  *)
+    printf 'CLASP_SWARM_RESOURCE_GUARD_BLOCK_MODE must be fail-closed, block, or retryable; got %s\n' "$resource_guard_block_mode" >&2
+    exit 2
+    ;;
+esac
 
 mkdir -p \
   "$runtime_root" \
@@ -279,6 +289,17 @@ last_child_job_is_resource_guard_failure() {
   esac
 
   return 1
+}
+
+resource_guard_failure_blocks_task() {
+  case "$resource_guard_block_mode" in
+    retryable)
+      return 1
+      ;;
+    *)
+      return 0
+      ;;
+  esac
 }
 
 lock_dir_for() {
@@ -1574,8 +1595,12 @@ while true; do
       feedback_file="$verifier_report"
       remove_worktree_if_present "$baseline_worktree"
       if last_child_job_is_resource_guard_failure; then
-        mark_blocked "$task_id" "$verifier_report"
-        echo "lane $lane_name blocked on $task_id after builder resource guard: status=$last_child_job_status" >&2
+        if resource_guard_failure_blocks_task; then
+          mark_blocked "$task_id" "$verifier_report"
+          echo "lane $lane_name blocked on $task_id after builder resource guard: status=$last_child_job_status" >&2
+        else
+          echo "lane $lane_name deferred retry for $task_id after builder resource guard: status=$last_child_job_status mode=$resource_guard_block_mode" >&2
+        fi
         break 2
       fi
       cooldown_after_infra_failure
@@ -1666,8 +1691,12 @@ while true; do
       feedback_file="$verifier_report"
       remove_worktree_if_present "$baseline_worktree"
       if last_child_job_is_resource_guard_failure; then
-        mark_blocked "$task_id" "$verifier_report"
-        echo "lane $lane_name blocked on $task_id after verifier resource guard: status=$last_child_job_status" >&2
+        if resource_guard_failure_blocks_task; then
+          mark_blocked "$task_id" "$verifier_report"
+          echo "lane $lane_name blocked on $task_id after verifier resource guard: status=$last_child_job_status" >&2
+        else
+          echo "lane $lane_name deferred retry for $task_id after verifier resource guard: status=$last_child_job_status mode=$resource_guard_block_mode" >&2
+        fi
         break 2
       fi
       cooldown_after_infra_failure
