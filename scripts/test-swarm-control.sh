@@ -1163,6 +1163,11 @@ grep -F --quiet 'active_child_job_dir="$job_dir"' "$project_root/scripts/clasp-s
 grep -F --quiet 'last_child_job_is_resource_guard_failure' "$project_root/scripts/clasp-swarm-lane.sh"
 grep -F --quiet 'write_resource_guard_failure_report' "$project_root/scripts/clasp-swarm-lane.sh"
 grep -F --quiet 'blocked on $task_id after builder resource guard' "$project_root/scripts/clasp-swarm-lane.sh"
+grep -F --quiet 'CLASP_MANAGED_JOB_MEMORY_BUDGET_SCOPE=current-root scripts/run-managed-job.sh --jobs-root "$PWD/.clasp-swarm/test-wave/01-foundation-a/jobs"' "$project_root/scripts/test-swarm-control.sh"
+grep -F --quiet 'CLASP_MANAGED_JOB_MEMORY_BUDGET_SCOPE=current-root scripts/run-managed-job.sh --jobs-root "$PWD/.clasp-swarm/test-wave/02-foundation-b/jobs"' "$project_root/scripts/test-swarm-control.sh"
+grep -F --quiet 'CLASP_MANAGED_JOB_MEMORY_BUDGET_SCOPE=current-root scripts/run-managed-job.sh --jobs-root "$PWD/.clasp-swarm/test-wave/01-foundation-a/child-jobs"' "$project_root/scripts/test-swarm-control.sh"
+grep -F --quiet 'CLASP_MANAGED_JOB_MEMORY_BUDGET_SCOPE=current-root bash scripts/clasp-swarm-start.sh --batch foundation test-wave' "$project_root/scripts/test-swarm-control.sh"
+grep -F --quiet 'CLASP_MANAGED_JOB_MEMORY_BUDGET_SCOPE=current-root bash scripts/clasp-swarm-lane.sh agents/swarm/test-wave/01-foundation-a' "$project_root/scripts/test-swarm-control.sh"
 grep -F --quiet 'preflight-complete' "$project_root/scripts/clasp-swarm-common.sh"
 grep -F --quiet 'max_running_lanes="${CLASP_SWARM_MAX_RUNNING_LANES:-1}"' "$project_root/scripts/clasp-swarm-start.sh"
 grep -F --quiet 'lane_memory_mb="${CLASP_SWARM_LANE_MEMORY_MB:-8192}"' "$project_root/scripts/clasp-swarm-start.sh"
@@ -2484,20 +2489,23 @@ bash -lc "
   set -euo pipefail
   cd '$swarm_managed_admission_project_root'
 
-  holder_job=\$(CLASP_MANAGED_JOB_MAX_MEMORY_MB=0 CLASP_MANAGED_JOB_DEFAULT_MIN_AVAILABLE_MEMORY_MB=0 CLASP_MANAGED_JOB_USE_SYSTEMD_SCOPE=never scripts/run-managed-job.sh --jobs-root \"\$PWD/holder-jobs\" --job-id budget-holder --memory-mb 999999999 -- bash -c 'while true; do sleep 1; done')
-  trap 'scripts/stop-managed-job.sh --jobs-root \"\$PWD/holder-jobs\" budget-holder >/dev/null 2>&1 || true' EXIT
-  deadline=\$((SECONDS + 5))
-  while [[ ! -f \"\$holder_job/pid\" ]]; do
-    if (( SECONDS >= deadline )); then
-      echo 'timed out waiting for budget holder to start' >&2
-      exit 1
-    fi
-    sleep 0.05
+  holder_job_a=\$(CLASP_MANAGED_JOB_MAX_MEMORY_MB=0 CLASP_MANAGED_JOB_DEFAULT_MIN_AVAILABLE_MEMORY_MB=0 CLASP_MANAGED_JOB_USE_SYSTEMD_SCOPE=never CLASP_MANAGED_JOB_MEMORY_BUDGET_SCOPE=current-root scripts/run-managed-job.sh --jobs-root \"\$PWD/.clasp-swarm/test-wave/01-foundation-a/jobs\" --job-id budget-holder-a --memory-mb 999999999 -- bash -c 'while true; do sleep 1; done')
+  holder_job_b=\$(CLASP_MANAGED_JOB_MAX_MEMORY_MB=0 CLASP_MANAGED_JOB_DEFAULT_MIN_AVAILABLE_MEMORY_MB=0 CLASP_MANAGED_JOB_USE_SYSTEMD_SCOPE=never CLASP_MANAGED_JOB_MEMORY_BUDGET_SCOPE=current-root scripts/run-managed-job.sh --jobs-root \"\$PWD/.clasp-swarm/test-wave/02-foundation-b/jobs\" --job-id budget-holder-b --memory-mb 999999999 -- bash -c 'while true; do sleep 1; done')
+  trap 'scripts/stop-managed-job.sh --jobs-root \"\$PWD/.clasp-swarm/test-wave/01-foundation-a/jobs\" budget-holder-a >/dev/null 2>&1 || true; scripts/stop-managed-job.sh --jobs-root \"\$PWD/.clasp-swarm/test-wave/02-foundation-b/jobs\" budget-holder-b >/dev/null 2>&1 || true' EXIT
+  for holder_job in \"\$holder_job_a\" \"\$holder_job_b\"; do
+    deadline=\$((SECONDS + 5))
+    while [[ ! -f \"\$holder_job/pid\" ]]; do
+      if (( SECONDS >= deadline )); then
+        echo 'timed out waiting for budget holder to start' >&2
+        exit 1
+      fi
+      sleep 0.05
+    done
+    holder_status=\$(sed -n '1p' \"\$holder_job/status\")
+    [[ \"\$holder_status\" == 'started' ]]
   done
-  holder_status=\$(sed -n '1p' \"\$holder_job/status\")
-  [[ \"\$holder_status\" == 'started' ]]
 
-  output=\$(CLASP_MANAGED_JOB_MAX_MEMORY_MB=0 CLASP_SWARM_ALLOW_DIRTY=1 CLASP_SWARM_MAX_RUNNING_LANES=2 CLASP_SWARM_LANE_MEMORY_MB=1 CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB=1 CLASP_SWARM_MIN_AVAILABLE_DISK_MB=0 CLASP_SWARM_MIN_DISK_HEADROOM_MB=0 bash scripts/clasp-swarm-start.sh --batch foundation test-wave 2>&1)
+  output=\$(CLASP_MANAGED_JOB_MAX_MEMORY_MB=0 CLASP_SWARM_ALLOW_DIRTY=1 CLASP_SWARM_MAX_RUNNING_LANES=2 CLASP_SWARM_LANE_MEMORY_MB=1 CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB=1 CLASP_SWARM_MIN_AVAILABLE_DISK_MB=0 CLASP_SWARM_MIN_DISK_HEADROOM_MB=0 CLASP_MANAGED_JOB_MEMORY_BUDGET_SCOPE=current-root bash scripts/clasp-swarm-start.sh --batch foundation test-wave 2>&1)
   [[ \"\$output\" == *'resource guard: not starting lane=01-foundation-a; managed_job_status=memory-exceeded'* ]]
   [[ \"\$output\" == *'lane=01-foundation-a memory-exceeded:'* ]]
   [[ \"\$output\" == *'running_managed_memory_budget_mb=999999999'* ]]
@@ -2515,8 +2523,8 @@ bash -lc "
   set -euo pipefail
   cd '$swarm_child_admission_project_root'
 
-  holder_job=\$(CLASP_MANAGED_JOB_MAX_MEMORY_MB=0 CLASP_MANAGED_JOB_DEFAULT_MIN_AVAILABLE_MEMORY_MB=0 CLASP_MANAGED_JOB_USE_SYSTEMD_SCOPE=never scripts/run-managed-job.sh --jobs-root \"\$PWD/holder-jobs\" --job-id child-budget-holder --memory-mb 999999999 -- bash -c 'while true; do sleep 1; done')
-  trap 'scripts/stop-managed-job.sh --jobs-root \"\$PWD/holder-jobs\" child-budget-holder >/dev/null 2>&1 || true' EXIT
+  holder_job=\$(CLASP_MANAGED_JOB_MAX_MEMORY_MB=0 CLASP_MANAGED_JOB_DEFAULT_MIN_AVAILABLE_MEMORY_MB=0 CLASP_MANAGED_JOB_USE_SYSTEMD_SCOPE=never CLASP_MANAGED_JOB_MEMORY_BUDGET_SCOPE=current-root scripts/run-managed-job.sh --jobs-root \"\$PWD/.clasp-swarm/test-wave/01-foundation-a/child-jobs\" --job-id child-budget-holder --memory-mb 999999999 -- bash -c 'while true; do sleep 1; done')
+  trap 'scripts/stop-managed-job.sh --jobs-root \"\$PWD/.clasp-swarm/test-wave/01-foundation-a/child-jobs\" child-budget-holder >/dev/null 2>&1 || true' EXIT
   deadline=\$((SECONDS + 5))
   while [[ ! -f \"\$holder_job/pid\" ]]; do
     if (( SECONDS >= deadline )); then
@@ -2528,7 +2536,7 @@ bash -lc "
   [[ \$(sed -n '1p' \"\$holder_job/status\") == 'started' ]]
 
   set +e
-  output=\$(CLASP_MANAGED_JOB_MAX_MEMORY_MB=0 CLASP_SWARM_RETRY_LIMIT=3 CLASP_SWARM_CHILD_MEMORY_MB=1 CLASP_SWARM_CHILD_MIN_AVAILABLE_MEMORY_MB=1 CLASP_SWARM_CHILD_MIN_AVAILABLE_DISK_MB=0 CLASP_SWARM_CHILD_MIN_DISK_HEADROOM_MB=0 bash scripts/clasp-swarm-lane.sh agents/swarm/test-wave/01-foundation-a 2>&1)
+  output=\$(CLASP_MANAGED_JOB_MAX_MEMORY_MB=0 CLASP_SWARM_RETRY_LIMIT=3 CLASP_SWARM_CHILD_MEMORY_MB=1 CLASP_SWARM_CHILD_MIN_AVAILABLE_MEMORY_MB=1 CLASP_SWARM_CHILD_MIN_AVAILABLE_DISK_MB=0 CLASP_SWARM_CHILD_MIN_DISK_HEADROOM_MB=0 CLASP_MANAGED_JOB_MEMORY_BUDGET_SCOPE=current-root bash scripts/clasp-swarm-lane.sh agents/swarm/test-wave/01-foundation-a 2>&1)
   lane_status=\$?
   set -e
   [[ \"\$lane_status\" -eq 0 ]]
@@ -2543,9 +2551,9 @@ bash -lc "
   grep -F 'resource-guard-reason=host-available-memory-reserve' \"\$verifier_report\" >/dev/null
   grep -F 'Stop only managed jobs by metadata; do not kill unmanaged agent or operator sessions.' \"\$verifier_report\" >/dev/null
   [[ -f .clasp-swarm/test-wave/01-foundation-a/blocked/BA-001-foundation-a.json ]]
-  child_job=\$(find .clasp-swarm/test-wave/01-foundation-a/child-jobs -mindepth 1 -maxdepth 1 -type d -print | sort | tail -1)
+  child_job=\$(find .clasp-swarm/test-wave/01-foundation-a/child-jobs -mindepth 1 -maxdepth 1 -type d ! -name child-budget-holder -print | sort | tail -1)
   [[ -n \"\$child_job\" ]]
-  [[ \$(find .clasp-swarm/test-wave/01-foundation-a/child-jobs -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d '[:space:]') == '1' ]]
+  [[ \$(find .clasp-swarm/test-wave/01-foundation-a/child-jobs -mindepth 1 -maxdepth 1 -type d ! -name child-budget-holder | wc -l | tr -d '[:space:]') == '1' ]]
   [[ \$(sed -n '1p' \"\$child_job/status\") == 'memory-exceeded' ]]
   [[ -f \"\$child_job/memory-exceeded\" ]]
 	" >/dev/null
