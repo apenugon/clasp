@@ -51,9 +51,11 @@ grep -F 'run-managed-job.sh' "$project_copy/scripts/verify-affected.sh" >/dev/nu
 grep -F '"$arg" == "--plan-only"' "$project_copy/scripts/verify-affected.sh" >/dev/null
 cp "$project_root/scripts/clasp-swarm-validate-task.mjs" "$project_copy/scripts/clasp-swarm-validate-task.mjs"
 cp "$project_root/scripts/clasp-swarm-preflight.sh" "$project_copy/scripts/clasp-swarm-preflight.sh"
+cp "$project_root/scripts/clasp-swarm-supervise.sh" "$project_copy/scripts/clasp-swarm-supervise.sh"
 cp "$project_root/scripts/test-task-manifest.sh" "$project_copy/scripts/test-task-manifest.sh"
 cp "$project_root/scripts/test-swarm-control.sh" "$project_copy/scripts/test-swarm-control.sh"
 cp "$project_root/scripts/test-swarm-preflight.sh" "$project_copy/scripts/test-swarm-preflight.sh"
+cp "$project_root/scripts/test-swarm-native-supervisor.sh" "$project_copy/scripts/test-swarm-native-supervisor.sh"
 cp "$project_root/scripts/test-standalone-swarm-surfaces.sh" "$project_copy/scripts/test-standalone-swarm-surfaces.sh"
 cp "$project_root/scripts/standalone-swarm-readiness.sh" "$project_copy/scripts/standalone-swarm-readiness.sh"
 cp "$project_root/scripts/standalone-swarm-verify.sh" "$project_copy/scripts/standalone-swarm-verify.sh"
@@ -616,22 +618,29 @@ switch (scenario) {
     assert(report.changedFiles.includes("scripts/clasp-swarm-start.sh"), "swarm start helper should be present");
     assert(report.changedFiles.includes("scripts/clasp-swarm-lane.sh"), "swarm lane helper should be present");
     assert(report.changedFiles.includes("scripts/clasp-swarm-preflight.sh"), "swarm preflight helper should be present");
+    assert(report.changedFiles.includes("scripts/clasp-swarm-supervise.sh"), "swarm supervisor launcher should be present");
     assert(report.changedFiles.includes("scripts/clasp-swarm-validate-task.mjs"), "swarm task validator should be present");
     assert(report.changedFiles.includes("scripts/test-task-manifest.sh"), "task manifest harness should be present");
     assert(hasCommand("bash -n 'scripts/clasp-swarm-common.sh'"), "swarm common helper should run shell syntax check");
     assert(hasCommand("bash -n 'scripts/clasp-swarm-start.sh'"), "swarm start helper should run shell syntax check");
     assert(hasCommand("bash -n 'scripts/clasp-swarm-lane.sh'"), "swarm lane helper should run shell syntax check");
     assert(hasCommand("bash -n 'scripts/clasp-swarm-preflight.sh'"), "swarm preflight helper should run shell syntax check");
+    assert(hasCommand("bash -n 'scripts/clasp-swarm-supervise.sh'"), "swarm supervisor launcher should run shell syntax check");
     assert(hasCommand("node --check 'scripts/clasp-swarm-validate-task.mjs'"), "swarm task validator should run node syntax check");
     assert(hasCommand("bash -n 'scripts/test-task-manifest.sh'"), "task manifest harness should run shell syntax check");
     assert(hasCommand("bash scripts/test-task-manifest.sh"), "task manifest route should run focused manifest coverage");
     assert(hasCommand("bash scripts/test-swarm-control.sh"), "swarm control route should run focused control-plane coverage");
+    assert(hasCommand("bash scripts/test-swarm-native-supervisor.sh"), "swarm supervisor launcher should run focused supervisor launch coverage");
+    assert(hasCommand("bash scripts/test-swarm-ready-gate.sh"), "swarm supervisor launcher should keep structural ready-gate coverage");
     assert(!hasCommand("bash scripts/verify-fast.sh"), "swarm control route should avoid verify-fast fallback");
     assert(report.selectedCommands.filter((command) => command.command === "bash scripts/test-swarm-control.sh").length === 1, "swarm control command should be deduplicated");
     assert(report.selectedCommands.filter((command) => command.command === "bash scripts/test-task-manifest.sh").length === 1, "task manifest command should be deduplicated");
+    assert(report.selectedCommands.filter((command) => command.command === "bash scripts/test-swarm-native-supervisor.sh").length === 1, "swarm native supervisor command should be deduplicated");
     assert(report.usedVerifyFastFallback === false, "known swarm control files should not use verify-fast fallback");
     assert(logHas("scripts/test-task-manifest.sh"), "fake task manifest command should execute");
     assert(logHas("scripts/test-swarm-control.sh"), "fake swarm control command should execute");
+    assert(logHas("scripts/test-swarm-native-supervisor.sh"), "fake swarm native supervisor command should execute");
+    assert(logHas("scripts/test-swarm-ready-gate.sh"), "fake swarm supervisor ready-gate command should execute");
     break;
   case "swarm-preflight-script":
     assert(report.changedFiles.includes("scripts/clasp-swarm-preflight.sh"), "swarm preflight helper should be present");
@@ -1649,6 +1658,7 @@ CLASP_TEST_FAKE_COMMAND_LOG="$swarm_control_log" \
     --changed-file scripts/clasp-swarm-start.sh \
     --changed-file scripts/clasp-swarm-lane.sh \
     --changed-file scripts/clasp-swarm-preflight.sh \
+    --changed-file scripts/clasp-swarm-supervise.sh \
     --changed-file scripts/clasp-swarm-validate-task.mjs \
     --changed-file scripts/test-task-manifest.sh > "$swarm_control_report"
 assert_report "$swarm_control_report" "$swarm_control_log" swarm-control-script

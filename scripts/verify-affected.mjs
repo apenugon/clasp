@@ -285,6 +285,7 @@ const COMMANDS = {
   swarmContextPack: "bash scripts/test-swarm-context-pack.sh",
   swarmSemanticSummaryIndex: "bash scripts/test-swarm-semantic-summary-index.sh",
   swarmPreflight: "bash scripts/test-swarm-preflight.sh",
+  swarmNativeSupervisor: "bash scripts/test-swarm-native-supervisor.sh",
   taskManifest: "bash scripts/test-task-manifest.sh",
   swarmControl: "bash scripts/test-swarm-control.sh",
   localSourceEditWorkspace: "bash scripts/test-local-source-edit-workspace.sh",
@@ -420,8 +421,13 @@ const swarmControlScriptFiles = new Set([
   "scripts/clasp-swarm-lane.sh",
   "scripts/clasp-swarm-start.sh",
   "scripts/clasp-swarm-status.sh",
+  "scripts/clasp-swarm-supervise.sh",
   "scripts/clasp-verifier.sh",
   "scripts/test-swarm-control.sh",
+]);
+const swarmNativeSupervisorScriptFiles = new Set([
+  "scripts/clasp-swarm-supervise.sh",
+  "scripts/test-swarm-native-supervisor.sh",
 ]);
 const swarmPreflightScriptFiles = new Set([
   "scripts/clasp-swarm-preflight.sh",
@@ -2372,6 +2378,30 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
       );
       addSelected(selectedByCommand, "swarm-preflight", COMMANDS.swarmPreflight, "swarm launch preflight path", file);
       addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "swarm launch preflight structural gate", file);
+    }
+
+    if (swarmNativeSupervisorScriptFiles.has(file)) {
+      matched = true;
+      reason(
+        file,
+        "swarm-native-supervisor",
+        "native supervisor launch files use shell syntax plus the focused Clasp supervisor launch fixture",
+      );
+      addSelected(
+        selectedByCommand,
+        `bash-syntax:${file}`,
+        `bash -n ${shellQuote(file)}`,
+        "swarm native supervisor shell syntax",
+        file,
+      );
+      addSelected(
+        selectedByCommand,
+        "swarm-native-supervisor",
+        COMMANDS.swarmNativeSupervisor,
+        "swarm native supervisor launch path",
+        file,
+      );
+      addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "swarm native supervisor structural gate", file);
     }
 
     if (swarmTaskManifestFiles.has(file) || swarmControlScriptFiles.has(file)) {

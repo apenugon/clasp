@@ -28,6 +28,7 @@ bash -n "$project_root/scripts/test-agent-backend-static.sh"
 bash -n "$project_root/scripts/test-agent-ergonomics-helpers.sh"
 bash -n "$project_root/scripts/clasp-manager-worktree-checkpoint.sh"
 bash -n "$project_root/scripts/clasp-swarm-preflight.sh"
+bash -n "$project_root/scripts/clasp-swarm-supervise.sh"
 bash -n "$project_root/scripts/test-swarm-preflight.sh"
 bash -n "$project_root/scripts/test-goal-manager-mailbox-capability-details.sh"
 bash -n "$project_root/scripts/test-safe-workspace-static.sh"
@@ -2935,6 +2936,23 @@ require_pattern "scripts/clasp-swarm-preflight.sh" 'launchAdjustment'
 require_pattern "scripts/clasp-swarm-preflight.sh" 'CLASP_SWARM_PREFLIGHT_CANDIDATE_LANE_MEMORY_MB'
 require_pattern "scripts/clasp-swarm-preflight.sh" 'candidateProfile: "bounded-low-memory"'
 require_pattern "scripts/clasp-swarm-preflight.sh" 'candidateEnv'
+require_pattern "scripts/clasp-swarm-supervise.sh" 'SwarmSupervisor.clasp'
+require_pattern "scripts/clasp-swarm-supervise.sh" 'scripts/run-managed-job.sh'
+require_pattern "scripts/clasp-swarm-supervise.sh" 'scripts/resolve-claspc.sh'
+require_pattern "scripts/clasp-swarm-supervise.sh" 'CLASP_SWARM_SUPERVISOR_MEMORY_MB'
+require_pattern "scripts/clasp-swarm-supervise.sh" 'CLASP_SWARM_SUPERVISOR_MIN_AVAILABLE_MEMORY_MB'
+require_pattern "scripts/clasp-swarm-supervise.sh" 'CLASP_SWARM_SUPERVISOR_MIN_AVAILABLE_DISK_MB'
+require_pattern "scripts/clasp-swarm-supervise.sh" 'CLASP_SWARM_SUPERVISOR_MIN_DISK_HEADROOM_MB'
+require_pattern "scripts/clasp-swarm-supervise.sh" 'clasp_swarm_managed_job_status_is_terminal'
+require_pattern "scripts/clasp-swarm-supervise.sh" 'supervisor already running'
+require_pattern "scripts/clasp-swarm-supervise.sh" 'supervisor_status=already-running'
+require_pattern "scripts/clasp-swarm-supervise.sh" 'supervisor_status=started'
+require_pattern "scripts/clasp-swarm-supervise.sh" 'supervisor_job='
+require_pattern "scripts/test-swarm-native-supervisor.sh" 'clasp-swarm-supervise.sh'
+require_pattern "scripts/test-swarm-native-supervisor.sh" 'supervisor_state='
+require_pattern "scripts/verify-affected.mjs" 'swarmNativeSupervisor: "bash scripts/test-swarm-native-supervisor.sh"'
+require_pattern "scripts/verify-affected.mjs" 'swarmNativeSupervisorScriptFiles'
+require_pattern "scripts/test-verify-affected.sh" 'swarm supervisor launcher should run focused supervisor launch coverage'
 require_pattern "scripts/test-swarm-preflight.sh" 'swarm-preflight-ok'
 require_pattern "scripts/test-swarm-preflight.sh" 'clasp-swarm-start.sh --preflight'
 require_pattern "scripts/test-swarm-preflight.sh" 'clasp-swarm-start.sh --preflight-json'

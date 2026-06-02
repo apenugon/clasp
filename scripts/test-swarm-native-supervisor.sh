@@ -159,4 +159,105 @@ assert(count("preflight") === 2, `preflight count ${count("preflight")}`);
 assert(count("start") === 2, `start count ${count("start")}`);
 EOF
 
+launcher_state_root="$test_root/launcher-state"
+launcher_jobs_root="$test_root/launcher-jobs"
+launcher_tool_state="$test_root/launcher-tool-state"
+launcher_output_path="$test_root/launcher-output.txt"
+
+CLASP_TEST_SWARM_TOOL_STATE="$launcher_tool_state" \
+  CLASP_SWARM_SUPERVISOR_CLASPC_BIN="$claspc_bin" \
+  CLASP_SWARM_SUPERVISOR_WORKSPACE_JSON="\"$project_root\"" \
+  CLASP_SWARM_SUPERVISOR_STATUS_COMMAND_JSON="[\"$fake_tool\",\"status\"]" \
+  CLASP_SWARM_SUPERVISOR_PREFLIGHT_COMMAND_JSON="[\"$fake_tool\",\"preflight\"]" \
+  CLASP_SWARM_SUPERVISOR_START_COMMAND_JSON="[\"$fake_tool\",\"start\"]" \
+  CLASP_SWARM_SUPERVISOR_FALLBACK_START_COMMAND_JSON="[\"$fake_tool\",\"start\"]" \
+  CLASP_SWARM_SUPERVISOR_MEMORY_MB=0 \
+  CLASP_SWARM_SUPERVISOR_MIN_AVAILABLE_MEMORY_MB=0 \
+  CLASP_SWARM_SUPERVISOR_MIN_AVAILABLE_DISK_MB=0 \
+  CLASP_SWARM_SUPERVISOR_MIN_DISK_HEADROOM_MB=0 \
+  CLASP_MANAGED_JOB_REQUIRE_MEMORY_LIMIT=0 \
+  CLASP_MANAGED_JOB_DEFAULT_MIN_AVAILABLE_MEMORY_MB=0 \
+  CLASP_MANAGED_JOB_EXTERNAL_AGENT_RESERVE_MB=0 \
+  CLASP_MANAGED_JOB_REQUIRE_ADMISSION_LOCK=0 \
+  CLASP_MANAGED_JOB_MEMORY_BUDGET_SCOPE=current-root \
+  bash "$project_root/scripts/clasp-swarm-supervise.sh" \
+    --state-root "$launcher_state_root" \
+    --jobs-root "$launcher_jobs_root" \
+    --max-iterations 2 \
+    --poll-ms 100 \
+    --command-timeout-ms 30000 \
+    --report-event-limit 5 \
+    full \
+    >"$launcher_output_path"
+
+launcher_job="$(awk -F= '$1 == "supervisor_job" { print $2 }' "$launcher_output_path")"
+if [[ -z "$launcher_job" || ! -d "$launcher_job" ]]; then
+  printf 'launcher did not report a valid supervisor job\n' >&2
+  cat "$launcher_output_path" >&2
+  exit 1
+fi
+
+for _ in $(seq 1 200); do
+  launcher_status="$(sed -n '1p' "$launcher_job/status" 2>/dev/null || true)"
+  case "$launcher_status" in
+    completed|failed|stopped|memory-exceeded|disk-exceeded|memory-enforcer-unavailable|admission-lock-unavailable)
+      break
+      ;;
+  esac
+  sleep 0.05
+done
+
+if [[ "$(sed -n '1p' "$launcher_job/status" 2>/dev/null || true)" != "completed" ]]; then
+  printf 'launcher supervisor job did not complete\n' >&2
+  cat "$launcher_output_path" >&2
+  cat "$launcher_job/status" >&2 || true
+  cat "$launcher_job/stderr.log" >&2 || true
+  exit 1
+fi
+
+node - "$launcher_output_path" "$launcher_state_root" "$launcher_job" "$launcher_tool_state" <<'EOF'
+const fs = require("node:fs");
+
+const [launcherOutputPath, launcherStateRoot, launcherJob, launcherToolState] = process.argv.slice(2);
+const launcherOutput = fs.readFileSync(launcherOutputPath, "utf8");
+const report = JSON.parse(fs.readFileSync(`${launcherStateRoot}/supervisor-report.json`, "utf8"));
+const eventLines = fs.readFileSync(`${launcherStateRoot}/supervisor-events.jsonl`, "utf8").trimEnd().split(/\n/).map((line) => JSON.parse(line));
+const jobPointer = fs.readFileSync(`${launcherStateRoot}/job`, "utf8").trim();
+const command = fs.readFileSync(`${launcherJob}/command.txt`, "utf8");
+const jobStatus = fs.readFileSync(`${launcherJob}/status`, "utf8").trim();
+const exitStatus = fs.readFileSync(`${launcherJob}/exit-status`, "utf8").trim();
+
+function assert(condition, message) {
+  if (!condition) {
+    throw new Error(message);
+  }
+}
+
+function count(name) {
+  return Number(fs.readFileSync(`${launcherToolState}/${name}.count`, "utf8").trim());
+}
+
+assert(launcherOutput.includes(`supervisor_job=${launcherJob}`), "launcher output should expose job path");
+assert(launcherOutput.includes(`supervisor_state=${launcherStateRoot}`), "launcher output should expose state path");
+assert(jobPointer === launcherJob, `state job pointer ${jobPointer}`);
+assert(jobStatus === "completed", `job status ${jobStatus}`);
+assert(exitStatus === "0", `job exit ${exitStatus}`);
+assert(command.includes("SwarmSupervisor.clasp"), "managed command should run the Clasp supervisor");
+assert(command.includes("claspc"), "managed command should use claspc run");
+assert(report.supervisorStatus === "completed", `supervisor status ${report.supervisorStatus}`);
+assert(report.waveName === "full", `wave ${report.waveName}`);
+assert(report.profileName === "bounded-memory-pressure", `profile ${report.profileName}`);
+assert(report.maxIterations === 2, `maxIterations ${report.maxIterations}`);
+assert(report.pollMs === 100, `pollMs ${report.pollMs}`);
+assert(report.reportEventLimit === 5, `reportEventLimit ${report.reportEventLimit}`);
+assert(report.completedIterations === 2, `completedIterations ${report.completedIterations}`);
+assert(report.admittedStarts === 1, `admittedStarts ${report.admittedStarts}`);
+assert(eventLines.length === 2, `event lines ${eventLines.length}`);
+assert(eventLines[0].action === "started-lane", `event0 ${eventLines[0].action}`);
+assert(eventLines[1].action === "observed-running", `event1 ${eventLines[1].action}`);
+assert(count("status") === 2, `status count ${count("status")}`);
+assert(count("preflight") === 1, `preflight count ${count("preflight")}`);
+assert(count("start") === 1, `start count ${count("start")}`);
+EOF
+
 printf 'swarm-native-supervisor-ok\n'
