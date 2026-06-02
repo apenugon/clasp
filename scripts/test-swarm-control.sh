@@ -1160,6 +1160,9 @@ grep -F --quiet 'child_memory_mb="${CLASP_SWARM_CHILD_MEMORY_MB:-${CLASP_SWARM_L
 grep -F --quiet 'run_lane_managed_subprocess "$timeout_seconds" "$@"' "$project_root/scripts/clasp-swarm-lane.sh"
 grep -F --quiet -- '--jobs-root "$child_jobs_root"' "$project_root/scripts/clasp-swarm-lane.sh"
 grep -F --quiet 'active_child_job_dir="$job_dir"' "$project_root/scripts/clasp-swarm-lane.sh"
+grep -F --quiet 'last_child_job_is_resource_guard_failure' "$project_root/scripts/clasp-swarm-lane.sh"
+grep -F --quiet 'write_resource_guard_failure_report' "$project_root/scripts/clasp-swarm-lane.sh"
+grep -F --quiet 'blocked on $task_id after builder resource guard' "$project_root/scripts/clasp-swarm-lane.sh"
 grep -F --quiet 'preflight-complete' "$project_root/scripts/clasp-swarm-common.sh"
 grep -F --quiet 'max_running_lanes="${CLASP_SWARM_MAX_RUNNING_LANES:-1}"' "$project_root/scripts/clasp-swarm-start.sh"
 grep -F --quiet 'lane_memory_mb="${CLASP_SWARM_LANE_MEMORY_MB:-8192}"' "$project_root/scripts/clasp-swarm-start.sh"
@@ -2525,19 +2528,24 @@ bash -lc "
   [[ \$(sed -n '1p' \"\$holder_job/status\") == 'started' ]]
 
   set +e
-  output=\$(CLASP_MANAGED_JOB_MAX_MEMORY_MB=0 CLASP_SWARM_RETRY_LIMIT=1 CLASP_SWARM_CHILD_MEMORY_MB=1 CLASP_SWARM_CHILD_MIN_AVAILABLE_MEMORY_MB=1 CLASP_SWARM_CHILD_MIN_AVAILABLE_DISK_MB=0 CLASP_SWARM_CHILD_MIN_DISK_HEADROOM_MB=0 bash scripts/clasp-swarm-lane.sh agents/swarm/test-wave/01-foundation-a 2>&1)
+  output=\$(CLASP_MANAGED_JOB_MAX_MEMORY_MB=0 CLASP_SWARM_RETRY_LIMIT=3 CLASP_SWARM_CHILD_MEMORY_MB=1 CLASP_SWARM_CHILD_MIN_AVAILABLE_MEMORY_MB=1 CLASP_SWARM_CHILD_MIN_AVAILABLE_DISK_MB=0 CLASP_SWARM_CHILD_MIN_DISK_HEADROOM_MB=0 bash scripts/clasp-swarm-lane.sh agents/swarm/test-wave/01-foundation-a 2>&1)
   lane_status=\$?
   set -e
   [[ \"\$lane_status\" -eq 0 ]]
   [[ \"\$output\" == *'lane subprocess clasp-builder managed job failed: status=memory-exceeded'* ]]
   [[ \"\$output\" == *'subprocess=clasp-builder memory-exceeded:'* ]]
   [[ \"\$output\" == *'running_managed_memory_budget_mb=999999999'* ]]
+  [[ \"\$output\" == *'blocked on BA-001-foundation-a after builder resource guard: status=memory-exceeded'* ]]
   [[ ! -f builder-events.log ]]
   verifier_report=\$(find .clasp-swarm/test-wave/01-foundation-a/runs -name verifier-report.json -print | sort | tail -1)
   [[ -n \"\$verifier_report\" ]]
-  grep -F 'Builder subagent infrastructure failed before verification could run.' \"\$verifier_report\" >/dev/null
+  grep -F 'Builder managed job hit the memory resource guard before the task could be verified.' \"\$verifier_report\" >/dev/null
+  grep -F 'resource-guard-reason=host-available-memory-reserve' \"\$verifier_report\" >/dev/null
+  grep -F 'Stop only managed jobs by metadata; do not kill unmanaged agent or operator sessions.' \"\$verifier_report\" >/dev/null
+  [[ -f .clasp-swarm/test-wave/01-foundation-a/blocked/BA-001-foundation-a.json ]]
   child_job=\$(find .clasp-swarm/test-wave/01-foundation-a/child-jobs -mindepth 1 -maxdepth 1 -type d -print | sort | tail -1)
   [[ -n \"\$child_job\" ]]
+  [[ \$(find .clasp-swarm/test-wave/01-foundation-a/child-jobs -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d '[:space:]') == '1' ]]
   [[ \$(sed -n '1p' \"\$child_job/status\") == 'memory-exceeded' ]]
   [[ -f \"\$child_job/memory-exceeded\" ]]
 	" >/dev/null

@@ -57,6 +57,9 @@ child_min_available_disk_mb="${CLASP_SWARM_CHILD_MIN_AVAILABLE_DISK_MB:-${CLASP_
 child_min_disk_headroom_mb="${CLASP_SWARM_CHILD_MIN_DISK_HEADROOM_MB:-${CLASP_SWARM_MIN_DISK_HEADROOM_MB:-${CLASP_GENERATED_STATE_MIN_HEADROOM_MB:-1024}}}"
 child_jobs_root="$runtime_root/child-jobs"
 active_child_job_dir=""
+last_child_job_dir=""
+last_child_job_status=""
+last_child_job_exit_status=""
 
 validate_non_negative_integer_config() {
   local name="$1"
@@ -120,6 +123,10 @@ run_with_timeout() {
 run_lane_subprocess() {
   local timeout_seconds="$1"
   shift
+
+  last_child_job_dir=""
+  last_child_job_status=""
+  last_child_job_exit_status=""
 
   if lane_child_subprocess_management_enabled; then
     run_lane_managed_subprocess "$timeout_seconds" "$@"
@@ -200,6 +207,9 @@ run_lane_managed_subprocess() {
     return "$?"
   fi
 
+  last_child_job_dir="$job_dir"
+  last_child_job_status=""
+  last_child_job_exit_status=""
   active_child_job_dir="$job_dir"
   while true; do
     status="$(clasp_swarm_managed_job_status "$job_dir")"
@@ -220,6 +230,8 @@ run_lane_managed_subprocess() {
 
   status="$(clasp_swarm_managed_job_status "$job_dir")"
   exit_status="$(clasp_swarm_managed_job_exit_status "$job_dir")"
+  last_child_job_status="$status"
+  last_child_job_exit_status="$exit_status"
 
   if [[ -s "$job_dir/stdout.log" ]]; then
     cat "$job_dir/stdout.log"
@@ -251,6 +263,18 @@ run_lane_managed_subprocess() {
       ;;
     memory-enforcer-unavailable|admission-lock-unavailable)
       return 125
+      ;;
+  esac
+
+  return 1
+}
+
+last_child_job_is_resource_guard_failure() {
+  [[ -n "${last_child_job_dir:-}" && -d "$last_child_job_dir" ]] || return 1
+
+  case "${last_child_job_status:-}" in
+    memory-exceeded|disk-exceeded)
+      return 0
       ;;
   esac
 
@@ -1015,6 +1039,70 @@ fs.writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
 EOF
 }
 
+write_resource_guard_failure_report() {
+  local report_file="$1"
+  local task_id="$2"
+  local role="$3"
+  local job_dir="$4"
+
+  node - <<'EOF' "$report_file" "$task_id" "$role" "$job_dir"
+const fs = require("fs");
+const [reportPath, taskId, role, jobDir] = process.argv.slice(2);
+
+const readFirst = (path) => {
+  try {
+    return fs.readFileSync(path, "utf8").split(/\r?\n/, 1)[0] || "";
+  } catch (_) {
+    return "";
+  }
+};
+
+const readText = (path) => {
+  try {
+    return fs.readFileSync(path, "utf8").trim();
+  } catch (_) {
+    return "";
+  }
+};
+
+const parseKv = (text) => {
+  const out = {};
+  for (const line of text.split(/\r?\n/)) {
+    const idx = line.indexOf("=");
+    if (idx > 0) out[line.slice(0, idx)] = line.slice(idx + 1);
+  }
+  return out;
+};
+
+const status = readFirst(`${jobDir}/status`) || "unknown";
+const exitStatus = readFirst(`${jobDir}/exit-status`) || "unknown";
+const memoryDetails = readText(`${jobDir}/memory-exceeded`);
+const diskDetails = readText(`${jobDir}/disk-exceeded`);
+const guardKind = status === "disk-exceeded" ? "disk" : "memory";
+const guardDetails = diskDetails || memoryDetails;
+const parsed = parseKv(guardDetails);
+const roleLabel = role.slice(0, 1).toUpperCase() + role.slice(1);
+
+const report = {
+  verdict: "fail",
+  summary: `${roleLabel} managed job hit the ${guardKind} resource guard before the task could be verified.`,
+  findings: [
+    `${role} managed job status=${status} exit_status=${exitStatus} for ${taskId}.`,
+    ...(parsed.reason ? [`resource-guard-reason=${parsed.reason}`] : []),
+    ...(parsed.phase ? [`resource-guard-phase=${parsed.phase}`] : []),
+    ...(guardDetails ? [`Resource guard details:\n${guardDetails}`] : []),
+  ],
+  tests_run: [],
+  follow_up: [
+    "Wait for resource pressure to clear or lower swarm child memory/concurrency before retrying this task.",
+    "If disk pressure caused the block, inspect the generated-state cleanup health report and apply only safe cleanup.",
+    "Stop only managed jobs by metadata; do not kill unmanaged agent or operator sessions.",
+  ],
+};
+fs.writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
+EOF
+}
+
 write_unusable_task_worktree_report() {
   local report_file="$1"
   local summary="$2"
@@ -1471,16 +1559,25 @@ while true; do
       :
     else
       builder_exit="$?"
-      write_failure_report \
-        "$verifier_report" \
-        "Builder subagent infrastructure failed before verification could run." \
-        "$builder_log" \
-        "$task_id" \
-        "builder" \
-        "$builder_exit"
+      if last_child_job_is_resource_guard_failure; then
+        write_resource_guard_failure_report "$verifier_report" "$task_id" "builder" "$last_child_job_dir"
+      else
+        write_failure_report \
+          "$verifier_report" \
+          "Builder subagent infrastructure failed before verification could run." \
+          "$builder_log" \
+          "$task_id" \
+          "builder" \
+          "$builder_exit"
+      fi
       archive_task_state "$task_worktree" "$run_dir" "$task_branch"
       feedback_file="$verifier_report"
       remove_worktree_if_present "$baseline_worktree"
+      if last_child_job_is_resource_guard_failure; then
+        mark_blocked "$task_id" "$verifier_report"
+        echo "lane $lane_name blocked on $task_id after builder resource guard: status=$last_child_job_status" >&2
+        break 2
+      fi
       cooldown_after_infra_failure
       attempt=$((attempt + 1))
       continue
@@ -1554,16 +1651,25 @@ while true; do
       :
     else
       verifier_exit="$?"
-      write_failure_report \
-        "$verifier_report" \
-        "Verifier subagent infrastructure failed before a verdict was produced." \
-        "$verifier_log" \
-        "$task_id" \
-        "verifier" \
-        "$verifier_exit"
+      if last_child_job_is_resource_guard_failure; then
+        write_resource_guard_failure_report "$verifier_report" "$task_id" "verifier" "$last_child_job_dir"
+      else
+        write_failure_report \
+          "$verifier_report" \
+          "Verifier subagent infrastructure failed before a verdict was produced." \
+          "$verifier_log" \
+          "$task_id" \
+          "verifier" \
+          "$verifier_exit"
+      fi
       archive_task_state "$task_worktree" "$run_dir" "$task_branch"
       feedback_file="$verifier_report"
       remove_worktree_if_present "$baseline_worktree"
+      if last_child_job_is_resource_guard_failure; then
+        mark_blocked "$task_id" "$verifier_report"
+        echo "lane $lane_name blocked on $task_id after verifier resource guard: status=$last_child_job_status" >&2
+        break 2
+      fi
       cooldown_after_infra_failure
       attempt=$((attempt + 1))
       continue
