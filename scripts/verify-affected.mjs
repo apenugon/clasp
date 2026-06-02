@@ -429,6 +429,10 @@ const swarmNativeSupervisorScriptFiles = new Set([
   "scripts/clasp-swarm-supervise.sh",
   "scripts/test-swarm-native-supervisor.sh",
 ]);
+const swarmNativeSupervisorFiles = new Set([
+  ...swarmNativeSupervisorScriptFiles,
+  "examples/swarm-native/SwarmSupervisor.clasp",
+]);
 const swarmPreflightScriptFiles = new Set([
   "scripts/clasp-swarm-preflight.sh",
   "scripts/test-swarm-preflight.sh",
@@ -2034,7 +2038,7 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
       );
     }
 
-    if (file.startsWith("examples/swarm-native/") && !isSwarmFeedbackLoopProgramPath && !isGoalManagerPlannerPromptPath && !isModelBoundaryPath && !isServiceDecodePath && !isFocusedSwarmPriorityHarness && !isFocusedSwarmPolicyHelperHarness && !focusedPlannerReportDecodeFiles.has(file) && !isRetiredGoalManagerProgramFile && !isHostResourcesPath && !isGoalManagerResourceHealthPath && !isGoalManagerGeneratedCleanupHealthPath && !isGoalManagerMailboxCapabilityDetailsPath && !isGeneratedStateCleanupPlanPath && !isLocalRoutingPath && !isStandaloneSwarmSurfacePath && !isSwarmCapabilityAuditPath && !isAgentErgonomicsPath && !isLocalSourceEditWorkspacePath && !isLocalAgentCapabilityClosurePath) {
+    if (file.startsWith("examples/swarm-native/") && !isSwarmFeedbackLoopProgramPath && !isGoalManagerPlannerPromptPath && !isModelBoundaryPath && !isServiceDecodePath && !isFocusedSwarmPriorityHarness && !isFocusedSwarmPolicyHelperHarness && !focusedPlannerReportDecodeFiles.has(file) && !isRetiredGoalManagerProgramFile && !isHostResourcesPath && !isGoalManagerResourceHealthPath && !isGoalManagerGeneratedCleanupHealthPath && !isGoalManagerMailboxCapabilityDetailsPath && !isGeneratedStateCleanupPlanPath && !isLocalRoutingPath && !isStandaloneSwarmSurfacePath && !isSwarmCapabilityAuditPath && !isAgentErgonomicsPath && !isLocalSourceEditWorkspacePath && !isLocalAgentCapabilityClosurePath && !swarmNativeSupervisorFiles.has(file)) {
       matched = true;
       reason(file, "swarm-native", "native swarm example path uses native claspc, ready-gate, managed-loop, memory, and context-pack coverage");
       addSelected(selectedByCommand, "native-claspc", COMMANDS.nativeClaspc, "swarm native path", file);
@@ -2380,20 +2384,22 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
       addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "swarm launch preflight structural gate", file);
     }
 
-    if (swarmNativeSupervisorScriptFiles.has(file)) {
+    if (swarmNativeSupervisorFiles.has(file)) {
       matched = true;
       reason(
         file,
         "swarm-native-supervisor",
         "native supervisor launch files use shell syntax plus the focused Clasp supervisor launch fixture",
       );
-      addSelected(
-        selectedByCommand,
-        `bash-syntax:${file}`,
-        `bash -n ${shellQuote(file)}`,
-        "swarm native supervisor shell syntax",
-        file,
-      );
+      if (file.endsWith(".sh")) {
+        addSelected(
+          selectedByCommand,
+          `bash-syntax:${file}`,
+          `bash -n ${shellQuote(file)}`,
+          "swarm native supervisor shell syntax",
+          file,
+        );
+      }
       addSelected(
         selectedByCommand,
         "swarm-native-supervisor",

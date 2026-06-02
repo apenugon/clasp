@@ -529,6 +529,22 @@ runFallbackStartCommand iteration statusDoc preflight = {
     }
 }
 
+runDecodedPreflightStep : Int -> SwarmStatusDocument -> Int -> SwarmPreflightDocument -> SupervisorReport
+runDecodedPreflightStep iteration statusDoc preflightExitCode preflight =
+  if preflight.status == "admitted" then
+    if preflightExitCode == 0 then
+      runStartCommand iteration statusDoc preflight
+    else
+      appendEvent
+        emptyReport
+        (supervisorPreflightEvent iteration "preflight-failed" preflight.reason statusDoc 0 preflight 0 false)
+  else if shouldRunFallbackStart preflight then
+    runFallbackStartCommand iteration statusDoc preflight
+  else
+    appendEvent
+      emptyReport
+      (supervisorPreflightEvent iteration "preflight-blocked" preflight.reason statusDoc 0 preflight 0 false)
+
 runPreflightStep : Int -> SwarmStatusDocument -> SupervisorReport
 runPreflightStep iteration statusDoc =
   match runSupervisorCommand preflightCommand {
@@ -542,9 +558,14 @@ runPreflightStep iteration statusDoc =
           emptyReport
           (supervisorStatusEvent iteration "preflight-timeout" preflightResult.error statusDoc.summary.runningCount statusDoc.summary.blockedCount 0 0 true)
       else if preflightResult.exitCode != 0 then
-        appendEvent
-          emptyReport
-          (supervisorStatusEvent iteration "preflight-failed" preflightResult.stderr statusDoc.summary.runningCount statusDoc.summary.blockedCount 0 0 false)
+        match tryDecode SwarmPreflightDocument preflightResult.stdout {
+          Err message ->
+            appendEvent
+              emptyReport
+              (supervisorStatusEvent iteration "preflight-failed" preflightResult.stderr statusDoc.summary.runningCount statusDoc.summary.blockedCount 0 0 false),
+          Ok preflight ->
+            runDecodedPreflightStep iteration statusDoc preflightResult.exitCode preflight
+        }
       else
         match tryDecode SwarmPreflightDocument preflightResult.stdout {
           Err message ->
@@ -552,14 +573,7 @@ runPreflightStep iteration statusDoc =
               emptyReport
               (supervisorStatusEvent iteration "preflight-decode-failed" message statusDoc.summary.runningCount statusDoc.summary.blockedCount 0 0 false),
           Ok preflight ->
-            if preflight.status == "admitted" then
-              runStartCommand iteration statusDoc preflight
-            else if shouldRunFallbackStart preflight then
-              runFallbackStartCommand iteration statusDoc preflight
-            else
-              appendEvent
-                emptyReport
-                (supervisorPreflightEvent iteration "preflight-blocked" preflight.reason statusDoc 0 preflight 0 false)
+            runDecodedPreflightStep iteration statusDoc preflightResult.exitCode preflight
         }
   }
 

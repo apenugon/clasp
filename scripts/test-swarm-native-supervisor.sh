@@ -56,6 +56,7 @@ JSON
       cat <<'JSON'
 {"schemaVersion":1,"status":"blocked","reason":"memory-pressure","waveName":"full","runningLanes":0,"maxRunningLanes":1,"selectedLane":null,"selectedTask":null,"selectedLaneText":"","selectedTaskText":"","resourcePressure":{"kind":"memory","shortfallMb":256,"recommendedAction":"wait-for-memory","externalAgentProcessCount":3,"externalAgentReservedMemoryMb":4096},"launchAdjustment":{"candidateProfile":"bounded-low-memory","candidateAdmissible":true,"candidateEnv":"CLASP_SWARM_LANE_MEMORY_MB=4096 CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB=32768","candidateShortfallMb":0},"repositoryGate":{"status":"not-checked","reason":"not-requested","recommendedAction":"none"}}
 JSON
+      exit 75
     fi
     ;;
   start)

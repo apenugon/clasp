@@ -141,6 +141,7 @@ touch "$project_copy/examples/swarm-native/GoalManagerPlannerInputState.clasp"
 touch "$project_copy/examples/swarm-native/PlannerInputFingerprintHarness.clasp"
 touch "$project_copy/examples/swarm-native/GoalManagerMailboxMessages.clasp"
 touch "$project_copy/examples/swarm-native/GoalManagerMailboxCapabilityHarness.clasp"
+touch "$project_copy/examples/swarm-native/SwarmSupervisor.clasp"
 touch "$project_copy/scripts/test-swarm-ready-benchmark.sh"
 touch "$project_copy/scripts/test-swarm-capability-audit.sh"
 touch "$project_copy/scripts/test-swarm-policy-helpers.sh"
@@ -806,6 +807,19 @@ switch (scenario) {
     assert(logHas("scripts/verify-runtime-slice.sh swarm-feedback-loop"), "fake FeedbackLoop runtime slice should execute");
     assert(logHas("scripts/test-agent-command-template.sh"), "fake agent command template should execute");
     assert(logHas("scripts/test-swarm-ready-gate.sh"), "fake swarm-ready command should execute");
+    break;
+  case "swarm-native-supervisor-program":
+    assert(report.changedFiles.includes("examples/swarm-native/SwarmSupervisor.clasp"), "SwarmSupervisor source should be present");
+    assert(hasCommand("bash scripts/test-swarm-native-supervisor.sh"), "SwarmSupervisor source should run focused supervisor launch coverage");
+    assert(hasCommand("bash scripts/test-swarm-ready-gate.sh"), "SwarmSupervisor source should keep structural ready-gate coverage");
+    assert(!hasCommand("bash scripts/test-native-claspc.sh"), "SwarmSupervisor source should avoid broad native-claspc routing");
+    assert(!hasCommand("bash scripts/verify-runtime-slice.sh managed-loop"), "SwarmSupervisor source should avoid unrelated managed-loop runtime slice");
+    assert(!hasCommand("bash scripts/test-swarm-memory.sh"), "SwarmSupervisor source should avoid standalone memory harness routing");
+    assert(!hasCommand("bash scripts/verify-fast.sh"), "SwarmSupervisor source should avoid verify-fast fallback");
+    assert(report.selectedCommands.filter((command) => command.command === "bash scripts/test-swarm-native-supervisor.sh").length === 1, "swarm native supervisor command should be deduplicated");
+    assert(report.usedVerifyFastFallback === false, "known SwarmSupervisor source should not use verify-fast fallback");
+    assert(logHas("scripts/test-swarm-native-supervisor.sh"), "fake swarm native supervisor command should execute");
+    assert(logHas("scripts/test-swarm-ready-gate.sh"), "fake SwarmSupervisor ready-gate command should execute");
     break;
   case "local-agent-capability-closure":
     assert(report.changedFiles.includes("examples/swarm-native/LocalSourceEdit.clasp"), "LocalSourceEdit source should be present");
@@ -1779,6 +1793,13 @@ CLASP_TEST_FAKE_COMMAND_LOG="$swarm_feedback_loop_program_log" \
     --changed-file examples/swarm-native/AttemptLoop.clasp \
     --changed-file examples/swarm-native/LocalAgent.clasp > "$swarm_feedback_loop_program_report"
 assert_report "$swarm_feedback_loop_program_report" "$swarm_feedback_loop_program_log" swarm-feedback-loop-program
+
+swarm_native_supervisor_program_report="$test_root/swarm-native-supervisor-program-report.json"
+swarm_native_supervisor_program_log="$test_root/swarm-native-supervisor-program.log"
+CLASP_TEST_FAKE_COMMAND_LOG="$swarm_native_supervisor_program_log" \
+  run_verify_affected \
+    --changed-file examples/swarm-native/SwarmSupervisor.clasp > "$swarm_native_supervisor_program_report"
+assert_report "$swarm_native_supervisor_program_report" "$swarm_native_supervisor_program_log" swarm-native-supervisor-program
 
 local_agent_capability_closure_report="$test_root/local-agent-capability-closure-report.json"
 local_agent_capability_closure_log="$test_root/local-agent-capability-closure.log"
