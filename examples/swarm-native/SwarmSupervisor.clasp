@@ -33,6 +33,7 @@ record SwarmPreflightDocument = {
   selectedLaneText : Str,
   selectedTaskText : Str,
   resourcePressure : SwarmResourcePressure,
+  launchAdjustment : SwarmLaunchAdjustment,
   repositoryGate : SwarmRepositoryGate
 }
 
@@ -50,6 +51,13 @@ record SwarmRepositoryGate = {
   recommendedAction : Str
 }
 
+record SwarmLaunchAdjustment = {
+  candidateProfile : Str,
+  candidateAdmissible : Bool,
+  candidateEnv : Str,
+  candidateShortfallMb : Int
+}
+
 record SupervisorEvent = {
   iteration : Int,
   action : Str,
@@ -59,6 +67,9 @@ record SupervisorEvent = {
   resourcePressureKind : Str,
   resourcePressureShortfallMb : Int,
   resourcePressureRecommendedAction : Str,
+  launchAdjustmentCandidateProfile : Str,
+  launchAdjustmentCandidateAdmissible : Bool,
+  launchAdjustmentCandidateEnv : Str,
   repositoryGateStatus : Str,
   repositoryGateReason : Str,
   runningCount : Int,
@@ -85,6 +96,8 @@ record SupervisorReport = {
   lastSelectedTask : Str,
   lastResourcePressureKind : Str,
   lastResourcePressureRecommendedAction : Str,
+  lastLaunchAdjustmentCandidateProfile : Str,
+  lastLaunchAdjustmentCandidateAdmissible : Bool,
   observedRunningCount : Int,
   observedBlockedCount : Int,
   events : [SupervisorEvent]
@@ -151,6 +164,9 @@ commandTimeoutMs = readEnvInt "CLASP_SWARM_SUPERVISOR_COMMAND_TIMEOUT_MS_JSON" 1
 dryRun : Bool
 dryRun = readEnvBool "CLASP_SWARM_SUPERVISOR_DRY_RUN_JSON" false
 
+allowFallbackProfile : Bool
+allowFallbackProfile = readEnvBool "CLASP_SWARM_SUPERVISOR_ALLOW_FALLBACK_JSON" true
+
 supervisorMode : Str
 supervisorMode = readEnvText "CLASP_SWARM_SUPERVISOR_MODE_JSON" "run"
 
@@ -172,6 +188,15 @@ startCommand =
     "CLASP_SWARM_SUPERVISOR_START_COMMAND_JSON"
     ["bash", "scripts/clasp-swarm-start.sh", "--profile", profileName, waveName]
 
+fallbackProfileName : Str
+fallbackProfileName = readEnvText "CLASP_SWARM_SUPERVISOR_FALLBACK_PROFILE_JSON" "bounded-low-memory"
+
+fallbackStartCommand : [Str]
+fallbackStartCommand =
+  readEnvCommand
+    "CLASP_SWARM_SUPERVISOR_FALLBACK_START_COMMAND_JSON"
+    ["bash", "scripts/clasp-swarm-start.sh", "--profile", fallbackProfileName, waveName]
+
 timedProcessResultError : Str -> Result TimedProcessResult
 timedProcessResultError message = Err message
 
@@ -185,8 +210,8 @@ runSupervisorCommand : [Str] -> Result TimedProcessResult
 runSupervisorCommand command =
   timedProcessResult (runCommandTimeoutRaw workspaceRoot commandTimeoutMs command)
 
-supervisorEvent : Int -> Str -> Str -> Str -> Str -> Str -> Int -> Str -> Str -> Str -> Int -> Int -> Int -> Str -> Str -> Int -> Bool -> SupervisorEvent
-supervisorEvent iteration action reason selectedLane selectedTask resourcePressureKind resourcePressureShortfallMb resourcePressureRecommendedAction repositoryGateStatus repositoryGateReason runningCount blockedCount statusExitCode preflightStatus preflightReason startExitCode timedOut =
+supervisorEvent : Int -> Str -> Str -> Str -> Str -> Str -> Int -> Str -> Str -> Bool -> Str -> Str -> Str -> Int -> Int -> Int -> Str -> Str -> Int -> Bool -> SupervisorEvent
+supervisorEvent iteration action reason selectedLane selectedTask resourcePressureKind resourcePressureShortfallMb resourcePressureRecommendedAction launchAdjustmentCandidateProfile launchAdjustmentCandidateAdmissible launchAdjustmentCandidateEnv repositoryGateStatus repositoryGateReason runningCount blockedCount statusExitCode preflightStatus preflightReason startExitCode timedOut =
   SupervisorEvent {
     iteration = iteration,
     action = action,
@@ -196,6 +221,9 @@ supervisorEvent iteration action reason selectedLane selectedTask resourcePressu
     resourcePressureKind = resourcePressureKind,
     resourcePressureShortfallMb = resourcePressureShortfallMb,
     resourcePressureRecommendedAction = resourcePressureRecommendedAction,
+    launchAdjustmentCandidateProfile = launchAdjustmentCandidateProfile,
+    launchAdjustmentCandidateAdmissible = launchAdjustmentCandidateAdmissible,
+    launchAdjustmentCandidateEnv = launchAdjustmentCandidateEnv,
     repositoryGateStatus = repositoryGateStatus,
     repositoryGateReason = repositoryGateReason,
     runningCount = runningCount,
@@ -210,7 +238,7 @@ supervisorEvent iteration action reason selectedLane selectedTask resourcePressu
 
 supervisorStatusEvent : Int -> Str -> Str -> Int -> Int -> Int -> Int -> Bool -> SupervisorEvent
 supervisorStatusEvent iteration action reason runningCount blockedCount statusExitCode startExitCode timedOut =
-  supervisorEvent iteration action reason "" "" "" 0 "" "" "" runningCount blockedCount statusExitCode "" "" startExitCode timedOut
+  supervisorEvent iteration action reason "" "" "" 0 "" "" false "" "" "" runningCount blockedCount statusExitCode "" "" startExitCode timedOut
 
 supervisorPreflightEvent : Int -> Str -> Str -> SwarmStatusDocument -> Int -> SwarmPreflightDocument -> Int -> Bool -> SupervisorEvent
 supervisorPreflightEvent iteration action reason statusDoc statusExitCode preflight startExitCode timedOut =
@@ -223,6 +251,9 @@ supervisorPreflightEvent iteration action reason statusDoc statusExitCode prefli
     preflight.resourcePressure.kind
     preflight.resourcePressure.shortfallMb
     preflight.resourcePressure.recommendedAction
+    preflight.launchAdjustment.candidateProfile
+    preflight.launchAdjustment.candidateAdmissible
+    preflight.launchAdjustment.candidateEnv
     preflight.repositoryGate.status
     preflight.repositoryGate.reason
     statusDoc.summary.runningCount
@@ -249,6 +280,8 @@ emptyReport =
     lastSelectedTask = "",
     lastResourcePressureKind = "",
     lastResourcePressureRecommendedAction = "",
+    lastLaunchAdjustmentCandidateProfile = "",
+    lastLaunchAdjustmentCandidateAdmissible = false,
     observedRunningCount = 0,
     observedBlockedCount = 0,
     events = emptyEvents
@@ -270,6 +303,8 @@ appendEvent report event =
     lastSelectedTask = event.selectedTask,
     lastResourcePressureKind = event.resourcePressureKind,
     lastResourcePressureRecommendedAction = event.resourcePressureRecommendedAction,
+    lastLaunchAdjustmentCandidateProfile = event.launchAdjustmentCandidateProfile,
+    lastLaunchAdjustmentCandidateAdmissible = event.launchAdjustmentCandidateAdmissible,
     observedRunningCount = event.runningCount,
     observedBlockedCount = event.blockedCount,
     events = append report.events [event]
@@ -291,6 +326,8 @@ markReportStatus report status =
     lastSelectedTask = report.lastSelectedTask,
     lastResourcePressureKind = report.lastResourcePressureKind,
     lastResourcePressureRecommendedAction = report.lastResourcePressureRecommendedAction,
+    lastLaunchAdjustmentCandidateProfile = report.lastLaunchAdjustmentCandidateProfile,
+    lastLaunchAdjustmentCandidateAdmissible = report.lastLaunchAdjustmentCandidateAdmissible,
     observedRunningCount = report.observedRunningCount,
     observedBlockedCount = report.observedBlockedCount,
     events = report.events
@@ -312,6 +349,8 @@ incrementAdmittedStarts report =
     lastSelectedTask = report.lastSelectedTask,
     lastResourcePressureKind = report.lastResourcePressureKind,
     lastResourcePressureRecommendedAction = report.lastResourcePressureRecommendedAction,
+    lastLaunchAdjustmentCandidateProfile = report.lastLaunchAdjustmentCandidateProfile,
+    lastLaunchAdjustmentCandidateAdmissible = report.lastLaunchAdjustmentCandidateAdmissible,
     observedRunningCount = report.observedRunningCount,
     observedBlockedCount = report.observedBlockedCount,
     events = report.events
@@ -388,6 +427,48 @@ runStartCommand iteration statusDoc preflight = {
     }
 }
 
+shouldRunFallbackStart : SwarmPreflightDocument -> Bool
+shouldRunFallbackStart preflight =
+  if allowFallbackProfile then
+    if preflight.status == "blocked" then
+      if preflight.resourcePressure.kind == "memory" then
+        preflight.launchAdjustment.candidateAdmissible
+      else
+        false
+    else
+      false
+  else
+    false
+
+runFallbackStartCommand : Int -> SwarmStatusDocument -> SwarmPreflightDocument -> SupervisorReport
+runFallbackStartCommand iteration statusDoc preflight = {
+  if dryRun then
+    appendEvent
+      emptyReport
+      (supervisorPreflightEvent iteration "would-start-fallback-lane" preflight.launchAdjustment.candidateProfile statusDoc 0 preflight 0 false)
+  else
+    match runSupervisorCommand fallbackStartCommand {
+      Err message ->
+        appendEvent
+          emptyReport
+          (supervisorPreflightEvent iteration "fallback-start-command-error" message statusDoc 0 preflight 127 false),
+      Ok startResult ->
+        if startResult.timedOut then
+          appendEvent
+            emptyReport
+            (supervisorPreflightEvent iteration "fallback-start-timeout" startResult.error statusDoc 0 preflight startResult.exitCode true)
+        else if startResult.exitCode == 0 then
+          incrementAdmittedStarts
+            (appendEvent
+              emptyReport
+              (supervisorPreflightEvent iteration "started-fallback-lane" "admitted" statusDoc 0 preflight startResult.exitCode false))
+        else
+          appendEvent
+            emptyReport
+            (supervisorPreflightEvent iteration "fallback-start-failed" startResult.stderr statusDoc 0 preflight startResult.exitCode false)
+    }
+}
+
 runPreflightStep : Int -> SwarmStatusDocument -> SupervisorReport
 runPreflightStep iteration statusDoc =
   match runSupervisorCommand preflightCommand {
@@ -413,6 +494,8 @@ runPreflightStep iteration statusDoc =
           Ok preflight ->
             if preflight.status == "admitted" then
               runStartCommand iteration statusDoc preflight
+            else if shouldRunFallbackStart preflight then
+              runFallbackStartCommand iteration statusDoc preflight
             else
               appendEvent
                 emptyReport
@@ -468,6 +551,8 @@ mergeStepReport report step =
     lastSelectedTask = step.lastSelectedTask,
     lastResourcePressureKind = step.lastResourcePressureKind,
     lastResourcePressureRecommendedAction = step.lastResourcePressureRecommendedAction,
+    lastLaunchAdjustmentCandidateProfile = step.lastLaunchAdjustmentCandidateProfile,
+    lastLaunchAdjustmentCandidateAdmissible = step.lastLaunchAdjustmentCandidateAdmissible,
     observedRunningCount = step.observedRunningCount,
     observedBlockedCount = step.observedBlockedCount,
     events = append report.events step.events
@@ -527,6 +612,8 @@ statusOutput =
           lastSelectedTask = "",
           lastResourcePressureKind = "",
           lastResourcePressureRecommendedAction = "",
+          lastLaunchAdjustmentCandidateProfile = "",
+          lastLaunchAdjustmentCandidateAdmissible = false,
           observedRunningCount = 0,
           observedBlockedCount = 0,
           events = emptyEvents
@@ -555,6 +642,8 @@ main =
             lastSelectedTask = "",
             lastResourcePressureKind = "",
             lastResourcePressureRecommendedAction = "",
+            lastLaunchAdjustmentCandidateProfile = "",
+            lastLaunchAdjustmentCandidateAdmissible = false,
             observedRunningCount = 0,
             observedBlockedCount = 0,
             events = emptyEvents
