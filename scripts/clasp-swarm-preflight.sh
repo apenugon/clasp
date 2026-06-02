@@ -41,6 +41,9 @@ before launching a lane.
 Profiles:
   bounded-low-memory  Use CLASP_SWARM_LANE_MEMORY_MB=4096 and
                       CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB=32768.
+  bounded-memory-pressure
+                      Use CLASP_SWARM_LANE_MEMORY_MB=4096 and
+                      CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB=28672.
 EOF
 }
 
@@ -61,6 +64,10 @@ apply_launch_profile() {
     bounded-low-memory)
       lane_memory_mb=4096
       min_available_memory_mb=32768
+      ;;
+    bounded-memory-pressure)
+      lane_memory_mb=4096
+      min_available_memory_mb=28672
       ;;
     *)
       printf 'clasp-swarm-preflight: unknown launch profile: %s\n' "$launch_profile" >&2

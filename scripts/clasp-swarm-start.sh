@@ -68,6 +68,13 @@ apply_launch_profile() {
       lane_memory_mb=4096
       min_available_memory_mb=32768
       ;;
+    bounded-memory-pressure)
+      lane_memory_mb=4096
+      min_available_memory_mb=28672
+      if [[ -z "${CLASP_SWARM_CHILD_MIN_AVAILABLE_MEMORY_MB:-}" ]]; then
+        export CLASP_SWARM_CHILD_MIN_AVAILABLE_MEMORY_MB=28672
+      fi
+      ;;
     *)
       printf 'clasp-swarm-start: unknown launch profile: %s\n' "$launch_profile" >&2
       exit 2

@@ -328,6 +328,25 @@ if (!report.repositoryGate?.checked || report.repositoryGate.status !== "admitte
 ' "$profile_json_output"
 [[ ! -e builder-events.log ]]
 
+pressure_profile_json_output="$(
+  CLASP_MANAGED_JOB_EXTERNAL_AGENT_RESERVE_MB=0 \
+  CLASP_MANAGED_JOB_MEMORY_BUDGET_SCOPE=current-root \
+  CLASP_SWARM_MAX_RUNNING_LANES=2 \
+  CLASP_SWARM_MIN_AVAILABLE_DISK_MB=0 \
+  CLASP_SWARM_MIN_DISK_HEADROOM_MB=0 \
+    bash scripts/clasp-swarm-start.sh --profile bounded-memory-pressure --preflight-json --batch foundation test-wave
+)"
+node -e '
+const report = JSON.parse(process.argv[1]);
+if (report.status !== "admitted") throw new Error(`pressure profile start preflight should admit: ${JSON.stringify(report)}`);
+if (report.laneMemoryMb !== 4096) throw new Error(`pressure profile should set lane memory: ${JSON.stringify(report)}`);
+if (report.minAvailableMemoryMb !== 28672) throw new Error(`pressure profile should set memory reserve: ${JSON.stringify(report)}`);
+if (!report.repositoryGate?.checked || report.repositoryGate.status !== "admitted") {
+  throw new Error(`pressure profile start preflight should include an admitted repository gate: ${JSON.stringify(report)}`);
+}
+' "$pressure_profile_json_output"
+[[ ! -e builder-events.log ]]
+
 printf 'dirty\n' > dirty.txt
 set +e
 dirty_repo_json="$(
