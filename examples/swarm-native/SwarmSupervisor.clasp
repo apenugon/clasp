@@ -29,13 +29,38 @@ record SwarmPreflightDocument = {
   reason : Str,
   waveName : Str,
   runningLanes : Int,
-  maxRunningLanes : Int
+  maxRunningLanes : Int,
+  selectedLaneText : Str,
+  selectedTaskText : Str,
+  resourcePressure : SwarmResourcePressure,
+  repositoryGate : SwarmRepositoryGate
+}
+
+record SwarmResourcePressure = {
+  kind : Str,
+  shortfallMb : Int,
+  recommendedAction : Str,
+  externalAgentProcessCount : Int,
+  externalAgentReservedMemoryMb : Int
+}
+
+record SwarmRepositoryGate = {
+  status : Str,
+  reason : Str,
+  recommendedAction : Str
 }
 
 record SupervisorEvent = {
   iteration : Int,
   action : Str,
   reason : Str,
+  selectedLane : Str,
+  selectedTask : Str,
+  resourcePressureKind : Str,
+  resourcePressureShortfallMb : Int,
+  resourcePressureRecommendedAction : Str,
+  repositoryGateStatus : Str,
+  repositoryGateReason : Str,
   runningCount : Int,
   blockedCount : Int,
   statusExitCode : Int,
@@ -56,6 +81,10 @@ record SupervisorReport = {
   admittedStarts : Int,
   lastAction : Str,
   lastReason : Str,
+  lastSelectedLane : Str,
+  lastSelectedTask : Str,
+  lastResourcePressureKind : Str,
+  lastResourcePressureRecommendedAction : Str,
   observedRunningCount : Int,
   observedBlockedCount : Int,
   events : [SupervisorEvent]
@@ -156,12 +185,19 @@ runSupervisorCommand : [Str] -> Result TimedProcessResult
 runSupervisorCommand command =
   timedProcessResult (runCommandTimeoutRaw workspaceRoot commandTimeoutMs command)
 
-supervisorEvent : Int -> Str -> Str -> Int -> Int -> Int -> Str -> Str -> Int -> Bool -> SupervisorEvent
-supervisorEvent iteration action reason runningCount blockedCount statusExitCode preflightStatus preflightReason startExitCode timedOut =
+supervisorEvent : Int -> Str -> Str -> Str -> Str -> Str -> Int -> Str -> Str -> Str -> Int -> Int -> Int -> Str -> Str -> Int -> Bool -> SupervisorEvent
+supervisorEvent iteration action reason selectedLane selectedTask resourcePressureKind resourcePressureShortfallMb resourcePressureRecommendedAction repositoryGateStatus repositoryGateReason runningCount blockedCount statusExitCode preflightStatus preflightReason startExitCode timedOut =
   SupervisorEvent {
     iteration = iteration,
     action = action,
     reason = reason,
+    selectedLane = selectedLane,
+    selectedTask = selectedTask,
+    resourcePressureKind = resourcePressureKind,
+    resourcePressureShortfallMb = resourcePressureShortfallMb,
+    resourcePressureRecommendedAction = resourcePressureRecommendedAction,
+    repositoryGateStatus = repositoryGateStatus,
+    repositoryGateReason = repositoryGateReason,
     runningCount = runningCount,
     blockedCount = blockedCount,
     statusExitCode = statusExitCode,
@@ -171,6 +207,31 @@ supervisorEvent iteration action reason runningCount blockedCount statusExitCode
     timedOut = timedOut,
     atMs = timeUnixMs
   }
+
+supervisorStatusEvent : Int -> Str -> Str -> Int -> Int -> Int -> Int -> Bool -> SupervisorEvent
+supervisorStatusEvent iteration action reason runningCount blockedCount statusExitCode startExitCode timedOut =
+  supervisorEvent iteration action reason "" "" "" 0 "" "" "" runningCount blockedCount statusExitCode "" "" startExitCode timedOut
+
+supervisorPreflightEvent : Int -> Str -> Str -> SwarmStatusDocument -> Int -> SwarmPreflightDocument -> Int -> Bool -> SupervisorEvent
+supervisorPreflightEvent iteration action reason statusDoc statusExitCode preflight startExitCode timedOut =
+  supervisorEvent
+    iteration
+    action
+    reason
+    preflight.selectedLaneText
+    preflight.selectedTaskText
+    preflight.resourcePressure.kind
+    preflight.resourcePressure.shortfallMb
+    preflight.resourcePressure.recommendedAction
+    preflight.repositoryGate.status
+    preflight.repositoryGate.reason
+    statusDoc.summary.runningCount
+    statusDoc.summary.blockedCount
+    statusExitCode
+    preflight.status
+    preflight.reason
+    startExitCode
+    timedOut
 
 emptyReport : SupervisorReport
 emptyReport =
@@ -184,6 +245,10 @@ emptyReport =
     admittedStarts = 0,
     lastAction = "none",
     lastReason = "",
+    lastSelectedLane = "",
+    lastSelectedTask = "",
+    lastResourcePressureKind = "",
+    lastResourcePressureRecommendedAction = "",
     observedRunningCount = 0,
     observedBlockedCount = 0,
     events = emptyEvents
@@ -201,6 +266,10 @@ appendEvent report event =
     admittedStarts = report.admittedStarts,
     lastAction = event.action,
     lastReason = event.reason,
+    lastSelectedLane = event.selectedLane,
+    lastSelectedTask = event.selectedTask,
+    lastResourcePressureKind = event.resourcePressureKind,
+    lastResourcePressureRecommendedAction = event.resourcePressureRecommendedAction,
     observedRunningCount = event.runningCount,
     observedBlockedCount = event.blockedCount,
     events = append report.events [event]
@@ -218,6 +287,10 @@ markReportStatus report status =
     admittedStarts = report.admittedStarts,
     lastAction = report.lastAction,
     lastReason = report.lastReason,
+    lastSelectedLane = report.lastSelectedLane,
+    lastSelectedTask = report.lastSelectedTask,
+    lastResourcePressureKind = report.lastResourcePressureKind,
+    lastResourcePressureRecommendedAction = report.lastResourcePressureRecommendedAction,
     observedRunningCount = report.observedRunningCount,
     observedBlockedCount = report.observedBlockedCount,
     events = report.events
@@ -235,6 +308,10 @@ incrementAdmittedStarts report =
     admittedStarts = intAdd report.admittedStarts 1,
     lastAction = report.lastAction,
     lastReason = report.lastReason,
+    lastSelectedLane = report.lastSelectedLane,
+    lastSelectedTask = report.lastSelectedTask,
+    lastResourcePressureKind = report.lastResourcePressureKind,
+    lastResourcePressureRecommendedAction = report.lastResourcePressureRecommendedAction,
     observedRunningCount = report.observedRunningCount,
     observedBlockedCount = report.observedBlockedCount,
     events = report.events
@@ -287,77 +364,27 @@ runStartCommand iteration statusDoc preflight = {
   if dryRun then
     appendEvent
       emptyReport
-      (supervisorEvent
-        iteration
-        "would-start-lane"
-        preflight.reason
-        statusDoc.summary.runningCount
-        statusDoc.summary.blockedCount
-        0
-        preflight.status
-        preflight.reason
-        0
-        false)
+      (supervisorPreflightEvent iteration "would-start-lane" preflight.reason statusDoc 0 preflight 0 false)
   else
     match runSupervisorCommand startCommand {
       Err message ->
         appendEvent
           emptyReport
-          (supervisorEvent
-            iteration
-            "start-command-error"
-            message
-            statusDoc.summary.runningCount
-            statusDoc.summary.blockedCount
-            0
-            preflight.status
-            preflight.reason
-            127
-            false),
+          (supervisorPreflightEvent iteration "start-command-error" message statusDoc 0 preflight 127 false),
       Ok startResult ->
         if startResult.timedOut then
           appendEvent
             emptyReport
-            (supervisorEvent
-              iteration
-              "start-timeout"
-              startResult.error
-              statusDoc.summary.runningCount
-              statusDoc.summary.blockedCount
-              0
-              preflight.status
-              preflight.reason
-              startResult.exitCode
-              true)
+            (supervisorPreflightEvent iteration "start-timeout" startResult.error statusDoc 0 preflight startResult.exitCode true)
         else if startResult.exitCode == 0 then
           incrementAdmittedStarts
             (appendEvent
               emptyReport
-              (supervisorEvent
-                iteration
-                "started-lane"
-                "admitted"
-                statusDoc.summary.runningCount
-                statusDoc.summary.blockedCount
-                0
-                preflight.status
-                preflight.reason
-                startResult.exitCode
-                false))
+              (supervisorPreflightEvent iteration "started-lane" "admitted" statusDoc 0 preflight startResult.exitCode false))
         else
           appendEvent
             emptyReport
-            (supervisorEvent
-              iteration
-              "start-failed"
-              startResult.stderr
-              statusDoc.summary.runningCount
-              statusDoc.summary.blockedCount
-              0
-              preflight.status
-              preflight.reason
-              startResult.exitCode
-              false)
+            (supervisorPreflightEvent iteration "start-failed" startResult.stderr statusDoc 0 preflight startResult.exitCode false)
     }
 }
 
@@ -367,39 +394,29 @@ runPreflightStep iteration statusDoc =
     Err message ->
       appendEvent
         emptyReport
-        (supervisorEvent iteration "preflight-command-error" message statusDoc.summary.runningCount statusDoc.summary.blockedCount 0 "" "" 0 false),
+        (supervisorStatusEvent iteration "preflight-command-error" message statusDoc.summary.runningCount statusDoc.summary.blockedCount 0 0 false),
     Ok preflightResult ->
       if preflightResult.timedOut then
         appendEvent
           emptyReport
-          (supervisorEvent iteration "preflight-timeout" preflightResult.error statusDoc.summary.runningCount statusDoc.summary.blockedCount 0 "" "" 0 true)
+          (supervisorStatusEvent iteration "preflight-timeout" preflightResult.error statusDoc.summary.runningCount statusDoc.summary.blockedCount 0 0 true)
       else if preflightResult.exitCode != 0 then
         appendEvent
           emptyReport
-          (supervisorEvent iteration "preflight-failed" preflightResult.stderr statusDoc.summary.runningCount statusDoc.summary.blockedCount 0 "" "" 0 false)
+          (supervisorStatusEvent iteration "preflight-failed" preflightResult.stderr statusDoc.summary.runningCount statusDoc.summary.blockedCount 0 0 false)
       else
         match tryDecode SwarmPreflightDocument preflightResult.stdout {
           Err message ->
             appendEvent
               emptyReport
-              (supervisorEvent iteration "preflight-decode-failed" message statusDoc.summary.runningCount statusDoc.summary.blockedCount 0 "" "" 0 false),
+              (supervisorStatusEvent iteration "preflight-decode-failed" message statusDoc.summary.runningCount statusDoc.summary.blockedCount 0 0 false),
           Ok preflight ->
             if preflight.status == "admitted" then
               runStartCommand iteration statusDoc preflight
             else
               appendEvent
                 emptyReport
-                (supervisorEvent
-                  iteration
-                  "preflight-blocked"
-                  preflight.reason
-                  statusDoc.summary.runningCount
-                  statusDoc.summary.blockedCount
-                  0
-                  preflight.status
-                  preflight.reason
-                  0
-                  false)
+                (supervisorPreflightEvent iteration "preflight-blocked" preflight.reason statusDoc 0 preflight 0 false)
         }
   }
 
@@ -407,29 +424,27 @@ runSupervisorStep : Int -> SupervisorReport
 runSupervisorStep iteration =
   match runSupervisorCommand statusCommand {
     Err message ->
-      appendEvent emptyReport (supervisorEvent iteration "status-command-error" message 0 0 127 "" "" 0 false),
+      appendEvent emptyReport (supervisorStatusEvent iteration "status-command-error" message 0 0 127 0 false),
     Ok statusResult ->
       if statusResult.timedOut then
-        appendEvent emptyReport (supervisorEvent iteration "status-timeout" statusResult.error 0 0 statusResult.exitCode "" "" 0 true)
+        appendEvent emptyReport (supervisorStatusEvent iteration "status-timeout" statusResult.error 0 0 statusResult.exitCode 0 true)
       else if statusResult.exitCode != 0 then
-        appendEvent emptyReport (supervisorEvent iteration "status-failed" statusResult.stderr 0 0 statusResult.exitCode "" "" 0 false)
+        appendEvent emptyReport (supervisorStatusEvent iteration "status-failed" statusResult.stderr 0 0 statusResult.exitCode 0 false)
       else
         match tryDecode SwarmStatusDocument statusResult.stdout {
           Err message ->
-            appendEvent emptyReport (supervisorEvent iteration "status-decode-failed" message 0 0 statusResult.exitCode "" "" 0 false),
+            appendEvent emptyReport (supervisorStatusEvent iteration "status-decode-failed" message 0 0 statusResult.exitCode 0 false),
           Ok statusDoc ->
             if statusDoc.summary.runningCount > 0 then
               appendEvent
                 emptyReport
-                (supervisorEvent
+                (supervisorStatusEvent
                   iteration
                   "observed-running"
                   "running-lanes-present"
                   statusDoc.summary.runningCount
                   statusDoc.summary.blockedCount
                   statusResult.exitCode
-                  ""
-                  ""
                   0
                   false)
             else
@@ -449,6 +464,10 @@ mergeStepReport report step =
     admittedStarts = intAdd report.admittedStarts step.admittedStarts,
     lastAction = step.lastAction,
     lastReason = step.lastReason,
+    lastSelectedLane = step.lastSelectedLane,
+    lastSelectedTask = step.lastSelectedTask,
+    lastResourcePressureKind = step.lastResourcePressureKind,
+    lastResourcePressureRecommendedAction = step.lastResourcePressureRecommendedAction,
     observedRunningCount = step.observedRunningCount,
     observedBlockedCount = step.observedBlockedCount,
     events = append report.events step.events
@@ -504,6 +523,10 @@ statusOutput =
           admittedStarts = 0,
           lastAction = "status",
           lastReason = message,
+          lastSelectedLane = "",
+          lastSelectedTask = "",
+          lastResourcePressureKind = "",
+          lastResourcePressureRecommendedAction = "",
           observedRunningCount = 0,
           observedBlockedCount = 0,
           events = emptyEvents
@@ -528,6 +551,10 @@ main =
             admittedStarts = 0,
             lastAction = "mkdir-failed",
             lastReason = message,
+            lastSelectedLane = "",
+            lastSelectedTask = "",
+            lastResourcePressureKind = "",
+            lastResourcePressureRecommendedAction = "",
             observedRunningCount = 0,
             observedBlockedCount = 0,
             events = emptyEvents

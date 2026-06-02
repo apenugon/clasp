@@ -119,6 +119,8 @@ const report = JSON.parse(process.argv[1]);
 if (report.status !== "admitted") throw new Error(`preflight should admit: ${JSON.stringify(report)}`);
 if (report.reason !== "managed-preflight-passed") throw new Error(`preflight should use managed admission: ${JSON.stringify(report)}`);
 if (report.selectedLane !== "01-foundation") throw new Error(`preflight should select the ready lane: ${JSON.stringify(report)}`);
+if (report.selectedLaneText !== report.selectedLane) throw new Error(`preflight should expose selected lane text: ${JSON.stringify(report)}`);
+if (report.selectedTaskText !== report.selectedTask) throw new Error(`preflight should expose selected task text: ${JSON.stringify(report)}`);
 if (!report.managedPreflight || report.managedPreflight.status !== "completed") {
   throw new Error(`preflight should report completed managed metadata: ${JSON.stringify(report)}`);
 }
@@ -300,6 +302,8 @@ const report = JSON.parse(process.argv[1]);
 if (report.status !== "admitted") throw new Error(`start preflight should admit: ${JSON.stringify(report)}`);
 if (report.reason !== "managed-preflight-passed") throw new Error(`start preflight should use managed admission: ${JSON.stringify(report)}`);
 if (report.selectedLane !== "01-foundation") throw new Error(`start preflight should select the ready lane: ${JSON.stringify(report)}`);
+if (report.selectedLaneText !== report.selectedLane) throw new Error(`start preflight should expose selected lane text: ${JSON.stringify(report)}`);
+if (report.selectedTaskText !== report.selectedTask) throw new Error(`start preflight should expose selected task text: ${JSON.stringify(report)}`);
 if (!report.repositoryGate || report.repositoryGate.checked !== true) {
   throw new Error(`start preflight should check repository gate: ${JSON.stringify(report)}`);
 }

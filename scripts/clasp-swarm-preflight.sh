@@ -714,6 +714,8 @@ process.stdout.write(`${JSON.stringify({
   minDiskHeadroomMb: Number(minDiskHeadroomMb),
   selectedLane: selectedLane || null,
   selectedTask: selectedTask || null,
+  selectedLaneText: selectedLane || "",
+  selectedTaskText: selectedTask || "",
   managedPreflight: {
     jobDir: jobDir || null,
     status: jobStatus || null,
