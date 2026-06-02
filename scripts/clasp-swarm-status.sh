@@ -28,6 +28,74 @@ count_task_files() {
   fi
 }
 
+file_mtime_epoch() {
+  local path="$1"
+
+  if [[ -e "$path" ]]; then
+    stat -c '%Y' "$path" 2>/dev/null || printf '0\n'
+  else
+    printf '0\n'
+  fi
+}
+
+run_started_epoch() {
+  local run_path="$1"
+  local run_name=""
+  local stamp=""
+
+  if [[ -z "$run_path" ]]; then
+    printf '0\n'
+    return 0
+  fi
+
+  run_name="$(basename "$run_path")"
+  stamp="${run_name%%-*}"
+  if [[ "$stamp" =~ ^[0-9]{8}T[0-9]{6}Z$ ]]; then
+    date -u -d "${stamp:0:8} ${stamp:9:2}:${stamp:11:2}:${stamp:13:2} UTC" +%s 2>/dev/null || printf '0\n'
+  else
+    printf '0\n'
+  fi
+}
+
+newer_activity_path() {
+  local current_path="$1"
+  local current_epoch="$2"
+  local candidate_path="$3"
+  local candidate_epoch="0"
+
+  candidate_epoch="$(file_mtime_epoch "$candidate_path")"
+  if [[ "$candidate_epoch" =~ ^[0-9]+$ ]] && (( candidate_epoch > current_epoch )); then
+    printf '%s\t%s\n' "$candidate_epoch" "$candidate_path"
+  else
+    printf '%s\t%s\n' "$current_epoch" "$current_path"
+  fi
+}
+
+latest_run_activity() {
+  local run_path="$1"
+  local log_file="$2"
+  local current_epoch="0"
+  local current_path=""
+  local row=""
+
+  if [[ -n "$run_path" ]]; then
+    for candidate in \
+      "$run_path/builder-log.jsonl" \
+      "$run_path/builder-report.json" \
+      "$run_path/verifier-log.jsonl" \
+      "$run_path/verifier-report.json"; do
+      row="$(newer_activity_path "$current_path" "$current_epoch" "$candidate")"
+      current_epoch="${row%%$'\t'*}"
+      current_path="${row#*$'\t'}"
+    done
+  fi
+
+  row="$(newer_activity_path "$current_path" "$current_epoch" "$log_file")"
+  current_epoch="${row%%$'\t'*}"
+  current_path="${row#*$'\t'}"
+  printf '%s\t%s\n' "$current_epoch" "$current_path"
+}
+
 marker_value() {
   local marker_file="$1"
   local marker_key="$2"
@@ -195,6 +263,12 @@ EOF
 
 json_mode=0
 wave_name="$(clasp_swarm_default_wave)"
+running_silence_stale_seconds="${CLASP_SWARM_RUNNING_SILENCE_STALE_SECONDS:-1800}"
+
+if ! [[ "$running_silence_stale_seconds" =~ ^[0-9]+$ ]]; then
+  printf 'CLASP_SWARM_RUNNING_SILENCE_STALE_SECONDS must be a non-negative integer; got %s\n' "$running_silence_stale_seconds" >&2
+  exit 2
+fi
 
 if [[ $# -gt 2 ]]; then
   usage
@@ -223,6 +297,13 @@ running_count=0
 stopped_count=0
 completed_total=0
 blocked_total=0
+now_epoch="$(date -u +%s)"
+running_progressing_count=0
+running_silent_count=0
+running_unknown_count=0
+running_no_report_count=0
+running_max_age_seconds=0
+running_max_silence_seconds=0
 
 while IFS= read -r lane_dir; do
   lane_name="$(clasp_swarm_lane_name "$lane_dir")"
@@ -269,6 +350,12 @@ while IFS= read -r lane_dir; do
   child_job_recovery_apply_command=""
   child_job_recovery_note=""
   current_task=""
+  latest_run_started_epoch="0"
+  latest_run_age_seconds="0"
+  latest_run_activity_epoch="0"
+  latest_run_activity_path=""
+  latest_run_silence_seconds="0"
+  latest_run_running_health=""
 
   lane_count=$((lane_count + 1))
 
@@ -417,6 +504,48 @@ while IFS= read -r lane_dir; do
     latest_run_summary="Lane $lane_name has no remaining tasks."
   fi
 
+  if [[ -n "$latest_run_path" ]]; then
+    latest_run_started_epoch="$(run_started_epoch "$latest_run_path")"
+    if [[ "$latest_run_started_epoch" =~ ^[0-9]+$ && "$latest_run_started_epoch" -gt 0 && "$now_epoch" -ge "$latest_run_started_epoch" ]]; then
+      latest_run_age_seconds=$((now_epoch - latest_run_started_epoch))
+    fi
+    latest_run_activity_row="$(latest_run_activity "$latest_run_path" "$log_file")"
+    latest_run_activity_epoch="${latest_run_activity_row%%$'\t'*}"
+    latest_run_activity_path="${latest_run_activity_row#*$'\t'}"
+    if [[ "$latest_run_activity_epoch" =~ ^[0-9]+$ && "$latest_run_activity_epoch" -gt 0 && "$now_epoch" -ge "$latest_run_activity_epoch" ]]; then
+      latest_run_silence_seconds=$((now_epoch - latest_run_activity_epoch))
+    elif [[ "$latest_run_age_seconds" =~ ^[0-9]+$ ]]; then
+      latest_run_silence_seconds="$latest_run_age_seconds"
+    fi
+  fi
+
+  if [[ "$status" == "running" ]]; then
+    if [[ "$latest_run_status" == "started" && -n "$latest_run_path" ]]; then
+      running_no_report_count=$((running_no_report_count + 1))
+      if (( latest_run_age_seconds > running_max_age_seconds )); then
+        running_max_age_seconds="$latest_run_age_seconds"
+      fi
+      if (( latest_run_silence_seconds > running_max_silence_seconds )); then
+        running_max_silence_seconds="$latest_run_silence_seconds"
+      fi
+      if [[ "$latest_run_activity_epoch" =~ ^[0-9]+$ && "$latest_run_activity_epoch" -gt 0 ]]; then
+        if (( latest_run_silence_seconds > running_silence_stale_seconds )); then
+          latest_run_running_health="silent"
+          running_silent_count=$((running_silent_count + 1))
+        else
+          latest_run_running_health="progressing"
+          running_progressing_count=$((running_progressing_count + 1))
+        fi
+      else
+        latest_run_running_health="unknown"
+        running_unknown_count=$((running_unknown_count + 1))
+      fi
+    else
+      latest_run_running_health="unknown"
+      running_unknown_count=$((running_unknown_count + 1))
+    fi
+  fi
+
   printf '%s\n' "${latest_run_status:-no-run}" >> "$run_state_file"
 
   {
@@ -527,6 +656,15 @@ while IFS= read -r lane_dir; do
       fi
       echo "  run status: $latest_run_status"
       echo "  run summary: $latest_run_summary"
+      if [[ -n "$latest_run_running_health" ]]; then
+        echo "  run health: $latest_run_running_health"
+      fi
+      if [[ "$latest_run_age_seconds" != "0" ]]; then
+        echo "  run age seconds: $latest_run_age_seconds"
+      fi
+      if [[ "$latest_run_silence_seconds" != "0" ]]; then
+        echo "  run silence seconds: $latest_run_silence_seconds"
+      fi
     fi
     if [[ -f "$log_file" ]]; then
       echo "  log: $log_file"
@@ -576,7 +714,11 @@ while IFS= read -r lane_dir; do
     "$latest_run_path" \
     "$latest_run_attempt" \
     "$latest_run_status" \
-    "$latest_run_summary" >> "$lane_jsonl_file"
+    "$latest_run_summary" \
+    "$latest_run_age_seconds" \
+    "$latest_run_silence_seconds" \
+    "$latest_run_activity_path" \
+    "$latest_run_running_health" >> "$lane_jsonl_file"
 const fs = require("fs");
 const [
   lane,
@@ -621,6 +763,10 @@ const [
   latestRunAttempt,
   latestRunStatus,
   latestRunSummary,
+  latestRunAgeSeconds,
+  latestRunSilenceSeconds,
+  latestRunActivityPath,
+  latestRunRunningHealth,
 ] = process.argv.slice(2);
 
 function tailLines(filePath, count) {
@@ -768,6 +914,10 @@ const laneStatus = {
         attempt: latestRunAttempt ? Number(latestRunAttempt) : null,
         status: latestRunStatus || "started",
         summary: latestRunSummary || null,
+        ageSeconds: Number(latestRunAgeSeconds || 0),
+        silenceSeconds: Number(latestRunSilenceSeconds || 0),
+        activityPath: latestRunActivityPath || null,
+        runningHealth: latestRunRunningHealth || null,
       }
     : null,
 };
@@ -779,9 +929,24 @@ EOF
 done < <(clasp_swarm_lane_dirs "$wave_name" "$project_root")
 
 if [[ "$json_mode" == "1" ]]; then
-  node - <<'EOF' "$wave_name" "$lane_count" "$running_count" "$stopped_count" "$completed_total" "$blocked_total" "$lane_jsonl_file"
+  node - <<'EOF' "$wave_name" "$lane_count" "$running_count" "$stopped_count" "$completed_total" "$blocked_total" "$running_progressing_count" "$running_silent_count" "$running_unknown_count" "$running_no_report_count" "$running_max_age_seconds" "$running_max_silence_seconds" "$running_silence_stale_seconds" "$lane_jsonl_file"
 const fs = require("fs");
-const [wave, laneCount, runningCount, stoppedCount, completedCount, blockedCount, laneJsonl] = process.argv.slice(2);
+const [
+  wave,
+  laneCount,
+  runningCount,
+  stoppedCount,
+  completedCount,
+  blockedCount,
+  runningProgressingCount,
+  runningSilentCount,
+  runningUnknownCount,
+  runningNoReportCount,
+  runningMaxAgeSeconds,
+  runningMaxSilenceSeconds,
+  runningSilenceStaleSeconds,
+  laneJsonl,
+] = process.argv.slice(2);
 const lanes = fs.existsSync(laneJsonl)
   ? fs
       .readFileSync(laneJsonl, "utf8")
@@ -807,6 +972,21 @@ const payload = {
     completedCount: Number(completedCount),
     blockedCount: Number(blockedCount),
     runStateCounts,
+    runningProgressingCount: Number(runningProgressingCount),
+    runningSilentCount: Number(runningSilentCount),
+    runningUnknownCount: Number(runningUnknownCount),
+    runningNoReportCount: Number(runningNoReportCount),
+    runningMaxAgeSeconds: Number(runningMaxAgeSeconds),
+    runningMaxSilenceSeconds: Number(runningMaxSilenceSeconds),
+    runningSilenceStaleSeconds: Number(runningSilenceStaleSeconds),
+    runningHealth:
+      Number(runningCount) === 0
+        ? "none"
+        : Number(runningSilentCount) > 0
+          ? "silent"
+          : Number(runningUnknownCount) > 0
+            ? "unknown"
+            : "progressing",
   },
   lanes,
 };
@@ -834,6 +1014,16 @@ EOF
 echo "wave: $wave_name"
 echo "summary: lanes=$lane_count running=$running_count stopped=$stopped_count completed=$completed_total blocked=$blocked_total"
 echo "run-states: ${run_state_summary:-none}"
+if (( running_count > 0 )); then
+  if (( running_silent_count > 0 )); then
+    running_health="silent"
+  elif (( running_unknown_count > 0 )); then
+    running_health="unknown"
+  else
+    running_health="progressing"
+  fi
+  echo "running-health: health=$running_health progressing=$running_progressing_count silent=$running_silent_count unknown=$running_unknown_count no-report=$running_no_report_count max-age-seconds=$running_max_age_seconds max-silence-seconds=$running_max_silence_seconds stale-threshold-seconds=$running_silence_stale_seconds"
+fi
 
 if [[ -s "$lane_text_file" ]]; then
   cat "$lane_text_file"

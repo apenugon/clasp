@@ -40,11 +40,25 @@ case "$mode" in
   status)
     if [[ "$count" == "2" ]]; then
       running=1
+      running_health='"progressing"'
+      running_progressing=1
+      running_silent=0
+      running_unknown=0
+      running_no_report=1
+      running_max_age=90
+      running_max_silence=3
     else
       running=0
+      running_health='"none"'
+      running_progressing=0
+      running_silent=0
+      running_unknown=0
+      running_no_report=0
+      running_max_age=0
+      running_max_silence=0
     fi
     cat <<JSON
-{"wave":"full","summary":{"laneCount":2,"runningCount":$running,"stoppedCount":$((2 - running)),"completedCount":7,"blockedCount":0},"lanes":[]}
+{"wave":"full","summary":{"laneCount":2,"runningCount":$running,"stoppedCount":$((2 - running)),"completedCount":7,"blockedCount":0,"runningProgressingCount":$running_progressing,"runningSilentCount":$running_silent,"runningUnknownCount":$running_unknown,"runningNoReportCount":$running_no_report,"runningMaxAgeSeconds":$running_max_age,"runningMaxSilenceSeconds":$running_max_silence,"runningSilenceStaleSeconds":1800,"runningHealth":$running_health},"lanes":[]}
 JSON
     ;;
   preflight)
@@ -143,7 +157,8 @@ assert(eventLines[0].selectedTask === "BOOT-001", `event0 selected task ${eventL
 assert(eventLines[0].resourcePressureKind === "none", `event0 resource ${eventLines[0].resourcePressureKind}`);
 assert(eventLines[0].launchAdjustmentCandidateAdmissible === false, `event0 fallback ${eventLines[0].launchAdjustmentCandidateAdmissible}`);
 assert(eventLines[0].repositoryGateStatus === "clean", `event0 repo gate ${eventLines[0].repositoryGateStatus}`);
-assert(eventLines[1].action === "observed-running", `event1 ${eventLines[1].action}`);
+assert(eventLines[1].action === "observed-running-progressing", `event1 ${eventLines[1].action}`);
+assert(eventLines[1].reason === "running-lanes-progressing", `event1 reason ${eventLines[1].reason}`);
 assert(eventLines[1].runningCount === 1, `event1 running ${eventLines[1].runningCount}`);
 assert(eventLines[2].action === "started-fallback-lane", `event2 ${eventLines[2].action}`);
 assert(eventLines[2].preflightReason === "memory-pressure", `event2 reason ${eventLines[2].preflightReason}`);
@@ -255,7 +270,8 @@ assert(report.completedIterations === 2, `completedIterations ${report.completed
 assert(report.admittedStarts === 1, `admittedStarts ${report.admittedStarts}`);
 assert(eventLines.length === 2, `event lines ${eventLines.length}`);
 assert(eventLines[0].action === "started-lane", `event0 ${eventLines[0].action}`);
-assert(eventLines[1].action === "observed-running", `event1 ${eventLines[1].action}`);
+assert(eventLines[1].action === "observed-running-progressing", `event1 ${eventLines[1].action}`);
+assert(eventLines[1].reason === "running-lanes-progressing", `event1 reason ${eventLines[1].reason}`);
 assert(count("status") === 2, `status count ${count("status")}`);
 assert(count("preflight") === 1, `preflight count ${count("preflight")}`);
 assert(count("start") === 1, `start count ${count("start")}`);

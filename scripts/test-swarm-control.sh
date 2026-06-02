@@ -1581,6 +1581,7 @@ bash -lc "
   [[ \"\$text\" == *'wave: $status_wave_name'* ]]
   [[ \"\$text\" == *'summary: lanes=6 running=1 stopped=5 completed=3 blocked=1'* ]]
   [[ \"\$text\" == *'run-states: admission-lock-unavailable=1 builder-complete=1 disk-exceeded=1 memory-enforcer-unavailable=1 memory-exceeded=1 pass=1'* ]]
+  [[ \"\$text\" == *'running-health: health=unknown progressing=0 silent=0 unknown=1 no-report=0'* ]]
   [[ \"\$text\" == *'lane: 01-active'* ]]
   [[ \"\$text\" == *'stale pid: '* ]]
   [[ \"\$text\" == *'current task: AA-100-sample'* ]]
@@ -1655,6 +1656,16 @@ if (payload.summary.completedCount !== 3 || payload.summary.blockedCount !== 1) 
   throw new Error('unexpected completion summary counts');
 }
 if (
+  payload.summary.runningHealth !== 'unknown' ||
+  payload.summary.runningProgressingCount !== 0 ||
+  payload.summary.runningSilentCount !== 0 ||
+  payload.summary.runningUnknownCount !== 1 ||
+  payload.summary.runningNoReportCount !== 0 ||
+  payload.summary.runningSilenceStaleSeconds !== 1800
+) {
+  throw new Error('unexpected running health summary');
+}
+if (
   payload.summary.runStateCounts?.pass !== 1 ||
   payload.summary.runStateCounts?.['builder-complete'] !== 1 ||
   payload.summary.runStateCounts?.['memory-exceeded'] !== 1 ||
@@ -1693,6 +1704,9 @@ if (idle.latestChildJob.status !== 'started') {
 }
 if (idle.latestRun?.status !== 'builder-complete' || idle.latestRun?.summary !== 'builder summary only') {
   throw new Error('unexpected idle-lane run summary');
+}
+if (idle.latestRun?.runningHealth !== 'unknown' || idle.latestRun?.ageSeconds <= 0 || idle.latestRun?.silenceSeconds <= 0) {
+  throw new Error('unexpected idle-lane running health');
 }
 if (interrupted.status !== 'stopped' || interrupted.managedJobStatus !== 'memory-exceeded' || interrupted.managedJobExitStatus !== '137') {
   throw new Error('unexpected interrupted-lane job state');

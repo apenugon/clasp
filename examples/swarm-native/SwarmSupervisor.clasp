@@ -15,7 +15,15 @@ record SwarmStatusSummary = {
   runningCount : Int,
   stoppedCount : Int,
   completedCount : Int,
-  blockedCount : Int
+  blockedCount : Int,
+  runningProgressingCount : Int,
+  runningSilentCount : Int,
+  runningUnknownCount : Int,
+  runningNoReportCount : Int,
+  runningMaxAgeSeconds : Int,
+  runningMaxSilenceSeconds : Int,
+  runningSilenceStaleSeconds : Int,
+  runningHealth : Str
 }
 
 record SwarmStatusDocument = {
@@ -577,6 +585,28 @@ runPreflightStep iteration statusDoc =
         }
   }
 
+runningObservationAction : SwarmStatusSummary -> Str
+runningObservationAction summary =
+  if summary.runningHealth == "silent" then
+    "observed-running-silent"
+  else if summary.runningHealth == "progressing" then
+    "observed-running-progressing"
+  else if summary.runningHealth == "unknown" then
+    "observed-running-unknown"
+  else
+    "observed-running"
+
+runningObservationReason : SwarmStatusSummary -> Str
+runningObservationReason summary =
+  if summary.runningHealth == "silent" then
+    "running-lanes-silent"
+  else if summary.runningHealth == "progressing" then
+    "running-lanes-progressing"
+  else if summary.runningHealth == "unknown" then
+    "running-lanes-health-unknown"
+  else
+    "running-lanes-present"
+
 runSupervisorStep : Int -> SupervisorReport
 runSupervisorStep iteration =
   match runSupervisorCommand statusCommand {
@@ -597,8 +627,8 @@ runSupervisorStep iteration =
                 emptyReport
                 (supervisorStatusEvent
                   iteration
-                  "observed-running"
-                  "running-lanes-present"
+                  (runningObservationAction statusDoc.summary)
+                  (runningObservationReason statusDoc.summary)
                   statusDoc.summary.runningCount
                   statusDoc.summary.blockedCount
                   statusResult.exitCode

@@ -305,6 +305,7 @@ while IFS= read -r lane_dir; do
   completed_root="$runtime_root/completed"
   blocked_root="$runtime_root/blocked"
   global_completed_root="$project_root/.clasp-swarm/completed"
+  cleared_retryable_resource_guard=0
 
   mkdir -p "$runtime_root"
 
@@ -313,7 +314,8 @@ while IFS= read -r lane_dir; do
     if [[ -f "$job_dir/pid" && -f "$job_dir/status" ]]; then
       pid="$(tr -d '[:space:]' <"$job_dir/pid")"
       status="$(sed -n '1p' "$job_dir/status")"
-      if [[ -f "$pid_file" && "$status" != "completed" && "$status" != "failed" && "$status" != "stopped" ]] &&
+      if [[ -f "$pid_file" ]] &&
+         ! clasp_swarm_managed_job_status_is_terminal "$status" &&
          kill -0 "$pid" >/dev/null 2>&1; then
         echo "lane $lane_name already running with managed job pid $pid"
         continue
@@ -352,6 +354,7 @@ while IFS= read -r lane_dir; do
     if [[ "${CLASP_SWARM_RESOURCE_GUARD_BLOCK_MODE:-fail-closed}" == "retryable" ]] &&
        blocked_report_is_resource_guard "$blocked_report"; then
       rm -f "$blocked_report"
+      cleared_retryable_resource_guard=1
       echo "lane $lane_name cleared retryable resource guard block for $task_id"
       selected_task="$task_file"
     else
@@ -361,7 +364,7 @@ while IFS= read -r lane_dir; do
   fi
 
   cooldown_guard_file="$(clasp_swarm_lane_resource_guard_cooldown_file "$runtime_root" "$resource_guard_cooldown_secs")"
-  if [[ -n "$cooldown_guard_file" ]]; then
+  if [[ -n "$cooldown_guard_file" && "$cleared_retryable_resource_guard" != "1" ]]; then
     cooldown_age_seconds="$(clasp_swarm_resource_guard_file_age_seconds "$cooldown_guard_file")"
     cooldown_remaining_seconds=$((resource_guard_cooldown_secs - cooldown_age_seconds))
     if (( cooldown_remaining_seconds < 0 )); then
