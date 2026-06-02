@@ -187,7 +187,6 @@ CLASP_TEST_SWARM_TOOL_STATE="$launcher_tool_state" \
   CLASP_SWARM_SUPERVISOR_PREFLIGHT_COMMAND_JSON="[\"$fake_tool\",\"preflight\"]" \
   CLASP_SWARM_SUPERVISOR_START_COMMAND_JSON="[\"$fake_tool\",\"start\"]" \
   CLASP_SWARM_SUPERVISOR_FALLBACK_START_COMMAND_JSON="[\"$fake_tool\",\"start\"]" \
-  CLASP_SWARM_SUPERVISOR_MEMORY_MB=0 \
   CLASP_SWARM_SUPERVISOR_MIN_AVAILABLE_MEMORY_MB=0 \
   CLASP_SWARM_SUPERVISOR_MIN_AVAILABLE_DISK_MB=0 \
   CLASP_SWARM_SUPERVISOR_MIN_DISK_HEADROOM_MB=0 \
@@ -240,6 +239,8 @@ const report = JSON.parse(fs.readFileSync(`${launcherStateRoot}/supervisor-repor
 const eventLines = fs.readFileSync(`${launcherStateRoot}/supervisor-events.jsonl`, "utf8").trimEnd().split(/\n/).map((line) => JSON.parse(line));
 const jobPointer = fs.readFileSync(`${launcherStateRoot}/job`, "utf8").trim();
 const command = fs.readFileSync(`${launcherJob}/command.txt`, "utf8");
+const memoryMb = fs.readFileSync(`${launcherJob}/memory-mb`, "utf8").trim();
+const effectiveMemoryMb = fs.readFileSync(`${launcherJob}/effective-memory-mb`, "utf8").trim();
 const jobStatus = fs.readFileSync(`${launcherJob}/status`, "utf8").trim();
 const exitStatus = fs.readFileSync(`${launcherJob}/exit-status`, "utf8").trim();
 
@@ -258,6 +259,8 @@ assert(launcherOutput.includes(`supervisor_state=${launcherStateRoot}`), "launch
 assert(jobPointer === launcherJob, `state job pointer ${jobPointer}`);
 assert(jobStatus === "completed", `job status ${jobStatus}`);
 assert(exitStatus === "0", `job exit ${exitStatus}`);
+assert(memoryMb === "2048", `job memory ${memoryMb}`);
+assert(effectiveMemoryMb === "2048", `effective job memory ${effectiveMemoryMb}`);
 assert(command.includes("SwarmSupervisor.clasp"), "managed command should run the Clasp supervisor");
 assert(command.includes("claspc"), "managed command should use claspc run");
 assert(report.supervisorStatus === "completed", `supervisor status ${report.supervisorStatus}`);
