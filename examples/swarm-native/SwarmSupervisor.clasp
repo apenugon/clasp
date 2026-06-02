@@ -88,6 +88,7 @@ record SupervisorReport = {
   profileName : Str,
   maxIterations : Int,
   pollMs : Int,
+  reportEventLimit : Int,
   dryRun : Bool,
   admittedStarts : Int,
   lastAction : Str,
@@ -157,6 +158,9 @@ maxIterations = readEnvInt "CLASP_SWARM_SUPERVISOR_MAX_ITERATIONS_JSON" 120
 
 pollMs : Int
 pollMs = readEnvInt "CLASP_SWARM_SUPERVISOR_POLL_MS_JSON" 30000
+
+reportEventLimit : Int
+reportEventLimit = readEnvInt "CLASP_SWARM_SUPERVISOR_REPORT_EVENT_LIMIT_JSON" 200
 
 commandTimeoutMs : Int
 commandTimeoutMs = readEnvInt "CLASP_SWARM_SUPERVISOR_COMMAND_TIMEOUT_MS_JSON" 120000
@@ -272,6 +276,7 @@ emptyReport =
     profileName = profileName,
     maxIterations = maxIterations,
     pollMs = pollMs,
+    reportEventLimit = reportEventLimit,
     dryRun = dryRun,
     admittedStarts = 0,
     lastAction = "none",
@@ -287,6 +292,31 @@ emptyReport =
     events = emptyEvents
   }
 
+dropFirstSupervisorEvent : [SupervisorEvent] -> [SupervisorEvent]
+dropFirstSupervisorEvent events = {
+  let mut remaining = emptyEvents;
+  let mut seenFirst = false;
+  for event in events {
+    if seenFirst then {
+      remaining = append remaining [event];
+      remaining
+    } else {
+      seenFirst = true;
+      remaining
+    }
+  };
+  remaining
+}
+
+trimSupervisorEvents : Int -> [SupervisorEvent] -> [SupervisorEvent]
+trimSupervisorEvents limit events =
+  if limit <= 0 then
+    emptyEvents
+  else if length events <= limit then
+    events
+  else
+    trimSupervisorEvents limit (dropFirstSupervisorEvent events)
+
 appendEvent : SupervisorReport -> SupervisorEvent -> SupervisorReport
 appendEvent report event =
   SupervisorReport {
@@ -295,6 +325,7 @@ appendEvent report event =
     profileName = report.profileName,
     maxIterations = report.maxIterations,
     pollMs = report.pollMs,
+    reportEventLimit = report.reportEventLimit,
     dryRun = report.dryRun,
     admittedStarts = report.admittedStarts,
     lastAction = event.action,
@@ -307,7 +338,7 @@ appendEvent report event =
     lastLaunchAdjustmentCandidateAdmissible = event.launchAdjustmentCandidateAdmissible,
     observedRunningCount = event.runningCount,
     observedBlockedCount = event.blockedCount,
-    events = append report.events [event]
+    events = trimSupervisorEvents report.reportEventLimit (append report.events [event])
   }
 
 markReportStatus : SupervisorReport -> Str -> SupervisorReport
@@ -318,6 +349,7 @@ markReportStatus report status =
     profileName = report.profileName,
     maxIterations = report.maxIterations,
     pollMs = report.pollMs,
+    reportEventLimit = report.reportEventLimit,
     dryRun = report.dryRun,
     admittedStarts = report.admittedStarts,
     lastAction = report.lastAction,
@@ -341,6 +373,7 @@ incrementAdmittedStarts report =
     profileName = report.profileName,
     maxIterations = report.maxIterations,
     pollMs = report.pollMs,
+    reportEventLimit = report.reportEventLimit,
     dryRun = report.dryRun,
     admittedStarts = intAdd report.admittedStarts 1,
     lastAction = report.lastAction,
@@ -543,6 +576,7 @@ mergeStepReport report step =
     profileName = report.profileName,
     maxIterations = report.maxIterations,
     pollMs = report.pollMs,
+    reportEventLimit = report.reportEventLimit,
     dryRun = report.dryRun,
     admittedStarts = intAdd report.admittedStarts step.admittedStarts,
     lastAction = step.lastAction,
@@ -555,7 +589,7 @@ mergeStepReport report step =
     lastLaunchAdjustmentCandidateAdmissible = step.lastLaunchAdjustmentCandidateAdmissible,
     observedRunningCount = step.observedRunningCount,
     observedBlockedCount = step.observedBlockedCount,
-    events = append report.events step.events
+    events = trimSupervisorEvents report.reportEventLimit (append report.events step.events)
   }
 
 shouldSleepAfter : Int -> Int -> Bool
@@ -604,6 +638,7 @@ statusOutput =
           profileName = profileName,
           maxIterations = maxIterations,
           pollMs = pollMs,
+          reportEventLimit = reportEventLimit,
           dryRun = dryRun,
           admittedStarts = 0,
           lastAction = "status",
@@ -634,6 +669,7 @@ main =
             profileName = profileName,
             maxIterations = maxIterations,
             pollMs = pollMs,
+            reportEventLimit = reportEventLimit,
             dryRun = dryRun,
             admittedStarts = 0,
             lastAction = "mkdir-failed",
