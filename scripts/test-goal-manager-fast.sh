@@ -1169,6 +1169,15 @@ if (value.primaryWaitingReason !== 'task-dependencies') {
 if (!Array.isArray(value.primaryWaitingTaskIds) || !value.primaryWaitingTaskIds.includes('ship')) {
   throw new Error(`expected ship in primaryWaitingTaskIds: ${JSON.stringify(value.primaryWaitingTaskIds)}`);
 }
+if (value.nextAction !== 'resume-task-wave') {
+  throw new Error(`expected resume-task-wave next action, got ${value.nextAction}`);
+}
+if (value.autonomyBlocked !== true) {
+  throw new Error(`expected autonomyBlocked=true, got ${value.autonomyBlocked}`);
+}
+if (!Array.isArray(value.autonomyBlockers) || !value.autonomyBlockers.includes('task-dependencies')) {
+  throw new Error(`expected task-dependencies autonomy blocker: ${JSON.stringify(value.autonomyBlockers)}`);
+}
 const dependencyReason = Array.isArray(value.waitingReasons)
   ? value.waitingReasons.find((reason) => reason.kind === 'task-dependencies')
   : null;
@@ -1206,6 +1215,15 @@ if (value.primaryWaitingReason !== 'benchmark-execution') {
 }
 if (!Array.isArray(value.primaryWaitingTaskIds) || !value.primaryWaitingTaskIds.includes('benchmark-gap')) {
   throw new Error(`expected benchmark-gap in primaryWaitingTaskIds: ${JSON.stringify(value.primaryWaitingTaskIds)}`);
+}
+if (value.nextAction !== 'await-benchmark') {
+  throw new Error(`expected await-benchmark next action, got ${value.nextAction}`);
+}
+if (value.autonomyBlocked !== false) {
+  throw new Error(`expected autonomyBlocked=false, got ${value.autonomyBlocked}`);
+}
+if (!Array.isArray(value.autonomyBlockers) || value.autonomyBlockers.length !== 0) {
+  throw new Error(`expected no autonomy blockers during benchmark wait: ${JSON.stringify(value.autonomyBlockers)}`);
 }
 const benchmarkReason = Array.isArray(value.waitingReasons)
   ? value.waitingReasons.find((reason) => reason.kind === 'benchmark-execution')

@@ -144,6 +144,75 @@ firstWaitingReasonTaskIds reasons = {
   taskIds
 }
 
+waitingReasonBlocksAutonomy : StatusWaitingReason -> Bool
+waitingReasonBlocksAutonomy reason =
+  if reason.kind == "planner-execution" then
+    false
+  else if reason.kind == "benchmark-execution" then
+    false
+  else
+    true
+
+autonomyBlockersFor : [StatusWaitingReason] -> [Str]
+autonomyBlockersFor reasons = {
+  let mut blockers = emptyTexts;
+  for reason in reasons {
+    if waitingReasonBlocksAutonomy reason then {
+      blockers = appendUniqueText blockers reason.kind;
+      blockers
+    } else
+      blockers
+  };
+  blockers
+}
+
+statusAutonomyBlocked : ManagerState -> [Str] -> [Str] -> [StatusWaitingReason] -> Bool
+statusAutonomyBlocked state readyTaskIds activeTaskIds waitingReasons =
+  if state.final then
+    false
+  else if state.phase == "completed" then
+    false
+  else if state.phase == "failed" then
+    false
+  else if length activeTaskIds > 0 then
+    false
+  else if length readyTaskIds > 0 then
+    false
+  else
+    length (autonomyBlockersFor waitingReasons) > 0
+
+statusNextAction : ManagerState -> [Str] -> [Str] -> [Str] -> Str
+statusNextAction state readyTaskIds activeTaskIds failedTaskIds =
+  if state.final then
+    "stop-final"
+  else if state.phase == "completed" then
+    "stop-final"
+  else if state.phase == "failed" then
+    "stop-final"
+  else if state.phase == "planner-running" then
+    "await-planner"
+  else if state.phase == "benchmark-running" then
+    "await-benchmark"
+  else if state.phase == "needs-planner" then
+    "run-planner"
+  else if state.phase == "task-running" then
+    if length activeTaskIds > 0 then
+      "await-child-loop"
+    else if length readyTaskIds > 0 then
+      "launch-ready-task"
+    else if length failedTaskIds > 0 then
+      "finalize-failed-task"
+    else
+      "resume-task-wave"
+  else if length activeTaskIds > 0 then
+    "await-child-loop"
+  else if length readyTaskIds > 0 then
+    "launch-ready-task"
+  else if length state.plannedTaskIds > 0 then
+    "resume-task-wave"
+  else
+    "run-planner"
+
 dependencyIdsFromBlocker : Str -> [Str]
 dependencyIdsFromBlocker blocker = match textPrefix blocker "waiting on " {
   Ok remainder ->
@@ -374,6 +443,9 @@ statusView state =
         waitingReasons = waitingReasons,
         primaryWaitingReason = firstWaitingReasonKind waitingReasons,
         primaryWaitingTaskIds = firstWaitingReasonTaskIds waitingReasons,
+        nextAction = statusNextAction state readyTaskIds activeTaskIds (map taskIdOf (filter taskFailed objectiveTasks)),
+        autonomyBlocked = statusAutonomyBlocked state readyTaskIds activeTaskIds waitingReasons,
+        autonomyBlockers = autonomyBlockersFor waitingReasons,
         benchmarkSummary = latestBenchmarkSummaryText,
         benchmarkTargetMet = latestBenchmarkTargetMet,
         feedbackSummary = readFeedbackSummary
@@ -396,6 +468,9 @@ statusView state =
         waitingReasons = waitingReasons,
         primaryWaitingReason = firstWaitingReasonKind waitingReasons,
         primaryWaitingTaskIds = firstWaitingReasonTaskIds waitingReasons,
+        nextAction = statusNextAction state emptyTexts heartbeatActiveTaskIds emptyTexts,
+        autonomyBlocked = statusAutonomyBlocked state emptyTexts heartbeatActiveTaskIds waitingReasons,
+        autonomyBlockers = autonomyBlockersFor waitingReasons,
         benchmarkSummary = latestBenchmarkSummaryText,
         benchmarkTargetMet = latestBenchmarkTargetMet,
         feedbackSummary = readFeedbackSummary

@@ -232,6 +232,9 @@ record StatusView = {
   waitingReasons : [StatusWaitingReason],
   primaryWaitingReason : Str,
   primaryWaitingTaskIds : [Str],
+  nextAction : Str,
+  autonomyBlocked : Bool,
+  autonomyBlockers : [Str],
   benchmarkSummary : Str,
   benchmarkTargetMet : Bool,
   feedbackSummary : Str
