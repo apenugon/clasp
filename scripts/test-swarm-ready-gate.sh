@@ -44,6 +44,28 @@ if [[ -e "$project_root/examples/swarm-native/GoalManagerProgram.clasp" || -e "$
   exit 1
 fi
 
+for retired_path in \
+  "cabal.project" \
+  "clasp-compiler.cabal" \
+  "app/Main.hs" \
+  "test/Main.hs" \
+  "src/scripts/render-primary-source.hs" \
+  "deprecated/bootstrap"; do
+  if [[ -e "$project_root/$retired_path" ]]; then
+    printf 'retired Haskell bootstrap surface should stay absent: %s\n' "$retired_path" >&2
+    exit 1
+  fi
+done
+
+require_pattern "AGENTS.md" 'The Haskell bootstrap compiler is retired.'
+require_pattern "AGENTS.md" 'Do not target `cabal`, `app/Main.hs`, `test/Main.hs`, or `deprecated/bootstrap` for active compiler work.'
+require_pattern "README.md" 'compiler-self--hosted%20Clasp%20%7C%20native%20claspc'
+reject_pattern "README.md" '--compiler=bootstrap'
+reject_pattern "examples/README.md" '--compiler=bootstrap'
+reject_pattern "examples/control-plane/demo.mjs" 'deprecated/bootstrap'
+reject_pattern "examples/control-plane/demo.mjs" 'test/Main.hs'
+require_pattern "compiler/README.md" 'The Haskell bootstrap compiler is retired and is no longer an active source tree, fallback, or ordinary verification target.'
+
 require_pattern "examples/feedback-loop/Main.clasp" 'codexModel = readEnvText "CLASP_LOOP_CODEX_MODEL_JSON" (readEnvText "CLASP_LOOP_AGENT_MODEL_JSON" "gpt-5.5")'
 require_pattern "examples/feedback-loop/Main.clasp" 'codexReasoning = readEnvText "CLASP_LOOP_CODEX_REASONING_JSON" (readEnvText "CLASP_LOOP_AGENT_REASONING_JSON" "xhigh")'
 require_pattern "benchmarks/run-codex-harness.sh" 'model="${CODEX_MODEL:-gpt-5.5}"'

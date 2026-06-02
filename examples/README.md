@@ -98,20 +98,20 @@ Verify the release-gate example on the native backend path:
 bash examples/release-gate/scripts/verify.sh
 ```
 
-Run the control-plane demo after compiling `Main.clasp` into `dist/` with explicit bootstrap recovery mode:
+Run the control-plane demo after compiling `Main.clasp` into `dist/` with the native compiler:
 
 ```sh
 mkdir -p dist/control-plane
-claspc compile examples/control-plane/Main.clasp -o dist/control-plane/Main.js --compiler=bootstrap
+claspc compile examples/control-plane/Main.clasp -o dist/control-plane/Main.js
 node examples/control-plane/demo.mjs dist/control-plane/Main.js
 ```
 
-Run the durable workflow restart and supervised hot-swap demo after compiling both module versions with explicit bootstrap recovery mode:
+Run the durable workflow restart and supervised hot-swap demo after compiling both module versions with the native compiler:
 
 ```sh
 mkdir -p dist/durable-workflow
-claspc compile examples/durable-workflow/Main.clasp -o dist/durable-workflow/Main.js --compiler=bootstrap
-claspc compile examples/durable-workflow/Main.next.clasp -o dist/durable-workflow/Main.next.js --compiler=bootstrap
+claspc compile examples/durable-workflow/Main.clasp -o dist/durable-workflow/Main.js
+claspc compile examples/durable-workflow/Main.next.clasp -o dist/durable-workflow/Main.next.js
 node examples/durable-workflow/demo.mjs dist/durable-workflow/Main.js dist/durable-workflow/Main.next.js
 ```
 

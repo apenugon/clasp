@@ -18,11 +18,11 @@ export async function runControlPlaneDemo(compiledModulePath) {
       throw new Error(`Unexpected tool method: ${request.method}`);
     }
     const query = request.params.query;
-    if (query === "rg --files src test") {
+    if (query === "rg --files src examples") {
       return {
         jsonrpc: "2.0",
         id: request.id,
-        result: { summary: "deprecated/bootstrap/src/Clasp/Compiler.hs\ntest/Main.hs" }
+        result: { summary: "src/Compiler/Checker.clasp\nexamples/control-plane/Main.clasp" }
       };
     }
     if (query === "bash scripts/verify-all.sh") {
@@ -37,12 +37,12 @@ export async function runControlPlaneDemo(compiledModulePath) {
 
   const boot = hook.invoke({ workerId: "builder-7" });
   const loopContext = { actor: { id: "builder-7" }, lane: "control-plane" };
-  const fileDecision = agent.policy.decideFile("/workspace/deprecated/bootstrap/src/Clasp/Compiler.hs", loopContext);
+  const fileDecision = agent.policy.decideFile("/workspace/src/Compiler/Checker.clasp", loopContext);
   const plannedVerifierRequests = mergeGate.plan({ query: "bash scripts/verify-all.sh" }, "release");
   const queue = [
     {
       step: "inspect",
-      request: tool.prepare({ query: "rg --files src test" }, "release:inspect"),
+      request: tool.prepare({ query: "rg --files src examples" }, "release:inspect"),
       process: "rg",
       parser: (response) => tool.decodeResultEnvelope(response).result
     },

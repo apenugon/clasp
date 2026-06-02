@@ -1,8 +1,8 @@
 # Compiler Layout
 
-The self-hosted Clasp compiler now lives at `src/`, with the entrypoint at `src/Main.clasp`.
+The self-hosted Clasp compiler lives at `src/`, with the entrypoint at `src/Main.clasp`.
 
-The legacy Haskell bootstrap compiler now lives under `deprecated/bootstrap/src/Clasp/`.
+The Haskell bootstrap compiler is retired and is no longer an active source tree, fallback, or ordinary verification target.
 
 Verify the promoted self-hosted compiler entrypoint on the native path with:
 

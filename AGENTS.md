@@ -1,6 +1,8 @@
 # Clasp Repo Guidance
 
-This repository is building `Clasp`, an AI-oriented programming language with a self-hosted compiler in `src/` and a legacy Haskell bootstrap compiler under `deprecated/bootstrap/`.
+This repository is building `Clasp`, an AI-oriented programming language with a self-hosted compiler in `src/` and a Rust-native runtime/compiler launcher in `runtime/`.
+
+The Haskell bootstrap compiler is retired. Do not target `cabal`, `app/Main.hs`, `test/Main.hs`, or `deprecated/bootstrap` for active compiler work.
 
 ## Working Rules
 
@@ -16,7 +18,7 @@ The main pipeline is:
 
 `source -> parser -> checker -> typed core -> lowered IR -> JavaScript emitter`
 
-The current implementation is split in two:
+The current active implementation is:
 
 - Self-hosted compiler:
   - `src/Main.clasp`
@@ -25,15 +27,21 @@ The current implementation is split in two:
   - `src/Compiler/Lower.clasp`
   - `src/Compiler/Emit/JavaScript.clasp`
   - `src/Compiler/Emit/Native.clasp`
-- Legacy Haskell bootstrap compiler:
-  - `deprecated/bootstrap/src/Clasp/Syntax.hs`
-  - `deprecated/bootstrap/src/Clasp/Parser.hs`
-  - `deprecated/bootstrap/src/Clasp/Checker.hs`
-  - `deprecated/bootstrap/src/Clasp/Core.hs`
-  - `deprecated/bootstrap/src/Clasp/Lower.hs`
-  - `deprecated/bootstrap/src/Clasp/Emit/JavaScript.hs`
-  - `deprecated/bootstrap/src/Clasp/Compiler.hs`
-- `test/Main.hs`
+  - `src/Compiler/Driver/Frontend.clasp`
+  - `src/Compiler/Driver/Native.clasp`
+- Promoted native images and caches:
+  - `src/embedded.compiler.native.image.json`
+  - `src/stage1.compiler.native.image.json`
+  - `src/stage1.compiler.module-summary-cache-v2.json`
+  - `src/stage1.compiler.source-export-cache-v1.json`
+- Native runtime and launcher:
+  - `runtime/`
+  - `scripts/resolve-claspc.sh`
+- Verification:
+  - `src/scripts/verify.sh`
+  - `scripts/test-native-claspc.sh`
+  - `scripts/test-swarm-ready-gate.sh`
+  - focused `scripts/test-*.sh` harnesses
 
 ## Task Discipline
 

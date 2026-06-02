@@ -5,7 +5,7 @@
 <p align="center">
   <img alt="version" src="https://img.shields.io/badge/version-v0.01-0f766e?style=flat-square">
   <img alt="status" src="https://img.shields.io/badge/status-experimental-b45309?style=flat-square">
-  <img alt="compiler" src="https://img.shields.io/badge/compiler-Clasp%20primary%20%7C%20Haskell%20bootstrap-4338ca?style=flat-square">
+  <img alt="compiler" src="https://img.shields.io/badge/compiler-self--hosted%20Clasp%20%7C%20native%20claspc-4338ca?style=flat-square">
   <img alt="target" src="https://img.shields.io/badge/target-JavaScript-111827?style=flat-square">
   <img alt="runtime" src="https://img.shields.io/badge/runtime-Bun-f59e0b?style=flat-square">
   <img alt="benchmark" src="https://img.shields.io/badge/benchmark-Codex%20gpt--5.4-1d4ed8?style=flat-square">
@@ -175,32 +175,29 @@ If that does not hold up across more tasks and more harnesses, the project shoul
 - `benchmarks/`: benchmark repos, manifests, runner, and results
 - `src/`: self-hosted Clasp compiler, promoted native seed, and self-hosted verification scripts
 - `src/runtime/`: compiler-packaged JS helper assets for client, React Native, Expo, and Python interop
-- `deprecated/bootstrap/src/Clasp/`: legacy Haskell bootstrap compiler
-- `deprecated/runtime/`: legacy JS backend server and worker shims pending full native replacement
 - `runtime/`: native runtime substrate plus the Rust-native `claspc` and native tool runners
 - `examples/`: small example programs and demo app
-- `app/Main.hs`: deprecated bootstrap CLI shim kept only for legacy recovery paths
 
 ## Quick Start
 
 ```sh
 nix develop
 
-claspc check src/Main.clasp --json --compiler=bootstrap
+claspc check src/Main.clasp --json
 bash src/scripts/verify.sh
 
-claspc check examples/hello.clasp --compiler=bootstrap
-claspc check examples/status.clasp --compiler=bootstrap
-claspc check examples/records.clasp --compiler=bootstrap
-claspc check examples/lead-app/Main.clasp --compiler=bootstrap
-claspc check examples/compiler-selfhost/Main.clasp --json --compiler=bootstrap
+claspc check examples/hello.clasp
+claspc check examples/status.clasp
+claspc check examples/records.clasp
+claspc check examples/lead-app/Main.clasp
+claspc check examples/compiler-selfhost/Main.clasp --json
 
 bash scripts/verify-compiler-slice.sh all
 bash scripts/verify-compiler-slice.sh --check-only checker
 bash scripts/verify-runtime-slice.sh workflow codex-loop
-claspc context examples/lead-app/Main.clasp --compiler=bootstrap
+claspc context examples/lead-app/Main.clasp
 claspc semantic examples/lead-app/Main.clasp -o dist/lead-app.semantic.json
-claspc native examples/lead-app/Main.clasp -o dist/lead-app.native.ir --compiler=bootstrap
+claspc native examples/lead-app/Main.clasp -o dist/lead-app.native.ir
 bash scripts/test-native-runtime.sh
 ```
 
