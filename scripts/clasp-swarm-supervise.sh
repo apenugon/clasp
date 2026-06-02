@@ -77,6 +77,7 @@ memory_mb="${CLASP_SWARM_SUPERVISOR_MEMORY_MB:-4096}"
 min_available_memory_mb="${CLASP_SWARM_SUPERVISOR_MIN_AVAILABLE_MEMORY_MB:-16384}"
 min_available_disk_mb="${CLASP_SWARM_SUPERVISOR_MIN_AVAILABLE_DISK_MB:-${CLASP_SWARM_MIN_AVAILABLE_DISK_MB:-16384}}"
 min_disk_headroom_mb="${CLASP_SWARM_SUPERVISOR_MIN_DISK_HEADROOM_MB:-${CLASP_SWARM_MIN_DISK_HEADROOM_MB:-${CLASP_GENERATED_STATE_MIN_HEADROOM_MB:-1024}}}"
+external_agent_reserve_mb="${CLASP_SWARM_SUPERVISOR_EXTERNAL_AGENT_RESERVE_MB:-${CLASP_MANAGED_JOB_EXTERNAL_AGENT_RESERVE_MB:-512}}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -203,6 +204,7 @@ validate_non_negative_integer "CLASP_SWARM_SUPERVISOR_MEMORY_MB" "$memory_mb"
 validate_non_negative_integer "CLASP_SWARM_SUPERVISOR_MIN_AVAILABLE_MEMORY_MB" "$min_available_memory_mb"
 validate_non_negative_integer "CLASP_SWARM_SUPERVISOR_MIN_AVAILABLE_DISK_MB" "$min_available_disk_mb"
 validate_non_negative_integer "CLASP_SWARM_SUPERVISOR_MIN_DISK_HEADROOM_MB" "$min_disk_headroom_mb"
+validate_non_negative_integer "CLASP_SWARM_SUPERVISOR_EXTERNAL_AGENT_RESERVE_MB" "$external_agent_reserve_mb"
 
 mkdir -p "$state_root" "$jobs_root"
 state_root="$(cd "$state_root" && pwd -P)"
@@ -251,8 +253,10 @@ if (( min_disk_headroom_mb > 0 )); then
 fi
 
 job_dir="$(
-  "${managed_job_args[@]}" \
+  CLASP_MANAGED_JOB_EXTERNAL_AGENT_RESERVE_MB="$external_agent_reserve_mb" \
+    "${managed_job_args[@]}" \
     -- env \
+      CLASP_MANAGED_JOB_EXTERNAL_AGENT_RESERVE_MB="$external_agent_reserve_mb" \
       CLASP_SWARM_SUPERVISOR_WORKSPACE_JSON="$workspace_json" \
       CLASP_SWARM_SUPERVISOR_WAVE_JSON="$wave_json" \
       CLASP_SWARM_SUPERVISOR_PROFILE_JSON="$profile_json" \

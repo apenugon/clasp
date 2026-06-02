@@ -261,6 +261,7 @@ assert(jobStatus === "completed", `job status ${jobStatus}`);
 assert(exitStatus === "0", `job exit ${exitStatus}`);
 assert(memoryMb === "4096", `job memory ${memoryMb}`);
 assert(effectiveMemoryMb === "4096", `effective job memory ${effectiveMemoryMb}`);
+assert(command.includes("CLASP_MANAGED_JOB_EXTERNAL_AGENT_RESERVE_MB=0"), "managed command should inherit the supervisor external-agent reserve");
 assert(command.includes("SwarmSupervisor.clasp"), "managed command should run the Clasp supervisor");
 assert(command.includes("claspc"), "managed command should use claspc run");
 assert(report.supervisorStatus === "completed", `supervisor status ${report.supervisorStatus}`);
