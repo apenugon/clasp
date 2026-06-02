@@ -90,7 +90,12 @@ record SupervisorReport = {
   pollMs : Int,
   reportEventLimit : Int,
   dryRun : Bool,
+  startedAtMs : Int,
+  updatedAtMs : Int,
+  completedIterations : Int,
   admittedStarts : Int,
+  totalEventCount : Int,
+  retainedEventCount : Int,
   lastAction : Str,
   lastReason : Str,
   lastSelectedLane : Str,
@@ -278,7 +283,12 @@ emptyReport =
     pollMs = pollMs,
     reportEventLimit = reportEventLimit,
     dryRun = dryRun,
+    startedAtMs = timeUnixMs,
+    updatedAtMs = timeUnixMs,
+    completedIterations = 0,
     admittedStarts = 0,
+    totalEventCount = 0,
+    retainedEventCount = 0,
     lastAction = "none",
     lastReason = "",
     lastSelectedLane = "",
@@ -318,7 +328,8 @@ trimSupervisorEvents limit events =
     trimSupervisorEvents limit (dropFirstSupervisorEvent events)
 
 appendEvent : SupervisorReport -> SupervisorEvent -> SupervisorReport
-appendEvent report event =
+appendEvent report event = {
+  let retainedEvents = trimSupervisorEvents report.reportEventLimit (append report.events [event]);
   SupervisorReport {
     supervisorStatus = report.supervisorStatus,
     waveName = report.waveName,
@@ -327,7 +338,12 @@ appendEvent report event =
     pollMs = report.pollMs,
     reportEventLimit = report.reportEventLimit,
     dryRun = report.dryRun,
+    startedAtMs = report.startedAtMs,
+    updatedAtMs = event.atMs,
+    completedIterations = report.completedIterations,
     admittedStarts = report.admittedStarts,
+    totalEventCount = intAdd report.totalEventCount 1,
+    retainedEventCount = length retainedEvents,
     lastAction = event.action,
     lastReason = event.reason,
     lastSelectedLane = event.selectedLane,
@@ -338,8 +354,9 @@ appendEvent report event =
     lastLaunchAdjustmentCandidateAdmissible = event.launchAdjustmentCandidateAdmissible,
     observedRunningCount = event.runningCount,
     observedBlockedCount = event.blockedCount,
-    events = trimSupervisorEvents report.reportEventLimit (append report.events [event])
+    events = retainedEvents
   }
+}
 
 markReportStatus : SupervisorReport -> Str -> SupervisorReport
 markReportStatus report status =
@@ -351,7 +368,12 @@ markReportStatus report status =
     pollMs = report.pollMs,
     reportEventLimit = report.reportEventLimit,
     dryRun = report.dryRun,
+    startedAtMs = report.startedAtMs,
+    updatedAtMs = timeUnixMs,
+    completedIterations = report.completedIterations,
     admittedStarts = report.admittedStarts,
+    totalEventCount = report.totalEventCount,
+    retainedEventCount = report.retainedEventCount,
     lastAction = report.lastAction,
     lastReason = report.lastReason,
     lastSelectedLane = report.lastSelectedLane,
@@ -375,7 +397,12 @@ incrementAdmittedStarts report =
     pollMs = report.pollMs,
     reportEventLimit = report.reportEventLimit,
     dryRun = report.dryRun,
+    startedAtMs = report.startedAtMs,
+    updatedAtMs = report.updatedAtMs,
+    completedIterations = report.completedIterations,
     admittedStarts = intAdd report.admittedStarts 1,
+    totalEventCount = report.totalEventCount,
+    retainedEventCount = report.retainedEventCount,
     lastAction = report.lastAction,
     lastReason = report.lastReason,
     lastSelectedLane = report.lastSelectedLane,
@@ -569,7 +596,8 @@ runSupervisorStep iteration =
   }
 
 mergeStepReport : SupervisorReport -> SupervisorReport -> SupervisorReport
-mergeStepReport report step =
+mergeStepReport report step = {
+  let retainedEvents = trimSupervisorEvents report.reportEventLimit (append report.events step.events);
   SupervisorReport {
     supervisorStatus = report.supervisorStatus,
     waveName = report.waveName,
@@ -578,7 +606,12 @@ mergeStepReport report step =
     pollMs = report.pollMs,
     reportEventLimit = report.reportEventLimit,
     dryRun = report.dryRun,
+    startedAtMs = report.startedAtMs,
+    updatedAtMs = step.updatedAtMs,
+    completedIterations = intAdd report.completedIterations 1,
     admittedStarts = intAdd report.admittedStarts step.admittedStarts,
+    totalEventCount = intAdd report.totalEventCount step.totalEventCount,
+    retainedEventCount = length retainedEvents,
     lastAction = step.lastAction,
     lastReason = step.lastReason,
     lastSelectedLane = step.lastSelectedLane,
@@ -589,8 +622,9 @@ mergeStepReport report step =
     lastLaunchAdjustmentCandidateAdmissible = step.lastLaunchAdjustmentCandidateAdmissible,
     observedRunningCount = step.observedRunningCount,
     observedBlockedCount = step.observedBlockedCount,
-    events = trimSupervisorEvents report.reportEventLimit (append report.events step.events)
+    events = retainedEvents
   }
+}
 
 shouldSleepAfter : Int -> Int -> Bool
 shouldSleepAfter iteration limit =
@@ -640,7 +674,12 @@ statusOutput =
           pollMs = pollMs,
           reportEventLimit = reportEventLimit,
           dryRun = dryRun,
+          startedAtMs = timeUnixMs,
+          updatedAtMs = timeUnixMs,
+          completedIterations = 0,
           admittedStarts = 0,
+          totalEventCount = 0,
+          retainedEventCount = 0,
           lastAction = "status",
           lastReason = message,
           lastSelectedLane = "",
@@ -671,7 +710,12 @@ main =
             pollMs = pollMs,
             reportEventLimit = reportEventLimit,
             dryRun = dryRun,
+            startedAtMs = timeUnixMs,
+            updatedAtMs = timeUnixMs,
+            completedIterations = 0,
             admittedStarts = 0,
+            totalEventCount = 0,
+            retainedEventCount = 0,
             lastAction = "mkdir-failed",
             lastReason = message,
             lastSelectedLane = "",

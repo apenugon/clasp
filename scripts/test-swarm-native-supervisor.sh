@@ -116,8 +116,13 @@ assert(report.profileName === "bounded-memory-pressure", `profile ${report.profi
 assert(report.maxIterations === 3, `maxIterations ${report.maxIterations}`);
 assert(report.pollMs === 0, `pollMs ${report.pollMs}`);
 assert(report.reportEventLimit === 2, `reportEventLimit ${report.reportEventLimit}`);
+assert(Number.isInteger(report.startedAtMs) && report.startedAtMs > 0, `startedAtMs ${report.startedAtMs}`);
+assert(Number.isInteger(report.updatedAtMs) && report.updatedAtMs >= report.startedAtMs, `updatedAtMs ${report.updatedAtMs}`);
+assert(report.completedIterations === 3, `completedIterations ${report.completedIterations}`);
 assert(report.dryRun === false, "dryRun should be false");
 assert(report.admittedStarts === 2, `admittedStarts ${report.admittedStarts}`);
+assert(report.totalEventCount === 3, `totalEventCount ${report.totalEventCount}`);
+assert(report.retainedEventCount === 2, `retainedEventCount ${report.retainedEventCount}`);
 assert(report.lastAction === "started-fallback-lane", `lastAction ${report.lastAction}`);
 assert(report.lastReason === "admitted", `lastReason ${report.lastReason}`);
 assert(report.lastSelectedLane === "", `lastSelectedLane ${report.lastSelectedLane}`);
