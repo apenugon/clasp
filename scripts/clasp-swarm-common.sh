@@ -535,6 +535,110 @@ clasp_swarm_wait_managed_job_immediate_terminal_status() {
   return 1
 }
 
+clasp_swarm_resource_guard_file_mtime_epoch() {
+  local guard_file="$1"
+
+  stat -c '%Y' "$guard_file" 2>/dev/null || printf '0\n'
+}
+
+clasp_swarm_resource_guard_file_age_seconds() {
+  local guard_file="$1"
+  local now_epoch=""
+  local guard_epoch=""
+  local age_seconds=0
+
+  now_epoch="$(date -u +%s)"
+  guard_epoch="$(clasp_swarm_resource_guard_file_mtime_epoch "$guard_file")"
+  if [[ ! "$guard_epoch" =~ ^[0-9]+$ ]]; then
+    guard_epoch=0
+  fi
+
+  age_seconds=$((now_epoch - guard_epoch))
+  if (( age_seconds < 0 )); then
+    age_seconds=0
+  fi
+  printf '%s\n' "$age_seconds"
+}
+
+clasp_swarm_resource_guard_file_kind() {
+  local guard_file="$1"
+
+  case "$(basename "$guard_file")" in
+    memory-exceeded)
+      printf 'memory\n'
+      ;;
+    disk-exceeded)
+      printf 'disk\n'
+      ;;
+    *)
+      printf 'unknown\n'
+      ;;
+  esac
+}
+
+clasp_swarm_latest_resource_guard_file() {
+  local runtime_root="$1"
+  local newest_file=""
+  local newest_mtime=0
+  local candidate=""
+  local candidate_mtime=0
+  local job_dir=""
+
+  if [[ -f "$runtime_root/job" ]]; then
+    job_dir="$(sed -n '1p' "$runtime_root/job")"
+    for candidate in "$job_dir/memory-exceeded" "$job_dir/disk-exceeded"; do
+      [[ -f "$candidate" ]] || continue
+      candidate_mtime="$(clasp_swarm_resource_guard_file_mtime_epoch "$candidate")"
+      [[ "$candidate_mtime" =~ ^[0-9]+$ ]] || candidate_mtime=0
+      if (( candidate_mtime >= newest_mtime )); then
+        newest_mtime="$candidate_mtime"
+        newest_file="$candidate"
+      fi
+    done
+  fi
+
+  for guard_root in "$runtime_root/jobs" "$runtime_root/child-jobs"; do
+    [[ -d "$guard_root" ]] || continue
+    while IFS= read -r -d '' candidate; do
+      candidate_mtime="$(clasp_swarm_resource_guard_file_mtime_epoch "$candidate")"
+      [[ "$candidate_mtime" =~ ^[0-9]+$ ]] || candidate_mtime=0
+      if (( candidate_mtime >= newest_mtime )); then
+        newest_mtime="$candidate_mtime"
+        newest_file="$candidate"
+      fi
+    done < <(find "$guard_root" -mindepth 2 -maxdepth 2 -type f \( -name memory-exceeded -o -name disk-exceeded \) -print0 2>/dev/null)
+  done
+
+  if [[ -n "$newest_file" ]]; then
+    printf '%s\n' "$newest_file"
+  fi
+}
+
+clasp_swarm_resource_guard_file_is_in_cooldown() {
+  local guard_file="$1"
+  local cooldown_seconds="$2"
+  local age_seconds=0
+
+  [[ -f "$guard_file" ]] || return 1
+  if ! [[ "$cooldown_seconds" =~ ^[0-9]+$ ]] || (( cooldown_seconds < 1 )); then
+    return 1
+  fi
+
+  age_seconds="$(clasp_swarm_resource_guard_file_age_seconds "$guard_file")"
+  (( age_seconds < cooldown_seconds ))
+}
+
+clasp_swarm_lane_resource_guard_cooldown_file() {
+  local runtime_root="$1"
+  local cooldown_seconds="$2"
+  local guard_file=""
+
+  guard_file="$(clasp_swarm_latest_resource_guard_file "$runtime_root")"
+  if [[ -n "$guard_file" ]] && clasp_swarm_resource_guard_file_is_in_cooldown "$guard_file" "$cooldown_seconds"; then
+    printf '%s\n' "$guard_file"
+  fi
+}
+
 clasp_swarm_print_managed_job_terminal_report() {
   local label="$1"
   local job_dir="$2"

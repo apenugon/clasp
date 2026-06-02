@@ -20,6 +20,7 @@ candidate_lane_memory_mb="${CLASP_SWARM_PREFLIGHT_CANDIDATE_LANE_MEMORY_MB:-4096
 candidate_min_available_memory_mb="${CLASP_SWARM_PREFLIGHT_CANDIDATE_MIN_AVAILABLE_MEMORY_MB:-32768}"
 external_agent_process_names="${CLASP_MANAGED_JOB_EXTERNAL_AGENT_PROCESS_NAMES:-codex}"
 external_agent_reserve_per_process_mb="${CLASP_MANAGED_JOB_EXTERNAL_AGENT_RESERVE_MB:-1024}"
+resource_guard_cooldown_secs="${CLASP_SWARM_RESOURCE_GUARD_COOLDOWN_SECS:-1800}"
 
 usage() {
   cat <<'EOF' >&2
@@ -37,6 +38,9 @@ whether a smaller explicitly configured launch would pass admission.
 When --include-repository-gate is set, the report also checks the same clean
 repository and required-branch gates that scripts/clasp-swarm-start.sh enforces
 before launching a lane.
+Recent lane-local memory or disk guard failures also create a short cooldown,
+controlled by CLASP_SWARM_RESOURCE_GUARD_COOLDOWN_SECS, so autonomous supervisors
+do not immediately relaunch a lane that was just stopped by a resource guard.
 
 Profiles:
   bounded-low-memory  Use CLASP_SWARM_LANE_MEMORY_MB=4096 and
@@ -141,6 +145,7 @@ validate_non_negative_integer "CLASP_SWARM_MIN_DISK_HEADROOM_MB" "$min_disk_head
 validate_non_negative_integer "CLASP_SWARM_PREFLIGHT_CANDIDATE_LANE_MEMORY_MB" "$candidate_lane_memory_mb"
 validate_non_negative_integer "CLASP_SWARM_PREFLIGHT_CANDIDATE_MIN_AVAILABLE_MEMORY_MB" "$candidate_min_available_memory_mb"
 validate_non_negative_integer "CLASP_MANAGED_JOB_EXTERNAL_AGENT_RESERVE_MB" "$external_agent_reserve_per_process_mb"
+validate_non_negative_integer "CLASP_SWARM_RESOURCE_GUARD_COOLDOWN_SECS" "$resource_guard_cooldown_secs"
 
 repository_gate_status="not-checked"
 repository_gate_reason="not-requested"
@@ -551,6 +556,29 @@ refresh_resource_report_fields() {
   fi
 }
 
+load_recent_resource_guard() {
+  local guard_file="$1"
+  local age_seconds=0
+  local remaining_seconds=0
+
+  recent_resource_guard_active="true"
+  recent_resource_guard_file="$guard_file"
+  recent_resource_guard_kind="$(clasp_swarm_resource_guard_file_kind "$guard_file")"
+  recent_resource_guard_cooldown_seconds="$resource_guard_cooldown_secs"
+  age_seconds="$(clasp_swarm_resource_guard_file_age_seconds "$guard_file")"
+  recent_resource_guard_age_seconds="$age_seconds"
+  remaining_seconds=$((resource_guard_cooldown_secs - age_seconds))
+  if (( remaining_seconds < 0 )); then
+    remaining_seconds=0
+  fi
+  recent_resource_guard_remaining_seconds="$remaining_seconds"
+  guard_details="$(cat "$guard_file" 2>/dev/null || true)"
+  recent_resource_guard_reason="$(guard_field "$guard_details" "reason")"
+  if [[ -z "$recent_resource_guard_reason" ]]; then
+    recent_resource_guard_reason="unknown"
+  fi
+}
+
 lane_runtime_is_running() {
   local runtime_root="$1"
   local job_file="$runtime_root/job"
@@ -607,6 +635,10 @@ find_next_ready_lane() {
   local global_completed_root="$project_root/.clasp-swarm/completed"
   local first_waiting_task=""
   local first_blocked_task=""
+  local first_cooldown_lane=""
+  local first_cooldown_task=""
+  local first_cooldown_guard_file=""
+  local cooldown_guard_file=""
 
   while IFS= read -r lane_dir; do
     [[ -n "$lane_dir" ]] || continue
@@ -639,16 +671,30 @@ find_next_ready_lane() {
       continue
     fi
 
-    printf '%s\t%s\n' "$lane_name" "$selected_task"
+    cooldown_guard_file="$(clasp_swarm_lane_resource_guard_cooldown_file "$runtime_root" "$resource_guard_cooldown_secs")"
+    if [[ -n "$cooldown_guard_file" ]]; then
+      if [[ -z "$first_cooldown_lane" ]]; then
+        first_cooldown_lane="$lane_name"
+        first_cooldown_task="$selected_task"
+        first_cooldown_guard_file="$cooldown_guard_file"
+      fi
+      continue
+    fi
+
+    printf 'READY\t%s\t%s\n' "$lane_name" "$selected_task"
     return 0
   done < <(clasp_swarm_lane_dirs "$wave_name" "$project_root")
 
+  if [[ -n "$first_cooldown_lane" ]]; then
+    printf 'COOLDOWN\t%s\t%s\t%s\n' "$first_cooldown_lane" "$first_cooldown_task" "$first_cooldown_guard_file"
+    return 0
+  fi
   if [[ -n "$first_blocked_task" ]]; then
-    printf '__BLOCKED__\t%s\n' "$first_blocked_task"
+    printf 'BLOCKED\t\t%s\n' "$first_blocked_task"
     return 0
   fi
   if [[ -n "$first_waiting_task" ]]; then
-    printf '__WAIT__\t%s\n' "$first_waiting_task"
+    printf 'WAIT\t\t%s\n' "$first_waiting_task"
     return 0
   fi
 
@@ -673,7 +719,8 @@ const [
   jobDir,
   jobStatus,
   jobExitStatus,
-  guardDetails,
+  managedGuardDetails,
+  resourceGuardDetails,
   resourcePressureKind,
   resourceShortfallMb,
   recommendedAction,
@@ -690,6 +737,13 @@ const [
   candidateShortfallMb,
   candidateAdmissible,
   candidateEnv,
+  recentResourceGuardActive,
+  recentResourceGuardKind,
+  recentResourceGuardFile,
+  recentResourceGuardAgeSeconds,
+  recentResourceGuardCooldownSeconds,
+  recentResourceGuardRemainingSeconds,
+  recentResourceGuardReason,
   repositoryGateChecked,
   repositoryGateStatus,
   repositoryGateReason,
@@ -720,7 +774,7 @@ process.stdout.write(`${JSON.stringify({
     jobDir: jobDir || null,
     status: jobStatus || null,
     exitStatus: jobExitStatus || null,
-    guardDetails: guardDetails || "",
+    guardDetails: managedGuardDetails || "",
   },
   resourcePressure: {
     kind: resourcePressureKind || "none",
@@ -745,6 +799,16 @@ process.stdout.write(`${JSON.stringify({
     candidateEnv: candidateEnv || "",
     note: "candidate settings are advisory; launch only through managed preflight/start with explicit policy",
   },
+  recentResourceGuard: {
+    active: recentResourceGuardActive === "true",
+    kind: recentResourceGuardKind || "none",
+    guardFile: recentResourceGuardFile || null,
+    ageSeconds: Number(recentResourceGuardAgeSeconds || 0),
+    cooldownSeconds: Number(recentResourceGuardCooldownSeconds || 0),
+    remainingSeconds: Number(recentResourceGuardRemainingSeconds || 0),
+    reason: recentResourceGuardReason || null,
+    guardDetails: resourceGuardDetails || "",
+  },
   repositoryGate: {
     checked: repositoryGateChecked === "1",
     status: repositoryGateStatus || "not-checked",
@@ -767,7 +831,7 @@ print_text_report() {
   local job_dir="$5"
   local job_status="$6"
   local job_exit_status="$7"
-  local guard_details="$8"
+  local managed_guard_details="$8"
 
   printf 'swarm-preflight=%s reason=%s wave=%s batch=%s running_lanes=%s max_running_lanes=%s lane_memory_mb=%s min_available_memory_mb=%s min_available_disk_mb=%s min_disk_headroom_mb=%s\n' \
     "$status" "$reason" "$wave_name" "${batch_filter:-}" "$running_lanes" "$max_running_lanes" "$lane_memory_mb" "$min_available_memory_mb" "$min_available_disk_mb" "$min_disk_headroom_mb"
@@ -800,8 +864,33 @@ print_text_report() {
   printf 'external_agent_rss_mb=%s\n' "$external_agent_rss_mb"
   printf 'external_agent_reserve_per_process_mb=%s\n' "$external_agent_reserve_per_process_mb"
   printf 'external_agent_reserved_memory_mb=%s\n' "$external_agent_reserved_memory_mb"
-  if [[ -n "$guard_details" ]]; then
-    printf 'managed_preflight_guard:\n%s\n' "$guard_details"
+  if [[ "$recent_resource_guard_active" == "true" ]]; then
+    printf 'recent_resource_guard:\n'
+    printf 'active=true\n'
+    printf 'kind=%s\n' "$recent_resource_guard_kind"
+    printf 'guard_file=%s\n' "$recent_resource_guard_file"
+    printf 'age_seconds=%s\n' "$recent_resource_guard_age_seconds"
+    printf 'cooldown_seconds=%s\n' "$recent_resource_guard_cooldown_seconds"
+    printf 'remaining_seconds=%s\n' "$recent_resource_guard_remaining_seconds"
+    printf 'reason=%s\n' "$recent_resource_guard_reason"
+    if [[ -n "$guard_details" ]]; then
+      printf 'recent_resource_guard_details:\n%s\n' "$guard_details"
+      if [[ "$resource_pressure_kind" == "memory" ]]; then
+        printf 'recent_resource_guard_recovery:\n'
+        printf 'same_reserve_max_lane_memory_mb=%s\n' "$same_reserve_max_lane_memory_mb"
+        printf 'same_lane_max_min_available_memory_mb=%s\n' "$same_lane_max_min_available_memory_mb"
+        printf 'candidate_profile=bounded-low-memory\n'
+        printf 'candidate_lane_memory_mb=%s\n' "$candidate_lane_memory_mb"
+        printf 'candidate_min_available_memory_mb=%s\n' "$candidate_min_available_memory_mb"
+        printf 'candidate_required_available_memory_mb=%s\n' "$candidate_required_available_memory_mb"
+        printf 'candidate_shortfall_mb=%s\n' "$candidate_shortfall_mb"
+        printf 'candidate_admissible=%s\n' "$candidate_admissible"
+        printf 'candidate_env=%s\n' "$candidate_env"
+      fi
+    fi
+  fi
+  if [[ -n "$managed_guard_details" ]]; then
+    printf 'managed_preflight_guard:\n%s\n' "$managed_guard_details"
     printf 'managed_preflight_recovery:\n'
     printf 'resource_pressure_kind=%s\n' "$resource_pressure_kind"
     printf 'resource_shortfall_mb=%s\n' "$resource_shortfall_mb"
@@ -832,10 +921,20 @@ running_lanes="$(running_lane_count_for_wave)"
 selected_lane=""
 selected_task=""
 ready_row=""
+ready_kind=""
+ready_rest=""
 job_dir=""
 job_status=""
 job_exit_status=""
 guard_details=""
+managed_guard_details=""
+recent_resource_guard_active="false"
+recent_resource_guard_kind="none"
+recent_resource_guard_file=""
+recent_resource_guard_age_seconds="0"
+recent_resource_guard_cooldown_seconds="$resource_guard_cooldown_secs"
+recent_resource_guard_remaining_seconds="0"
+recent_resource_guard_reason=""
 exit_code=0
 err_path="$(mktemp "${TMPDIR:-/tmp}/clasp-swarm-preflight.err.XXXXXX")"
 
@@ -851,16 +950,29 @@ if (( max_running_lanes > 0 && running_lanes >= max_running_lanes )); then
   exit_code=75
 else
   if ready_row="$(find_next_ready_lane)"; then
-    selected_lane="${ready_row%%$'\t'*}"
-    selected_task="${ready_row#*$'\t'}"
-    if [[ "$selected_lane" == "__WAIT__" ]]; then
+    ready_kind="${ready_row%%$'\t'*}"
+    ready_rest="${ready_row#*$'\t'}"
+    if [[ "$ready_kind" == "WAIT" ]]; then
+      selected_task="${ready_rest#*$'\t'}"
       status="waiting"
       reason="dependencies-not-ready"
-    elif [[ "$selected_lane" == "__BLOCKED__" ]]; then
+    elif [[ "$ready_kind" == "BLOCKED" ]]; then
+      selected_task="${ready_rest#*$'\t'}"
       status="blocked"
       reason="lane-task-blocked"
       exit_code=75
+    elif [[ "$ready_kind" == "COOLDOWN" ]]; then
+      selected_lane="${ready_rest%%$'\t'*}"
+      ready_rest="${ready_rest#*$'\t'}"
+      selected_task="${ready_rest%%$'\t'*}"
+      cooldown_guard_file="${ready_rest#*$'\t'}"
+      load_recent_resource_guard "$cooldown_guard_file"
+      status="blocked"
+      reason="recent-resource-guard-cooldown"
+      exit_code=75
     else
+      selected_lane="${ready_rest%%$'\t'*}"
+      selected_task="${ready_rest#*$'\t'}"
       managed_args=(
         "$project_root/scripts/run-managed-job.sh"
         --jobs-root "$project_root/.clasp-swarm/preflight-jobs"
@@ -887,6 +999,7 @@ else
         status="blocked"
         reason="managed-preflight-launch-failed"
         guard_details="$(cat "$err_path" 2>/dev/null || true)"
+        managed_guard_details="$guard_details"
         exit_code="$preflight_status"
       else
         for _ in $(seq 1 100); do
@@ -901,21 +1014,25 @@ else
         job_exit_status="$(managed_job_exit_status "$job_dir")"
         if [[ -f "$job_dir/memory-exceeded" ]]; then
           guard_details="$(cat "$job_dir/memory-exceeded")"
+          managed_guard_details="$guard_details"
           if [[ -z "$job_status" ]]; then
             job_status="memory-exceeded"
           fi
         elif [[ -f "$job_dir/disk-exceeded" ]]; then
           guard_details="$(cat "$job_dir/disk-exceeded")"
+          managed_guard_details="$guard_details"
           if [[ -z "$job_status" ]]; then
             job_status="disk-exceeded"
           fi
         elif [[ -f "$job_dir/admission-error" ]]; then
           guard_details="$(cat "$job_dir/admission-error")"
+          managed_guard_details="$guard_details"
           if [[ -z "$job_status" ]]; then
             job_status="admission-lock-unavailable"
           fi
         elif [[ -f "$job_dir/memory-enforcer-error" ]]; then
           guard_details="$(cat "$job_dir/memory-enforcer-error")"
+          managed_guard_details="$guard_details"
           if [[ -z "$job_status" ]]; then
             job_status="memory-enforcer-unavailable"
           fi
@@ -962,22 +1079,26 @@ candidate_env=""
 refresh_resource_report_fields
 
 if (( json_output )); then
-  print_json_report \
-    "$status" "$reason" "$wave_name" "$batch_filter" "$running_lanes" "$max_running_lanes" \
-    "$lane_memory_mb" "$min_available_memory_mb" "$min_available_disk_mb" "$min_disk_headroom_mb" \
-    "$selected_lane" "$selected_task" "$job_dir" "$job_status" "$job_exit_status" "$guard_details" \
-    "$resource_pressure_kind" "$resource_shortfall_mb" "$recommended_action" \
-    "$external_agent_process_count" "$external_agent_rss_mb" "$external_agent_reserve_per_process_mb" \
-    "$external_agent_reserved_memory_mb" "$external_agent_process_names" \
-    "$same_reserve_max_lane_memory_mb" "$same_lane_max_min_available_memory_mb" \
-    "$candidate_lane_memory_mb" "$candidate_min_available_memory_mb" \
-    "$candidate_required_available_memory_mb" "$candidate_shortfall_mb" \
-    "$candidate_admissible" "$candidate_env" \
-    "$include_repository_gate" "$repository_gate_status" "$repository_gate_reason" "$allow_dirty" \
-    "$repository_gate_current_branch" "$repository_gate_required_branch" "$repository_gate_dirty_entries" \
-    "$repository_gate_recommended_action"
+	  print_json_report \
+	    "$status" "$reason" "$wave_name" "$batch_filter" "$running_lanes" "$max_running_lanes" \
+	    "$lane_memory_mb" "$min_available_memory_mb" "$min_available_disk_mb" "$min_disk_headroom_mb" \
+	    "$selected_lane" "$selected_task" "$job_dir" "$job_status" "$job_exit_status" \
+	    "$managed_guard_details" "$guard_details" \
+	    "$resource_pressure_kind" "$resource_shortfall_mb" "$recommended_action" \
+	    "$external_agent_process_count" "$external_agent_rss_mb" "$external_agent_reserve_per_process_mb" \
+	    "$external_agent_reserved_memory_mb" "$external_agent_process_names" \
+	    "$same_reserve_max_lane_memory_mb" "$same_lane_max_min_available_memory_mb" \
+	    "$candidate_lane_memory_mb" "$candidate_min_available_memory_mb" \
+	    "$candidate_required_available_memory_mb" "$candidate_shortfall_mb" \
+	    "$candidate_admissible" "$candidate_env" \
+	    "$recent_resource_guard_active" "$recent_resource_guard_kind" "$recent_resource_guard_file" \
+	    "$recent_resource_guard_age_seconds" "$recent_resource_guard_cooldown_seconds" \
+	    "$recent_resource_guard_remaining_seconds" "$recent_resource_guard_reason" \
+	    "$include_repository_gate" "$repository_gate_status" "$repository_gate_reason" "$allow_dirty" \
+	    "$repository_gate_current_branch" "$repository_gate_required_branch" "$repository_gate_dirty_entries" \
+	    "$repository_gate_recommended_action"
 else
-  print_text_report "$status" "$reason" "$selected_lane" "$selected_task" "$job_dir" "$job_status" "$job_exit_status" "$guard_details"
+  print_text_report "$status" "$reason" "$selected_lane" "$selected_task" "$job_dir" "$job_status" "$job_exit_status" "$managed_guard_details"
 fi
 
 exit "$exit_code"

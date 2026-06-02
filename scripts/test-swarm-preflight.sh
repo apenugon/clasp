@@ -145,6 +145,80 @@ if (!report.repositoryGate || report.repositoryGate.checked !== false) {
 ' "$json_output"
 [[ ! -e builder-events.log ]]
 
+runtime_root=".clasp-swarm/test-wave/01-foundation"
+guard_job_dir="$runtime_root/jobs/recent-memory"
+mkdir -p "$guard_job_dir"
+cat > "$guard_job_dir/memory-exceeded" <<'EOF'
+min_available_memory_mb=1
+lane_memory_mb=1
+external_agent_process_count=0
+external_agent_rss_mb=0
+external_agent_reserve_per_process_mb=0
+external_agent_reserved_memory_mb=0
+running_managed_memory_budget_mb=0
+required_available_memory_mb=100
+available_memory_mb=90
+reason=host-available-memory-reserve
+phase=watch
+detected_at=2026-06-02T00:00:00Z
+EOF
+set +e
+cooldown_json="$(
+  CLASP_MANAGED_JOB_EXTERNAL_AGENT_RESERVE_MB=0 \
+  CLASP_MANAGED_JOB_MEMORY_BUDGET_SCOPE=current-root \
+  CLASP_SWARM_RESOURCE_GUARD_COOLDOWN_SECS=600 \
+  CLASP_SWARM_MAX_RUNNING_LANES=2 \
+  CLASP_SWARM_LANE_MEMORY_MB=1 \
+  CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB=1 \
+  CLASP_SWARM_MIN_AVAILABLE_DISK_MB=0 \
+  CLASP_SWARM_MIN_DISK_HEADROOM_MB=0 \
+    bash scripts/clasp-swarm-preflight.sh --json --batch foundation test-wave
+)"
+cooldown_status="$?"
+set -e
+[[ "$cooldown_status" == "75" ]]
+node -e '
+const report = JSON.parse(process.argv[1]);
+if (report.status !== "blocked") throw new Error(`recent guard cooldown should block: ${JSON.stringify(report)}`);
+if (report.reason !== "recent-resource-guard-cooldown") throw new Error(`expected cooldown reason: ${JSON.stringify(report)}`);
+if (report.selectedLane !== "01-foundation") throw new Error(`cooldown should report the cooled lane: ${JSON.stringify(report)}`);
+if (!report.recentResourceGuard?.active) throw new Error(`cooldown report should be active: ${JSON.stringify(report)}`);
+if (report.recentResourceGuard.kind !== "memory") throw new Error(`cooldown should classify memory guard: ${JSON.stringify(report)}`);
+if (!String(report.recentResourceGuard.guardFile || "").endsWith("/memory-exceeded")) {
+  throw new Error(`cooldown should report the guard file: ${JSON.stringify(report)}`);
+}
+if (!(report.recentResourceGuard.remainingSeconds > 0)) {
+  throw new Error(`cooldown should report remaining time: ${JSON.stringify(report)}`);
+}
+if (report.recentResourceGuard.reason !== "host-available-memory-reserve") {
+  throw new Error(`cooldown should report guard reason: ${JSON.stringify(report)}`);
+}
+if (!report.resourcePressure || report.resourcePressure.kind !== "memory") {
+  throw new Error(`cooldown should reuse guard details for resource pressure: ${JSON.stringify(report)}`);
+}
+if (report.resourcePressure.shortfallMb !== 10) {
+  throw new Error(`cooldown should preserve guard shortfall: ${JSON.stringify(report)}`);
+}
+if (report.managedPreflight.jobDir !== null || report.managedPreflight.guardDetails !== "") {
+  throw new Error(`cooldown should not run a managed preflight job: ${JSON.stringify(report)}`);
+}
+' "$cooldown_json"
+
+cooldown_start_output="$(
+  CLASP_SWARM_BATCH=foundation \
+  CLASP_SWARM_RESOURCE_GUARD_COOLDOWN_SECS=600 \
+  CLASP_SWARM_MAX_RUNNING_LANES=2 \
+  CLASP_SWARM_LANE_MEMORY_MB=1 \
+  CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB=1 \
+  CLASP_SWARM_MIN_AVAILABLE_DISK_MB=0 \
+  CLASP_SWARM_MIN_DISK_HEADROOM_MB=0 \
+    bash scripts/clasp-swarm-start.sh test-wave
+)"
+[[ "$cooldown_start_output" == *"resource guard cooldown: not starting lane=01-foundation"* ]]
+[[ ! -f "$runtime_root/job" ]]
+rm -rf "$runtime_root"
+[[ ! -e builder-events.log ]]
+
 sleep 30 &
 external_pressure_pid="$!"
 external_admitted_json="$(

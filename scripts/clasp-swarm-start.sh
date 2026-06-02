@@ -52,6 +52,7 @@ lane_memory_mb="${CLASP_SWARM_LANE_MEMORY_MB:-8192}"
 min_available_memory_mb="${CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB:-45056}"
 min_available_disk_mb="${CLASP_SWARM_MIN_AVAILABLE_DISK_MB:-16384}"
 min_disk_headroom_mb="${CLASP_SWARM_MIN_DISK_HEADROOM_MB:-${CLASP_GENERATED_STATE_MIN_HEADROOM_MB:-1024}}"
+resource_guard_cooldown_secs="${CLASP_SWARM_RESOURCE_GUARD_COOLDOWN_SECS:-1800}"
 native_jobs_max="${CLASP_SWARM_NATIVE_JOBS_MAX:-1}"
 native_bundle_jobs="${CLASP_SWARM_NATIVE_BUNDLE_JOBS:-1}"
 native_image_section_jobs="${CLASP_SWARM_NATIVE_IMAGE_SECTION_JOBS:-1}"
@@ -202,6 +203,7 @@ validate_non_negative_integer "CLASP_SWARM_LANE_MEMORY_MB" "$lane_memory_mb"
 validate_non_negative_integer "CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB" "$min_available_memory_mb"
 validate_non_negative_integer "CLASP_SWARM_MIN_AVAILABLE_DISK_MB" "$min_available_disk_mb"
 validate_non_negative_integer "CLASP_SWARM_MIN_DISK_HEADROOM_MB" "$min_disk_headroom_mb"
+validate_non_negative_integer "CLASP_SWARM_RESOURCE_GUARD_COOLDOWN_SECS" "$resource_guard_cooldown_secs"
 validate_non_negative_integer "CLASP_SWARM_NATIVE_JOBS_MAX" "$native_jobs_max"
 validate_non_negative_integer "CLASP_SWARM_NATIVE_BUNDLE_JOBS" "$native_bundle_jobs"
 validate_non_negative_integer "CLASP_SWARM_NATIVE_IMAGE_SECTION_JOBS" "$native_image_section_jobs"
@@ -355,6 +357,17 @@ while IFS= read -r lane_dir; do
       echo "lane $lane_name is blocked; not starting"
       continue
     fi
+  fi
+
+  cooldown_guard_file="$(clasp_swarm_lane_resource_guard_cooldown_file "$runtime_root" "$resource_guard_cooldown_secs")"
+  if [[ -n "$cooldown_guard_file" ]]; then
+    cooldown_age_seconds="$(clasp_swarm_resource_guard_file_age_seconds "$cooldown_guard_file")"
+    cooldown_remaining_seconds=$((resource_guard_cooldown_secs - cooldown_age_seconds))
+    if (( cooldown_remaining_seconds < 0 )); then
+      cooldown_remaining_seconds=0
+    fi
+    echo "resource guard cooldown: not starting lane=$lane_name task=$(basename "$selected_task") guard=$(basename "$cooldown_guard_file") age_seconds=$cooldown_age_seconds cooldown_seconds=$resource_guard_cooldown_secs remaining_seconds=$cooldown_remaining_seconds guard_file=$cooldown_guard_file"
+    continue
   fi
 
   if (( max_running_lanes > 0 && running_lanes >= max_running_lanes )); then
