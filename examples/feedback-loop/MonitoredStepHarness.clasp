@@ -1,0 +1,188 @@
+module MonitoredStepHarness
+
+foreign watchCommandRaw : Str -> Str -> Str -> Str -> Int -> [Str] -> Result Str = "watchCommandJson"
+foreign watchCommandWithLimitsRaw : Str -> Str -> Str -> Str -> Int -> Int -> [Str] -> Result Str = "watchCommandWithLimitsJson"
+
+harnessWatchMemoryLimitMb : Int
+harnessWatchMemoryLimitMb = 8192
+
+record WatchedProcessDetails = {
+  pid : Int,
+  status : Str,
+  running : Bool,
+  completed : Bool,
+  exitCode : Int,
+  timedOut : Bool,
+  error : Str,
+  command : [Str],
+  stdoutPath : Str,
+  stderrPath : Str,
+  heartbeatPath : Str,
+  startedAtMs : Int,
+  endedAtMs : Int,
+  durationMs : Int,
+  updatedAtMs : Int
+}
+
+record MonitoredStepResult = {
+  status : Str,
+  exitCode : Int,
+  stdout : Str,
+  stderr : Str,
+  command : [Str],
+  stdoutPath : Str,
+  stderrPath : Str,
+  heartbeatPath : Str,
+  running : Bool,
+  completed : Bool,
+  timedOut : Bool,
+  error : Str,
+  startedAtMs : Int,
+  endedAtMs : Int,
+  durationMs : Int,
+  updatedAtMs : Int
+}
+
+record WatchedCommandSpec = {
+  cwd : Str,
+  stdoutPath : Str,
+  stderrPath : Str,
+  heartbeatPath : Str,
+  watchPollMs : Int,
+  command : [Str]
+}
+
+watchedProcessDetailsError : Str -> Result WatchedProcessDetails
+watchedProcessDetailsError message = Err message
+
+monitoredStepError : Str -> Result MonitoredStepResult
+monitoredStepError message = Err message
+
+watchedCommandSpec : Str -> Str -> Str -> Str -> Int -> [Str] -> WatchedCommandSpec
+watchedCommandSpec cwd stdoutPath stderrPath heartbeatPath watchPollMs command =
+  WatchedCommandSpec {
+    cwd = cwd,
+    stdoutPath = stdoutPath,
+    stderrPath = stderrPath,
+    heartbeatPath = heartbeatPath,
+    watchPollMs = watchPollMs,
+    command = command
+  }
+
+watchedProcessDetailsResult : Result Str -> Result WatchedProcessDetails
+watchedProcessDetailsResult value = match value {
+  Ok raw -> Ok (decode WatchedProcessDetails raw),
+  Err message -> watchedProcessDetailsError message
+}
+
+processReadTextOrEmpty : Str -> Str
+processReadTextOrEmpty path = match readFile path {
+  Ok raw -> raw,
+  Err message -> ""
+}
+
+watchedProcessStatus : WatchedProcessDetails -> Str
+watchedProcessStatus process =
+  if process.timedOut then
+    "timeout"
+  else if process.status != "" then
+    process.status
+  else if process.completed then
+    if process.exitCode == 0 then
+      "completed-pass"
+    else
+      "completed-fail"
+  else if process.running then
+    "running"
+  else
+    "stopped"
+
+monitoredStepResult : WatchedProcessDetails -> MonitoredStepResult
+monitoredStepResult process =
+  MonitoredStepResult {
+    status = watchedProcessStatus process,
+    exitCode = process.exitCode,
+    stdout = processReadTextOrEmpty process.stdoutPath,
+    stderr = processReadTextOrEmpty process.stderrPath,
+    command = process.command,
+    stdoutPath = process.stdoutPath,
+    stderrPath = process.stderrPath,
+    heartbeatPath = process.heartbeatPath,
+    running = process.running,
+    completed = process.completed,
+    timedOut = process.timedOut,
+    error = if process.timedOut then "timeout" else process.error,
+    startedAtMs = process.startedAtMs,
+    endedAtMs = process.endedAtMs,
+    durationMs = process.durationMs,
+    updatedAtMs = process.updatedAtMs
+  }
+
+watchDetails : WatchedCommandSpec -> Result WatchedProcessDetails
+watchDetails spec =
+  watchedProcessDetailsResult (
+    watchCommandWithLimitsRaw
+      spec.cwd
+      spec.stdoutPath
+      spec.stderrPath
+      spec.heartbeatPath
+      spec.watchPollMs
+      harnessWatchMemoryLimitMb
+      spec.command
+  )
+
+runMonitored : WatchedCommandSpec -> Result MonitoredStepResult
+runMonitored spec = match watchDetails spec {
+  Ok process -> Ok (monitoredStepResult process),
+  Err message -> monitoredStepError message
+}
+
+stateRoot : Str
+stateRoot =
+  if textJoin "" argv == "" then
+    "feedback-loop-monitored-step-state"
+  else
+    pathJoin argv
+
+stdoutPath : Str
+stdoutPath = pathJoin [stateRoot, "step.stdout.log"]
+
+stderrPath : Str
+stderrPath = pathJoin [stateRoot, "step.stderr.log"]
+
+heartbeatPath : Str
+heartbeatPath = pathJoin [stateRoot, "step.heartbeat.json"]
+
+watchPollMs : Int
+watchPollMs = 25
+
+directCommand : [Str]
+directCommand = [
+  "node",
+  "-e",
+  "process.stdout.write('monitored-step-out'); process.stderr.write('monitored-step-err'); process.exit(3);"
+]
+
+stepSpec : WatchedCommandSpec
+stepSpec =
+  watchedCommandSpec
+    "."
+    stdoutPath
+    stderrPath
+    heartbeatPath
+    watchPollMs
+    directCommand
+
+runDemo : Str
+runDemo =
+  match runMonitored stepSpec {
+    Ok result -> encode result,
+    Err message -> textConcat ["error:", message]
+  }
+
+main : Str
+main =
+  match mkdirAll stateRoot {
+    Err message -> textConcat ["error:", message],
+    Ok created -> runDemo
+  }

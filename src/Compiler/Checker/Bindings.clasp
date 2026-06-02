@@ -1,0 +1,109 @@
+module Compiler.Checker.Bindings
+
+import Compiler.Ast
+import Compiler.Checker.TypeOps
+import Compiler.Checker.Types
+
+collectAnnotatedBindings : HostedModuleAst -> [TypeBinding]
+collectAnnotatedBindings modl = {
+  let mut bindings = emptyTypeBindings;
+  for decl in moduleDeclarations modl {
+    bindings = if hasAnnotationAst (declAnnotation decl) then appendTypeBinding bindings (TypeBinding (declName decl) (typeFromHostedTypeAst (annotationTypeAst (declAnnotation decl)))) else bindings;
+    bindings
+  };
+  bindings
+}
+
+moduleDeclarationsFullyAnnotated : HostedModuleAst -> Bool
+moduleDeclarationsFullyAnnotated modl = {
+  let mut fullyAnnotated = true;
+  for decl in moduleDeclarations modl {
+    if declIsMetadataDeclaration decl then {
+      fullyAnnotated
+    } else if hasAnnotationAst (declAnnotation decl) then {
+      fullyAnnotated
+    } else {
+      fullyAnnotated = false;
+      fullyAnnotated
+    }
+  };
+  fullyAnnotated
+}
+
+collectForeignBindings : HostedModuleAst -> [TypeBinding]
+collectForeignBindings modl = {
+  let mut bindings = emptyTypeBindings;
+  for foreignDecl in moduleForeignDeclarations modl {
+    bindings = appendTypeBinding bindings (TypeBinding (foreignDeclName foreignDecl) (typeFromHostedTypeAst (foreignDeclTypeAst foreignDecl)));
+    bindings
+  };
+  bindings
+}
+
+jsInteropIdentifierLowercaseCharIsSafe : Str -> Bool
+jsInteropIdentifierLowercaseCharIsSafe char = if char == "a" then true else if char == "b" then true else if char == "c" then true else if char == "d" then true else if char == "e" then true else if char == "f" then true else if char == "g" then true else if char == "h" then true else if char == "i" then true else if char == "j" then true else if char == "k" then true else if char == "l" then true else if char == "m" then true else if char == "n" then true else if char == "o" then true else if char == "p" then true else if char == "q" then true else if char == "r" then true else if char == "s" then true else if char == "t" then true else if char == "u" then true else if char == "v" then true else if char == "w" then true else if char == "x" then true else if char == "y" then true else if char == "z" then true else false
+
+jsInteropIdentifierDigitCharIsSafe : Str -> Bool
+jsInteropIdentifierDigitCharIsSafe char = if char == "0" then true else if char == "1" then true else if char == "2" then true else if char == "3" then true else if char == "4" then true else if char == "5" then true else if char == "6" then true else if char == "7" then true else if char == "8" then true else if char == "9" then true else false
+
+jsInteropIdentifierStartCharIsSafe : Str -> Bool
+jsInteropIdentifierStartCharIsSafe char = if char == "_" then true else if char == "$" then true else if isUppercaseChar char then true else jsInteropIdentifierLowercaseCharIsSafe char
+
+jsInteropIdentifierPartCharIsSafe : Str -> Bool
+jsInteropIdentifierPartCharIsSafe char = if jsInteropIdentifierStartCharIsSafe char then true else jsInteropIdentifierDigitCharIsSafe char
+
+jsInteropIdentifierIsSafe : Str -> Bool
+jsInteropIdentifierIsSafe value = {
+  let mut seenChar = false;
+  let mut safe = true;
+  for char in textChars value {
+    if seenChar then {
+      if jsInteropIdentifierPartCharIsSafe char then safe else {
+        safe = false;
+        safe
+      }
+    } else {
+      seenChar = true;
+      if jsInteropIdentifierStartCharIsSafe char then safe else {
+        safe = false;
+        safe
+      }
+    }
+  };
+  if seenChar then safe else false
+}
+
+foreignInteropValidationError : HostedForeignDeclAst -> Str
+foreignInteropValidationError foreignDecl = match foreignDeclSource foreignDecl {
+  HostedForeignPackageImport kind specifier declarationPath ->
+    if jsInteropIdentifierIsSafe (foreignDeclName foreignDecl) then {
+      if jsInteropIdentifierIsSafe (foreignDeclRuntimeName foreignDecl) then "" else textConcat ["In `", foreignDeclName foreignDecl, "`: Package foreign import runtime name `", foreignDeclRuntimeName foreignDecl, "` must be a safe JavaScript identifier."]
+    } else {
+      textConcat ["In `", foreignDeclName foreignDecl, "`: Package foreign declaration name `", foreignDeclName foreignDecl, "` must be a safe JavaScript identifier."]
+    },
+  HostedForeignRuntime ->
+    if jsInteropIdentifierIsSafe (foreignDeclName foreignDecl) then "" else textConcat ["In `", foreignDeclName foreignDecl, "`: Foreign declaration name `", foreignDeclName foreignDecl, "` must be a safe JavaScript identifier."]
+}
+
+moduleForeignInteropValidationError : HostedModuleAst -> Str
+moduleForeignInteropValidationError modl = {
+  for foreignDecl in moduleForeignDeclarations modl {
+    let message = foreignInteropValidationError foreignDecl;
+    if message == "" then "" else return message
+  };
+  ""
+}
+
+collectConstructorBindings : [HostedTypeDeclAst] -> [TypeBinding]
+collectConstructorBindings typeDecls = {
+  let mut bindings = emptyTypeBindings;
+  for typeDecl in typeDecls {
+    for constructorDecl in typeDeclConstructors typeDecl {
+      let constructorType = buildFunctionType (constructorDeclPayloadTypes constructorDecl) (typeDeclResultType typeDecl);
+      bindings = appendTypeBinding bindings (TypeBinding (constructorDeclName constructorDecl) constructorType);
+      bindings
+    };
+    bindings
+  };
+  bindings
+}

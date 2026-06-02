@@ -260,10 +260,42 @@ function printField(value) {
   process.stdout.write(`${String(value)}\n`);
 }
 
+function printFieldTsv(taskPaths, manifests, fieldName) {
+  manifests.forEach((manifest, index) => {
+    if (!Object.prototype.hasOwnProperty.call(manifest, fieldName)) {
+      fail(`manifest.${fieldName} does not exist`);
+    }
+
+    const value = manifest[fieldName];
+    const rendered = Array.isArray(value)
+      ? value.join(",")
+      : value && typeof value === "object"
+        ? JSON.stringify(value)
+        : String(value);
+
+    process.stdout.write(`${taskPaths[index]}\t${rendered}\n`);
+  });
+}
+
+function printSummaryTsv(taskPaths, manifests) {
+  manifests.forEach((manifest, index) => {
+    process.stdout.write([
+      taskPaths[index],
+      manifest.taskKey,
+      manifest.batchLabel,
+      manifest.dependencies.join(","),
+      manifest.dependencyLabels.join(","),
+    ].join("\t"));
+    process.stdout.write("\n");
+  });
+}
+
 function main() {
   const args = process.argv.slice(2);
   let printManifest = false;
   let printFieldName = "";
+  let printFieldTsvName = "";
+  let printSummaryTsvEnabled = false;
   const taskPaths = [];
 
   while (args.length > 0) {
@@ -279,11 +311,25 @@ function main() {
       }
       continue;
     }
+    if (arg === "--print-field-tsv") {
+      printFieldTsvName = args.shift() || "";
+      if (printFieldTsvName.length === 0) {
+        fail("missing field name after --print-field-tsv");
+      }
+      continue;
+    }
+    if (arg === "--print-summary-tsv") {
+      printSummaryTsvEnabled = true;
+      continue;
+    }
     taskPaths.push(arg);
   }
 
   if (taskPaths.length === 0) {
     fail("expected at least one task path");
+  }
+  if ([printManifest, Boolean(printFieldName), Boolean(printFieldTsvName), printSummaryTsvEnabled].filter(Boolean).length > 1) {
+    fail("--print-manifest, --print-field, --print-field-tsv, and --print-summary-tsv are mutually exclusive");
   }
   if ((printManifest || printFieldName) && taskPaths.length !== 1) {
     fail("--print-manifest and --print-field require exactly one task path");
@@ -319,6 +365,14 @@ function main() {
       fail(`manifest.${printFieldName} does not exist`);
     }
     printField(manifest[printFieldName]);
+  }
+
+  if (printFieldTsvName) {
+    printFieldTsv(taskPaths, manifests, printFieldTsvName);
+  }
+
+  if (printSummaryTsvEnabled) {
+    printSummaryTsv(taskPaths, manifests);
   }
 }
 

@@ -3,7 +3,9 @@ module GoalManagerWatch
 import GoalManagerTypes
 
 foreign spawnCommandRaw : Str -> Str -> Str -> Str -> Int -> [Str] -> Result Str = "spawnCommandJson"
+foreign spawnCommandWithLimitsRaw : Str -> Str -> Str -> Str -> Int -> Int -> [Str] -> Result Str = "spawnCommandWithLimitsJson"
 foreign watchCommandRaw : Str -> Str -> Str -> Str -> Int -> [Str] -> Result Str = "watchCommandJson"
+foreign watchCommandWithLimitsRaw : Str -> Str -> Str -> Str -> Int -> Int -> [Str] -> Result Str = "watchCommandWithLimitsJson"
 foreign reconcileWatchedProcessRaw : Str -> Result Str = "reconcileWatchedProcessJson"
 foreign cancelWatchedProcessRaw : Str -> Result Str = "cancelWatchedProcessJson"
 foreign awaitWatchedProcessRaw : Str -> Int -> Result Str = "awaitWatchedProcessJson"
@@ -22,15 +24,33 @@ watchChildLoopAwaitTimeoutMs = readWatchEnvInt "CLASP_MANAGER_CHILD_AWAIT_TIMEOU
 watchedProcessError : Str -> Result WatchedProcess
 watchedProcessError message = Err message
 
+watchedProcessFromRaw : Str -> Result WatchedProcess
+watchedProcessFromRaw raw =
+  match tryDecode WatchedProcess raw {
+    Ok process -> Ok process,
+    Err message ->
+      match tryDecode LegacyWatchedProcess raw {
+        Ok legacyProcess -> Ok (watchedProcessFromLegacy legacyProcess),
+        Err legacyMessage ->
+          watchedProcessError
+            (textConcat [
+              "watched process decode failed: ",
+              message,
+              "; legacy watched process decode failed: ",
+              legacyMessage
+            ])
+      }
+  }
+
 watchedProcessResult : Result Str -> Result WatchedProcess
 watchedProcessResult value = match value {
-  Ok raw -> Ok (decode WatchedProcess raw),
+  Ok raw -> watchedProcessFromRaw raw,
   Err message -> watchedProcessError message
 }
 
 readWatchedProcessPath : Str -> Result WatchedProcess
 readWatchedProcessPath path = match readFile path {
-  Ok raw -> Ok (decode WatchedProcess raw),
+  Ok raw -> watchedProcessFromRaw raw,
   Err message -> watchedProcessError message
 }
 
@@ -40,7 +60,7 @@ awaitWatchedProcess heartbeatPath pollMs =
     watchedProcessResult (awaitWatchedProcessRaw heartbeatPath pollMs)
   else
     match awaitWatchedProcessTimeoutRaw heartbeatPath pollMs watchChildLoopAwaitTimeoutMs {
-      Ok raw -> Ok (decode WatchedProcess raw),
+      Ok raw -> watchedProcessFromRaw raw,
       Err message ->
         if message == "timeout" then
           reconcileWatchedProcess heartbeatPath
@@ -64,9 +84,17 @@ spawnWatchedProcess : Str -> Str -> Str -> Str -> Int -> [Str] -> Result Watched
 spawnWatchedProcess cwd stdoutPath stderrPath heartbeatPath pollMs command =
   watchedProcessResult (spawnCommandRaw cwd stdoutPath stderrPath heartbeatPath pollMs command)
 
+spawnWatchedProcessWithLimits : Str -> Str -> Str -> Str -> Int -> Int -> [Str] -> Result WatchedProcess
+spawnWatchedProcessWithLimits cwd stdoutPath stderrPath heartbeatPath pollMs memoryLimitMb command =
+  watchedProcessResult (spawnCommandWithLimitsRaw cwd stdoutPath stderrPath heartbeatPath pollMs memoryLimitMb command)
+
 watchWatchedProcess : Str -> Str -> Str -> Str -> Int -> [Str] -> Result WatchedProcess
 watchWatchedProcess cwd stdoutPath stderrPath heartbeatPath pollMs command =
   watchedProcessResult (watchCommandRaw cwd stdoutPath stderrPath heartbeatPath pollMs command)
+
+watchWatchedProcessWithLimits : Str -> Str -> Str -> Str -> Int -> Int -> [Str] -> Result WatchedProcess
+watchWatchedProcessWithLimits cwd stdoutPath stderrPath heartbeatPath pollMs memoryLimitMb command =
+  watchedProcessResult (watchCommandWithLimitsRaw cwd stdoutPath stderrPath heartbeatPath pollMs memoryLimitMb command)
 
 sleepMsValue : Int -> Result Str
 sleepMsValue delayMs = sleepMsRaw delayMs
@@ -74,8 +102,15 @@ sleepMsValue delayMs = sleepMsRaw delayMs
 childLoopStateError : Str -> Result ChildLoopState
 childLoopStateError message = Err message
 
+childLoopStateFromRaw : Str -> Result ChildLoopState
+childLoopStateFromRaw raw =
+  match tryDecode ChildLoopState raw {
+    Ok state -> Ok state,
+    Err message -> childLoopStateError (textConcat ["child loop state decode failed: ", message])
+  }
+
 readChildLoopStatePath : Str -> Result ChildLoopState
 readChildLoopStatePath path = match readFile path {
-  Ok raw -> Ok (decode ChildLoopState raw),
+  Ok raw -> childLoopStateFromRaw raw,
   Err message -> childLoopStateError message
 }

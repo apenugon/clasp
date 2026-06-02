@@ -1,0 +1,33 @@
+module StandaloneSwarmReadiness
+
+readinessStatus : Str
+readinessStatus = "open"
+
+readinessGoal : Str
+readinessGoal =
+  "Clasp-native swarms should plan, edit, verify, recover, and improve Clasp without Codex-specific control flow."
+
+readinessRequiredEvidence : [Str]
+readinessRequiredEvidence = [
+  "standalone agent backend policy passes",
+  "planner emits bounded source-edit tasks",
+  "local agent edits existing repo source surfaces",
+  "verifier emits typed pass/fail gate evidence",
+  "managed execution applies time, memory, and disk guards"
+]
+
+readinessPatchTarget : Str
+readinessPatchTarget = "readinessStatus = \"open\""
+
+readinessFixedValue : Str
+readinessFixedValue = "readinessStatus = \"standalone-swarm-fixed-after-feedback\""
+
+readinessProbeText : Str
+readinessProbeText =
+  textJoin "\n" [
+    textConcat ["status=", readinessStatus],
+    textConcat ["goal=", readinessGoal],
+    textConcat ["requiredEvidence=", textJoin " | " readinessRequiredEvidence],
+    textConcat ["patchTarget=", readinessPatchTarget],
+    textConcat ["fixedValue=", readinessFixedValue]
+  ]

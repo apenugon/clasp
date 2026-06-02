@@ -2,6 +2,7 @@ module GoalManagerTaskExecutionRuntime
 
 import GoalManagerFinalize
 import GoalManagerTaskExecutionHelpers
+import GoalManagerResourceHealth
 import GoalManagerChildLoopMonitor
 import GoalManagerTaskStatusRuntime
 import GoalManagerTaskSet
@@ -256,18 +257,29 @@ launchReadyTasks report wave refreshedTasks readyTasks runningTaskIds = {
     else if reportReady then
       launchError
     else if taskReady then {
-      let taskError = launchReadyTask wave report spec in
-      if taskError != "" then
-        {
+      let projectedActiveChildren = incrementManagerCounter (length activeTaskIds) in
+      let resourceError = managerChildLaunchResourceErrorForActiveChildren projectedActiveChildren in
+      if resourceError != "" then {
+        let taskError = recordResourceBlockedPlannedTask spec resourceError in
+        if taskError != "" then {
           launchError = taskError;
           launchError
-        }
-      else
-        {
-          activeTaskIds = append activeTaskIds [spec.taskId];
-          launchSlots = decrementManagerCounter launchSlots;
+        } else
           launchError
-        }
+      } else {
+        let taskError = launchReadyTaskForActiveChildren wave report spec projectedActiveChildren in
+        if taskError != "" then
+          {
+            launchError = taskError;
+            launchError
+          }
+        else
+          {
+            activeTaskIds = append activeTaskIds [spec.taskId];
+            launchSlots = decrementManagerCounter launchSlots;
+            launchError
+          }
+      }
     } else if taskStatus == "leased" then {
       let retryAvailable = childLoopManagerRetryAvailable spec.taskId in
       let taskError =

@@ -1,0 +1,409 @@
+module Main
+
+foreign swarmObjectiveCreateRaw : Str -> Str -> Str -> Int -> Int -> Result Str = "swarmObjectiveCreateJson"
+foreign swarmTaskCreateRaw : Str -> Str -> Str -> Str -> [Str] -> Int -> Int -> Result Str = "swarmTaskCreateJson"
+foreign swarmPolicySetWithCapabilitiesRaw : Str -> Str -> Str -> [Str] -> [Str] -> [Str] -> [Str] -> Str -> Result Str = "swarmPolicySetWithCapabilitiesJson"
+foreign swarmPolicySetWithNetworkAccessRaw : Str -> Str -> Str -> [Str] -> [Str] -> [Str] -> [Str] -> Str -> [Str] -> Result Str = "swarmPolicySetWithNetworkAccessJson"
+foreign swarmLeaseRaw : Str -> Str -> Str -> Result Str = "swarmLeaseJson"
+foreign swarmToolRunWithLimitsRaw : Str -> Str -> Str -> Str -> Int -> Int -> [Str] -> Result Str = "swarmToolRunWithLimitsJson"
+foreign swarmTailRaw : Str -> Str -> Int -> Result Str = "swarmTailJson"
+
+record SwarmRoot = { path : Str }
+record ObjectiveHandle = { root : SwarmRoot, objectiveId : Str }
+record TaskHandle = { root : SwarmRoot, taskId : Str, actor : Str }
+record SwarmCommand = { cwd : Str, command : [Str] }
+
+record SwarmObjective = { objectiveId : Str }
+record SwarmTask = { taskId : Str, status : Str }
+record SwarmTaskUpdate = { task : SwarmTask }
+
+record SwarmPolicy = {
+  taskId : Str,
+  mergegateName : Str,
+  requiredApprovals : [Str],
+  requiredVerifiers : [Str],
+  allowedProcesses : [Str],
+  allowedWorkspaceRoots : [Str],
+  networkAccess : Str,
+  allowedNetworkDestinations : [Str]
+}
+
+record SwarmAccessPolicy = {
+  allowedProcesses : [Str],
+  allowedWorkspaceRoots : [Str],
+  networkAccess : Str,
+  allowedNetworkDestinations : [Str]
+}
+
+record SwarmVerificationPolicy = {
+  mergegateName : Str,
+  requiredApprovals : [Str],
+  requiredVerifiers : [Str],
+  access : SwarmAccessPolicy
+}
+
+record SwarmRun = {
+  exitCode : Int,
+  status : Str
+}
+
+record SwarmEvent = {
+  kind : Str,
+  taskId : Str,
+  actor : Str,
+  detail : Str
+}
+
+record PolicyHarnessReport = {
+  taskId : Str,
+  mergegateName : Str,
+  requiredApprovals : [Str],
+  requiredVerifiers : [Str],
+  allowedProcesses : [Str],
+  allowedWorkspaceRoots : [Str],
+  networkAccess : Str,
+  allowedNetworkDestinations : [Str],
+  allowlistedNetworkAccess : Str,
+  allowlistedNetworkDestinations : [Str],
+  allowlistedNetworkBlocked : Bool,
+  allowlistedNetworkMediated : Bool,
+  allowlistedNetworkStatus : Str,
+  allowlistedNetworkExitCode : Int,
+  allowlistedNetworkFileExists : Bool,
+  allowedRunStatus : Str,
+  allowedRunExitCode : Int,
+  deniedProcessBlocked : Bool,
+  deniedWorkspaceBlocked : Bool,
+  networkEventKinds : [Str],
+  eventKinds : [Str]
+}
+
+swarmRoot : Str -> SwarmRoot
+swarmRoot path = SwarmRoot { path = path }
+
+objectiveHandle : SwarmRoot -> Str -> ObjectiveHandle
+objectiveHandle root objectiveId = ObjectiveHandle { root = root, objectiveId = objectiveId }
+
+taskHandle : SwarmRoot -> Str -> Str -> TaskHandle
+taskHandle root taskId actor = TaskHandle { root = root, taskId = taskId, actor = actor }
+
+commandSpec : Str -> [Str] -> SwarmCommand
+commandSpec cwd command = SwarmCommand { cwd = cwd, command = command }
+
+swarmNetworkDenied : Str
+swarmNetworkDenied = "denied"
+
+swarmNetworkAllowlisted : Str
+swarmNetworkAllowlisted = "allowlisted"
+
+swarmAccessPolicy : [Str] -> [Str] -> Str -> SwarmAccessPolicy
+swarmAccessPolicy allowedProcesses allowedWorkspaceRoots networkAccess =
+  SwarmAccessPolicy {
+    allowedProcesses = allowedProcesses,
+    allowedWorkspaceRoots = allowedWorkspaceRoots,
+    networkAccess = networkAccess,
+    allowedNetworkDestinations = []
+  }
+
+swarmAccessPolicyWithNetworkDestinations : [Str] -> [Str] -> Str -> [Str] -> SwarmAccessPolicy
+swarmAccessPolicyWithNetworkDestinations allowedProcesses allowedWorkspaceRoots networkAccess allowedNetworkDestinations =
+  SwarmAccessPolicy {
+    allowedProcesses = allowedProcesses,
+    allowedWorkspaceRoots = allowedWorkspaceRoots,
+    networkAccess = networkAccess,
+    allowedNetworkDestinations = allowedNetworkDestinations
+  }
+
+swarmDenyNetworkAccess : [Str] -> [Str] -> SwarmAccessPolicy
+swarmDenyNetworkAccess allowedProcesses allowedWorkspaceRoots =
+  swarmAccessPolicy allowedProcesses allowedWorkspaceRoots swarmNetworkDenied
+
+swarmAllowNetworkDestinations : [Str] -> [Str] -> [Str] -> SwarmAccessPolicy
+swarmAllowNetworkDestinations allowedProcesses allowedWorkspaceRoots allowedNetworkDestinations =
+  swarmAccessPolicyWithNetworkDestinations allowedProcesses allowedWorkspaceRoots swarmNetworkAllowlisted allowedNetworkDestinations
+
+swarmVerificationPolicy : Str -> [Str] -> [Str] -> SwarmAccessPolicy -> SwarmVerificationPolicy
+swarmVerificationPolicy mergegateName requiredApprovals requiredVerifiers access =
+  SwarmVerificationPolicy {
+    mergegateName = mergegateName,
+    requiredApprovals = requiredApprovals,
+    requiredVerifiers = requiredVerifiers,
+    access = access
+  }
+
+objectiveResult : Result Str -> Result SwarmObjective
+objectiveResult value = match value {
+  Ok raw -> Ok (decode SwarmObjective raw),
+  Err message -> Err message
+}
+
+taskResult : Result Str -> Result SwarmTask
+taskResult value = match value {
+  Ok raw -> Ok (decode SwarmTask raw),
+  Err message -> Err message
+}
+
+taskUpdateResult : Result Str -> Result SwarmTaskUpdate
+taskUpdateResult value = match value {
+  Ok raw -> Ok (decode SwarmTaskUpdate raw),
+  Err message -> Err message
+}
+
+policyResult : Result Str -> Result SwarmPolicy
+policyResult value = match value {
+  Ok raw -> Ok (decode SwarmPolicy raw),
+  Err message -> Err message
+}
+
+runResult : Result Str -> Result SwarmRun
+runResult value = match value {
+  Ok raw -> Ok (decode SwarmRun raw),
+  Err message -> Err message
+}
+
+eventListResult : Result Str -> Result [SwarmEvent]
+eventListResult value = match value {
+  Ok raw -> Ok (decode [SwarmEvent] raw),
+  Err message -> Err message
+}
+
+objectiveCreate : SwarmRoot -> Str -> Str -> Int -> Int -> Result SwarmObjective
+objectiveCreate root objectiveId detail maxTasks maxRuns =
+  objectiveResult (swarmObjectiveCreateRaw root.path objectiveId detail maxTasks maxRuns)
+
+taskCreate : ObjectiveHandle -> Str -> Str -> [Str] -> Int -> Int -> Result SwarmTask
+taskCreate handle taskId detail dependencies maxRuns leaseTimeoutMs =
+  taskResult (swarmTaskCreateRaw handle.root.path handle.objectiveId taskId detail dependencies maxRuns leaseTimeoutMs)
+
+policySetWithCapabilities : TaskHandle -> Str -> [Str] -> [Str] -> [Str] -> [Str] -> Str -> Result SwarmPolicy
+policySetWithCapabilities handle mergegateName requiredApprovals requiredVerifiers allowedProcesses allowedWorkspaceRoots networkAccess =
+  policySetWithNetworkAccess handle mergegateName requiredApprovals requiredVerifiers allowedProcesses allowedWorkspaceRoots networkAccess []
+
+policySetWithNetworkAccess : TaskHandle -> Str -> [Str] -> [Str] -> [Str] -> [Str] -> Str -> [Str] -> Result SwarmPolicy
+policySetWithNetworkAccess handle mergegateName requiredApprovals requiredVerifiers allowedProcesses allowedWorkspaceRoots networkAccess allowedNetworkDestinations =
+  policyResult (swarmPolicySetWithNetworkAccessRaw handle.root.path handle.taskId mergegateName requiredApprovals requiredVerifiers allowedProcesses allowedWorkspaceRoots networkAccess allowedNetworkDestinations)
+
+policySetWithAccessPolicy : TaskHandle -> Str -> [Str] -> [Str] -> SwarmAccessPolicy -> Result SwarmPolicy
+policySetWithAccessPolicy handle mergegateName requiredApprovals requiredVerifiers access =
+  policySetWithNetworkAccess handle mergegateName requiredApprovals requiredVerifiers access.allowedProcesses access.allowedWorkspaceRoots access.networkAccess access.allowedNetworkDestinations
+
+policySetVerificationPolicy : TaskHandle -> SwarmVerificationPolicy -> Result SwarmPolicy
+policySetVerificationPolicy handle policy =
+  policySetWithAccessPolicy handle policy.mergegateName policy.requiredApprovals policy.requiredVerifiers policy.access
+
+lease : TaskHandle -> Result SwarmTaskUpdate
+lease handle =
+  taskUpdateResult (swarmLeaseRaw handle.root.path handle.taskId handle.actor)
+
+toolRunWithLimits : TaskHandle -> SwarmCommand -> Int -> Int -> Result SwarmRun
+toolRunWithLimits handle spec timeoutMs memoryLimitMb =
+  runResult (swarmToolRunWithLimitsRaw handle.root.path handle.taskId handle.actor spec.cwd timeoutMs memoryLimitMb spec.command)
+
+tail : TaskHandle -> Int -> Result [SwarmEvent]
+tail handle limit =
+  eventListResult (swarmTailRaw handle.root.path handle.taskId limit)
+
+stateRootPath : Str
+stateRootPath =
+  if textJoin "" argv == "" then
+    "swarm-policy-helper-state"
+  else
+    pathJoin argv
+
+workspaceRoot : Str
+workspaceRoot = pathJoin [stateRootPath, "workspace"]
+
+outsideRoot : Str
+outsideRoot = pathJoin [stateRootPath, "outside"]
+
+root : SwarmRoot
+root = swarmRoot stateRootPath
+
+objectiveId : Str
+objectiveId = "policy-helper-objective"
+
+taskId : Str
+taskId = "policy-helper-task"
+
+networkTaskId : Str
+networkTaskId = "policy-network-allowlist-task"
+
+actorName : Str
+actorName = "manager"
+
+verifierName : Str
+verifierName = "typed-policy-smoke"
+
+mergegateName : Str
+mergegateName = "typed-policy"
+
+objective : ObjectiveHandle
+objective = objectiveHandle root objectiveId
+
+task : TaskHandle
+task = taskHandle root taskId actorName
+
+networkTask : TaskHandle
+networkTask = taskHandle root networkTaskId actorName
+
+textIncludes : Str -> Str -> Bool
+textIncludes value needle = length (textSplit value needle) > 1
+
+eventKind : SwarmEvent -> Str
+eventKind event = event.kind
+
+resultBlockedBy : Result SwarmRun -> Str -> Bool
+resultBlockedBy result needle = match result {
+  Ok run -> false,
+  Err message -> textIncludes message needle
+}
+
+resultPassed : Result SwarmRun -> Bool
+resultPassed result = match result {
+  Ok run -> run.status == "passed" && run.exitCode == 0,
+  Err message -> false
+}
+
+runStatusOr : Result SwarmRun -> Str -> Str
+runStatusOr result fallback = match result {
+  Ok run -> run.status,
+  Err message -> fallback
+}
+
+runExitCodeOr : Result SwarmRun -> Int -> Int
+runExitCodeOr result fallback = match result {
+  Ok run -> run.exitCode,
+  Err message -> fallback
+}
+
+errorText : Str -> Str
+errorText message = textConcat ["error:", message]
+
+access : SwarmAccessPolicy
+access =
+  swarmDenyNetworkAccess ["bash"] [workspaceRoot]
+
+verificationPolicy : SwarmVerificationPolicy
+verificationPolicy =
+  swarmVerificationPolicy mergegateName ["review"] [verifierName] access
+
+allowlistedAccess : SwarmAccessPolicy
+allowlistedAccess =
+  swarmAllowNetworkDestinations ["bash"] [workspaceRoot] ["api.openai.com:443"]
+
+networkVerificationPolicy : SwarmVerificationPolicy
+networkVerificationPolicy =
+  swarmVerificationPolicy "typed-policy-network" ["review"] [verifierName] allowlistedAccess
+
+allowedCommand : SwarmCommand
+allowedCommand =
+  commandSpec workspaceRoot ["bash", "-lc", "printf typed-policy-ok > typed-policy.txt"]
+
+deniedProcessCommand : SwarmCommand
+deniedProcessCommand =
+  commandSpec workspaceRoot ["sh", "-c", "printf denied-process > denied-process.txt"]
+
+deniedWorkspaceCommand : SwarmCommand
+deniedWorkspaceCommand =
+  commandSpec outsideRoot ["bash", "-lc", "printf denied-workspace > denied-workspace.txt"]
+
+allowlistedNetworkCommand : SwarmCommand
+allowlistedNetworkCommand =
+  commandSpec workspaceRoot ["bash", "-lc", "printf allowlisted-network-ran > allowlisted-network.txt"]
+
+allowlistedNetworkOutputPath : Str
+allowlistedNetworkOutputPath = pathJoin [workspaceRoot, "allowlisted-network.txt"]
+
+main : Str
+main =
+  match mkdirAll stateRootPath {
+    Ok stateRootValue ->
+      match mkdirAll workspaceRoot {
+        Ok workspaceValue ->
+          match mkdirAll outsideRoot {
+            Ok outsideValue ->
+              match objectiveCreate root objectiveId "Exercise typed ordinary Clasp swarm policies." 3 5 {
+                Ok objectiveValue ->
+                  match taskCreate objective taskId "Run allowed and denied commands through a typed policy helper." [] 4 60000 {
+                    Ok taskValue ->
+                      match policySetVerificationPolicy task verificationPolicy {
+                        Ok policyValue ->
+                          match lease task {
+                            Ok leaseValue ->
+                              match toolRunWithLimits task allowedCommand 5000 256 {
+                                Ok allowedRun ->
+                                  let deniedProcessResult = toolRunWithLimits task deniedProcessCommand 5000 256 in
+                                  let deniedWorkspaceResult = toolRunWithLimits task deniedWorkspaceCommand 5000 256 in
+                                  match tail task 12 {
+                                    Ok eventValues ->
+                                      match taskCreate objective networkTaskId "Run fail-closed allowlisted network policy through a typed helper." [] 1 60000 {
+                                        Ok networkTaskValue ->
+                                          match policySetVerificationPolicy networkTask networkVerificationPolicy {
+                                            Ok networkPolicyValue ->
+                                              match lease networkTask {
+                                                Ok networkLeaseValue ->
+                                                  let networkRunResult = toolRunWithLimits networkTask allowlistedNetworkCommand 5000 1024 in
+                                                  match tail networkTask 12 {
+                                                    Ok networkEventValues ->
+                                                      encode (PolicyHarnessReport {
+                                                        taskId = policyValue.taskId,
+                                                        mergegateName = policyValue.mergegateName,
+                                                        requiredApprovals = policyValue.requiredApprovals,
+                                                        requiredVerifiers = policyValue.requiredVerifiers,
+                                                        allowedProcesses = policyValue.allowedProcesses,
+                                                        allowedWorkspaceRoots = policyValue.allowedWorkspaceRoots,
+                                                        networkAccess = policyValue.networkAccess,
+                                                        allowedNetworkDestinations = policyValue.allowedNetworkDestinations,
+                                                        allowlistedNetworkAccess = networkPolicyValue.networkAccess,
+                                                        allowlistedNetworkDestinations = networkPolicyValue.allowedNetworkDestinations,
+                                                        allowlistedNetworkBlocked = resultBlockedBy networkRunResult "allowlisted network destinations are not enforced",
+                                                        allowlistedNetworkMediated = resultPassed networkRunResult,
+                                                        allowlistedNetworkStatus = runStatusOr networkRunResult "blocked",
+                                                        allowlistedNetworkExitCode = runExitCodeOr networkRunResult 125,
+                                                        allowlistedNetworkFileExists = fileExists allowlistedNetworkOutputPath,
+                                                        allowedRunStatus = allowedRun.status,
+                                                        allowedRunExitCode = allowedRun.exitCode,
+                                                        deniedProcessBlocked = resultBlockedBy deniedProcessResult "process `sh` is not allowed",
+                                                        deniedWorkspaceBlocked = resultBlockedBy deniedWorkspaceResult "outside allowed workspace roots",
+                                                        networkEventKinds = map eventKind networkEventValues,
+                                                        eventKinds = map eventKind eventValues
+                                                      }),
+                                                    Err message ->
+                                                      errorText message
+                                                  },
+                                                Err message ->
+                                                  errorText message
+                                              },
+                                            Err message ->
+                                              errorText message
+                                          },
+                                        Err message ->
+                                          errorText message
+                                      },
+                                    Err message ->
+                                      errorText message
+                                  },
+                                Err message ->
+                                  errorText message
+                              },
+                            Err message ->
+                              errorText message
+                          },
+                        Err message ->
+                          errorText message
+                      },
+                    Err message ->
+                      errorText message
+                  },
+                Err message ->
+                  errorText message
+              },
+            Err message ->
+              errorText message
+          },
+        Err message ->
+          errorText message
+      },
+    Err message ->
+      errorText message
+  }

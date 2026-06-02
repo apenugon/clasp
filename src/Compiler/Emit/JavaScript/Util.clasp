@@ -1,0 +1,20 @@
+module Compiler.Emit.JavaScript.Util
+
+import Compiler.Ast
+
+appendJsRenderedText : [Str] -> Str -> [Str]
+appendJsRenderedText values value = append values [value]
+
+hasJsValues : [Str] -> Bool
+hasJsValues values = {
+  for value in values {
+    return true
+  };
+  false
+}
+
+emitJsString : Str -> Str
+emitJsString value = encode value
+
+emitOptionalJsString : Str -> Str
+emitOptionalJsString value = if value == "" then "null" else emitJsString value

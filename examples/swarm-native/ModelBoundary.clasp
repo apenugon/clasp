@@ -1,0 +1,180 @@
+module ModelBoundary
+
+record ModelBoundaryRequest = {
+  provider : Str,
+  model : Str,
+  prompt : Prompt,
+  outputSchema : Str,
+  outputVersion : Str,
+  responseFormat : Str,
+  trustPolicy : Str
+}
+
+record ModelBoundaryRequestSummary = {
+  provider : Str,
+  model : Str,
+  outputSchema : Str,
+  outputVersion : Str,
+  responseFormat : Str,
+  trustPolicy : Str,
+  promptText : Str
+}
+
+record UntrustedModelOutput = {
+  provider : Str,
+  model : Str,
+  schemaName : Str,
+  schemaVersion : Str,
+  status : Str,
+  rawText : Str,
+  transport : Str,
+  trusted : Bool
+}
+
+record PlannedTask = { taskId : Str, role : Str, detail : Str, dependencies : [Str], taskPrompt : Str, coordinationFocus : [Str] }
+
+record PlannerReport = {
+  objectiveSummary : Str,
+  strategy : Str,
+  tasks : [PlannedTask],
+  testsRun : [Str],
+  residualRisks : [Str]
+}
+
+record TrustedPlannerModelOutput = {
+  provider : Str,
+  model : Str,
+  schemaName : Str,
+  schemaVersion : Str,
+  trust : Str,
+  report : PlannerReport
+}
+
+emptyModelBoundaryTexts : [Str]
+emptyModelBoundaryTexts = []
+
+modelBoundaryRequest : Str -> Str -> Prompt -> Str -> Str -> Str -> ModelBoundaryRequest
+modelBoundaryRequest provider model prompt outputSchema outputVersion responseFormat =
+  ModelBoundaryRequest {
+    provider = provider,
+    model = model,
+    prompt = prompt,
+    outputSchema = outputSchema,
+    outputVersion = outputVersion,
+    responseFormat = responseFormat,
+    trustPolicy = "untrusted-until-tryDecode"
+  }
+
+modelBoundaryRequestSummary : ModelBoundaryRequest -> ModelBoundaryRequestSummary
+modelBoundaryRequestSummary request =
+  ModelBoundaryRequestSummary {
+    provider = request.provider,
+    model = request.model,
+    outputSchema = request.outputSchema,
+    outputVersion = request.outputVersion,
+    responseFormat = request.responseFormat,
+    trustPolicy = request.trustPolicy,
+    promptText = promptText request.prompt
+  }
+
+untrustedModelOutputForSchema : ModelBoundaryRequest -> Str -> Str -> Str -> Str -> UntrustedModelOutput
+untrustedModelOutputForSchema request schemaName status rawText transport =
+  UntrustedModelOutput {
+    provider = request.provider,
+    model = request.model,
+    schemaName = schemaName,
+    schemaVersion = request.outputVersion,
+    status = status,
+    rawText = rawText,
+    transport = transport,
+    trusted = false
+  }
+
+untrustedModelOutput : ModelBoundaryRequest -> Str -> Str -> Str -> UntrustedModelOutput
+untrustedModelOutput request status rawText transport =
+  untrustedModelOutputForSchema request request.outputSchema status rawText transport
+
+plannedTaskHasId : PlannedTask -> Bool
+plannedTaskHasId task = task.taskId != ""
+
+modelBoundaryTextIncludes : Str -> Str -> Bool
+modelBoundaryTextIncludes value needle =
+  length (textSplit value needle) > 1
+
+plannerReportRawHasRequiredFields : Str -> Bool
+plannerReportRawHasRequiredFields raw =
+  if modelBoundaryTextIncludes raw "\"objectiveSummary\"" then
+    if modelBoundaryTextIncludes raw "\"strategy\"" then
+      if modelBoundaryTextIncludes raw "\"tasks\"" then
+        if modelBoundaryTextIncludes raw "\"testsRun\"" then
+          modelBoundaryTextIncludes raw "\"residualRisks\""
+        else
+          false
+      else
+        false
+    else
+      false
+  else
+    false
+
+plannerReportShapeError : PlannerReport -> Str
+plannerReportShapeError report =
+  if report.objectiveSummary == "" then
+    "planner-report-empty-objective"
+  else if report.strategy == "" then
+    "planner-report-empty-strategy"
+  else if length report.tasks == 0 then
+    "planner-report-empty-tasks"
+  else if all plannedTaskHasId report.tasks then
+    ""
+  else
+    "planner-report-empty-task-id"
+
+trustedPlannerModelOutput : UntrustedModelOutput -> PlannerReport -> TrustedPlannerModelOutput
+trustedPlannerModelOutput output report =
+  TrustedPlannerModelOutput {
+    provider = output.provider,
+    model = output.model,
+    schemaName = output.schemaName,
+    schemaVersion = output.schemaVersion,
+    trust = "validated",
+    report = report
+  }
+
+trustedPlannerModelOk : UntrustedModelOutput -> PlannerReport -> Result TrustedPlannerModelOutput
+trustedPlannerModelOk output report =
+  Ok (trustedPlannerModelOutput output report)
+
+trustedPlannerModelError : Str -> Result TrustedPlannerModelOutput
+trustedPlannerModelError message =
+  Err message
+
+validatePlannerModelOutput : ModelBoundaryRequest -> UntrustedModelOutput -> Result TrustedPlannerModelOutput
+validatePlannerModelOutput request output =
+  if output.trusted then
+    trustedPlannerModelError "model-boundary-rejects-pretrusted-output"
+  else if output.status != "completed" then
+    trustedPlannerModelError (textConcat ["model-output-status-not-completed:", output.status])
+  else if output.provider != request.provider then
+    trustedPlannerModelError "model-output-provider-mismatch"
+  else if output.model != request.model then
+    trustedPlannerModelError "model-output-model-mismatch"
+  else if output.schemaName != request.outputSchema then
+    trustedPlannerModelError "model-output-schema-mismatch"
+  else if output.schemaVersion != request.outputVersion then
+    trustedPlannerModelError "model-output-schema-version-mismatch"
+  else
+    match tryDecode PlannerReport output.rawText {
+      Err message ->
+        trustedPlannerModelError (textConcat ["model-output-decode-failed:", message]),
+      Ok report -> {
+        if plannerReportRawHasRequiredFields output.rawText == false then
+          trustedPlannerModelError "model-output-missing-planner-fields"
+        else
+          let shapeError = plannerReportShapeError report in
+          if shapeError == "" then
+            trustedPlannerModelOk output report
+          else
+            trustedPlannerModelError shapeError
+      }
+    }

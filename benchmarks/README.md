@@ -186,27 +186,27 @@ node benchmarks/run-benchmark.mjs run ts-shared-priority \
 Summarize recorded runs by task, harness, model, and repeated-run series:
 
 ```sh
-node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.4
+node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.5
 ```
 
 Run the mixed-stack semantic-layer suite through the repeated Codex wrapper:
 
 ```sh
-bash benchmarks/run-codex-series.sh mixed-stack-semantic-layer 5 mixed-stack-a gpt-5.4
+bash benchmarks/run-codex-series.sh mixed-stack-semantic-layer 5 mixed-stack-a gpt-5.5
 ```
 
 Run the proof-gated authorization/data-access pair through the repeated Codex wrapper:
 
 ```sh
-bash benchmarks/run-codex-series.sh authorization-data-access 5 authorization-data-access-a gpt-5.4
+bash benchmarks/run-codex-series.sh authorization-data-access 5 authorization-data-access-a gpt-5.5
 ```
 
 Run the agent-planning scorecard slice covering obligation discharge, semantic-memory freshness, parallel-agent coordination, rollback, and cheapest-valid-path planning:
 
 ```sh
 CLASP_BENCHMARK_WORKFLOW_ASSISTANCE=compiler-owned-air \
-  bash benchmarks/run-codex-series.sh agent-planning 5 planning-a gpt-5.4
-node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.4 --notes planning-a
+  bash benchmarks/run-codex-series.sh agent-planning 5 planning-a gpt-5.5
+node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.5 --notes planning-a
 ```
 
 `summarize` emits `agent-planning-scorecard`, which rolls up:
@@ -220,11 +220,11 @@ node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.4 --no
 Run the repeated caching-and-trust slice covering proof/result cache reuse, world-snapshot fidelity, interference analysis, and trusted-computing-base reporting clarity:
 
 ```sh
-bash benchmarks/run-codex-series.sh authorization-data-access 5 cache-trust-1 gpt-5.4
-bash benchmarks/run-codex-series.sh external-adaptation 5 cache-trust-1 gpt-5.4
-bash benchmarks/run-codex-series.sh control-plane 5 cache-trust-1 gpt-5.4
-bash benchmarks/run-codex-series.sh interop-boundary 5 cache-trust-1 gpt-5.4
-node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.4 --notes cache-trust-1
+bash benchmarks/run-codex-series.sh authorization-data-access 5 cache-trust-1 gpt-5.5
+bash benchmarks/run-codex-series.sh external-adaptation 5 cache-trust-1 gpt-5.5
+bash benchmarks/run-codex-series.sh control-plane 5 cache-trust-1 gpt-5.5
+bash benchmarks/run-codex-series.sh interop-boundary 5 cache-trust-1 gpt-5.5
+node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.5 --notes cache-trust-1
 ```
 
 `summarize` emits `caching-and-trust-scorecard`, which rolls up:
@@ -241,7 +241,7 @@ Package a filtered result set into a reproducible benchmark bundle:
 ```sh
 node benchmarks/run-benchmark.mjs package \
   --harness codex \
-  --model gpt-5.4 \
+  --model gpt-5.5 \
   --notes public-app \
   --output dist/benchmarks/public-app.tar.gz
 ```
@@ -254,10 +254,10 @@ Freeze a publication-grade fairness bundle before running repeated samples:
 node benchmarks/run-benchmark.mjs freeze lead-segment \
   --count 5 \
   --harness codex \
-  --model gpt-5.4 \
+  --model gpt-5.5 \
   --mode raw-repo \
   --notes remediation-1 \
-  --output benchmarks/bundles/remediation-1--codex--gpt-5.4--raw-repo--workflow-assistance-compiler-owned-air.json
+  --output benchmarks/bundles/remediation-1--codex--gpt-5.5--raw-repo--workflow-assistance-compiler-owned-air.json
 ```
 
 The freeze manifest records the selected task set, benchmark mode, workflow-assistance variant, repeated-sample count, deterministic randomized run order for each sample, and file digests for the frozen task bundle. `run-codex-series.sh` and `run-claude-series.sh` generate this manifest automatically and record its digest plus the normalized workflow-assistance value in each result record. When running semantic-artifact benchmark slices through the series wrappers, set `CLASP_BENCHMARK_WORKFLOW_ASSISTANCE` to values like `compiler-owned-air`, `raw-text`, or `browser-only`; the wrappers include that slice in the manifest filename so frozen bundles do not collide across workflow-assistance variants, and `summarize` can compare `raw-text` against `compiler-owned-air` for the same Clasp task series.
@@ -268,24 +268,24 @@ Run a repeated Codex sample set with a consistent harness wrapper:
 
 ```sh
 CLASP_BENCHMARK_WORKFLOW_ASSISTANCE=compiler-owned-air \
-  bash benchmarks/run-codex-series.sh clasp-lead-priority 5 gpt54-series gpt-5.4 raw-repo
+  bash benchmarks/run-codex-series.sh clasp-lead-priority 5 gpt55-series gpt-5.5 raw-repo
 ```
 
 Run the same Clasp task series twice to compare raw-text planning against compiler-owned AIR planning:
 
 ```sh
 CLASP_BENCHMARK_WORKFLOW_ASSISTANCE=raw-text \
-  bash benchmarks/run-codex-series.sh clasp-lead-priority 5 air-a gpt-5.4
+  bash benchmarks/run-codex-series.sh clasp-lead-priority 5 air-a gpt-5.5
 CLASP_BENCHMARK_WORKFLOW_ASSISTANCE=compiler-owned-air \
-  bash benchmarks/run-codex-series.sh clasp-lead-priority 5 air-a gpt-5.4
-node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.4 --notes air-a
+  bash benchmarks/run-codex-series.sh clasp-lead-priority 5 air-a gpt-5.5
+node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.5 --notes air-a
 ```
 
 Run the mirrored repeated control-plane containment pair:
 
 ```sh
-bash benchmarks/run-codex-series.sh control-plane 5 containment-1 gpt-5.4
-node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.4 --notes containment-1
+bash benchmarks/run-codex-series.sh control-plane 5 containment-1 gpt-5.5
+node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.5 --notes containment-1
 ```
 
 Run the same repeated sample set through Claude Code:
@@ -298,22 +298,22 @@ CLASP_BENCHMARK_WORKFLOW_ASSISTANCE=raw-text \
 Run the mirrored schema-propagation pair for both languages:
 
 ```sh
-bash benchmarks/run-codex-series.sh lead-priority 5 remediation-1 gpt-5.4
-node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.4 --notes remediation-1
+bash benchmarks/run-codex-series.sh lead-priority 5 remediation-1 gpt-5.5
+node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.5 --notes remediation-1
 ```
 
 Run the mirrored repeated trust-boundary rejection series for both languages:
 
 ```sh
-bash benchmarks/run-codex-series.sh lead-rejection 5 rejection-1 gpt-5.4
-node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.4 --notes rejection-1
+bash benchmarks/run-codex-series.sh lead-rejection 5 rejection-1 gpt-5.5
+node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.5 --notes rejection-1
 ```
 
 Run the full mirrored app benchmark that the public scorecard should center on:
 
 ```sh
-bash benchmarks/run-codex-series.sh app 5 public-app-1 gpt-5.4
-node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.4 --notes public-app-1
+bash benchmarks/run-codex-series.sh app 5 public-app-1 gpt-5.5
+node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.5 --notes public-app-1
 ```
 
 Run the machine-readable public-app benchmark signal that the ordinary Clasp goal manager can consume:
@@ -335,8 +335,8 @@ When no complete result set exists, the signal is still a failing `BenchmarkSign
 Run the mirrored repeated `lead-segment` series for both languages:
 
 ```sh
-bash benchmarks/run-codex-series.sh lead-segment 5 remediation-1 gpt-5.4
-node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.4 --notes remediation-1
+bash benchmarks/run-codex-series.sh lead-segment 5 remediation-1 gpt-5.5
+node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.5 --notes remediation-1
 ```
 
 Run the SQLite-backed dogfood benchmark in `Oracle` mode:
@@ -348,22 +348,22 @@ node benchmarks/run-benchmark.mjs prepare ts-lead-persistence --mode oracle --wo
 Run the end-to-end correctness suite for workflow constraints plus the storage-backed dogfood change:
 
 ```sh
-bash benchmarks/run-codex-series.sh correctness 5 correctness-1 gpt-5.4
-node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.4 --notes correctness-1
+bash benchmarks/run-codex-series.sh correctness 5 correctness-1 gpt-5.5
+node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.5 --notes correctness-1
 ```
 
 Run the mirrored repeated external-objective adaptation series for both languages:
 
 ```sh
-bash benchmarks/run-codex-series.sh external-adaptation 5 objective-1 gpt-5.4
-node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.4 --notes objective-1
+bash benchmarks/run-codex-series.sh external-adaptation 5 objective-1 gpt-5.5
+node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.5 --notes objective-1
 ```
 
 Run the mirrored repeated foreign-interop series for compiler-managed `npm`, `Python`, and `Rust` versus handwritten host glue:
 
 ```sh
-bash benchmarks/run-codex-series.sh foreign-interop 5 interop-1 gpt-5.4
-node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.4 --notes interop-1
+bash benchmarks/run-codex-series.sh foreign-interop 5 interop-1 gpt-5.5
+node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.5 --notes interop-1
 ```
 
 Run the native-only backend compile-time and runtime benchmark lane:
@@ -403,15 +403,15 @@ That benchmark compiles `benchmarks/backend/boundary-transport-schema.clasp`, lo
 Run the mirrored repeated unsafe-refinement and blame-quality pair for unexpected foreign values:
 
 ```sh
-bash benchmarks/run-codex-series.sh interop-boundary 5 interop-boundary-1 gpt-5.4
-node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.4 --notes interop-boundary-1
+bash benchmarks/run-codex-series.sh interop-boundary 5 interop-boundary-1 gpt-5.5
+node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.5 --notes interop-boundary-1
 ```
 
 Run the mirrored repeated declared-secret handling pair:
 
 ```sh
-bash benchmarks/run-codex-series.sh secret-handling 5 secret-handling-1 gpt-5.4
-node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.4 --notes secret-handling-1
+bash benchmarks/run-codex-series.sh secret-handling 5 secret-handling-1 gpt-5.5
+node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.5 --notes secret-handling-1
 ```
 
 Run the mirrored repeated series for Claude Code:
@@ -470,8 +470,8 @@ For the syntax-form A/B slice, the prepared `clasp-syntax-verbose` workspace inc
 Run the syntax-form A/B series for Codex:
 
 ```sh
-bash benchmarks/run-codex-series.sh syntax-form 5 syntax-a gpt-5.4
-node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.4 --notes syntax-a
+bash benchmarks/run-codex-series.sh syntax-form 5 syntax-a gpt-5.5
+node benchmarks/run-benchmark.mjs summarize --harness codex --model gpt-5.5 --notes syntax-a
 ```
 
 Run the same syntax-form A/B series for Claude Code:

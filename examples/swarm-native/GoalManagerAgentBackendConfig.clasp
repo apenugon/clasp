@@ -1,0 +1,140 @@
+module GoalManagerAgentBackendConfig
+
+import AgentBackend
+
+emptyTexts : [Str]
+emptyTexts = []
+
+agentBackendConfigReadEnvText : Str -> Str -> Str
+agentBackendConfigReadEnvText name fallback = match envVar name {
+  Ok raw -> if raw == "" then fallback else decode Str raw,
+  Err message -> fallback
+}
+
+agentBackendConfigReadEnvTextList : Str -> [Str] -> [Str]
+agentBackendConfigReadEnvTextList name fallback = match envVar name {
+  Ok raw -> if raw == "" then fallback else decode [Str] raw,
+  Err message -> fallback
+}
+
+agentBackendConfigReadEnvBool : Str -> Bool -> Bool
+agentBackendConfigReadEnvBool name fallback = match envVar name {
+  Ok raw -> if raw == "" then fallback else decode Bool raw,
+  Err message -> fallback
+}
+
+codexBin : Str
+codexBin =
+  agentBackendConfigReadEnvText
+    "CLASP_LOOP_CODEX_BIN_JSON"
+    (agentBackendConfigReadEnvText "CLASP_LOOP_AGENT_BIN_JSON" "codex")
+
+managerClaspcBin : Str
+managerClaspcBin =
+  agentBackendConfigReadEnvText "CLASP_MANAGER_CLASPC_BIN_JSON" "claspc"
+
+codexModel : Str
+codexModel =
+  agentBackendConfigReadEnvText
+    "CLASP_LOOP_CODEX_MODEL_JSON"
+    (agentBackendConfigReadEnvText "CLASP_LOOP_AGENT_MODEL_JSON" "gpt-5.5")
+
+codexReasoning : Str
+codexReasoning =
+  agentBackendConfigReadEnvText
+    "CLASP_LOOP_CODEX_REASONING_JSON"
+    (agentBackendConfigReadEnvText "CLASP_LOOP_AGENT_REASONING_JSON" "xhigh")
+
+codexSandbox : Str
+codexSandbox =
+  agentBackendConfigReadEnvText
+    "CLASP_LOOP_CODEX_SANDBOX_JSON"
+    (agentBackendConfigReadEnvText "CLASP_LOOP_AGENT_SANDBOX_JSON" "danger-full-access")
+
+requireStandaloneAgentBackend : Bool
+requireStandaloneAgentBackend =
+  agentBackendConfigReadEnvBool "CLASP_REQUIRE_STANDALONE_AGENT_BACKEND_JSON" false
+
+loopRequireStandaloneAgentBackend : Bool
+loopRequireStandaloneAgentBackend =
+  agentBackendConfigReadEnvBool "CLASP_LOOP_REQUIRE_STANDALONE_AGENT_BACKEND_JSON" requireStandaloneAgentBackend
+
+plannerRequireStandaloneAgentBackend : Bool
+plannerRequireStandaloneAgentBackend =
+  agentBackendConfigReadEnvBool "CLASP_MANAGER_REQUIRE_STANDALONE_PLANNER_AGENT_BACKEND_JSON" requireStandaloneAgentBackend
+
+anyStandaloneAgentBackendRequired : Bool
+anyStandaloneAgentBackendRequired =
+  if requireStandaloneAgentBackend then
+    true
+  else if loopRequireStandaloneAgentBackend then
+    true
+  else
+    plannerRequireStandaloneAgentBackend
+
+agentBinFallback : Str
+agentBinFallback =
+  if anyStandaloneAgentBackendRequired then
+    managerClaspcBin
+  else
+    codexBin
+
+agentBin : Str
+agentBin =
+  agentBackendConfigReadEnvText "CLASP_LOOP_AGENT_BIN_JSON" agentBinFallback
+
+agentModel : Str
+agentModel =
+  agentBackendConfigReadEnvText "CLASP_LOOP_AGENT_MODEL_JSON" codexModel
+
+agentReasoning : Str
+agentReasoning =
+  agentBackendConfigReadEnvText "CLASP_LOOP_AGENT_REASONING_JSON" codexReasoning
+
+agentSandbox : Str
+agentSandbox =
+  agentBackendConfigReadEnvText "CLASP_LOOP_AGENT_SANDBOX_JSON" codexSandbox
+
+agentCommandTemplateFallback : [Str]
+agentCommandTemplateFallback =
+  if loopRequireStandaloneAgentBackend then
+    agentBackendLocalAgentTemplate
+  else
+    emptyTexts
+
+agentCommandTemplate : [Str]
+agentCommandTemplate =
+  agentBackendConfigReadEnvTextList "CLASP_LOOP_AGENT_COMMAND_JSON" agentCommandTemplateFallback
+
+agentCapabilityProfileFallback : Str
+agentCapabilityProfileFallback =
+  if loopRequireStandaloneAgentBackend then
+    "local-clasp"
+  else
+    ""
+
+agentCapabilityProfileName : Str
+agentCapabilityProfileName =
+  agentBackendConfigReadEnvText "CLASP_LOOP_AGENT_CAPABILITY_PROFILE_JSON" agentCapabilityProfileFallback
+
+plannerAgentCommandTemplateFallback : [Str]
+plannerAgentCommandTemplateFallback =
+  if plannerRequireStandaloneAgentBackend then
+    agentBackendLocalPlannerTemplate
+  else
+    agentCommandTemplate
+
+plannerAgentCommandTemplate : [Str]
+plannerAgentCommandTemplate =
+  agentBackendConfigReadEnvTextList "CLASP_MANAGER_PLANNER_AGENT_COMMAND_JSON" plannerAgentCommandTemplateFallback
+
+plannerAgentCapabilityProfileFallback : Str
+plannerAgentCapabilityProfileFallback =
+  if plannerRequireStandaloneAgentBackend then
+    "local-clasp"
+  else
+    agentCapabilityProfileName
+
+plannerAgentCapabilityProfileName : Str
+plannerAgentCapabilityProfileName =
+  agentBackendConfigReadEnvText "CLASP_MANAGER_PLANNER_AGENT_CAPABILITY_PROFILE_JSON" plannerAgentCapabilityProfileFallback

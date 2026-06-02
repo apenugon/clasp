@@ -1,0 +1,1321 @@
+module Compiler.Checker.TypeOps
+
+import Compiler.Ast
+import Compiler.Checker.Builtins
+import Compiler.Checker.Types
+
+appendCheckerRenderedText : [Str] -> Str -> [Str]
+appendCheckerRenderedText values value = append values [value]
+
+firstHostedExpr : [HostedExprAst] -> HostedExprAst
+firstHostedExpr values = {
+  for value in values {
+    return value
+  };
+  HostedName ""
+}
+
+remainingHostedExprs : [HostedExprAst] -> [HostedExprAst]
+remainingHostedExprs values = {
+  let mut remaining = emptyHostedExprs;
+  let mut seenFirst = false;
+  for value in values {
+    if seenFirst then {
+      remaining = append remaining [value];
+      remaining
+    } else {
+      seenFirst = true;
+      remaining
+    }
+  };
+  remaining
+}
+
+renderAtomicType : TypeText -> Str
+renderAtomicType typeText = match typeText {
+  TFunction input result ->
+    textConcat ["(", renderType typeText, ")"],
+  TList itemType ->
+    textConcat ["[", renderType itemType, "]"],
+  TApply name args ->
+    textConcat ["(", renderType typeText, ")"],
+  TInt ->
+    "Int",
+  TStr ->
+    "Str",
+  TBool ->
+    "Bool",
+  TNamed label ->
+    label,
+  TVar label ->
+    label,
+  TUnknown label ->
+    textConcat ["?", label]
+}
+
+renderTypeTextArgs : [TypeText] -> [Str]
+renderTypeTextArgs values = {
+  let mut rendered = emptyRenderedTexts;
+  for value in values {
+    rendered = appendCheckerRenderedText rendered (renderAtomicType value);
+    rendered
+  };
+  rendered
+}
+
+renderType : TypeText -> Str
+renderType typeText = match typeText {
+  TInt ->
+    "Int",
+  TStr ->
+    "Str",
+  TBool ->
+    "Bool",
+  TList itemType ->
+    textConcat ["[", renderType itemType, "]"],
+  TNamed label ->
+    label,
+  TApply label args ->
+    textConcat [label, " ", textJoin " " (renderTypeTextArgs args)],
+  TVar label ->
+    label,
+  TUnknown label ->
+    textConcat ["?", label],
+  TFunction input result ->
+    textConcat [renderAtomicType input, " -> ", renderType result]
+}
+
+firstTypeText : [TypeText] -> TypeText
+firstTypeText values = {
+  for value in values {
+    return value
+  };
+  TUnknown "<type>"
+}
+
+remainingTypeTexts : [TypeText] -> [TypeText]
+remainingTypeTexts values = {
+  let mut remaining = emptyTypeTexts;
+  let mut seenFirst = false;
+  for value in values {
+    if seenFirst then {
+      remaining = append remaining [value];
+      remaining
+    } else {
+      seenFirst = true;
+      remaining
+    }
+  };
+  remaining
+}
+
+hasTypeTexts : [TypeText] -> Bool
+hasTypeTexts values = {
+  for value in values {
+    return true
+  };
+  false
+}
+
+lookupTypeSubstitution : [TypeSubstitution] -> Str -> LookupResult
+lookupTypeSubstitution substitutions targetName = {
+  for substitution in substitutions {
+    match substitution {
+      TypeSubstitution name value ->
+        if name == targetName then return FoundType value else MissingType targetName
+    }
+  };
+  MissingType targetName
+}
+
+appendTypeSubstitution : [TypeSubstitution] -> TypeSubstitution -> [TypeSubstitution]
+appendTypeSubstitution substitutions substitution = append substitutions [substitution]
+
+applyTypeSubstitutions : TypeText -> [TypeSubstitution] -> TypeText
+applyTypeSubstitutions typ substitutions = match typ {
+  TInt ->
+    TInt,
+  TStr ->
+    TStr,
+  TBool ->
+    TBool,
+  TList itemType ->
+    TList (applyTypeSubstitutions itemType substitutions),
+  TFunction input result ->
+    TFunction (applyTypeSubstitutions input substitutions) (applyTypeSubstitutions result substitutions),
+  TNamed label ->
+    TNamed label,
+  TApply label args ->
+    TApply label (applyTypeSubstitutionList args substitutions),
+  TVar label ->
+    match lookupTypeSubstitution substitutions label {
+      FoundType value ->
+        applyTypeSubstitutions value substitutions,
+      MissingType missing ->
+        TVar label
+    },
+  TUnknown label ->
+    match lookupTypeSubstitution substitutions label {
+      FoundType value ->
+        applyTypeSubstitutions value substitutions,
+      MissingType missing ->
+        TUnknown label
+    }
+}
+
+applyTypeSubstitutionList : [TypeText] -> [TypeSubstitution] -> [TypeText]
+applyTypeSubstitutionList values substitutions = {
+  let mut applied = emptyTypeTexts;
+  for value in values {
+    applied = append applied [applyTypeSubstitutions value substitutions];
+    applied
+  };
+  applied
+}
+
+bindingTypeText : TypeBinding -> TypeText
+bindingTypeText binding = match binding {
+  TypeBinding name bindingType ->
+    bindingType
+}
+
+bindingNameText : TypeBinding -> Str
+bindingNameText binding = match binding {
+  TypeBinding name bindingType ->
+    name
+}
+
+parseRenderedTypeBinding : Str -> TypeBinding
+parseRenderedTypeBinding line = match textSplitFirst line " : " {
+  Ok payload ->
+    TypeBinding (trimSpaces (firstSegment payload)) (typeFromHostedTypeAst (parseHostedType (trimSpaces (remainingSegments payload)))),
+  Err missing ->
+    TypeBinding "" (TUnknown "")
+}
+
+parseRenderedTypeBindings : Str -> [TypeBinding]
+parseRenderedTypeBindings text = {
+  let mut bindings = emptyTypeBindings;
+  for line in textSplit text "\n" {
+    let trimmed = trimSpaces line;
+    if trimmed == "" then {
+      bindings
+    } else {
+      let binding = parseRenderedTypeBinding trimmed;
+      if bindingNameText binding == "" then {
+        bindings
+      } else {
+        bindings = appendTypeBinding bindings binding;
+        bindings
+      }
+    }
+  };
+  bindings
+}
+
+typeContainsUnknown : Str -> TypeText -> Bool
+typeContainsUnknown target typ = match typ {
+  TInt ->
+    false,
+  TStr ->
+    false,
+  TBool ->
+    false,
+  TList itemType ->
+    typeContainsUnknown target itemType,
+  TFunction input result ->
+    if typeContainsUnknown target input then true else typeContainsUnknown target result,
+  TNamed label ->
+    false,
+  TApply label args ->
+    typeListContainsUnknown target args,
+  TVar label ->
+    false,
+  TUnknown label ->
+    label == target
+}
+
+typeListContainsUnknown : Str -> [TypeText] -> Bool
+typeListContainsUnknown target values = {
+  for value in values {
+    if typeContainsUnknown target value then return true else false
+  };
+  false
+}
+
+instantiateGenericUnknownName : Str -> Str -> Str
+instantiateGenericUnknownName context label = textConcat ["inst.", textFingerprint64Hex (textConcat [context, "|", label]), ".", label]
+
+instantiateGenericTypeList : Str -> [TypeText] -> [TypeText]
+instantiateGenericTypeList context values = {
+  let mut instantiated = emptyTypeTexts;
+  for value in values {
+    instantiated = append instantiated [instantiateGenericType context value];
+    instantiated
+  };
+  instantiated
+}
+
+instantiateGenericType : Str -> TypeText -> TypeText
+instantiateGenericType context typ = match typ {
+  TInt ->
+    TInt,
+  TStr ->
+    TStr,
+  TBool ->
+    TBool,
+  TList itemType ->
+    TList (instantiateGenericType context itemType),
+  TFunction input result ->
+    TFunction (instantiateGenericType context input) (instantiateGenericType context result),
+  TNamed label ->
+    TNamed label,
+  TApply label args ->
+    TApply label (instantiateGenericTypeList context args),
+  TVar label ->
+    TUnknown (instantiateGenericUnknownName context label),
+  TUnknown label ->
+    TUnknown label
+}
+
+lookupTypeBindingInstantiated : [TypeBinding] -> Str -> Str -> LookupResult
+lookupTypeBindingInstantiated env targetName context = match lookupTypeBinding env targetName {
+  FoundType bindingType ->
+    FoundType (instantiateGenericType context bindingType),
+  MissingType missing ->
+    MissingType missing
+}
+
+lookupTypeBindingLayersInstantiated : [TypeBinding] -> [TypeBinding] -> Str -> Str -> LookupResult
+lookupTypeBindingLayersInstantiated localEnv env targetName context = match lookupTypeBindingInstantiated localEnv targetName context {
+  FoundType bindingType ->
+    FoundType bindingType,
+  MissingType missing ->
+    lookupTypeBindingInstantiated env targetName context
+}
+
+collectTypeUnknownLabels : TypeText -> [Str]
+collectTypeUnknownLabels typ = match typ {
+  TInt ->
+    emptyRenderedTexts,
+  TStr ->
+    emptyRenderedTexts,
+  TBool ->
+    emptyRenderedTexts,
+  TList itemType ->
+    collectTypeUnknownLabels itemType,
+  TFunction input result ->
+    appendUniqueTextList (collectTypeUnknownLabels input) (collectTypeUnknownLabels result),
+  TNamed label ->
+    emptyRenderedTexts,
+  TApply label args ->
+    collectTypeUnknownLabelsList args,
+  TVar label ->
+    emptyRenderedTexts,
+  TUnknown label ->
+    [label]
+}
+
+collectTypeUnknownLabelsList : [TypeText] -> [Str]
+collectTypeUnknownLabelsList values = {
+  let mut labels = emptyRenderedTexts;
+  for value in values {
+    labels = appendUniqueTextList labels (collectTypeUnknownLabels value);
+    labels
+  };
+  labels
+}
+
+appendUniqueText : [Str] -> Str -> [Str]
+appendUniqueText values value = if containsText values value then values else appendCheckerRenderedText values value
+
+appendUniqueTextList : [Str] -> [Str] -> [Str]
+appendUniqueTextList left right = {
+  let mut combined = left;
+  for value in right {
+    combined = appendUniqueText combined value;
+    combined
+  };
+  combined
+}
+
+collectBindingUnknownLabels : [TypeBinding] -> [Str]
+collectBindingUnknownLabels bindings = {
+  let mut labels = emptyRenderedTexts;
+  for binding in bindings {
+    labels = appendUniqueTextList labels (collectTypeUnknownLabels (bindingTypeText binding));
+    labels
+  };
+  labels
+}
+
+collectReturnContextUnknownLabels : ReturnContext -> [Str]
+collectReturnContextUnknownLabels fnContext = match fnContext {
+  OutsideFunction ->
+    emptyRenderedTexts,
+  InsideFunction expectedType ->
+    collectTypeUnknownLabels expectedType
+}
+
+generalizeUnknownTypeExcept : [Str] -> TypeText -> TypeText
+generalizeUnknownTypeExcept protected typ = match typ {
+  TInt ->
+    TInt,
+  TStr ->
+    TStr,
+  TBool ->
+    TBool,
+  TList itemType ->
+    TList (generalizeUnknownTypeExcept protected itemType),
+  TFunction inputType resultType ->
+    TFunction (generalizeUnknownTypeExcept protected inputType) (generalizeUnknownTypeExcept protected resultType),
+  TNamed label ->
+    TNamed label,
+  TApply label args ->
+    TApply label (generalizeUnknownTypeExceptList protected args),
+  TVar label ->
+    TVar label,
+  TUnknown label ->
+    if containsText protected label then TUnknown label else TVar (generalizedUnknownVarLabel label)
+}
+
+generalizeUnknownTypeExceptList : [Str] -> [TypeText] -> [TypeText]
+generalizeUnknownTypeExceptList protected values = {
+  let mut generalized = emptyTypeTexts;
+  for value in values {
+    generalized = append generalized [generalizeUnknownTypeExcept protected value];
+    generalized
+  };
+  generalized
+}
+
+lastTextOr : [Str] -> Str -> Str
+lastTextOr values fallback = {
+  let mut found = fallback;
+  for value in values {
+    found = value;
+    found
+  };
+  found
+}
+
+generalizedUnknownVarLabel : Str -> Str
+generalizedUnknownVarLabel label = {
+  let parts = textSplit label ".";
+  if firstText parts == "inst" then {
+    let remaining = remainingTexts (remainingTexts parts);
+    lastTextOr remaining label
+  } else {
+    label
+  }
+}
+
+generalizeBindingType : [TypeBinding] -> [TypeBinding] -> ReturnContext -> TypeText -> TypeText
+generalizeBindingType env localEnv fnContext typ = {
+  let protected = appendUniqueTextList (appendUniqueTextList (collectBindingUnknownLabels env) (collectBindingUnknownLabels localEnv)) (collectReturnContextUnknownLabels fnContext);
+  generalizeUnknownTypeExcept protected typ
+}
+
+typeContainsVar : Str -> TypeText -> Bool
+typeContainsVar target typ = match typ {
+  TInt ->
+    false,
+  TStr ->
+    false,
+  TBool ->
+    false,
+  TList itemType ->
+    typeContainsVar target itemType,
+  TFunction input result ->
+    if typeContainsVar target input then true else typeContainsVar target result,
+  TNamed label ->
+    false,
+  TApply label args ->
+    typeListContainsVar target args,
+  TVar label ->
+    label == target,
+  TUnknown label ->
+    false
+}
+
+typeListContainsVar : Str -> [TypeText] -> Bool
+typeListContainsVar target values = {
+  for value in values {
+    if typeContainsVar target value then return true else false
+  };
+  false
+}
+
+typeHasGenericVars : TypeText -> Bool
+typeHasGenericVars typ = match typ {
+  TInt ->
+    false,
+  TStr ->
+    false,
+  TBool ->
+    false,
+  TList itemType ->
+    typeHasGenericVars itemType,
+  TFunction input result ->
+    if typeHasGenericVars input then true else typeHasGenericVars result,
+  TNamed label ->
+    false,
+  TApply label args ->
+    typeListHasGenericVars args,
+  TVar label ->
+    true,
+  TUnknown label ->
+    false
+}
+
+typeListHasGenericVars : [TypeText] -> Bool
+typeListHasGenericVars values = {
+  for value in values {
+    if typeHasGenericVars value then return true else false
+  };
+  false
+}
+
+typeIsFunction : TypeText -> Bool
+typeIsFunction typ = match typ {
+  TInt ->
+    false,
+  TStr ->
+    false,
+  TBool ->
+    false,
+  TList itemType ->
+    false,
+  TFunction input result ->
+    true,
+  TNamed label ->
+    false,
+  TApply label args ->
+    false,
+  TVar label ->
+    false,
+  TUnknown label ->
+    false
+}
+
+unifyTypeVar : Str -> TypeText -> [TypeSubstitution] -> TypeUnifyResult
+unifyTypeVar name typ substitutions = {
+  let resolved = applyTypeSubstitutions typ substitutions;
+  match resolved {
+    TVar other ->
+      if name == other then UnifiedTypes substitutions else UnifiedTypes (appendTypeSubstitution substitutions (TypeSubstitution name resolved)),
+    TUnknown label ->
+      UnifiedTypes substitutions,
+    TInt ->
+      if typeContainsVar name resolved then TypeUnifyError else UnifiedTypes (appendTypeSubstitution substitutions (TypeSubstitution name resolved)),
+    TStr ->
+      if typeContainsVar name resolved then TypeUnifyError else UnifiedTypes (appendTypeSubstitution substitutions (TypeSubstitution name resolved)),
+    TBool ->
+      if typeContainsVar name resolved then TypeUnifyError else UnifiedTypes (appendTypeSubstitution substitutions (TypeSubstitution name resolved)),
+    TList itemType ->
+      if typeContainsVar name resolved then TypeUnifyError else UnifiedTypes (appendTypeSubstitution substitutions (TypeSubstitution name resolved)),
+    TFunction input result ->
+      if typeContainsVar name resolved then TypeUnifyError else UnifiedTypes (appendTypeSubstitution substitutions (TypeSubstitution name resolved)),
+    TNamed label ->
+      if typeContainsVar name resolved then TypeUnifyError else UnifiedTypes (appendTypeSubstitution substitutions (TypeSubstitution name resolved)),
+	  TApply label args ->
+	    if typeContainsVar name resolved then TypeUnifyError else UnifiedTypes (appendTypeSubstitution substitutions (TypeSubstitution name resolved))
+  }
+}
+
+unknownLabelIsInstantiatedGeneric : Str -> Bool
+unknownLabelIsInstantiatedGeneric label = firstText (textSplit label ".") == "inst"
+
+unifyUnknownLabels : Str -> Str -> [TypeSubstitution] -> TypeUnifyResult
+unifyUnknownLabels left right substitutions =
+  if left == right then {
+    UnifiedTypes substitutions
+  } else if unknownLabelIsInstantiatedGeneric left then {
+    if unknownLabelIsInstantiatedGeneric right then {
+      UnifiedTypes (appendTypeSubstitution substitutions (TypeSubstitution left (TUnknown right)))
+    } else {
+      UnifiedTypes (appendTypeSubstitution substitutions (TypeSubstitution right (TUnknown left)))
+    }
+  } else {
+    UnifiedTypes (appendTypeSubstitution substitutions (TypeSubstitution left (TUnknown right)))
+  }
+
+unifyUnknownType : Str -> TypeText -> [TypeSubstitution] -> TypeUnifyResult
+unifyUnknownType name typ substitutions = {
+  let resolved = applyTypeSubstitutions typ substitutions;
+  match resolved {
+    TUnknown other ->
+      unifyUnknownLabels name other substitutions,
+    TInt ->
+      if typeContainsUnknown name resolved then TypeUnifyError else UnifiedTypes (appendTypeSubstitution substitutions (TypeSubstitution name resolved)),
+    TStr ->
+      if typeContainsUnknown name resolved then TypeUnifyError else UnifiedTypes (appendTypeSubstitution substitutions (TypeSubstitution name resolved)),
+    TBool ->
+      if typeContainsUnknown name resolved then TypeUnifyError else UnifiedTypes (appendTypeSubstitution substitutions (TypeSubstitution name resolved)),
+    TList itemType ->
+      if typeContainsUnknown name resolved then TypeUnifyError else UnifiedTypes (appendTypeSubstitution substitutions (TypeSubstitution name resolved)),
+    TFunction input result ->
+      if typeContainsUnknown name resolved then TypeUnifyError else UnifiedTypes (appendTypeSubstitution substitutions (TypeSubstitution name resolved)),
+    TNamed label ->
+      if typeContainsUnknown name resolved then TypeUnifyError else UnifiedTypes (appendTypeSubstitution substitutions (TypeSubstitution name resolved)),
+    TApply label args ->
+      if typeContainsUnknown name resolved then TypeUnifyError else UnifiedTypes (appendTypeSubstitution substitutions (TypeSubstitution name resolved)),
+    TVar label ->
+      UnifiedTypes (appendTypeSubstitution substitutions (TypeSubstitution name resolved))
+  }
+}
+
+unifyTypeLists : [TypeText] -> [TypeText] -> [TypeSubstitution] -> TypeUnifyResult
+unifyTypeLists left right substitutions = if hasTypeTexts left then {
+  if hasTypeTexts right then {
+    match unifyTypes (firstTypeText left) (firstTypeText right) substitutions {
+      TypeUnifyError ->
+        TypeUnifyError,
+      UnifiedTypes next ->
+        unifyTypeLists (remainingTypeTexts left) (remainingTypeTexts right) next
+    }
+  } else {
+    TypeUnifyError
+  }
+} else if hasTypeTexts right then {
+  TypeUnifyError
+} else {
+  UnifiedTypes substitutions
+}
+
+unifyTypes : TypeText -> TypeText -> [TypeSubstitution] -> TypeUnifyResult
+unifyTypes left right substitutions = {
+  let resolvedLeft = applyTypeSubstitutions left substitutions;
+  let resolvedRight = applyTypeSubstitutions right substitutions;
+  match resolvedLeft {
+    TUnknown label ->
+      unifyUnknownType label resolvedRight substitutions,
+    TVar label ->
+      unifyTypeVar label resolvedRight substitutions,
+    TInt ->
+      match resolvedRight {
+        TUnknown label ->
+          unifyUnknownType label resolvedLeft substitutions,
+        TVar label ->
+          unifyTypeVar label resolvedLeft substitutions,
+        TInt ->
+          UnifiedTypes substitutions,
+        TStr ->
+          TypeUnifyError,
+        TBool ->
+          TypeUnifyError,
+        TList itemType ->
+          TypeUnifyError,
+        TFunction input result ->
+          TypeUnifyError,
+        TNamed label ->
+          TypeUnifyError,
+        TApply label args ->
+          TypeUnifyError
+      },
+    TStr ->
+      match resolvedRight {
+        TUnknown label ->
+          unifyUnknownType label resolvedLeft substitutions,
+        TVar label ->
+          unifyTypeVar label resolvedLeft substitutions,
+        TStr ->
+          UnifiedTypes substitutions,
+        TInt ->
+          TypeUnifyError,
+        TBool ->
+          TypeUnifyError,
+        TList itemType ->
+          TypeUnifyError,
+        TFunction input result ->
+          TypeUnifyError,
+        TNamed label ->
+          TypeUnifyError,
+        TApply label args ->
+          TypeUnifyError
+      },
+    TBool ->
+      match resolvedRight {
+        TUnknown label ->
+          unifyUnknownType label resolvedLeft substitutions,
+        TVar label ->
+          unifyTypeVar label resolvedLeft substitutions,
+        TBool ->
+          UnifiedTypes substitutions,
+        TInt ->
+          TypeUnifyError,
+        TStr ->
+          TypeUnifyError,
+        TList itemType ->
+          TypeUnifyError,
+        TFunction input result ->
+          TypeUnifyError,
+        TNamed label ->
+          TypeUnifyError,
+        TApply label args ->
+          TypeUnifyError
+      },
+    TList leftItemType ->
+      match resolvedRight {
+        TUnknown label ->
+          unifyUnknownType label resolvedLeft substitutions,
+        TVar label ->
+          unifyTypeVar label resolvedLeft substitutions,
+        TList rightItemType ->
+          unifyTypes leftItemType rightItemType substitutions,
+        TInt ->
+          TypeUnifyError,
+        TStr ->
+          TypeUnifyError,
+        TBool ->
+          TypeUnifyError,
+        TFunction input result ->
+          TypeUnifyError,
+        TNamed label ->
+          TypeUnifyError,
+        TApply label args ->
+          TypeUnifyError
+      },
+    TFunction leftInput leftResult ->
+      match resolvedRight {
+        TUnknown label ->
+          unifyUnknownType label resolvedLeft substitutions,
+        TVar label ->
+          unifyTypeVar label resolvedLeft substitutions,
+        TFunction rightInput rightResult ->
+          match unifyTypes leftInput rightInput substitutions {
+            TypeUnifyError ->
+              TypeUnifyError,
+            UnifiedTypes next ->
+              unifyTypes leftResult rightResult next
+          },
+        TInt ->
+          TypeUnifyError,
+        TStr ->
+          TypeUnifyError,
+        TBool ->
+          TypeUnifyError,
+        TList itemType ->
+          TypeUnifyError,
+        TNamed label ->
+          TypeUnifyError,
+        TApply label args ->
+          TypeUnifyError
+      },
+    TNamed leftLabel ->
+      match resolvedRight {
+        TUnknown label ->
+          unifyUnknownType label resolvedLeft substitutions,
+        TVar label ->
+          unifyTypeVar label resolvedLeft substitutions,
+        TNamed rightLabel ->
+          if leftLabel == rightLabel then UnifiedTypes substitutions else TypeUnifyError,
+        TApply rightLabel rightArgs ->
+          TypeUnifyError,
+        TInt ->
+          TypeUnifyError,
+        TStr ->
+          TypeUnifyError,
+        TBool ->
+          TypeUnifyError,
+        TList itemType ->
+          TypeUnifyError,
+        TFunction input result ->
+          TypeUnifyError
+      },
+    TApply leftLabel leftArgs ->
+      match resolvedRight {
+        TUnknown label ->
+          unifyUnknownType label resolvedLeft substitutions,
+        TVar label ->
+          unifyTypeVar label resolvedLeft substitutions,
+        TApply rightLabel rightArgs ->
+          if leftLabel == rightLabel then unifyTypeLists leftArgs rightArgs substitutions else TypeUnifyError,
+        TNamed rightLabel ->
+          TypeUnifyError,
+        TInt ->
+          TypeUnifyError,
+        TStr ->
+          TypeUnifyError,
+        TBool ->
+          TypeUnifyError,
+        TList itemType ->
+          TypeUnifyError,
+        TFunction input result ->
+          TypeUnifyError
+      }
+  }
+}
+
+sameTypeList : [TypeText] -> [TypeText] -> Bool
+sameTypeList left right = if hasTypeTexts left then {
+  if hasTypeTexts right then {
+    if sameType (firstTypeText left) (firstTypeText right) then sameTypeList (remainingTypeTexts left) (remainingTypeTexts right) else false
+  } else {
+    false
+  }
+} else if hasTypeTexts right then {
+  false
+} else {
+  true
+}
+
+sameType : TypeText -> TypeText -> Bool
+sameType left right = match left {
+  TInt ->
+    match right {
+      TInt ->
+        true,
+      TStr ->
+        false,
+      TBool ->
+        false,
+      TList itemType ->
+        false,
+      TFunction input result ->
+        false,
+      TNamed label ->
+        false,
+      TApply label args ->
+        false,
+      TVar label ->
+        false,
+      TUnknown label ->
+        false
+    },
+  TStr ->
+    match right {
+      TStr ->
+        true,
+      TInt ->
+        false,
+      TBool ->
+        false,
+      TList itemType ->
+        false,
+      TFunction input result ->
+        false,
+      TNamed label ->
+        false,
+      TApply label args ->
+        false,
+      TVar label ->
+        false,
+      TUnknown label ->
+        false
+    },
+  TBool ->
+    match right {
+      TBool ->
+        true,
+      TInt ->
+        false,
+      TStr ->
+        false,
+      TList itemType ->
+        false,
+      TFunction input result ->
+        false,
+      TNamed label ->
+        false,
+      TApply label args ->
+        false,
+      TVar label ->
+        false,
+      TUnknown label ->
+        false
+    },
+  TList leftItemType ->
+    match right {
+      TList rightItemType ->
+        sameType leftItemType rightItemType,
+      TInt ->
+        false,
+      TStr ->
+        false,
+      TBool ->
+        false,
+      TFunction input result ->
+        false,
+      TNamed label ->
+        false,
+      TApply label args ->
+        false,
+      TVar label ->
+        false,
+      TUnknown label ->
+        false
+    },
+  TFunction leftInput leftResult ->
+    match right {
+      TFunction rightInput rightResult ->
+        if sameType leftInput rightInput then sameType leftResult rightResult else false,
+      TInt ->
+        false,
+      TStr ->
+        false,
+      TBool ->
+        false,
+      TList itemType ->
+        false,
+      TNamed label ->
+        false,
+      TApply label args ->
+        false,
+      TVar label ->
+        false,
+      TUnknown label ->
+        false
+    },
+  TNamed leftLabel ->
+    match right {
+      TNamed rightLabel ->
+        leftLabel == rightLabel,
+      TInt ->
+        false,
+      TStr ->
+        false,
+      TBool ->
+        false,
+      TList itemType ->
+        false,
+      TFunction input result ->
+        false,
+      TApply label args ->
+        false,
+      TVar label ->
+        false,
+      TUnknown label ->
+        false
+    },
+  TApply leftLabel leftArgs ->
+    match right {
+      TApply rightLabel rightArgs ->
+        if leftLabel == rightLabel then sameTypeList leftArgs rightArgs else false,
+      TInt ->
+        false,
+      TStr ->
+        false,
+      TBool ->
+        false,
+      TList itemType ->
+        false,
+      TFunction input result ->
+        false,
+      TNamed label ->
+        false,
+      TVar label ->
+        false,
+      TUnknown label ->
+        false
+    },
+  TVar leftLabel ->
+    match right {
+      TVar rightLabel ->
+        leftLabel == rightLabel,
+      TInt ->
+        false,
+      TStr ->
+        false,
+      TBool ->
+        false,
+      TList itemType ->
+        false,
+      TFunction input result ->
+        false,
+      TNamed label ->
+        false,
+      TApply label args ->
+        false,
+      TUnknown label ->
+        false
+    },
+  TUnknown leftLabel ->
+    match right {
+      TUnknown rightLabel ->
+        leftLabel == rightLabel,
+      TInt ->
+        false,
+      TStr ->
+        false,
+      TBool ->
+        false,
+      TList itemType ->
+        false,
+      TFunction input result ->
+        false,
+      TNamed label ->
+        false,
+      TApply label args ->
+        false,
+      TVar label ->
+        false
+    }
+}
+
+typeFromHostedTypeAst : HostedTypeAst -> TypeText
+typeFromHostedTypeAst typeAst = match typeAst {
+  HostedTypeName name ->
+    if name == "Int" then TInt else if name == "Str" then TStr else if name == "Bool" then TBool else TNamed name,
+  HostedTypeApply name args ->
+    TApply name (typeFromHostedTypes args),
+  HostedTypeVar name ->
+    TVar name,
+  HostedTypeList itemType ->
+    TList (typeFromHostedTypeAst itemType),
+  HostedTypeFunction input result ->
+    TFunction (typeFromHostedTypeAst input) (typeFromHostedTypeAst result)
+}
+
+typeFromHostedTypes : [HostedTypeAst] -> [TypeText]
+typeFromHostedTypes values = {
+  let mut converted = emptyTypeTexts;
+  for value in values {
+    converted = append converted [typeFromHostedTypeAst value];
+    converted
+  };
+  converted
+}
+
+remainingHostedTypes : [HostedTypeAst] -> [HostedTypeAst]
+remainingHostedTypes values = {
+  let mut remaining = emptyHostedTypes;
+  let mut seenFirst = false;
+  for value in values {
+    if seenFirst then {
+      remaining = append remaining [value];
+      remaining
+    } else {
+      seenFirst = true;
+      remaining
+    }
+  };
+  remaining
+}
+
+buildFunctionType : [HostedTypeAst] -> TypeText -> TypeText
+buildFunctionType payloadTypes resultType = {
+  for payloadType in payloadTypes {
+    return TFunction (typeFromHostedTypeAst payloadType) (buildFunctionType (remainingHostedTypes payloadTypes) resultType)
+  };
+  resultType
+}
+
+typeMismatchMessage : Str -> TypeText -> TypeText -> Str
+typeMismatchMessage name expectedType actualType = textConcat ["Type mismatch for `", name, "`: expected ", renderType expectedType, ", found ", renderType actualType, "."]
+
+unknownNameMessage : Str -> Str
+unknownNameMessage missing =
+  if missing == "True" then
+    "Unknown name `True`. Clasp boolean literals are lowercase; use `true` instead, or define/import `True` if it should be a value."
+  else if missing == "False" then
+    "Unknown name `False`. Clasp boolean literals are lowercase; use `false` instead, or define/import `False` if it should be a value."
+  else
+    textConcat ["Unknown name `", missing, "`. Define or import `", missing, "`, or fix the spelling of the reference."]
+
+unknownConstructorMessage : Str -> Str
+unknownConstructorMessage missing =
+  if missing == "True" then
+    "Unknown constructor `True`. Clasp boolean literals are lowercase; use `true` instead, or declare/import a constructor named `True` if this is a data constructor."
+  else if missing == "False" then
+    "Unknown constructor `False`. Clasp boolean literals are lowercase; use `false` instead, or declare/import a constructor named `False` if this is a data constructor."
+  else
+    textConcat ["Unknown constructor `", missing, "`. Declare or import a constructor named `", missing, "`, or fix the spelling of the constructor reference."]
+
+compilerBuiltinDiagnosticName : Str -> Bool
+compilerBuiltinDiagnosticName name = match lookupTypeBinding baseEnv name {
+  FoundType bindingType ->
+    true,
+  MissingType missing ->
+    if name == resultOkConstructorName then true else if name == resultErrConstructorName then true else if name == optionSomeConstructorName then true else if name == optionNoneConstructorName then true else false
+}
+
+appendDiagnosticCandidateName : [Str] -> Str -> [Str]
+appendDiagnosticCandidateName names name =
+  if name == "" then names else if compilerBuiltinDiagnosticName name then names else if containsText names name then names else appendCheckerRenderedText names name
+
+diagnosticCandidateNamesFromBindings : [TypeBinding] -> [Str]
+diagnosticCandidateNamesFromBindings bindings = {
+  let mut names = emptyRenderedTexts;
+  for binding in bindings {
+    names = appendDiagnosticCandidateName names (bindingNameText binding);
+    names
+  };
+  names
+}
+
+firstFiveDiagnosticNames : [Str] -> [Str]
+firstFiveDiagnosticNames names = {
+  let first = firstText names;
+  if first == "" then emptyRenderedTexts else {
+    let afterFirst = remainingTexts names;
+    let second = firstText afterFirst;
+    if second == "" then [first] else {
+      let afterSecond = remainingTexts afterFirst;
+      let third = firstText afterSecond;
+      if third == "" then [first, second] else {
+        let afterThird = remainingTexts afterSecond;
+        let fourth = firstText afterThird;
+        if fourth == "" then [first, second, third] else {
+          let afterFourth = remainingTexts afterThird;
+          let fifth = firstText afterFourth;
+          if fifth == "" then [first, second, third, fourth] else [first, second, third, fourth, fifth]
+        }
+      }
+    }
+  }
+}
+
+renderDiagnosticCandidateNames : [Str] -> Str
+renderDiagnosticCandidateNames names = {
+  let mut rendered = emptyRenderedTexts;
+  for name in names {
+    rendered = appendCheckerRenderedText rendered (textConcat ["`", name, "`"]);
+    rendered
+  };
+  textJoin ", " rendered
+}
+
+unknownNameScopeHint : [TypeBinding] -> [TypeBinding] -> Str
+unknownNameScopeHint localEnv env = {
+  let localNames = diagnosticCandidateNamesFromBindings localEnv;
+  let availableNames = firstFiveDiagnosticNames (appendUniqueTextList localNames (diagnosticCandidateNamesFromBindings env));
+  if firstText availableNames == "" then "" else textConcat [" In scope here: ", renderDiagnosticCandidateNames availableNames, "."]
+}
+
+unknownNameMessageInScope : Str -> [TypeBinding] -> [TypeBinding] -> Str
+unknownNameMessageInScope missing localEnv env =
+  if missing == "True" then unknownNameMessage missing else if missing == "False" then unknownNameMessage missing else textConcat [unknownNameMessage missing, unknownNameScopeHint localEnv env]
+
+lookupTypeDecl : [HostedTypeDeclAst] -> Str -> TypeDeclLookupResult
+lookupTypeDecl typeDecls targetName = {
+  for typeDecl in typeDecls {
+    if typeDeclName typeDecl == targetName then {
+      return FoundTypeDecl typeDecl
+    } else {
+      MissingTypeDecl targetName
+    }
+  };
+  MissingTypeDecl targetName
+}
+
+lookupRecordDecl : [HostedRecordDeclAst] -> Str -> RecordLookupResult
+lookupRecordDecl recordDecls targetName = {
+  for recordDecl in recordDecls {
+    if recordDeclName recordDecl == targetName then {
+      return FoundRecord recordDecl
+    } else {
+      MissingRecord targetName
+    }
+  };
+  MissingRecord targetName
+}
+
+lookupRecordField : [HostedRecordFieldDeclAst] -> Str -> RecordFieldLookupResult
+lookupRecordField fields targetName = {
+  for field in fields {
+    if recordFieldDeclName field == targetName then {
+      return FoundRecordField field
+    } else {
+      MissingRecordField targetName
+    }
+  };
+  MissingRecordField targetName
+}
+
+lookupRecordExprField : [HostedRecordFieldExprAst] -> Str -> RecordExprFieldLookupResult
+lookupRecordExprField fields targetName = {
+  for field in fields {
+    if recordExprFieldName field == targetName then {
+      return FoundRecordExprField field
+    } else {
+      MissingRecordExprField targetName
+    }
+  };
+  MissingRecordExprField targetName
+}
+
+lookupTypeConstructor : HostedTypeDeclAst -> Str -> TypeConstructorLookupResult
+lookupTypeConstructor typeDecl constructorName = {
+  for constructorDecl in typeDeclConstructors typeDecl {
+    if constructorDeclName constructorDecl == constructorName then {
+      return FoundTypeConstructor constructorDecl
+    } else {
+      MissingTypeConstructor constructorName
+    }
+  };
+  MissingTypeConstructor constructorName
+}
+
+lookupConstructorDecl : [HostedTypeDeclAst] -> Str -> ConstructorLookupResult
+lookupConstructorDecl typeDecls constructorName = {
+  for typeDecl in typeDecls {
+    match lookupTypeConstructor typeDecl constructorName {
+      FoundTypeConstructor constructorDecl ->
+        return FoundConstructor (typeDeclName typeDecl) constructorDecl,
+      MissingTypeConstructor missing ->
+        MissingConstructor constructorName
+    }
+  };
+  MissingConstructor constructorName
+}
+
+typeParamSubstitutions : [Str] -> [TypeText] -> [TypeSubstitution]
+typeParamSubstitutions params args = {
+  let param = firstText params;
+  let arg = firstTypeText args;
+  if param == "" then {
+    emptyTypeSubstitutions
+  } else if hasTypeTexts args then {
+    append [TypeSubstitution param arg] (typeParamSubstitutions (remainingTexts params) (remainingTypeTexts args))
+  } else {
+    emptyTypeSubstitutions
+  }
+}
+
+instantiateTypeFromSubstitutions : TypeText -> [TypeSubstitution] -> TypeText
+instantiateTypeFromSubstitutions typ substitutions = applyTypeSubstitutions typ substitutions
+
+typeDeclResultType : HostedTypeDeclAst -> TypeText
+typeDeclResultType typeDecl = {
+  let name = typeDeclName typeDecl;
+  let params = typeDeclParams typeDecl;
+  if firstText params == "" then TNamed name else TApply name (typeParamTypes params)
+}
+
+recordDeclResultType : HostedRecordDeclAst -> TypeText
+recordDeclResultType recordDecl = {
+  let name = recordDeclName recordDecl;
+  let params = recordDeclParams recordDecl;
+  if firstText params == "" then TNamed name else TApply name (typeParamTypes params)
+}
+
+typeParamTypes : [Str] -> [TypeText]
+typeParamTypes params = {
+  let mut types = emptyTypeTexts;
+  for param in params {
+    types = append types [TVar param];
+    types
+  };
+  types
+}
+
+containsText : [Str] -> Str -> Bool
+containsText values target = {
+  for value in values {
+    if value == target then return true else false
+  };
+  false
+}
+
+findMissingBranchName : HostedTypeDeclAst -> [Str] -> Str
+findMissingBranchName typeDecl seen = {
+  for constructorDecl in typeDeclConstructors typeDecl {
+    let constructorName = constructorDeclName constructorDecl;
+    if containsText seen constructorName then {
+      ""
+    } else {
+      return constructorName
+    }
+  };
+  ""
+}
+
+bindPatternArgs : Str -> [HostedTypeAst] -> [Str] -> [TypeSubstitution] -> PatternBindResult
+bindPatternArgs constructorName payloadTypes binders substitutions = {
+  let mut remainingBinders = binders;
+  let mut bindings = emptyTypeBindings;
+  for payloadType in payloadTypes {
+    let binder = firstText remainingBinders;
+    if binder == "" then {
+      return PatternBindError (textConcat ["Pattern for constructor `", constructorName, "` is missing a binder."])
+    } else {
+      bindings = appendTypeBinding bindings (TypeBinding binder (instantiateTypeFromSubstitutions (typeFromHostedTypeAst payloadType) substitutions));
+      remainingBinders = remainingTexts remainingBinders;
+      BoundPattern bindings
+    }
+  };
+  if firstText remainingBinders == "" then BoundPattern bindings else PatternBindError (textConcat ["Pattern for constructor `", constructorName, "` binds too many values."])
+}
+
+bindPattern : HostedTypeDeclAst -> TypeText -> HostedPatternAst -> PatternBindResult
+bindPattern typeDecl subjectType pattern = {
+  let constructorName = patternConstructorName pattern;
+  match lookupTypeConstructor typeDecl constructorName {
+    FoundTypeConstructor constructorDecl ->
+      bindPatternArgs constructorName (constructorDeclPayloadTypes constructorDecl) (patternBinders pattern) (typeDeclInstantiations typeDecl subjectType),
+    MissingTypeConstructor missing ->
+      PatternBindError (textConcat ["Constructor `", missing, "` is not part of `", typeDeclName typeDecl, "`."])
+  }
+}
+
+typeDeclInstantiations : HostedTypeDeclAst -> TypeText -> [TypeSubstitution]
+typeDeclInstantiations typeDecl subjectType = match subjectType {
+  TApply name args ->
+    if name == typeDeclName typeDecl then typeParamSubstitutions (typeDeclParams typeDecl) args else emptyTypeSubstitutions,
+  TNamed name ->
+    if name == typeDeclName typeDecl then emptyTypeSubstitutions else emptyTypeSubstitutions,
+  TInt ->
+    emptyTypeSubstitutions,
+  TStr ->
+    emptyTypeSubstitutions,
+  TBool ->
+    emptyTypeSubstitutions,
+  TList itemType ->
+    emptyTypeSubstitutions,
+  TFunction input result ->
+    emptyTypeSubstitutions,
+  TVar label ->
+    emptyTypeSubstitutions,
+  TUnknown label ->
+    emptyTypeSubstitutions
+}
+
+recordDeclInstantiations : HostedRecordDeclAst -> TypeText -> [TypeSubstitution]
+recordDeclInstantiations recordDecl subjectType = match subjectType {
+  TApply name args ->
+    if name == recordDeclName recordDecl then typeParamSubstitutions (recordDeclParams recordDecl) args else emptyTypeSubstitutions,
+  TNamed name ->
+    if name == recordDeclName recordDecl then emptyTypeSubstitutions else emptyTypeSubstitutions,
+  TInt ->
+    emptyTypeSubstitutions,
+  TStr ->
+    emptyTypeSubstitutions,
+  TBool ->
+    emptyTypeSubstitutions,
+  TList itemType ->
+    emptyTypeSubstitutions,
+  TFunction input result ->
+    emptyTypeSubstitutions,
+  TVar label ->
+    emptyTypeSubstitutions,
+  TUnknown label ->
+    emptyTypeSubstitutions
+}
+
+applyFunctionArgumentType : Str -> TypeText -> TypeText -> [TypeSubstitution] -> ApplyCallResult
+applyFunctionArgumentType calleeName currentType actualType substitutions = match currentType {
+  TFunction inputType resultType ->
+    match unifyTypes inputType actualType substitutions {
+      UnifiedTypes next ->
+        ApplyCallOk (applyTypeSubstitutions resultType next) next,
+      TypeUnifyError ->
+        ApplyCallError (typeMismatchMessage (calleeName) (applyTypeSubstitutions inputType substitutions) actualType)
+    },
+  TList itemType ->
+    ApplyCallError (textConcat ["`", calleeName, "` is not callable."]),
+  TInt ->
+    ApplyCallError (textConcat ["`", calleeName, "` is not callable."]),
+  TStr ->
+    ApplyCallError (textConcat ["`", calleeName, "` is not callable."]),
+  TBool ->
+    ApplyCallError (textConcat ["`", calleeName, "` is not callable."]),
+  TNamed label ->
+    ApplyCallError (textConcat ["`", calleeName, "` is not callable."]),
+  TApply label args ->
+    ApplyCallError (textConcat ["`", calleeName, "` is not callable."]),
+  TVar label ->
+    ApplyCallError (textConcat ["Could not infer the callable type of `", calleeName, "`."]),
+  TUnknown label ->
+    ApplyCallError (textConcat ["Could not infer the callable type of `", calleeName, "`."])
+}

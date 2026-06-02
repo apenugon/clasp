@@ -1,0 +1,1384 @@
+module Compiler.Checker.InferExpr
+
+import Compiler.Ast
+import Compiler.Checker.Builtins
+import Compiler.Checker.DecodeTarget
+import Compiler.Checker.Equality
+import Compiler.Checker.RecordValidation
+import Compiler.Checker.TypeOps
+import Compiler.Checker.Types
+
+inferRecordLiteralSubstitutions : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedRecordDeclAst -> [HostedRecordFieldExprAst] -> RecordSubstitutionResult
+inferRecordLiteralSubstitutions typeDecls recordDecls env localEnv fnContext recordDecl fields = {
+  let mut state = WaitingRecordSubstitutions emptyTypeSubstitutions;
+  for fieldDecl in recordDeclFields recordDecl {
+    state = stepRecordLiteralSubstitution typeDecls recordDecls env localEnv fnContext recordDecl fields state fieldDecl;
+    state
+  };
+  match state {
+    WaitingRecordSubstitutions substitutions ->
+      RecordSubstitutionOk substitutions,
+    SeenRecordSubstitutionError message ->
+      RecordSubstitutionError message
+  }
+}
+
+stepRecordLiteralSubstitution : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedRecordDeclAst -> [HostedRecordFieldExprAst] -> RecordSubstitutionFoldState -> HostedRecordFieldDeclAst -> RecordSubstitutionFoldState
+stepRecordLiteralSubstitution typeDecls recordDecls env localEnv fnContext recordDecl fields state fieldDecl = match state {
+  SeenRecordSubstitutionError message ->
+    SeenRecordSubstitutionError message,
+  WaitingRecordSubstitutions substitutions ->
+    inferRecordLiteralFieldSubstitution typeDecls recordDecls env localEnv fnContext recordDecl fields substitutions fieldDecl
+}
+
+inferRecordLiteralFieldSubstitution : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedRecordDeclAst -> [HostedRecordFieldExprAst] -> [TypeSubstitution] -> HostedRecordFieldDeclAst -> RecordSubstitutionFoldState
+inferRecordLiteralFieldSubstitution typeDecls recordDecls env localEnv fnContext recordDecl fields substitutions fieldDecl = {
+  let fieldName = recordFieldDeclName fieldDecl;
+  match lookupRecordExprField fields fieldName {
+    MissingRecordExprField missingField ->
+      SeenRecordSubstitutionError (textConcat ["Record literal for `", recordDeclName recordDecl, "` is missing field `", missingField, "`."]),
+    FoundRecordExprField exprField ->
+      match inferExpr typeDecls recordDecls env localEnv fnContext (recordExprFieldValue exprField) {
+        InferExprError message ->
+          SeenRecordSubstitutionError message,
+        InferredExpr actualType -> {
+          let expectedType = applyTypeSubstitutions (typeFromHostedTypeAst (recordFieldDeclType fieldDecl)) substitutions;
+          match unifyTypes expectedType actualType substitutions {
+            UnifiedTypes next ->
+              WaitingRecordSubstitutions next,
+            TypeUnifyError ->
+              SeenRecordSubstitutionError (typeMismatchMessage fieldName expectedType actualType)
+          }
+        }
+      }
+  }
+}
+
+inferAppendBuiltinCall : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> BuiltinCallInferResult
+inferAppendBuiltinCall typeDecls recordDecls env localEnv fnContext args = {
+  let left = firstHostedExpr args;
+  let right = firstHostedExpr (remainingHostedExprs args);
+  let extra = firstHostedExpr (remainingHostedExprs (remainingHostedExprs args));
+  if expressionSummary left == "" then {
+    BuiltinCallError "Builtin `append` expects 2 arguments."
+  } else if expressionSummary right == "" then {
+    BuiltinCallError "Builtin `append` expects 2 arguments."
+  } else if expressionSummary extra == "" then {
+    match inferExpr typeDecls recordDecls env localEnv fnContext left {
+      InferExprError message ->
+        BuiltinCallError message,
+      InferredExpr leftType ->
+        match inferExpr typeDecls recordDecls env localEnv fnContext right {
+          InferExprError message ->
+            BuiltinCallError message,
+          InferredExpr rightType ->
+            match leftType {
+              TList itemType ->
+                match rightType {
+                  TList rightItemType ->
+                    match unifyTypes leftType rightType emptyTypeSubstitutions {
+                      UnifiedTypes substitutions ->
+                        BuiltinCallInferred (applyTypeSubstitutions leftType substitutions),
+                      TypeUnifyError ->
+                        BuiltinCallError (typeMismatchMessage (expressionSummary right) leftType rightType)
+                    },
+                  TInt ->
+                    BuiltinCallError "`append` expects list-compatible values.",
+                  TStr ->
+                    BuiltinCallError "`append` expects list-compatible values.",
+                  TBool ->
+                    BuiltinCallError "`append` expects list-compatible values.",
+                  TFunction inputType resultType ->
+                    BuiltinCallError "`append` expects list-compatible values.",
+                  TNamed label ->
+                    BuiltinCallError "`append` expects list-compatible values.",
+                  TApply label args ->
+                    BuiltinCallError "`append` expects list-compatible values.",
+                  TVar label ->
+                    BuiltinCallError "`append` expects list-compatible values.",
+                  TUnknown label ->
+                    BuiltinCallError "`append` expects list-compatible values."
+                },
+              TNamed label ->
+                if sameType leftType rightType then if label == "View" then BuiltinCallInferred leftType else if label == "Prompt" then BuiltinCallInferred leftType else BuiltinCallError "`append` expects list-compatible values." else BuiltinCallError (typeMismatchMessage (expressionSummary right) leftType rightType),
+              TInt ->
+                BuiltinCallError "`append` expects list-compatible values.",
+              TStr ->
+                BuiltinCallError "`append` expects list-compatible values.",
+              TBool ->
+                BuiltinCallError "`append` expects list-compatible values.",
+              TFunction inputType resultType ->
+                BuiltinCallError "`append` expects list-compatible values.",
+              TApply label args ->
+                BuiltinCallError "`append` expects list-compatible values.",
+              TVar label ->
+                BuiltinCallError "`append` expects list-compatible values.",
+              TUnknown label ->
+                BuiltinCallError "`append` expects list-compatible values."
+            }
+        }
+    }
+  } else {
+    BuiltinCallError "Builtin `append` expects 2 arguments."
+  }
+}
+
+inferPrependBuiltinCall : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> BuiltinCallInferResult
+inferPrependBuiltinCall typeDecls recordDecls env localEnv fnContext args = {
+  let value = firstHostedExpr args;
+  let values = firstHostedExpr (remainingHostedExprs args);
+  let extra = firstHostedExpr (remainingHostedExprs (remainingHostedExprs args));
+  if expressionSummary value == "" then {
+    BuiltinCallError "Builtin `prepend` expects 2 arguments."
+  } else if expressionSummary values == "" then {
+    BuiltinCallError "Builtin `prepend` expects 2 arguments."
+  } else if expressionSummary extra == "" then {
+    match inferExpr typeDecls recordDecls env localEnv fnContext value {
+      InferExprError message ->
+        BuiltinCallError message,
+      InferredExpr valueType ->
+        match inferExpr typeDecls recordDecls env localEnv fnContext values {
+          InferExprError message ->
+            BuiltinCallError message,
+          InferredExpr valuesType ->
+            match valuesType {
+              TList itemType ->
+                if sameType itemType valueType then BuiltinCallInferred valuesType else BuiltinCallError (typeMismatchMessage (expressionSummary value) itemType valueType),
+              TInt ->
+                BuiltinCallError "`prepend` expects a list as its second argument.",
+              TStr ->
+                BuiltinCallError "`prepend` expects a list as its second argument.",
+              TBool ->
+                BuiltinCallError "`prepend` expects a list as its second argument.",
+              TFunction inputType resultType ->
+                BuiltinCallError "`prepend` expects a list as its second argument.",
+              TNamed label ->
+                BuiltinCallError "`prepend` expects a list as its second argument.",
+              TApply label args ->
+                BuiltinCallError "`prepend` expects a list as its second argument.",
+              TVar label ->
+                BuiltinCallError "`prepend` expects a list as its second argument.",
+              TUnknown label ->
+                BuiltinCallError "`prepend` expects a list as its second argument."
+            }
+        }
+    }
+  } else {
+    BuiltinCallError "Builtin `prepend` expects 2 arguments."
+  }
+}
+
+inferReverseBuiltinCall : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> BuiltinCallInferResult
+inferReverseBuiltinCall typeDecls recordDecls env localEnv fnContext args = {
+  let values = firstHostedExpr args;
+  let extra = firstHostedExpr (remainingHostedExprs args);
+  if expressionSummary values == "" then {
+    BuiltinCallError "Builtin `reverse` expects 1 argument."
+  } else if expressionSummary extra == "" then {
+    match inferExpr typeDecls recordDecls env localEnv fnContext values {
+      InferExprError message ->
+        BuiltinCallError message,
+      InferredExpr valuesType ->
+        match valuesType {
+          TList itemType ->
+            BuiltinCallInferred valuesType,
+          TInt ->
+            BuiltinCallError "`reverse` expects a list argument.",
+          TStr ->
+            BuiltinCallError "`reverse` expects a list argument.",
+          TBool ->
+            BuiltinCallError "`reverse` expects a list argument.",
+          TFunction inputType resultType ->
+            BuiltinCallError "`reverse` expects a list argument.",
+          TNamed label ->
+            BuiltinCallError "`reverse` expects a list argument.",
+          TApply label args ->
+            BuiltinCallError "`reverse` expects a list argument.",
+          TVar label ->
+            BuiltinCallError "`reverse` expects a list argument.",
+          TUnknown label ->
+            BuiltinCallError "`reverse` expects a list argument."
+        }
+    }
+  } else {
+    BuiltinCallError "Builtin `reverse` expects 1 argument."
+  }
+}
+
+inferLengthBuiltinCall : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> BuiltinCallInferResult
+inferLengthBuiltinCall typeDecls recordDecls env localEnv fnContext args = {
+  let value = firstHostedExpr args;
+  let extra = firstHostedExpr (remainingHostedExprs args);
+  if expressionSummary value == "" then {
+    BuiltinCallError "Builtin `length` expects 1 argument."
+  } else if expressionSummary extra == "" then {
+    match inferExpr typeDecls recordDecls env localEnv fnContext value {
+      InferExprError message ->
+        BuiltinCallError message,
+      InferredExpr valueType ->
+        match valueType {
+          TList itemType ->
+            BuiltinCallInferred TInt,
+          TStr ->
+            BuiltinCallInferred TInt,
+          TInt ->
+            BuiltinCallError "`length` expects a list or string argument.",
+          TBool ->
+            BuiltinCallError "`length` expects a list or string argument.",
+          TFunction inputType resultType ->
+            BuiltinCallError "`length` expects a list or string argument.",
+          TNamed label ->
+            BuiltinCallError "`length` expects a list or string argument.",
+          TApply label args ->
+            BuiltinCallError "`length` expects a list or string argument.",
+          TVar label ->
+            BuiltinCallError "`length` expects a list or string argument.",
+          TUnknown label ->
+            BuiltinCallError "`length` expects a list or string argument."
+        }
+    }
+  } else {
+    BuiltinCallError "Builtin `length` expects 1 argument."
+  }
+}
+
+inferMapBuiltinCall : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> BuiltinCallInferResult
+inferMapBuiltinCall typeDecls recordDecls env localEnv fnContext args = {
+  let functionExpr = firstHostedExpr args;
+  let valuesExpr = firstHostedExpr (remainingHostedExprs args);
+  let extraExpr = firstHostedExpr (remainingHostedExprs (remainingHostedExprs args));
+  if expressionSummary functionExpr == "" then {
+    BuiltinCallError "Builtin `map` expects 2 arguments."
+  } else if expressionSummary valuesExpr == "" then {
+    BuiltinCallError "Builtin `map` expects 2 arguments."
+  } else if expressionSummary extraExpr == "" then {
+    match functionExpr {
+      HostedName functionName ->
+        match lookupTypeBindingLayers localEnv env functionName {
+          MissingType missing ->
+            BuiltinCallError (unknownNameMessageInScope missing localEnv env),
+          FoundType functionType ->
+            match functionType {
+              TFunction inputType resultType ->
+                match inferExpr typeDecls recordDecls env localEnv fnContext valuesExpr {
+                  InferExprError message ->
+                    BuiltinCallError message,
+                  InferredExpr valuesType ->
+                    match valuesType {
+                      TList itemType ->
+                        match applyFunctionArgumentType functionName functionType itemType emptyTypeSubstitutions {
+                          ApplyCallOk mappedType substitutions ->
+                            BuiltinCallInferred (TList mappedType),
+                          ApplyCallError message ->
+                            BuiltinCallError message
+                        },
+                      TInt ->
+                        BuiltinCallError "`map` expects a list as its second argument.",
+                      TStr ->
+                        BuiltinCallError "`map` expects a list as its second argument.",
+                      TBool ->
+                        BuiltinCallError "`map` expects a list as its second argument.",
+                      TFunction nestedInputType nestedResultType ->
+                        BuiltinCallError "`map` expects a list as its second argument.",
+                      TNamed label ->
+                        BuiltinCallError "`map` expects a list as its second argument.",
+                      TApply label args ->
+                        BuiltinCallError "`map` expects a list as its second argument.",
+                      TVar label ->
+                        BuiltinCallError "`map` expects a list as its second argument.",
+                      TUnknown label ->
+                        BuiltinCallError "`map` expects a list as its second argument."
+                    }
+                },
+              TInt ->
+                BuiltinCallError "`map` expects a function name as its first argument.",
+              TStr ->
+                BuiltinCallError "`map` expects a function name as its first argument.",
+              TBool ->
+                BuiltinCallError "`map` expects a function name as its first argument.",
+              TList itemType ->
+                BuiltinCallError "`map` expects a function name as its first argument.",
+              TNamed label ->
+                BuiltinCallError "`map` expects a function name as its first argument.",
+              TApply label args ->
+                BuiltinCallError "`map` expects a function name as its first argument.",
+              TVar label ->
+                BuiltinCallError "`map` expects a function name as its first argument.",
+              TUnknown label ->
+                BuiltinCallError "`map` expects a function name as its first argument."
+            }
+        },
+      HostedString value ->
+        BuiltinCallError "`map` expects a function name as its first argument.",
+      HostedInt value ->
+        BuiltinCallError "`map` expects a function name as its first argument.",
+      HostedBool value ->
+        BuiltinCallError "`map` expects a function name as its first argument.",
+      HostedList values ->
+        BuiltinCallError "`map` expects a function name as its first argument.",
+      HostedCall callee values ->
+        BuiltinCallError "`map` expects a function name as its first argument.",
+      HostedConstructor constructorName values ->
+        BuiltinCallError "`map` expects a function name as its first argument.",
+      HostedMatch subject branches ->
+        BuiltinCallError "`map` expects a function name as its first argument.",
+      HostedRecord recordName fields ->
+        BuiltinCallError "`map` expects a function name as its first argument.",
+      HostedFieldAccess subject fieldName ->
+        BuiltinCallError "`map` expects a function name as its first argument.",
+      HostedLet binder value body ->
+        BuiltinCallError "`map` expects a function name as its first argument.",
+      HostedMutableLet binder value body ->
+        BuiltinCallError "`map` expects a function name as its first argument.",
+      HostedAssign binder value body ->
+        BuiltinCallError "`map` expects a function name as its first argument.",
+      HostedFor binder iterable loopBody body ->
+        BuiltinCallError "`map` expects a function name as its first argument.",
+      HostedReturn value ->
+        BuiltinCallError "`map` expects a function name as its first argument.",
+      HostedIf condition thenBranch elseBranch ->
+        BuiltinCallError "`map` expects a function name as its first argument.",
+      HostedEqual left right ->
+        BuiltinCallError "`map` expects a function name as its first argument.",
+      HostedNotEqual left right ->
+        BuiltinCallError "`map` expects a function name as its first argument.",
+      HostedLessThan left right ->
+        BuiltinCallError "`map` expects a function name as its first argument.",
+      HostedLessThanOrEqual left right ->
+        BuiltinCallError "`map` expects a function name as its first argument.",
+      HostedGreaterThan left right ->
+        BuiltinCallError "`map` expects a function name as its first argument.",
+      HostedGreaterThanOrEqual left right ->
+        BuiltinCallError "`map` expects a function name as its first argument."
+    }
+  } else {
+    BuiltinCallError "Builtin `map` expects 2 arguments."
+  }
+}
+
+inferFilterBuiltinCall : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> BuiltinCallInferResult
+inferFilterBuiltinCall typeDecls recordDecls env localEnv fnContext args = {
+  let functionExpr = firstHostedExpr args;
+  let valuesExpr = firstHostedExpr (remainingHostedExprs args);
+  let extraExpr = firstHostedExpr (remainingHostedExprs (remainingHostedExprs args));
+  if expressionSummary functionExpr == "" then {
+    BuiltinCallError "Builtin `filter` expects 2 arguments."
+  } else if expressionSummary valuesExpr == "" then {
+    BuiltinCallError "Builtin `filter` expects 2 arguments."
+  } else if expressionSummary extraExpr == "" then {
+    match functionExpr {
+      HostedName functionName ->
+        match lookupTypeBindingLayers localEnv env functionName {
+          MissingType missing ->
+            BuiltinCallError (unknownNameMessageInScope missing localEnv env),
+          FoundType functionType ->
+            match functionType {
+              TFunction inputType resultType ->
+                if sameType resultType TBool then {
+                  match inferExpr typeDecls recordDecls env localEnv fnContext valuesExpr {
+                    InferExprError message ->
+                      BuiltinCallError message,
+                  InferredExpr valuesType ->
+                    match valuesType {
+                      TList itemType ->
+                          match applyFunctionArgumentType functionName functionType itemType emptyTypeSubstitutions {
+                            ApplyCallOk predicateResult substitutions ->
+                              if sameType predicateResult TBool then BuiltinCallInferred valuesType else BuiltinCallError "`filter` expects a predicate function as its first argument.",
+                            ApplyCallError message ->
+                              BuiltinCallError message
+                          },
+                      TInt ->
+                        BuiltinCallError "`filter` expects a list as its second argument.",
+                      TStr ->
+                        BuiltinCallError "`filter` expects a list as its second argument.",
+                      TBool ->
+                        BuiltinCallError "`filter` expects a list as its second argument.",
+                      TFunction nestedInputType nestedResultType ->
+                        BuiltinCallError "`filter` expects a list as its second argument.",
+                      TNamed label ->
+                        BuiltinCallError "`filter` expects a list as its second argument.",
+                      TApply label args ->
+                        BuiltinCallError "`filter` expects a list as its second argument.",
+                      TVar label ->
+                        BuiltinCallError "`filter` expects a list as its second argument.",
+                      TUnknown label ->
+                        BuiltinCallError "`filter` expects a list as its second argument."
+                    }
+                  }
+                } else {
+                  BuiltinCallError "`filter` expects a predicate function as its first argument."
+                },
+              TInt ->
+                BuiltinCallError "`filter` expects a predicate function as its first argument.",
+              TStr ->
+                BuiltinCallError "`filter` expects a predicate function as its first argument.",
+              TBool ->
+                BuiltinCallError "`filter` expects a predicate function as its first argument.",
+              TList itemType ->
+                BuiltinCallError "`filter` expects a predicate function as its first argument.",
+              TNamed label ->
+                BuiltinCallError "`filter` expects a predicate function as its first argument.",
+              TApply label args ->
+                BuiltinCallError "`filter` expects a predicate function as its first argument.",
+              TVar label ->
+                BuiltinCallError "`filter` expects a predicate function as its first argument.",
+              TUnknown label ->
+                BuiltinCallError "`filter` expects a predicate function as its first argument."
+            }
+        },
+      HostedString value ->
+        BuiltinCallError "`filter` expects a predicate function as its first argument.",
+      HostedInt value ->
+        BuiltinCallError "`filter` expects a predicate function as its first argument.",
+      HostedBool value ->
+        BuiltinCallError "`filter` expects a predicate function as its first argument.",
+      HostedList values ->
+        BuiltinCallError "`filter` expects a predicate function as its first argument.",
+      HostedCall callee values ->
+        BuiltinCallError "`filter` expects a predicate function as its first argument.",
+      HostedConstructor constructorName values ->
+        BuiltinCallError "`filter` expects a predicate function as its first argument.",
+      HostedMatch subject branches ->
+        BuiltinCallError "`filter` expects a predicate function as its first argument.",
+      HostedRecord recordName fields ->
+        BuiltinCallError "`filter` expects a predicate function as its first argument.",
+      HostedFieldAccess subject fieldName ->
+        BuiltinCallError "`filter` expects a predicate function as its first argument.",
+      HostedLet binder value body ->
+        BuiltinCallError "`filter` expects a predicate function as its first argument.",
+      HostedMutableLet binder value body ->
+        BuiltinCallError "`filter` expects a predicate function as its first argument.",
+      HostedAssign binder value body ->
+        BuiltinCallError "`filter` expects a predicate function as its first argument.",
+      HostedFor binder iterable loopBody body ->
+        BuiltinCallError "`filter` expects a predicate function as its first argument.",
+      HostedReturn value ->
+        BuiltinCallError "`filter` expects a predicate function as its first argument.",
+      HostedIf condition thenBranch elseBranch ->
+        BuiltinCallError "`filter` expects a predicate function as its first argument.",
+      HostedEqual left right ->
+        BuiltinCallError "`filter` expects a predicate function as its first argument.",
+      HostedNotEqual left right ->
+        BuiltinCallError "`filter` expects a predicate function as its first argument.",
+      HostedLessThan left right ->
+        BuiltinCallError "`filter` expects a predicate function as its first argument.",
+      HostedLessThanOrEqual left right ->
+        BuiltinCallError "`filter` expects a predicate function as its first argument.",
+      HostedGreaterThan left right ->
+        BuiltinCallError "`filter` expects a predicate function as its first argument.",
+      HostedGreaterThanOrEqual left right ->
+        BuiltinCallError "`filter` expects a predicate function as its first argument."
+    }
+  } else {
+    BuiltinCallError "Builtin `filter` expects 2 arguments."
+  }
+}
+
+inferAnyBuiltinCall : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> BuiltinCallInferResult
+inferAnyBuiltinCall typeDecls recordDecls env localEnv fnContext args = {
+  let functionExpr = firstHostedExpr args;
+  let valuesExpr = firstHostedExpr (remainingHostedExprs args);
+  let extraExpr = firstHostedExpr (remainingHostedExprs (remainingHostedExprs args));
+  if expressionSummary functionExpr == "" then {
+    BuiltinCallError "Builtin `any` expects 2 arguments."
+  } else if expressionSummary valuesExpr == "" then {
+    BuiltinCallError "Builtin `any` expects 2 arguments."
+  } else if expressionSummary extraExpr == "" then {
+    match inferFilterBuiltinCall typeDecls recordDecls env localEnv fnContext args {
+      BuiltinCallInferred filteredType ->
+        BuiltinCallInferred TBool,
+      BuiltinCallNotHandled ->
+        BuiltinCallError "`any` expects a predicate function as its first argument.",
+      BuiltinCallError message ->
+        if message == "Builtin `filter` expects 2 arguments." then BuiltinCallError "Builtin `any` expects 2 arguments." else if message == "`filter` expects a list as its second argument." then BuiltinCallError "`any` expects a list as its second argument." else if message == "`filter` expects a predicate function as its first argument." then BuiltinCallError "`any` expects a predicate function as its first argument." else BuiltinCallError message
+    }
+  } else {
+    BuiltinCallError "Builtin `any` expects 2 arguments."
+  }
+}
+
+inferAllBuiltinCall : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> BuiltinCallInferResult
+inferAllBuiltinCall typeDecls recordDecls env localEnv fnContext args = {
+  let functionExpr = firstHostedExpr args;
+  let valuesExpr = firstHostedExpr (remainingHostedExprs args);
+  let extraExpr = firstHostedExpr (remainingHostedExprs (remainingHostedExprs args));
+  if expressionSummary functionExpr == "" then {
+    BuiltinCallError "Builtin `all` expects 2 arguments."
+  } else if expressionSummary valuesExpr == "" then {
+    BuiltinCallError "Builtin `all` expects 2 arguments."
+  } else if expressionSummary extraExpr == "" then {
+    match inferFilterBuiltinCall typeDecls recordDecls env localEnv fnContext args {
+      BuiltinCallInferred filteredType ->
+        BuiltinCallInferred TBool,
+      BuiltinCallNotHandled ->
+        BuiltinCallError "`all` expects a predicate function as its first argument.",
+      BuiltinCallError message ->
+        if message == "Builtin `filter` expects 2 arguments." then BuiltinCallError "Builtin `all` expects 2 arguments." else if message == "`filter` expects a list as its second argument." then BuiltinCallError "`all` expects a list as its second argument." else if message == "`filter` expects a predicate function as its first argument." then BuiltinCallError "`all` expects a predicate function as its first argument." else BuiltinCallError message
+    }
+  } else {
+    BuiltinCallError "Builtin `all` expects 2 arguments."
+  }
+}
+
+inferFoldBuiltinCall : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> BuiltinCallInferResult
+inferFoldBuiltinCall typeDecls recordDecls env localEnv fnContext args = {
+  let functionExpr = firstHostedExpr args;
+  let initialExpr = firstHostedExpr (remainingHostedExprs args);
+  let valuesExpr = firstHostedExpr (remainingHostedExprs (remainingHostedExprs args));
+  let extraExpr = firstHostedExpr (remainingHostedExprs (remainingHostedExprs (remainingHostedExprs args)));
+  if expressionSummary functionExpr == "" then {
+    BuiltinCallError "Builtin `fold` expects 3 arguments."
+  } else if expressionSummary initialExpr == "" then {
+    BuiltinCallError "Builtin `fold` expects 3 arguments."
+  } else if expressionSummary valuesExpr == "" then {
+    BuiltinCallError "Builtin `fold` expects 3 arguments."
+  } else if expressionSummary extraExpr == "" then {
+    match functionExpr {
+      HostedName functionName ->
+        match lookupTypeBindingLayers localEnv env functionName {
+          MissingType missing ->
+            BuiltinCallError (unknownNameMessageInScope missing localEnv env),
+          FoundType functionType ->
+            match inferExpr typeDecls recordDecls env localEnv fnContext initialExpr {
+              InferExprError message ->
+                BuiltinCallError message,
+              InferredExpr initialType ->
+                match inferExpr typeDecls recordDecls env localEnv fnContext valuesExpr {
+                  InferExprError message ->
+                    BuiltinCallError message,
+                  InferredExpr valuesType ->
+                    match valuesType {
+                      TList itemType ->
+                        match applyFunctionArgumentType functionName functionType initialType emptyTypeSubstitutions {
+                          ApplyCallError message ->
+                            BuiltinCallError message,
+                          ApplyCallOk nextType firstSubstitutions ->
+                            match applyFunctionArgumentType functionName nextType itemType firstSubstitutions {
+                              ApplyCallError message ->
+                                BuiltinCallError message,
+                              ApplyCallOk foldedType secondSubstitutions -> {
+                                let expectedResultType = applyTypeSubstitutions initialType secondSubstitutions;
+                                if sameType foldedType expectedResultType then BuiltinCallInferred expectedResultType else BuiltinCallError (typeMismatchMessage functionName expectedResultType foldedType)
+                              }
+                            }
+                        },
+                      TInt ->
+                        BuiltinCallError "`fold` expects a list as its third argument.",
+                      TStr ->
+                        BuiltinCallError "`fold` expects a list as its third argument.",
+                      TBool ->
+                        BuiltinCallError "`fold` expects a list as its third argument.",
+                      TFunction inputType resultType ->
+                        BuiltinCallError "`fold` expects a list as its third argument.",
+                      TNamed label ->
+                        BuiltinCallError "`fold` expects a list as its third argument.",
+                      TApply label args ->
+                        BuiltinCallError "`fold` expects a list as its third argument.",
+                      TVar label ->
+                        BuiltinCallError "`fold` expects a list as its third argument.",
+                      TUnknown label ->
+                        BuiltinCallError "`fold` expects a list as its third argument."
+                    }
+                }
+            }
+        },
+      HostedString value ->
+        BuiltinCallError "`fold` expects a function name as its first argument.",
+      HostedInt value ->
+        BuiltinCallError "`fold` expects a function name as its first argument.",
+      HostedBool value ->
+        BuiltinCallError "`fold` expects a function name as its first argument.",
+      HostedList values ->
+        BuiltinCallError "`fold` expects a function name as its first argument.",
+      HostedCall callee values ->
+        BuiltinCallError "`fold` expects a function name as its first argument.",
+      HostedConstructor constructorName values ->
+        BuiltinCallError "`fold` expects a function name as its first argument.",
+      HostedMatch subject branches ->
+        BuiltinCallError "`fold` expects a function name as its first argument.",
+      HostedRecord recordName fields ->
+        BuiltinCallError "`fold` expects a function name as its first argument.",
+      HostedFieldAccess subject fieldName ->
+        BuiltinCallError "`fold` expects a function name as its first argument.",
+      HostedLet binder value body ->
+        BuiltinCallError "`fold` expects a function name as its first argument.",
+      HostedMutableLet binder value body ->
+        BuiltinCallError "`fold` expects a function name as its first argument.",
+      HostedAssign binder value body ->
+        BuiltinCallError "`fold` expects a function name as its first argument.",
+      HostedFor binder iterable loopBody body ->
+        BuiltinCallError "`fold` expects a function name as its first argument.",
+      HostedReturn value ->
+        BuiltinCallError "`fold` expects a function name as its first argument.",
+      HostedIf condition thenBranch elseBranch ->
+        BuiltinCallError "`fold` expects a function name as its first argument.",
+      HostedEqual left right ->
+        BuiltinCallError "`fold` expects a function name as its first argument.",
+      HostedNotEqual left right ->
+        BuiltinCallError "`fold` expects a function name as its first argument.",
+      HostedLessThan left right ->
+        BuiltinCallError "`fold` expects a function name as its first argument.",
+      HostedLessThanOrEqual left right ->
+        BuiltinCallError "`fold` expects a function name as its first argument.",
+      HostedGreaterThan left right ->
+        BuiltinCallError "`fold` expects a function name as its first argument.",
+      HostedGreaterThanOrEqual left right ->
+        BuiltinCallError "`fold` expects a function name as its first argument."
+    }
+  } else {
+    BuiltinCallError "Builtin `fold` expects 3 arguments."
+  }
+}
+
+inferEncodeBuiltinCall : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> BuiltinCallInferResult
+inferEncodeBuiltinCall typeDecls recordDecls env localEnv fnContext args = {
+  let value = firstHostedExpr args;
+  if expressionSummary value == "" then {
+    BuiltinCallError "Builtin `encode` expects 1 argument."
+  } else {
+    match inferExpr typeDecls recordDecls env localEnv fnContext value {
+      InferExprError message ->
+        BuiltinCallError message,
+      InferredExpr valueType ->
+        BuiltinCallInferred TStr
+    }
+  }
+}
+
+inferDecodeBuiltinCall : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> BuiltinCallInferResult
+inferDecodeBuiltinCall typeDecls recordDecls env localEnv fnContext args = {
+  let targetExpr = firstHostedExpr args;
+  let rawExpr = firstHostedExpr (remainingHostedExprs args);
+  let extraExpr = firstHostedExpr (remainingHostedExprs (remainingHostedExprs args));
+  if expressionSummary targetExpr == "" then {
+    BuiltinCallError "Builtin `decode` expects 2 arguments."
+  } else if expressionSummary rawExpr == "" then {
+    BuiltinCallError "Builtin `decode` expects 2 arguments."
+  } else if expressionSummary extraExpr == "" then {
+    match decodeTargetTypeFromExpr targetExpr {
+      DecodeTargetTypeError message ->
+        BuiltinCallError message,
+      DecodeTargetType targetType ->
+        match inferExpr typeDecls recordDecls env localEnv fnContext rawExpr {
+          InferExprError message ->
+            BuiltinCallError message,
+          InferredExpr rawType ->
+            if sameType rawType TStr then BuiltinCallInferred targetType else BuiltinCallError (typeMismatchMessage (expressionSummary rawExpr) TStr rawType)
+        }
+    }
+  } else {
+    BuiltinCallError "Builtin `decode` expects 2 arguments."
+  }
+}
+
+inferTryDecodeBuiltinCall : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> BuiltinCallInferResult
+inferTryDecodeBuiltinCall typeDecls recordDecls env localEnv fnContext args = {
+  let targetExpr = firstHostedExpr args;
+  let rawExpr = firstHostedExpr (remainingHostedExprs args);
+  let extraExpr = firstHostedExpr (remainingHostedExprs (remainingHostedExprs args));
+  if expressionSummary targetExpr == "" then {
+    BuiltinCallError "Builtin `tryDecode` expects 2 arguments."
+  } else if expressionSummary rawExpr == "" then {
+    BuiltinCallError "Builtin `tryDecode` expects 2 arguments."
+  } else if expressionSummary extraExpr == "" then {
+    match decodeTargetTypeFromExpr targetExpr {
+      DecodeTargetTypeError message ->
+        BuiltinCallError (textJoin "tryDecode" (textSplit message "decode")),
+      DecodeTargetType targetType ->
+        match inferExpr typeDecls recordDecls env localEnv fnContext rawExpr {
+          InferExprError message ->
+            BuiltinCallError message,
+          InferredExpr rawType ->
+            if sameType rawType TStr then BuiltinCallInferred (TApply "Result" [targetType]) else BuiltinCallError (typeMismatchMessage (expressionSummary rawExpr) TStr rawType)
+        }
+    }
+  } else {
+    BuiltinCallError "Builtin `tryDecode` expects 2 arguments."
+  }
+}
+
+inferBuiltinCall : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> Str -> [HostedExprAst] -> BuiltinCallInferResult
+inferBuiltinCall typeDecls recordDecls env localEnv fnContext callee args = if callee == "append" then {
+  inferAppendBuiltinCall typeDecls recordDecls env localEnv fnContext args
+} else if callee == "length" then {
+  inferLengthBuiltinCall typeDecls recordDecls env localEnv fnContext args
+} else if callee == "decode" then {
+  inferDecodeBuiltinCall typeDecls recordDecls env localEnv fnContext args
+} else if callee == "tryDecode" then {
+  inferTryDecodeBuiltinCall typeDecls recordDecls env localEnv fnContext args
+} else if callee == "encode" then {
+  inferEncodeBuiltinCall typeDecls recordDecls env localEnv fnContext args
+} else if callee == recordUpdateBuiltinName then {
+  inferRecordUpdateBuiltinCall typeDecls recordDecls env localEnv fnContext args
+} else {
+  BuiltinCallNotHandled
+}
+
+inferExprAgainst : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> TypeText -> HostedExprAst -> InferExprResult
+inferExprAgainst typeDecls recordDecls env localEnv fnContext expectedType expr = match inferExpr typeDecls recordDecls env localEnv fnContext expr {
+  InferExprError message ->
+    InferExprError message,
+  InferredExpr actualType ->
+    match unifyTypes expectedType actualType emptyTypeSubstitutions {
+      UnifiedTypes substitutions ->
+        InferredExpr (applyTypeSubstitutions expectedType substitutions),
+      TypeUnifyError ->
+        InferExprError (typeMismatchMessage (expressionSummary expr) expectedType actualType)
+    }
+}
+
+inferExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedExprAst -> InferExprResult
+inferExpr typeDecls recordDecls env localEnv fnContext expr = match expr {
+  HostedString value ->
+    InferredExpr TStr,
+  HostedInt value ->
+    InferredExpr TInt,
+  HostedBool value ->
+    InferredExpr TBool,
+  HostedList values ->
+    inferListExpr typeDecls recordDecls env localEnv fnContext values,
+  HostedCall callee args ->
+    match inferBuiltinCall typeDecls recordDecls env localEnv fnContext callee args {
+      BuiltinCallInferred builtinType ->
+        InferredExpr builtinType,
+      BuiltinCallError message ->
+        InferExprError message,
+      BuiltinCallNotHandled ->
+        match lookupTypeBindingLayersInstantiated localEnv env callee (textConcat ["call:", callee]) {
+          FoundType calleeType ->
+            applyCallType typeDecls recordDecls env localEnv fnContext callee calleeType args,
+          MissingType missing ->
+            InferExprError (unknownNameMessageInScope missing localEnv env)
+        }
+    },
+  HostedConstructor constructorName args ->
+    inferConstructorExpr typeDecls recordDecls env localEnv fnContext constructorName args,
+  HostedMatch subject branches ->
+    inferMatchExpr typeDecls recordDecls env localEnv fnContext subject branches,
+  HostedRecord recordName fields ->
+    inferRecordExpr typeDecls recordDecls env localEnv fnContext recordName fields,
+  HostedFieldAccess subject fieldName ->
+    inferFieldAccessExpr typeDecls recordDecls env localEnv fnContext subject fieldName,
+  HostedLet binder value body ->
+    inferLetExpr typeDecls recordDecls env localEnv fnContext binder value body,
+  HostedMutableLet binder value body ->
+    inferLetExpr typeDecls recordDecls env localEnv fnContext binder value body,
+  HostedAssign binder value body ->
+    inferAssignExpr typeDecls recordDecls env localEnv fnContext binder value body,
+  HostedFor binder iterable loopBody body ->
+    inferForExpr typeDecls recordDecls env localEnv fnContext binder iterable loopBody body,
+  HostedReturn value ->
+    inferReturnExpr typeDecls recordDecls env localEnv fnContext value,
+  HostedIf condition thenBranch elseBranch ->
+    inferIfExpr typeDecls recordDecls env localEnv fnContext condition thenBranch elseBranch,
+  HostedEqual left right ->
+    inferEqualityExpr typeDecls recordDecls env localEnv fnContext left right,
+  HostedNotEqual left right ->
+    inferEqualityExpr typeDecls recordDecls env localEnv fnContext left right,
+  HostedLessThan left right ->
+    inferIntegerComparisonExpr typeDecls recordDecls env localEnv fnContext left right "<",
+  HostedLessThanOrEqual left right ->
+    inferIntegerComparisonExpr typeDecls recordDecls env localEnv fnContext left right "<=",
+  HostedGreaterThan left right ->
+    inferIntegerComparisonExpr typeDecls recordDecls env localEnv fnContext left right ">",
+  HostedGreaterThanOrEqual left right ->
+    inferIntegerComparisonExpr typeDecls recordDecls env localEnv fnContext left right ">=",
+  HostedName name ->
+    match lookupTypeBindingLayersInstantiated localEnv env name (textConcat ["name:", name]) {
+      FoundType bindingType ->
+        InferredExpr bindingType,
+      MissingType missing ->
+        InferExprError (unknownNameMessageInScope missing localEnv env)
+    }
+}
+
+inferLetExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> Str -> HostedExprAst -> HostedExprAst -> InferExprResult
+inferLetExpr typeDecls recordDecls env localEnv fnContext binder value body = match inferExpr typeDecls recordDecls env localEnv fnContext value {
+  InferExprError message ->
+    InferExprError message,
+  InferredExpr valueType ->
+    inferExpr typeDecls recordDecls env (appendTypeBinding localEnv (TypeBinding binder (generalizeBindingType env localEnv fnContext valueType))) fnContext body
+}
+
+inferAssignExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> Str -> HostedExprAst -> HostedExprAst -> InferExprResult
+inferAssignExpr typeDecls recordDecls env localEnv fnContext binder value body = match lookupTypeBinding localEnv binder {
+  MissingType missing ->
+    InferExprError (unknownNameMessageInScope missing localEnv env),
+  FoundType binderType ->
+    match inferExprAgainst typeDecls recordDecls env localEnv fnContext binderType value {
+      InferExprError message ->
+        InferExprError message,
+      InferredExpr valueType ->
+        inferExpr typeDecls recordDecls env localEnv fnContext body
+    }
+}
+
+inferForExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> Str -> HostedExprAst -> HostedExprAst -> HostedExprAst -> InferExprResult
+inferForExpr typeDecls recordDecls env localEnv fnContext binder iterable loopBody body = match inferExpr typeDecls recordDecls env localEnv fnContext iterable {
+  InferExprError message ->
+    InferExprError message,
+  InferredExpr iterableType ->
+    match iterableType {
+      TList itemType ->
+        match inferExpr typeDecls recordDecls env (appendTypeBinding localEnv (TypeBinding binder itemType)) fnContext loopBody {
+          InferExprError message ->
+            InferExprError message,
+          InferredExpr loopBodyType ->
+            inferExpr typeDecls recordDecls env localEnv fnContext body
+        },
+      TStr ->
+        match inferExpr typeDecls recordDecls env (appendTypeBinding localEnv (TypeBinding binder TStr)) fnContext loopBody {
+          InferExprError message ->
+            InferExprError message,
+          InferredExpr loopBodyType ->
+            inferExpr typeDecls recordDecls env localEnv fnContext body
+        },
+      TInt ->
+        InferExprError (textConcat ["`", expressionSummary iterable, "` is not iterable."]),
+      TBool ->
+        InferExprError (textConcat ["`", expressionSummary iterable, "` is not iterable."]),
+      TFunction input result ->
+        InferExprError (textConcat ["`", expressionSummary iterable, "` is not iterable."]),
+      TNamed label ->
+        InferExprError (textConcat ["`", expressionSummary iterable, "` is not iterable."]),
+      TApply label args ->
+        InferExprError (textConcat ["`", expressionSummary iterable, "` is not iterable."]),
+      TVar label ->
+        InferExprError (textConcat ["`", expressionSummary iterable, "` is not iterable."]),
+      TUnknown label ->
+        InferExprError (textConcat ["`", expressionSummary iterable, "` is not iterable."])
+    }
+}
+
+inferReturnExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedExprAst -> InferExprResult
+inferReturnExpr typeDecls recordDecls env localEnv fnContext value = match fnContext {
+  OutsideFunction ->
+    InferExprError "`return` is only allowed inside function bodies.",
+  InsideFunction expectedType ->
+    inferExprAgainst typeDecls recordDecls env localEnv fnContext expectedType value
+}
+
+inferIfExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedExprAst -> HostedExprAst -> HostedExprAst -> InferExprResult
+inferIfExpr typeDecls recordDecls env localEnv fnContext condition thenBranch elseBranch = match inferExpr typeDecls recordDecls env localEnv fnContext condition {
+  InferExprError message ->
+    InferExprError message,
+  InferredExpr conditionType ->
+    match unifyTypes TBool conditionType emptyTypeSubstitutions {
+      TypeUnifyError ->
+        InferExprError (typeMismatchMessage "if condition" TBool conditionType),
+      UnifiedTypes conditionSubstitutions -> {
+      match inferExpr typeDecls recordDecls env localEnv fnContext thenBranch {
+        InferExprError message ->
+          InferExprError message,
+        InferredExpr thenType ->
+          match inferExprAgainst typeDecls recordDecls env localEnv fnContext thenType elseBranch {
+            InferExprError message ->
+              InferExprError message,
+            InferredExpr elseType ->
+              InferredExpr elseType
+          }
+      }
+    }
+    }
+}
+
+inferEqualityExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedExprAst -> HostedExprAst -> InferExprResult
+inferEqualityExpr typeDecls recordDecls env localEnv fnContext left right = match inferExpr typeDecls recordDecls env localEnv fnContext left {
+  InferExprError message ->
+    InferExprError message,
+  InferredExpr leftType ->
+    match inferExprAgainst typeDecls recordDecls env localEnv fnContext leftType right {
+      InferExprError message ->
+        InferExprError message,
+      InferredExpr rightType ->
+        if supportsHostedEquality leftType then InferredExpr TBool else InferExprError (textConcat ["`", renderType leftType, "` does not support equality."])
+    }
+}
+
+inferIntegerComparisonExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedExprAst -> HostedExprAst -> Str -> InferExprResult
+inferIntegerComparisonExpr typeDecls recordDecls env localEnv fnContext left right operatorName = match inferExpr typeDecls recordDecls env localEnv fnContext left {
+  InferExprError message ->
+    InferExprError message,
+  InferredExpr leftType ->
+    match unifyTypes TInt leftType emptyTypeSubstitutions {
+      TypeUnifyError ->
+        InferExprError (typeMismatchMessage (textConcat ["operator ", operatorName]) TInt leftType),
+      UnifiedTypes substitutions ->
+      match inferExprAgainst typeDecls recordDecls env localEnv fnContext TInt right {
+        InferExprError message ->
+          InferExprError message,
+        InferredExpr rightType ->
+          InferredExpr TBool
+      }
+    }
+}
+
+inferListExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> InferExprResult
+inferListExpr typeDecls recordDecls env localEnv fnContext values = {
+  let mut state = WaitingForItem;
+  for value in values {
+    let step = inferExpr typeDecls recordDecls env localEnv fnContext value;
+    state = match state {
+      WaitingForItem ->
+        match step {
+          InferredExpr valueType ->
+            SeenItemType valueType,
+          InferExprError message ->
+            SeenListError message
+        },
+      SeenItemType currentType ->
+        match step {
+          InferredExpr valueType ->
+            match unifyTypes currentType valueType emptyTypeSubstitutions {
+              UnifiedTypes substitutions ->
+                SeenItemType (applyTypeSubstitutions currentType substitutions),
+              TypeUnifyError ->
+                SeenListError (textConcat ["expected ", renderType currentType, " but found ", renderType valueType])
+            },
+          InferExprError message ->
+            SeenListError message
+        },
+      SeenListError message ->
+        SeenListError message
+    };
+    state
+  };
+  match state {
+    WaitingForItem ->
+      InferredExpr (TList (TUnknown "<list-item>")),
+    SeenItemType itemType ->
+      InferredExpr (TList itemType),
+    SeenListError message ->
+      InferExprError message
+  }
+}
+
+inferRecordFieldValue : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedRecordDeclAst -> HostedRecordFieldDeclAst -> [HostedRecordFieldExprAst] -> InferExprResult
+inferRecordFieldValue typeDecls recordDecls env localEnv fnContext recordDecl fieldDecl fields = {
+  let fieldName = recordFieldDeclName fieldDecl;
+  let recordName = recordDeclName recordDecl;
+  let expectedType = typeFromHostedTypeAst (recordFieldDeclType fieldDecl);
+  match lookupRecordExprField fields fieldName {
+    MissingRecordExprField missingField ->
+      InferExprError (textConcat ["Record literal for `", recordName, "` is missing field `", missingField, "`."]),
+    FoundRecordExprField exprField ->
+      inferExprAgainst typeDecls recordDecls env localEnv fnContext expectedType (recordExprFieldValue exprField)
+  }
+}
+
+findRecordLiteralFailure : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedRecordDeclAst -> [HostedRecordFieldExprAst] -> Str
+findRecordLiteralFailure typeDecls recordDecls env localEnv fnContext recordDecl fields = {
+  for fieldDecl in recordDeclFields recordDecl {
+    match inferRecordFieldValue typeDecls recordDecls env localEnv fnContext recordDecl fieldDecl fields {
+      InferredExpr inferredType ->
+        "",
+      InferExprError message ->
+        return message
+    }
+  };
+  ""
+}
+
+inferRecordExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> Str -> [HostedRecordFieldExprAst] -> InferExprResult
+inferRecordExpr typeDecls recordDecls env localEnv fnContext recordName fields = match lookupRecordDecl recordDecls recordName {
+  MissingRecord missing ->
+    InferExprError (textConcat ["Unknown record `", missing, "`."]),
+  FoundRecord recordDecl -> {
+    let fieldValidationFailure = findRecordLiteralFieldValidationFailure recordDecl fields;
+    if fieldValidationFailure == "" then {
+      match inferRecordLiteralSubstitutions typeDecls recordDecls env localEnv fnContext recordDecl fields {
+        RecordSubstitutionOk substitutions ->
+          InferredExpr (applyTypeSubstitutions (recordDeclResultType recordDecl) substitutions),
+        RecordSubstitutionError message ->
+          InferExprError message
+      }
+    } else {
+      InferExprError fieldValidationFailure
+    }
+  }
+}
+
+findRecordUpdateFailure : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedRecordDeclAst -> [HostedRecordFieldExprAst] -> [TypeSubstitution] -> Str
+findRecordUpdateFailure typeDecls recordDecls env localEnv fnContext recordDecl fields substitutions = {
+  let mut seenFields = emptyRenderedTexts;
+  for exprField in fields {
+    let fieldName = recordExprFieldName exprField;
+    if containsText seenFields fieldName then {
+      return textConcat ["Record update for `", recordDeclName recordDecl, "` repeats field `", fieldName, "`."]
+    } else {
+      seenFields = appendCheckerRenderedText seenFields fieldName;
+      match lookupRecordField (recordDeclFields recordDecl) fieldName {
+        MissingRecordField missingField ->
+          return textConcat ["Record update for `", recordDeclName recordDecl, "` includes unknown field `", missingField, "`."],
+        FoundRecordField fieldDecl ->
+          match inferExpr typeDecls recordDecls env localEnv fnContext (recordExprFieldValue exprField) {
+            InferExprError message ->
+              return message,
+            InferredExpr actualType -> {
+              let expectedType = applyTypeSubstitutions (typeFromHostedTypeAst (recordFieldDeclType fieldDecl)) substitutions;
+              match unifyTypes expectedType actualType emptyTypeSubstitutions {
+                UnifiedTypes next ->
+                  "",
+                TypeUnifyError ->
+                  return typeMismatchMessage fieldName expectedType actualType
+              }
+            }
+          }
+      }
+    }
+  };
+  ""
+}
+
+inferRecordUpdateBuiltinCall : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> BuiltinCallInferResult
+inferRecordUpdateBuiltinCall typeDecls recordDecls env localEnv fnContext args = {
+  let subjectExpr = firstHostedExpr args;
+  let overrideExpr = firstHostedExpr (remainingHostedExprs args);
+  let extraExpr = firstHostedExpr (remainingHostedExprs (remainingHostedExprs args));
+  if expressionSummary subjectExpr == "" then {
+    BuiltinCallError "Record update expects 2 arguments."
+  } else if expressionSummary overrideExpr == "" then {
+    BuiltinCallError "Record update expects 2 arguments."
+  } else if expressionSummary extraExpr == "" then {
+    match overrideExpr {
+      HostedRecord recordName fields ->
+        if recordName == recordUpdatePlaceholderName then {
+          match inferExpr typeDecls recordDecls env localEnv fnContext subjectExpr {
+            InferExprError message ->
+              BuiltinCallError message,
+            InferredExpr subjectType ->
+              match subjectType {
+                TNamed actualRecordName ->
+                  match lookupRecordDecl recordDecls actualRecordName {
+                    FoundRecord recordDecl -> {
+                      let failure = findRecordUpdateFailure typeDecls recordDecls env localEnv fnContext recordDecl fields emptyTypeSubstitutions;
+                      if failure == "" then BuiltinCallInferred subjectType else BuiltinCallError failure
+                    },
+                    MissingRecord missing ->
+                      BuiltinCallError (textConcat ["Unknown record `", missing, "`."])
+                  },
+                TApply actualRecordName actualArgs ->
+                  match lookupRecordDecl recordDecls actualRecordName {
+                    FoundRecord recordDecl -> {
+                      let failure = findRecordUpdateFailure typeDecls recordDecls env localEnv fnContext recordDecl fields (recordDeclInstantiations recordDecl subjectType);
+                      if failure == "" then BuiltinCallInferred subjectType else BuiltinCallError failure
+                    },
+                    MissingRecord missing ->
+                      BuiltinCallError (textConcat ["Unknown record `", missing, "`."])
+                  },
+                TInt ->
+                  BuiltinCallError "`with` expects a record value.",
+                TStr ->
+                  BuiltinCallError "`with` expects a record value.",
+                TBool ->
+                  BuiltinCallError "`with` expects a record value.",
+                TList itemType ->
+                  BuiltinCallError "`with` expects a record value.",
+                TFunction inputType resultType ->
+                  BuiltinCallError "`with` expects a record value.",
+                TVar label ->
+                  BuiltinCallError "`with` expects a record value.",
+                TUnknown label ->
+                  BuiltinCallError (textConcat ["Could not infer the record type of `", expressionSummary subjectExpr, "`."])
+              }
+          }
+        } else {
+          BuiltinCallError "Record update expects override fields."
+        },
+      HostedName name ->
+        BuiltinCallError "Record update expects override fields.",
+      HostedString value ->
+        BuiltinCallError "Record update expects override fields.",
+      HostedInt value ->
+        BuiltinCallError "Record update expects override fields.",
+      HostedBool value ->
+        BuiltinCallError "Record update expects override fields.",
+      HostedList values ->
+        BuiltinCallError "Record update expects override fields.",
+      HostedCall callee callArgs ->
+        BuiltinCallError "Record update expects override fields.",
+      HostedConstructor constructorName constructorArgs ->
+        BuiltinCallError "Record update expects override fields.",
+      HostedMatch subject branches ->
+        BuiltinCallError "Record update expects override fields.",
+      HostedFieldAccess subject fieldName ->
+        BuiltinCallError "Record update expects override fields.",
+      HostedLet binder value body ->
+        BuiltinCallError "Record update expects override fields.",
+      HostedMutableLet binder value body ->
+        BuiltinCallError "Record update expects override fields.",
+      HostedAssign binder value body ->
+        BuiltinCallError "Record update expects override fields.",
+      HostedFor binder iterable loopBody body ->
+        BuiltinCallError "Record update expects override fields.",
+      HostedReturn value ->
+        BuiltinCallError "Record update expects override fields.",
+      HostedIf condition thenBranch elseBranch ->
+        BuiltinCallError "Record update expects override fields.",
+      HostedEqual left right ->
+        BuiltinCallError "Record update expects override fields.",
+      HostedNotEqual left right ->
+        BuiltinCallError "Record update expects override fields.",
+      HostedLessThan left right ->
+        BuiltinCallError "Record update expects override fields.",
+      HostedLessThanOrEqual left right ->
+        BuiltinCallError "Record update expects override fields.",
+      HostedGreaterThan left right ->
+        BuiltinCallError "Record update expects override fields.",
+      HostedGreaterThanOrEqual left right ->
+        BuiltinCallError "Record update expects override fields."
+    }
+  } else {
+    BuiltinCallError "Record update expects 2 arguments."
+  }
+}
+
+inferFieldAccessExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedExprAst -> Str -> InferExprResult
+inferFieldAccessExpr typeDecls recordDecls env localEnv fnContext subject fieldName = match inferExpr typeDecls recordDecls env localEnv fnContext subject {
+  InferExprError message ->
+    InferExprError message,
+  InferredExpr subjectType ->
+    match subjectType {
+      TNamed recordName ->
+        match lookupRecordDecl recordDecls recordName {
+          FoundRecord recordDecl ->
+            match lookupRecordField (recordDeclFields recordDecl) fieldName {
+              FoundRecordField field ->
+                InferredExpr (typeFromHostedTypeAst (recordFieldDeclType field)),
+              MissingRecordField missingField ->
+                InferExprError (textConcat ["Record `", recordName, "` does not define field `", missingField, "`."])
+            },
+          MissingRecord missing ->
+            match lookupTypeDecl typeDecls recordName {
+              FoundTypeDecl typeDecl ->
+                InferExprError (textConcat ["`", expressionSummary subject, "` does not support field access."]),
+              MissingTypeDecl missingType ->
+                InferExprError (textConcat ["Unknown record `", missing, "`."])
+            }
+        },
+      TApply recordName args ->
+        match lookupRecordDecl recordDecls recordName {
+          FoundRecord recordDecl ->
+            match lookupRecordField (recordDeclFields recordDecl) fieldName {
+              FoundRecordField field ->
+                InferredExpr (applyTypeSubstitutions (typeFromHostedTypeAst (recordFieldDeclType field)) (recordDeclInstantiations recordDecl subjectType)),
+              MissingRecordField missingField ->
+                InferExprError (textConcat ["Record `", recordName, "` does not define field `", missingField, "`."])
+            },
+          MissingRecord missing ->
+            match lookupTypeDecl typeDecls recordName {
+              FoundTypeDecl typeDecl ->
+                InferExprError (textConcat ["`", expressionSummary subject, "` does not support field access."]),
+              MissingTypeDecl missingType ->
+                InferExprError (textConcat ["Unknown record `", missing, "`."])
+            }
+        },
+      TInt ->
+        InferExprError (textConcat ["`", expressionSummary subject, "` does not support field access."]),
+      TStr ->
+        InferExprError (textConcat ["`", expressionSummary subject, "` does not support field access."]),
+      TBool ->
+        InferExprError (textConcat ["`", expressionSummary subject, "` does not support field access."]),
+      TList itemType ->
+        InferExprError (textConcat ["`", expressionSummary subject, "` does not support field access."]),
+      TFunction inputType resultType ->
+        InferExprError (textConcat ["`", expressionSummary subject, "` does not support field access."]),
+      TVar label ->
+        InferExprError (textConcat ["Could not infer the record type of `", expressionSummary subject, "`."]),
+      TUnknown label ->
+        InferExprError (textConcat ["Could not infer the record type of `", expressionSummary subject, "`."])
+    }
+}
+
+inferConstructorExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> Str -> [HostedExprAst] -> InferExprResult
+inferConstructorExpr typeDecls recordDecls env localEnv fnContext constructorName args = match lookupConstructorDecl typeDecls constructorName {
+  FoundConstructor typeName constructorDecl ->
+    match lookupTypeDecl typeDecls typeName {
+      FoundTypeDecl typeDecl ->
+        applyCallType typeDecls recordDecls env localEnv fnContext constructorName (instantiateGenericType (textConcat ["ctor:", constructorName]) (buildFunctionType (constructorDeclPayloadTypes constructorDecl) (typeDeclResultType typeDecl))) args,
+      MissingTypeDecl missing ->
+        InferExprError (textConcat ["Unknown type `", missing, "`."])
+    },
+  MissingConstructor missing ->
+    InferExprError (unknownConstructorMessage missing)
+}
+
+inferMatchBranch : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedTypeDeclAst -> TypeText -> HostedMatchBranchAst -> InferMatchBranchResult
+inferMatchBranch typeDecls recordDecls env localEnv fnContext typeDecl subjectType branch = {
+  let pattern = branchPatternAst branch;
+  let constructorName = patternConstructorName pattern;
+  match bindPattern typeDecl subjectType pattern {
+    PatternBindError message ->
+      InferMatchBranchError message,
+    BoundPattern bindings ->
+      match inferExpr typeDecls recordDecls env (append bindings localEnv) fnContext (branchBodyExpr branch) {
+        InferExprError message ->
+          InferMatchBranchError message,
+        InferredExpr bodyType ->
+          InferredMatchBranch constructorName bodyType
+      }
+  }
+}
+
+inferMatchExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedExprAst -> [HostedMatchBranchAst] -> InferExprResult
+inferMatchExpr typeDecls recordDecls env localEnv fnContext subject branches = match inferExpr typeDecls recordDecls env localEnv fnContext subject {
+  InferExprError message ->
+    InferExprError message,
+  InferredExpr subjectType ->
+    match subjectType {
+      TNamed typeName ->
+        match lookupTypeDecl typeDecls typeName {
+          MissingTypeDecl missing ->
+            InferExprError (textConcat ["`", expressionSummary subject, "` does not support match."]),
+          FoundTypeDecl typeDecl -> {
+            let mut state = WaitingForBranch emptyRenderedTexts;
+            for branch in branches {
+              state = match state {
+                SeenMatchError message ->
+                  SeenMatchError message,
+                WaitingForBranch seen -> {
+                  let constructorName = patternConstructorName (branchPatternAst branch);
+                  if containsText seen constructorName then {
+                    SeenMatchError (textConcat ["Duplicate match branch for constructor `", constructorName, "`."])
+                  } else {
+                    match inferMatchBranch typeDecls recordDecls env localEnv fnContext typeDecl subjectType branch {
+                      InferMatchBranchError message ->
+                        SeenMatchError message,
+                      InferredMatchBranch seenConstructor bodyType ->
+                        SeenBranchType (append seen [seenConstructor]) bodyType
+                    }
+                  }
+                },
+                SeenBranchType seen currentType -> {
+                  let constructorName = patternConstructorName (branchPatternAst branch);
+                  if containsText seen constructorName then {
+                    SeenMatchError (textConcat ["Duplicate match branch for constructor `", constructorName, "`."])
+                  } else {
+                    match inferMatchBranch typeDecls recordDecls env localEnv fnContext typeDecl subjectType branch {
+                      InferMatchBranchError message ->
+                        SeenMatchError message,
+                      InferredMatchBranch seenConstructor bodyType ->
+                        match unifyTypes currentType bodyType emptyTypeSubstitutions {
+                          UnifiedTypes substitutions ->
+                            SeenBranchType (append seen [seenConstructor]) (applyTypeSubstitutions currentType substitutions),
+                          TypeUnifyError ->
+                            SeenMatchError (typeMismatchMessage constructorName currentType bodyType)
+                        }
+                    }
+                  }
+                }
+              };
+              state
+            };
+            match state {
+              SeenMatchError message ->
+                InferExprError message,
+              WaitingForBranch seen ->
+                InferExprError "Match expression needs at least one branch.",
+              SeenBranchType seen resultType -> {
+                let missingBranch = findMissingBranchName typeDecl seen;
+                if missingBranch == "" then InferredExpr resultType else InferExprError (textConcat ["Non-exhaustive match for `", typeName, "` is missing branch `", missingBranch, "`."])
+              }
+            }
+          }
+        },
+      TApply typeName args ->
+        match lookupTypeDecl typeDecls typeName {
+          MissingTypeDecl missing ->
+            InferExprError (textConcat ["`", expressionSummary subject, "` does not support match."]),
+          FoundTypeDecl typeDecl -> {
+            let mut state = WaitingForBranch emptyRenderedTexts;
+            for branch in branches {
+              state = match state {
+                SeenMatchError message ->
+                  SeenMatchError message,
+                WaitingForBranch seen -> {
+                  let constructorName = patternConstructorName (branchPatternAst branch);
+                  if containsText seen constructorName then {
+                    SeenMatchError (textConcat ["Duplicate match branch for constructor `", constructorName, "`."])
+                  } else {
+                    match inferMatchBranch typeDecls recordDecls env localEnv fnContext typeDecl subjectType branch {
+                      InferMatchBranchError message ->
+                        SeenMatchError message,
+                      InferredMatchBranch seenConstructor bodyType ->
+                        SeenBranchType (append seen [seenConstructor]) bodyType
+                    }
+                  }
+                },
+                SeenBranchType seen currentType -> {
+                  let constructorName = patternConstructorName (branchPatternAst branch);
+                  if containsText seen constructorName then {
+                    SeenMatchError (textConcat ["Duplicate match branch for constructor `", constructorName, "`."])
+                  } else {
+                    match inferMatchBranch typeDecls recordDecls env localEnv fnContext typeDecl subjectType branch {
+                      InferMatchBranchError message ->
+                        SeenMatchError message,
+                      InferredMatchBranch seenConstructor bodyType ->
+                        match unifyTypes currentType bodyType emptyTypeSubstitutions {
+                          UnifiedTypes substitutions ->
+                            SeenBranchType (append seen [seenConstructor]) (applyTypeSubstitutions currentType substitutions),
+                          TypeUnifyError ->
+                            SeenMatchError (typeMismatchMessage constructorName currentType bodyType)
+                        }
+                    }
+                  }
+                }
+              };
+              state
+            };
+            match state {
+              SeenMatchError message ->
+                InferExprError message,
+              WaitingForBranch seen ->
+                InferExprError "Match expression needs at least one branch.",
+              SeenBranchType seen resultType -> {
+                let missingBranch = findMissingBranchName typeDecl seen;
+                if missingBranch == "" then InferredExpr resultType else InferExprError (textConcat ["Non-exhaustive match for `", typeName, "` is missing branch `", missingBranch, "`."])
+              }
+            }
+          }
+        },
+      TInt ->
+        InferExprError (textConcat ["`", expressionSummary subject, "` does not support match."]),
+      TStr ->
+        InferExprError (textConcat ["`", expressionSummary subject, "` does not support match."]),
+      TBool ->
+        InferExprError (textConcat ["`", expressionSummary subject, "` does not support match."]),
+      TList itemType ->
+        InferExprError (textConcat ["`", expressionSummary subject, "` does not support match."]),
+      TFunction inputType resultType ->
+        InferExprError (textConcat ["`", expressionSummary subject, "` does not support match."]),
+      TVar label ->
+        InferExprError (textConcat ["Could not infer the match type of `", expressionSummary subject, "`."]),
+      TUnknown label ->
+        InferExprError (textConcat ["Could not infer the match type of `", expressionSummary subject, "`."])
+    }
+}
+
+applyCallType : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> Str -> TypeText -> [HostedExprAst] -> InferExprResult
+applyCallType typeDecls recordDecls env localEnv fnContext calleeName calleeType argValues = {
+  let mut result = ApplyCallOk calleeType emptyTypeSubstitutions;
+  for argValue in argValues {
+    result = applyCallArg typeDecls recordDecls env localEnv fnContext calleeName result argValue;
+    result
+  };
+  match result {
+    ApplyCallOk outputType substitutions ->
+      InferredExpr (applyTypeSubstitutions outputType substitutions),
+    ApplyCallError message ->
+      InferExprError message
+  }
+}
+
+applyCallArg : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> Str -> ApplyCallResult -> HostedExprAst -> ApplyCallResult
+applyCallArg typeDecls recordDecls env localEnv fnContext calleeName state argValue = match state {
+  ApplyCallError message ->
+    ApplyCallError message,
+  ApplyCallOk currentType substitutions ->
+    match inferExpr typeDecls recordDecls env localEnv fnContext argValue {
+      InferExprError message ->
+        ApplyCallError message,
+      InferredExpr actualType ->
+        applyFunctionArgumentType calleeName currentType actualType substitutions
+    }
+}

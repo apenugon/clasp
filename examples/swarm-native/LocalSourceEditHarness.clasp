@@ -1,0 +1,172 @@
+module Main
+
+import LocalSourceEdit
+
+foreign harnessWorkspaceReadFileRaw : Str -> Str -> Result Str = "workspaceReadFile"
+foreign harnessWorkspaceWriteFileRaw : Str -> Str -> Str -> Result Str = "workspaceWriteFile"
+foreign harnessWorkspaceMkdirAllRaw : Str -> Str -> Result Str = "workspaceMkdirAll"
+
+record LocalSourceEditWorkspaceReport = {
+	  writeError : Str,
+	  verifierPresent : Bool,
+	  proofHasWorkspaceConfinedWrite : Bool,
+	  proofHasWorkspaceApi : Bool,
+	  proofHasWorkspaceReplaceText : Bool,
+	  firstSourcePatched : Bool,
+  docPatched : Bool,
+  runtimePatched : Bool,
+  parentEscapeBlocked : Bool
+}
+
+firstTextOrDefault : [Str] -> Str -> Str
+firstTextOrDefault values fallback = {
+  let mut first = fallback;
+  let mut found = false;
+  for value in values {
+    if found then
+      found
+    else {
+      first = value;
+      found = true;
+      found
+    }
+  };
+  first
+}
+
+harnessTextIncludes : Str -> Str -> Bool
+harnessTextIncludes value needle = length (textSplit value needle) > 1
+
+harnessResultText : Result Str -> Str
+harnessResultText result = match result {
+  Ok value -> value,
+  Err message -> textConcat ["ERR:", message]
+}
+
+harnessReadTextOrEmpty : Str -> Str -> Str
+harnessReadTextOrEmpty root relative =
+  match harnessWorkspaceReadFileRaw root relative {
+    Ok value -> value,
+    Err message -> ""
+  }
+
+harnessWrite : Str -> Str -> Str -> Str
+harnessWrite root relative text = harnessResultText (harnessWorkspaceWriteFileRaw root relative text)
+
+harnessMkdir : Str -> Str -> Str
+harnessMkdir root relative = harnessResultText (harnessWorkspaceMkdirAllRaw root relative)
+
+workspaceRoot : Str
+workspaceRoot = firstTextOrDefault argv "local-source-edit-workspace"
+
+sourceEditHarnessPrompt : Str
+sourceEditHarnessPrompt = textJoin "\n" [
+  "Task file content:",
+  "Make the standalone swarm source edit concrete.",
+  "Source edit plan:",
+  "- src/StandaloneSwarmReadiness.clasp",
+  "- src/StandaloneSwarmVerifier.clasp",
+  "- examples/swarm-native/StandaloneSwarmHarness.clasp",
+  "- examples/swarm-native/StandaloneSwarmRouting.clasp",
+  "- scripts/standalone-swarm-readiness.sh",
+  "- scripts/standalone-swarm-verify.sh",
+  "- docs/standalone-swarm-readiness.md",
+  "- runtime/standalone_swarm_probe.rs",
+  "",
+  "Source edit patches:",
+  "- src/StandaloneSwarmReadiness.clasp :: readinessStatus = \"pending\" => readinessStatus = \"fixed\"",
+  "- src/StandaloneSwarmVerifier.clasp :: verifierStatus = \"pending\" => verifierStatus = \"fixed\"",
+  "- examples/swarm-native/StandaloneSwarmHarness.clasp :: harnessStatus = \"pending\" => harnessStatus = \"fixed\"",
+  "- examples/swarm-native/StandaloneSwarmRouting.clasp :: routingStatus = \"pending\" => routingStatus = \"fixed\"",
+  "- scripts/standalone-swarm-readiness.sh :: echo \"standalone-swarm=pending\" => echo \"standalone-swarm=fixed\"",
+  "- scripts/standalone-swarm-verify.sh :: echo \"standalone-swarm-verifier=pending\" => echo \"standalone-swarm-verifier=fixed\"",
+  "- docs/standalone-swarm-readiness.md :: standalone-swarm-status: pending => standalone-swarm-status: fixed",
+  "- runtime/standalone_swarm_probe.rs :: const STANDALONE_SWARM_STATUS: &str = \"pending\"; => const STANDALONE_SWARM_STATUS: &str = \"fixed\";",
+  ""
+]
+
+seedWorkspace : Str -> Str
+seedWorkspace root = {
+  let mut error = "";
+  let dirs = ["src", "examples/swarm-native", "scripts", "docs", "runtime", "notes"];
+  for dir in dirs {
+    if error != "" then
+      error
+    else {
+      let result = harnessMkdir root dir in
+      if harnessTextIncludes result "ERR:" then {
+        error = result;
+        error
+      } else
+        error
+    }
+  };
+  if error != "" then
+    error
+  else {
+    error = harnessWrite root "src/StandaloneSwarmReadiness.clasp" "module StandaloneSwarmReadiness\nreadinessStatus = \"pending\"\n";
+    if harnessTextIncludes error "ERR:" then
+      error
+    else {
+      error = harnessWrite root "src/StandaloneSwarmVerifier.clasp" "module StandaloneSwarmVerifier\nverifierStatus = \"pending\"\n";
+      if harnessTextIncludes error "ERR:" then
+        error
+      else {
+        error = harnessWrite root "examples/swarm-native/StandaloneSwarmHarness.clasp" "module StandaloneSwarmHarness\nharnessStatus = \"pending\"\n";
+        if harnessTextIncludes error "ERR:" then
+          error
+        else {
+          error = harnessWrite root "examples/swarm-native/StandaloneSwarmRouting.clasp" "module StandaloneSwarmRouting\nroutingStatus = \"pending\"\n";
+          if harnessTextIncludes error "ERR:" then
+            error
+          else {
+            error = harnessWrite root "scripts/standalone-swarm-readiness.sh" "echo \"standalone-swarm=pending\"\n";
+            if harnessTextIncludes error "ERR:" then
+              error
+            else {
+              error = harnessWrite root "scripts/standalone-swarm-verify.sh" "echo \"standalone-swarm-verifier=pending\"\n";
+              if harnessTextIncludes error "ERR:" then
+                error
+              else {
+                error = harnessWrite root "docs/standalone-swarm-readiness.md" "standalone-swarm-status: pending\n";
+                if harnessTextIncludes error "ERR:" then
+                  error
+                else
+                  harnessWrite root "runtime/standalone_swarm_probe.rs" "const STANDALONE_SWARM_STATUS: &str = \"pending\";\n"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+sourceEditWorkspaceReport : LocalSourceEditWorkspaceReport
+sourceEditWorkspaceReport = {
+  let seedError = seedWorkspace workspaceRoot in
+  let writeError =
+    if harnessTextIncludes seedError "ERR:" then
+      seedError
+    else
+      writeStandaloneSwarmDirectSourceEdit workspaceRoot "standalone-swarm" "fixed" sourceEditHarnessPrompt in
+  let proof = harnessReadTextOrEmpty workspaceRoot "notes/direct-source-edit.txt" in
+  let firstSource = harnessReadTextOrEmpty workspaceRoot "src/StandaloneSwarmReadiness.clasp" in
+  let docSource = harnessReadTextOrEmpty workspaceRoot "docs/standalone-swarm-readiness.md" in
+  let runtimeSource = harnessReadTextOrEmpty workspaceRoot "runtime/standalone_swarm_probe.rs" in
+  let parentEscape = harnessResultText (harnessWorkspaceWriteFileRaw workspaceRoot "../outside.txt" "leaked") in
+  LocalSourceEditWorkspaceReport {
+	    writeError = writeError,
+	    verifierPresent = standaloneSwarmDirectSourceEditPresent workspaceRoot "standalone-swarm" sourceEditHarnessPrompt,
+	    proofHasWorkspaceConfinedWrite = harnessTextIncludes proof "workspaceConfinedWrite=true",
+	    proofHasWorkspaceApi = harnessTextIncludes proof "workspaceApi=workspaceReadFile/workspaceReplaceText/workspaceWriteFile/workspaceMkdirAll",
+	    proofHasWorkspaceReplaceText = harnessTextIncludes proof "sourceEditPrimitive=workspaceReplaceText",
+	    firstSourcePatched = harnessTextIncludes firstSource "readinessStatus = \"fixed\"",
+    docPatched = harnessTextIncludes docSource "standalone-swarm-status: fixed",
+    runtimePatched = harnessTextIncludes runtimeSource "const STANDALONE_SWARM_STATUS: &str = \"fixed\";",
+    parentEscapeBlocked = harnessTextIncludes parentEscape "ERR:workspace_path_escape"
+  }
+}
+
+main : Str
+main = encode sourceEditWorkspaceReport

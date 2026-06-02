@@ -1,6 +1,7 @@
 module Compiler.Driver.Native
 
 import Compiler.Checker
+import Compiler.Checker.Types
 import Compiler.Emit.Native
 import Compiler.Json
 import Compiler.Lower
@@ -149,6 +150,25 @@ nativeDriverImageProjectModuleDeclsText bundle moduleName = if nativeDriverProje
     match lookupProjectModule sourceModules moduleName {
       FoundHostedProjectModule sourceModule ->
         emitNativeSourceModuleImageDecls mergedModule sourceModule,
+      MissingHostedProjectModule missing ->
+        jsonArray [encode (textConcat ["ERROR:", missing])]
+    },
+  HostedResolvedProjectError message ->
+    jsonArray [encode (textConcat ["ERROR:", message])]
+}
+
+nativeDriverImageProjectModuleNamedDeclsText : Str -> Str -> Str -> Str
+nativeDriverImageProjectModuleNamedDeclsText bundle moduleName namesText = if nativeDriverProjectBundleIsSingleSourceModule bundle then {
+  let sourceModuleValue = nativeDriverProjectBundleSourceModule bundle;
+  if moduleName == moduleNameOf sourceModuleValue then
+    emitNativeModuleImageNamedDecls sourceModuleValue (if namesText == "" then [] else textSplit namesText "\n")
+  else
+    jsonArray [encode (textConcat ["ERROR:", moduleName])]
+} else match resolveProjectModules bundle {
+  HostedResolvedProjectOk mergedModule sourceModules ->
+    match lookupProjectModule sourceModules moduleName {
+      FoundHostedProjectModule sourceModule ->
+        emitNativeSourceModuleImageNamedDecls mergedModule sourceModule (if namesText == "" then [] else textSplit namesText "\n"),
       MissingHostedProjectModule missing ->
         jsonArray [encode (textConcat ["ERROR:", missing])]
     },

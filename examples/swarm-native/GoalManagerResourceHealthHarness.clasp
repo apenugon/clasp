@@ -1,0 +1,296 @@
+module GoalManagerResourceHealthHarness
+
+import GoalManagerResourceHealth
+
+record GoalManagerResourceHealthHarnessReport = {
+  minAvailableMemoryMb : Int,
+  childMemoryReserveMb : Int,
+  plannerMemoryReserveMb : Int,
+  benchmarkMemoryReserveMb : Int,
+  serviceMemoryReserveMb : Int,
+  upgradeMemoryReserveMb : Int,
+  launchRequiredMemoryMb : Int,
+  plannerLaunchRequiredMemoryMb : Int,
+  benchmarkLaunchRequiredMemoryMb : Int,
+  serviceLaunchRequiredMemoryMb : Int,
+  upgradeLaunchRequiredMemoryMb : Int,
+  projectedChildren : Int,
+  projectedLaunchRequiredMemoryMb : Int,
+  externalAgentReserveMb : Int,
+  externalAgentProcessNames : [Str],
+  explicitExternalAgentRssMb : Int,
+  reserveBlockError : Str,
+  childBlockError : Str,
+  projectedBlockError : Str,
+  projectedAllowedError : Str,
+  plannerBlockError : Str,
+  benchmarkBlockError : Str,
+  serviceBlockError : Str,
+  upgradeBlockError : Str,
+  workspaceMaterializationBlockError : Str,
+  explicitExternalBlockMessage : Str,
+  explicitPlannerExternalBlockMessage : Str,
+  explicitBenchmarkExternalBlockMessage : Str,
+  admittedAdmissionStatus : Str,
+  admittedAdmissionReason : Str,
+  admittedAdmissionAction : Str,
+  admittedAdmissionRequiredMemoryMb : Int,
+  projectedBlockedAdmissionReason : Str,
+  externalBlockedAdmissionReason : Str,
+  externalBlockedAdmissionAction : Str,
+  admittedAdmissionSummary : Str,
+  projectedBlockedAdmissionSummary : Str,
+  externalBlockedAdmissionSummary : Str,
+  admittedConcurrencyStatus : Str,
+  reducedConcurrencyReason : Str,
+  reducedConcurrencyAction : Str,
+  reducedConcurrencySummary : Str,
+  memoryRecoveryTaskId : Str,
+  memoryRecoveryKind : Str,
+  memoryRecoveryGuidance : Str,
+  diskRecoveryTaskId : Str,
+  diskRecoveryKind : Str,
+  diskRecoveryGuidance : Str,
+  generatedCleanupPlanEnabled : Bool,
+  generatedCleanupPlanAction : Str,
+  generatedCleanupPlanSafeToClean : Bool,
+  generatedCleanupPlanCanSatisfyReserve : Bool,
+  generatedCleanupPlanCanSatisfyGuard : Bool,
+  generatedCleanupPlanProjectedAvailableMb : Int,
+  generatedCleanupPlanGuardShortfallAfterCleanupMb : Int,
+  generatedCleanupPlanSummary : Str,
+  memorySummaryAtFloor : Str,
+  actualLaunchError : Str,
+  actualPlannerLaunchError : Str,
+  actualBenchmarkLaunchError : Str,
+  actualServiceLaunchError : Str,
+  actualUpgradeLaunchError : Str,
+  actualWorkspaceMaterializationError : Str,
+  launchSummary : Str,
+  autonomousGateMode : Str,
+  autonomousGateReady : Bool,
+  autonomousGateMaySpawn : Bool,
+  autonomousGateMaySpawnRepair : Bool,
+  autonomousGateRecommendation : Str,
+  autonomousGateRepairRecommendation : Str,
+  autonomousGateWorktreeCheckpointPath : Str,
+  autonomousGateWorktreeStatusFingerprint64Hex : Str,
+  autonomousGateWorktreeCheckpointMatches : Bool,
+  autonomousGateRequestedChildAgents : Int,
+  autonomousGateAdmittedChildCapacity : Int,
+  autonomousGateFirstClosure : Str,
+  autonomousGateSummary : Str
+}
+
+harnessFirstTextOrEmpty : [Str] -> Str
+harnessFirstTextOrEmpty values = {
+  let mut first = "";
+  let mut found = false;
+  for value in values {
+    if found then
+      found
+    else {
+      first = value;
+      found = true;
+      found
+    }
+  };
+  first
+}
+
+main : Str
+main =
+  let projectedChildren = 2 in
+  let launchRequiredMemoryMb = managerMemoryLaunchRequiredMb in
+  let plannerLaunchRequiredMemoryMb = managerPlannerMemoryLaunchRequiredMb in
+  let benchmarkLaunchRequiredMemoryMb = managerBenchmarkMemoryLaunchRequiredMb in
+  let serviceLaunchRequiredMemoryMb = managerServiceMemoryLaunchRequiredMb in
+  let upgradeLaunchRequiredMemoryMb = managerUpgradeMemoryLaunchRequiredMb in
+  let projectedLaunchRequiredMemoryMb =
+    managerMemoryLaunchRequiredMbForActiveChildren projectedChildren in
+  let projectedLaunchRequiredWithExternalMemoryMb =
+    managerMemoryLaunchRequiredWithExternalMbForActiveChildren
+      projectedChildren
+      3 in
+  let projectedLaunchRequiredWithExternalStatsMemoryMb =
+    managerMemoryLaunchRequiredWithExternalStatsMbForActiveChildren
+      projectedChildren
+      3
+      64 in
+  let admittedAdmissionDecision =
+    managerMemoryAdmissionDecisionWithExternalStatsForActiveChildren
+      projectedChildren
+      3
+      64
+      projectedLaunchRequiredWithExternalStatsMemoryMb in
+  let projectedBlockedAdmissionDecision =
+    managerMemoryAdmissionDecisionWithExternalStatsForActiveChildren
+      projectedChildren
+      0
+      0
+      launchRequiredMemoryMb in
+  let externalBlockedAdmissionDecision =
+    managerMemoryAdmissionDecisionWithExternalStatsForActiveChildren
+      projectedChildren
+      3
+      64
+      projectedLaunchRequiredWithExternalMemoryMb in
+  let admittedConcurrencyDecision =
+    managerMemoryConcurrencyDecisionWithExternalStats
+      0
+      0
+      projectedLaunchRequiredMemoryMb in
+  let reducedConcurrencyDecision =
+    managerMemoryConcurrencyDecisionWithExternalStats
+      0
+      0
+      launchRequiredMemoryMb in
+  let generatedCleanupPlan = managerGeneratedStateCleanupPlan in
+  encode (GoalManagerResourceHealthHarnessReport {
+    minAvailableMemoryMb = managerMinAvailableMemoryMb,
+    childMemoryReserveMb = managerChildMemoryReserveMb,
+    plannerMemoryReserveMb = managerPlannerMemoryReserveMb,
+    benchmarkMemoryReserveMb = managerBenchmarkMemoryReserveMb,
+    serviceMemoryReserveMb = managerServiceMemoryReserveMb,
+    upgradeMemoryReserveMb = managerUpgradeMemoryReserveMb,
+    launchRequiredMemoryMb = launchRequiredMemoryMb,
+    plannerLaunchRequiredMemoryMb = plannerLaunchRequiredMemoryMb,
+    benchmarkLaunchRequiredMemoryMb = benchmarkLaunchRequiredMemoryMb,
+    serviceLaunchRequiredMemoryMb = serviceLaunchRequiredMemoryMb,
+    upgradeLaunchRequiredMemoryMb = upgradeLaunchRequiredMemoryMb,
+    projectedChildren = projectedChildren,
+    projectedLaunchRequiredMemoryMb = projectedLaunchRequiredMemoryMb,
+    externalAgentReserveMb = managerExternalAgentReserveMb,
+    externalAgentProcessNames = managerExternalAgentProcessNames,
+    explicitExternalAgentRssMb = 64,
+    reserveBlockError =
+      managerMemoryLaunchResourceErrorFromAvailableForActiveChildren
+        1
+        (intSubtract managerMinAvailableMemoryMb 1),
+    childBlockError =
+      managerMemoryLaunchResourceErrorFromAvailableForActiveChildren
+        1
+        managerMinAvailableMemoryMb,
+    projectedBlockError =
+      managerMemoryLaunchResourceErrorFromAvailableForActiveChildren
+        projectedChildren
+        launchRequiredMemoryMb,
+    projectedAllowedError =
+      managerMemoryLaunchResourceErrorFromAvailableForActiveChildren
+        projectedChildren
+        projectedLaunchRequiredMemoryMb,
+    plannerBlockError =
+      managerPlannerMemoryLaunchResourceErrorFromAvailable managerMinAvailableMemoryMb,
+    benchmarkBlockError =
+      managerBenchmarkMemoryLaunchResourceErrorFromAvailable managerMinAvailableMemoryMb,
+    serviceBlockError =
+      managerServiceMemoryLaunchResourceErrorFromAvailable managerMinAvailableMemoryMb,
+    upgradeBlockError =
+      managerUpgradeMemoryLaunchResourceErrorFromAvailable managerMinAvailableMemoryMb,
+    workspaceMaterializationBlockError =
+      managerWorkspaceMaterializationDiskResourceGuardBlockMessage
+        (encode (intSubtract managerMinAvailableDiskMb 1)),
+    explicitExternalBlockMessage =
+      managerExternalAgentMemoryResourceGuardBlockMessage
+        projectedChildren
+        3
+        64
+        (encode projectedLaunchRequiredMemoryMb)
+        (encode (managerMemoryLaunchHeadroomMbFromAvailable projectedLaunchRequiredMemoryMb)),
+    explicitPlannerExternalBlockMessage =
+      managerPlannerExternalAgentMemoryResourceGuardBlockMessage
+        3
+        64
+        (encode plannerLaunchRequiredMemoryMb)
+        (encode (managerMemoryLaunchHeadroomMbFromAvailable plannerLaunchRequiredMemoryMb)),
+    explicitBenchmarkExternalBlockMessage =
+      managerBenchmarkExternalAgentMemoryResourceGuardBlockMessage
+        3
+        64
+        (encode benchmarkLaunchRequiredMemoryMb)
+        (encode (managerMemoryLaunchHeadroomMbFromAvailable benchmarkLaunchRequiredMemoryMb)),
+    admittedAdmissionStatus = admittedAdmissionDecision.status,
+    admittedAdmissionReason = admittedAdmissionDecision.reason,
+    admittedAdmissionAction = admittedAdmissionDecision.recommendedAction,
+    admittedAdmissionRequiredMemoryMb = admittedAdmissionDecision.requiredMb,
+    projectedBlockedAdmissionReason = projectedBlockedAdmissionDecision.reason,
+    externalBlockedAdmissionReason = externalBlockedAdmissionDecision.reason,
+    externalBlockedAdmissionAction = externalBlockedAdmissionDecision.recommendedAction,
+    admittedAdmissionSummary =
+      managerResourceHealthMemoryAdmissionSummaryFromDecision admittedAdmissionDecision,
+    projectedBlockedAdmissionSummary =
+      managerResourceHealthMemoryAdmissionSummaryFromDecision projectedBlockedAdmissionDecision,
+    externalBlockedAdmissionSummary =
+      managerResourceHealthMemoryAdmissionSummaryFromDecision externalBlockedAdmissionDecision,
+    admittedConcurrencyStatus = admittedConcurrencyDecision.status,
+    reducedConcurrencyReason = reducedConcurrencyDecision.reason,
+    reducedConcurrencyAction = reducedConcurrencyDecision.recommendedAction,
+    reducedConcurrencySummary =
+      managerResourceHealthMemoryConcurrencySummaryFromDecision reducedConcurrencyDecision,
+    memoryRecoveryTaskId =
+      resourceBlockRecoveryTaskId
+        (managerExternalAgentMemoryResourceGuardBlockMessage
+          projectedChildren
+          3
+          64
+          (encode projectedLaunchRequiredMemoryMb)
+          (encode (managerMemoryLaunchHeadroomMbFromAvailable projectedLaunchRequiredMemoryMb))),
+    memoryRecoveryKind =
+      resourceBlockRecoveryKind
+        (managerExternalAgentMemoryResourceGuardBlockMessage
+          projectedChildren
+          3
+          64
+          (encode projectedLaunchRequiredMemoryMb)
+          (encode (managerMemoryLaunchHeadroomMbFromAvailable projectedLaunchRequiredMemoryMb))),
+    memoryRecoveryGuidance =
+      resourceBlockRecoveryGuidance
+        (managerExternalAgentMemoryResourceGuardBlockMessage
+          projectedChildren
+          3
+          64
+          (encode projectedLaunchRequiredMemoryMb)
+          (encode (managerMemoryLaunchHeadroomMbFromAvailable projectedLaunchRequiredMemoryMb))),
+    diskRecoveryTaskId =
+      resourceBlockRecoveryTaskId
+        (managerWorkspaceMaterializationDiskResourceGuardBlockMessage
+          (encode (intSubtract managerMinAvailableDiskMb 1))),
+    diskRecoveryKind =
+      resourceBlockRecoveryKind
+        (managerWorkspaceMaterializationDiskResourceGuardBlockMessage
+          (encode (intSubtract managerMinAvailableDiskMb 1))),
+    diskRecoveryGuidance =
+      resourceBlockRecoveryGuidance
+        (managerWorkspaceMaterializationDiskResourceGuardBlockMessage
+          (encode (intSubtract managerMinAvailableDiskMb 1))),
+    generatedCleanupPlanEnabled = managerGeneratedStateCleanupPlanEnabled,
+    generatedCleanupPlanAction = generatedCleanupPlan.recommendedAction,
+    generatedCleanupPlanSafeToClean = generatedCleanupPlan.safeToClean,
+    generatedCleanupPlanCanSatisfyReserve = generatedCleanupPlan.cleanup.cleanupCanSatisfyReserve,
+    generatedCleanupPlanCanSatisfyGuard = generatedCleanupPlan.cleanup.cleanupCanSatisfyGuard,
+    generatedCleanupPlanProjectedAvailableMb = generatedCleanupPlan.cleanup.projectedAvailableMb,
+    generatedCleanupPlanGuardShortfallAfterCleanupMb = generatedCleanupPlan.cleanup.guardShortfallAfterCleanupMb,
+    generatedCleanupPlanSummary = managerGeneratedStateCleanupPlanSummary,
+    memorySummaryAtFloor =
+      managerResourceHealthMemorySummaryFromAvailable managerMinAvailableMemoryMb,
+    actualLaunchError = managerChildLaunchResourceError,
+    actualPlannerLaunchError = managerPlannerLaunchResourceError,
+    actualBenchmarkLaunchError = managerBenchmarkLaunchResourceError,
+    actualServiceLaunchError = managerServiceLaunchResourceError,
+    actualUpgradeLaunchError = managerUpgradeLaunchResourceError,
+    actualWorkspaceMaterializationError = managerWorkspaceMaterializationResourceError,
+    launchSummary = managerResourceHealthLaunchSummary,
+    autonomousGateMode = managerAutonomousLaunchGate.mode,
+    autonomousGateReady = managerAutonomousLaunchGate.ready,
+    autonomousGateMaySpawn = managerAutonomousLaunchGate.maySpawn,
+    autonomousGateMaySpawnRepair = managerAutonomousLaunchGateRepairMaySpawnForActiveChildren 1,
+    autonomousGateRecommendation = managerAutonomousLaunchGate.recommendation,
+    autonomousGateRepairRecommendation = managerAutonomousLaunchGateRepairRecommendationForActiveChildren 1,
+    autonomousGateWorktreeCheckpointPath = managerWorktreeCheckpointPath,
+    autonomousGateWorktreeStatusFingerprint64Hex = managerGitWorktreeStatusFingerprint64Hex,
+    autonomousGateWorktreeCheckpointMatches = managerWorktreeCheckpointMatchesCurrentStatus,
+    autonomousGateRequestedChildAgents = managerAutonomousLaunchGate.requestedChildAgents,
+    autonomousGateAdmittedChildCapacity = managerAutonomousLaunchGate.admittedChildCapacity,
+    autonomousGateFirstClosure = harnessFirstTextOrEmpty managerAutonomousLaunchGate.requiredClosure,
+    autonomousGateSummary = managerAutonomousLaunchGateSummary
+  })

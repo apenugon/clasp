@@ -6,7 +6,14 @@ import path from "node:path";
 const projectRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
 const defaultOutputPath = path.join(projectRoot, "src/stage1.compiler.module-summary-cache-v2.json");
 const defaultEntryPath = path.join(projectRoot, "src/Main.clasp");
+const defaultCompilerEntryPath = path.join(projectRoot, "src/CompilerMain.clasp");
+const defaultSupportEntryPaths = [
+  path.join(projectRoot, "examples/swarm-native/GoalManagerGeneratedCleanupHealthHarness.clasp"),
+];
 const compilerImagePath = path.join(projectRoot, "src/stage1.compiler.native.image.json");
+const fnvOffset = 0xcbf29ce484222325n;
+const fnvPrime = 0x100000001b3n;
+const fnvMask = 0xffffffffffffffffn;
 
 function fail(message) {
   console.error(`generate-promoted-module-summary-cache: ${message}`);
@@ -16,6 +23,7 @@ function fail(message) {
 function parseArgs(argv) {
   const options = {
     check: false,
+    defaultEntries: true,
     entryPath: defaultEntryPath,
     outputPath: defaultOutputPath,
   };
@@ -26,6 +34,7 @@ function parseArgs(argv) {
     } else if (arg === "--entry") {
       index += 1;
       if (!argv[index]) fail("missing path after --entry");
+      options.defaultEntries = false;
       options.entryPath = path.resolve(argv[index]);
     } else if (arg === "--output") {
       index += 1;
@@ -38,31 +47,38 @@ function parseArgs(argv) {
   return options;
 }
 
-function fnvBytes(buffer) {
-  let hash = 0xcbf29ce484222325n;
-  const prime = 0x100000001b3n;
-  const mask = 0xffffffffffffffffn;
+function fnvUpdateState(hash, buffer) {
   for (const byte of buffer) {
     hash ^= BigInt(byte);
-    hash = (hash * prime) & mask;
+    hash = (hash * fnvPrime) & fnvMask;
   }
+  return hash;
+}
+
+function fnvPartDelimiter(hash) {
+  hash ^= 0xffn;
+  return (hash * fnvPrime) & fnvMask;
+}
+
+function fnvStateHex(hash) {
   return hash.toString(16).padStart(16, "0");
 }
 
-function fnvParts(parts) {
-  let hash = 0xcbf29ce484222325n;
-  const prime = 0x100000001b3n;
-  const mask = 0xffffffffffffffffn;
+function fnvBytes(buffer) {
+  return fnvStateHex(fnvUpdateState(fnvOffset, buffer));
+}
+
+function fnvPartsFromState(initialState, parts) {
+  let hash = initialState;
   for (const part of parts) {
     const buffer = Buffer.isBuffer(part) ? part : Buffer.from(String(part));
-    for (const byte of buffer) {
-      hash ^= BigInt(byte);
-      hash = (hash * prime) & mask;
-    }
-    hash ^= 0xffn;
-    hash = (hash * prime) & mask;
+    hash = fnvPartDelimiter(fnvUpdateState(hash, buffer));
   }
-  return hash.toString(16).padStart(16, "0");
+  return fnvStateHex(hash);
+}
+
+function fnvParts(parts) {
+  return fnvPartsFromState(fnvOffset, parts);
 }
 
 function parseModuleName(source) {
@@ -101,16 +117,36 @@ function parseImports(source) {
 }
 
 function braceDelta(text) {
-  return (text.match(/\{/g) || []).length - (text.match(/\}/g) || []).length;
+  let delta = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (const byte of Buffer.from(text)) {
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (inString) {
+      if (byte === 0x5c) {
+        escaped = true;
+      } else if (byte === 0x22) {
+        inString = false;
+      }
+      continue;
+    }
+    if (byte === 0x22) {
+      inString = true;
+    } else if (byte === 0x7b) {
+      delta += 1;
+    } else if (byte === 0x7d) {
+      delta -= 1;
+    }
+  }
+
+  return delta;
 }
 
-function sourcePathForModule(moduleName) {
-  if (moduleName === "Main") return path.join(projectRoot, "src/Main.clasp");
-  return path.join(projectRoot, "src", `${moduleName.replaceAll(".", "/")}.clasp`);
-}
-
-function conservativeModuleInterfaceFingerprint(moduleName) {
-  const source = fs.readFileSync(sourcePathForModule(moduleName), "utf8");
+function conservativeModuleInterfaceFingerprint(source) {
   const renderedLines = [];
   const annotatedNames = new Set();
   let blockDepth = 0;
@@ -227,9 +263,22 @@ function moduleSummaryFromAnnotations(source) {
     }
     if (!topLevel) continue;
     const match = /^([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.+)$/.exec(trimmed);
-    if (match) summaries.push(`${match[1]} : ${match[2].trim()}`);
+    if (match) summaries.push(`${match[1]} : ${normalizeSummaryType(match[2].trim())}`);
   }
   return summaries.join("\n");
+}
+
+function normalizeSummaryType(typeText) {
+  const parts = typeText.split(/\s+->\s+/).map((part) => part.trim());
+  if (parts.length < 2) return typeText;
+  return parts
+    .map((part, index) => {
+      if (index + 1 === parts.length) return part;
+      if (!part.includes(" ")) return part;
+      if (part.startsWith("(") || part.startsWith("[") || part.startsWith("{")) return part;
+      return `(${part})`;
+    })
+    .join(" -> ");
 }
 
 function topLevelDefinitionName(line) {
@@ -382,6 +431,7 @@ function collectPostorder(moduleName, modulesByName, seen, ordered) {
 
 function generatePayload(entryPath) {
   const image = fs.readFileSync(compilerImagePath);
+  const cacheKeyInitialState = fnvPartDelimiter(fnvUpdateState(fnvOffset, image));
   const modules = loadBundle(entryPath).map((module) => ({
     ...module,
     sourceFingerprint: fnvBytes(Buffer.from(module.source)),
@@ -411,7 +461,7 @@ function generatePayload(entryPath) {
   }
 
   const interfaceFingerprints = new Map(
-    modules.map((module) => [module.moduleName, conservativeModuleInterfaceFingerprint(module.moduleName)]),
+    modules.map((module) => [module.moduleName, conservativeModuleInterfaceFingerprint(module.source)]),
   );
   const summaries = new Map();
   const entries = [];
@@ -425,8 +475,7 @@ function generatePayload(entryPath) {
       .map((name) => summaries.get(name))
       .filter((summary) => summary && summary.trim())
       .join("\n");
-    const cacheKey = `${fnvParts([
-      image,
+    const cacheKey = `${fnvPartsFromState(cacheKeyInitialState, [
       moduleName,
       interfaceFingerprints.get(moduleName),
       importedSummariesText,
@@ -451,9 +500,34 @@ function generatePayload(entryPath) {
   };
 }
 
+function mergePayloads(primary, extra) {
+  const entriesByKey = new Map(primary.summaries.map((entry) => [entry.cacheKey, entry]));
+  for (const entry of extra.summaries) entriesByKey.set(entry.cacheKey, entry);
+  const sources = [primary.source, extra.source].filter((source, index, values) =>
+    source && values.indexOf(source) === index,
+  );
+  return {
+    ...primary,
+    source: sources[0] || primary.source,
+    sources,
+    summaries: [...entriesByKey.values()],
+  };
+}
+
 function main() {
   const options = parseArgs(process.argv);
-  const payload = `${JSON.stringify(generatePayload(options.entryPath), null, 2)}\n`;
+  let generated = generatePayload(options.entryPath);
+  if (options.defaultEntries && fs.existsSync(defaultCompilerEntryPath)) {
+    generated = mergePayloads(generated, generatePayload(defaultCompilerEntryPath));
+  }
+  if (options.defaultEntries) {
+    for (const supportEntryPath of defaultSupportEntryPaths) {
+      if (fs.existsSync(supportEntryPath)) {
+        generated = mergePayloads(generated, generatePayload(supportEntryPath));
+      }
+    }
+  }
+  const payload = `${JSON.stringify(generated, null, 2)}\n`;
   if (options.check) {
     const current = fs.readFileSync(options.outputPath, "utf8");
     if (current !== payload) fail(`${path.relative(projectRoot, options.outputPath)} is stale`);

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ulimit -c 0 >/dev/null 2>&1 || true
+
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 timeout_secs="${CLASP_RUNTIME_SLICE_TIMEOUT_SECS:-180}"
 

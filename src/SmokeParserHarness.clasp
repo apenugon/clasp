@@ -1,6 +1,7 @@
 module SmokeParserHarness
 
 import Compiler.Checker
+import Compiler.Checker.ModuleSummary
 import Compiler.Project
 
 checkSourceText : Str -> Str

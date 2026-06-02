@@ -1,0 +1,1152 @@
+module Main
+
+record CapabilityStatus = {
+  name : Str,
+  status : Str,
+  evidence : [Str],
+  blocking_gaps : [Str],
+  required_closure : [Str]
+}
+
+record SwarmCapabilityAudit = {
+  schema_version : Int,
+  kind : Str,
+  objective : Str,
+  overall_status : Str,
+  default_agent_model : Str,
+  default_agent_reasoning : Str,
+  capability_statuses : [CapabilityStatus],
+  blocking_gaps : [Str],
+  required_closure : [Str],
+  verification_notes : [Str]
+}
+
+record ManagedVerifyAllReport = {
+  finalVerdict : Str,
+  exitStatus : Int,
+  elapsedMs : Int,
+  commandCount : Int
+}
+
+record ManagedVerificationEvidence = {
+  proven : Bool,
+  evidence : [Str],
+  blocking_gaps : [Str],
+  required_closure : [Str],
+  verification_notes : [Str]
+}
+
+record ManagedSwarmProofReport = {
+  schemaVersion : Int,
+  kind : Str,
+  verdict : Str,
+  managerCompleted : Bool,
+  managerFinal : Bool,
+  plannerBackendKind : Str,
+  plannerBackendTransport : Str,
+  codexFallbackInvoked : Bool,
+  taskCount : Int,
+  completedTaskCount : Int,
+  dependencyOrdered : Bool,
+  localPlannerBackend : Bool,
+  localAgentCommandPropagated : Bool,
+  sourceEditPlanDelivered : Bool,
+  sourcePatchPlanDelivered : Bool,
+  dependencyEvidenceDelivered : Bool
+}
+
+record StandaloneClosureReport = {
+  schemaVersion : Int,
+  kind : Str,
+  mode : Str,
+  status : Str,
+  workspaceRoot : Str,
+  builderReport : Str,
+  verifierReport : Str,
+  proofPath : Str,
+  workspaceFingerprintManifest : Str,
+  workspaceFingerprintManifestSha256 : Str,
+  requiredSurfaceCount : Int,
+  evidence : [Str]
+}
+
+emptyTexts : [Str]
+emptyTexts = []
+
+textIncludes : Str -> Str -> Bool
+textIncludes value needle = length (textSplit value needle) > 1
+
+textListIncludes : [Str] -> Str -> Bool
+textListIncludes values needle = {
+  let mut found = false;
+  for value in values {
+    if found then
+      found
+    else if value == needle then {
+      found = true;
+      found
+    } else
+      found
+  };
+  found
+}
+
+jsonTextOrRaw : Str -> Str
+jsonTextOrRaw raw = match textPrefix raw "\"" {
+  Ok quotedTail -> decode Str raw,
+  Err notQuoted -> raw
+}
+
+readEnvText : Str -> Str -> Str
+readEnvText name fallback = match envVar name {
+  Ok raw -> if raw == "" then fallback else jsonTextOrRaw raw,
+  Err message -> fallback
+}
+
+capabilityStatus : Str -> Str -> [Str] -> [Str] -> [Str] -> CapabilityStatus
+capabilityStatus name status evidence blockingGaps requiredClosure =
+  CapabilityStatus {
+    name = name,
+    status = status,
+    evidence = evidence,
+    blocking_gaps = blockingGaps,
+    required_closure = requiredClosure
+  }
+
+managedVerifyReportPath : Str
+managedVerifyReportPath = readEnvText "CLASP_SWARM_CAPABILITY_VERIFY_REPORT_JSON" ""
+
+managedSwarmProofReportPath : Str
+managedSwarmProofReportPath = readEnvText "CLASP_SWARM_CAPABILITY_SWARM_PROOF_JSON" ""
+
+standaloneClosureReportPath : Str
+standaloneClosureReportPath = readEnvText "CLASP_SWARM_CAPABILITY_STANDALONE_CLOSURE_REPORT_JSON" ""
+
+managedSpeedReportPath : Str
+managedSpeedReportPath = readEnvText "CLASP_SWARM_CAPABILITY_SPEED_REPORT_JSON" ""
+
+managedCompilerModuleSpeedReportPath : Str
+managedCompilerModuleSpeedReportPath = readEnvText "CLASP_SWARM_CAPABILITY_COMPILER_MODULE_SPEED_REPORT_JSON" ""
+
+jsonStringFieldEquals : Str -> Str -> Str -> Bool
+jsonStringFieldEquals raw field expected =
+  if textIncludes raw (textConcat ["\"", field, "\":\"", expected, "\""]) then
+    true
+  else
+    textIncludes raw (textConcat ["\"", field, "\": \"", expected, "\""])
+
+jsonBoolFieldTrue : Str -> Str -> Bool
+jsonBoolFieldTrue raw field =
+  if textIncludes raw (textConcat ["\"", field, "\":true"]) then
+    true
+  else
+    textIncludes raw (textConcat ["\"", field, "\": true"])
+
+managedVerifyEvidenceFromReport : Str -> ManagedVerifyAllReport -> ManagedVerificationEvidence
+managedVerifyEvidenceFromReport path report =
+  if report.finalVerdict == "passed" && report.exitStatus == 0 then
+    ManagedVerificationEvidence {
+      proven = true,
+      evidence = [
+        textConcat [
+          "Managed verify-all passed from ",
+          path,
+          " with commandCount=",
+          encode report.commandCount,
+          " elapsedMs=",
+          encode report.elapsedMs,
+          "."
+        ],
+        "The verification proof came from an existing report artifact; this audit did not launch heavyweight work."
+      ],
+      blocking_gaps = emptyTexts,
+      required_closure = emptyTexts,
+      verification_notes = [
+        textConcat ["Managed verification report consumed: ", path]
+      ]
+    }
+  else
+    ManagedVerificationEvidence {
+      proven = false,
+      evidence = [
+        textConcat [
+          "Managed verify-all report was present at ",
+          path,
+          " but did not pass: finalVerdict=",
+          report.finalVerdict,
+          " exitStatus=",
+          encode report.exitStatus,
+          "."
+        ]
+      ],
+      blocking_gaps = [
+        "Managed verify-all report exists but does not prove a passing current tree."
+      ],
+      required_closure = [
+        "Re-run bash scripts/verify-all.sh through scripts/run-managed-job.sh and provide the passing report path."
+      ],
+      verification_notes = [
+        textConcat ["Managed verification report consumed but rejected: ", path]
+      ]
+    }
+
+missingManagedVerifyEvidence : ManagedVerificationEvidence
+missingManagedVerifyEvidence =
+  ManagedVerificationEvidence {
+    proven = false,
+    evidence = [
+      "No managed verify-all report path was provided to this lightweight audit."
+    ],
+    blocking_gaps = [
+      "bash scripts/verify-all.sh has not been proven for the current dirty tree in this audit."
+    ],
+    required_closure = [
+      "Run bash scripts/verify-all.sh only through scripts/run-managed-job.sh with explicit memory, disk, and low-parallelism settings."
+    ],
+    verification_notes = [
+      "Set CLASP_SWARM_CAPABILITY_VERIFY_REPORT_JSON to a managed verify-all report artifact to let this audit consume current verification evidence."
+    ]
+  }
+
+readManagedVerifyEvidence : Str -> ManagedVerificationEvidence
+readManagedVerifyEvidence path =
+  if path == "" then
+    missingManagedVerifyEvidence
+  else
+    match readFile path {
+      Err message ->
+        ManagedVerificationEvidence {
+          proven = false,
+          evidence = [
+            textConcat ["Managed verify-all report could not be read at ", path, ": ", message]
+          ],
+          blocking_gaps = [
+            "Managed verify-all report path was configured but unreadable."
+          ],
+          required_closure = [
+            "Provide a readable managed verify-all report artifact."
+          ],
+          verification_notes = [
+            textConcat ["Managed verification report read failed: ", path]
+          ]
+        },
+      Ok raw ->
+        match tryDecode ManagedVerifyAllReport raw {
+          Ok report -> managedVerifyEvidenceFromReport path report,
+          Err message ->
+            ManagedVerificationEvidence {
+              proven = false,
+              evidence = [
+                textConcat ["Managed verify-all report could not be decoded at ", path, ": ", message]
+              ],
+              blocking_gaps = [
+                "Managed verify-all report exists but does not match the expected report schema."
+              ],
+              required_closure = [
+                "Provide an unmodified scripts/verify-all.sh JSON report artifact."
+              ],
+              verification_notes = [
+                textConcat ["Managed verification report decode failed: ", path]
+              ]
+            }
+        }
+    }
+
+managedVerifyEvidence : ManagedVerificationEvidence
+managedVerifyEvidence = readManagedVerifyEvidence managedVerifyReportPath
+
+managedSwarmProofReportPassed : ManagedSwarmProofReport -> Bool
+managedSwarmProofReportPassed report =
+  if report.kind == "clasp-managed-swarm-proof" then
+    if report.verdict == "pass" then
+      if report.managerCompleted && report.managerFinal then
+        if report.plannerBackendKind == "template" && report.plannerBackendTransport == "prompt-path" then
+          if report.codexFallbackInvoked == false then
+            if report.taskCount >= 3 && report.completedTaskCount >= report.taskCount then
+              if report.dependencyOrdered && report.localPlannerBackend then
+                if report.localAgentCommandPropagated then
+                  if report.sourceEditPlanDelivered && report.sourcePatchPlanDelivered then
+                    report.dependencyEvidenceDelivered
+                  else
+                    false
+                else
+                  false
+              else
+                false
+            else
+              false
+          else
+            false
+        else
+          false
+      else
+        false
+    else
+      false
+  else
+    false
+
+managedSwarmProofEvidenceFromReport : Str -> ManagedSwarmProofReport -> ManagedVerificationEvidence
+managedSwarmProofEvidenceFromReport path report =
+  if managedSwarmProofReportPassed report then
+    ManagedVerificationEvidence {
+      proven = true,
+      evidence = [
+        textConcat [
+          "Managed swarm proof passed from ",
+          path,
+          " with taskCount=",
+          encode report.taskCount,
+          " completedTaskCount=",
+          encode report.completedTaskCount,
+          "."
+        ],
+        "The proof used a template planner backend, prompt-path transport, local planner routing, propagated local child-agent commands, dependency-ordered child launch, and no Codex fallback.",
+        "The proof delivered standalone source-edit and source-patch plans plus dependency completion evidence to the final child task."
+      ],
+      blocking_gaps = emptyTexts,
+      required_closure = emptyTexts,
+      verification_notes = [
+        textConcat ["Managed swarm proof consumed: ", path]
+      ]
+    }
+  else
+    ManagedVerificationEvidence {
+      proven = false,
+      evidence = [
+        textConcat [
+          "Managed swarm proof report was present at ",
+          path,
+          " but did not satisfy the multi-task non-Codex manager proof contract."
+        ]
+      ],
+      blocking_gaps = [
+        "Managed swarm proof report exists but does not prove a passing multi-task non-Codex manager run."
+      ],
+      required_closure = [
+        "Run scripts/test-goal-manager-agent-command-template.sh through scripts/run-managed-job.sh with CLASP_GOAL_MANAGER_SWARM_PROOF_REPORT_JSON set."
+      ],
+      verification_notes = [
+        textConcat ["Managed swarm proof consumed but rejected: ", path]
+      ]
+    }
+
+missingManagedSwarmProofEvidence : ManagedVerificationEvidence
+missingManagedSwarmProofEvidence =
+  ManagedVerificationEvidence {
+    proven = false,
+    evidence = [
+      "No managed multi-task swarm proof report path was provided to this lightweight audit."
+    ],
+    blocking_gaps = [
+      "Broad self-improving swarm has not yet completed an end-to-end managed proof run."
+    ],
+    required_closure = [
+      "Run the GoalManager local planner and child-loop proof through scripts/run-managed-job.sh with CLASP_GOAL_MANAGER_SWARM_PROOF_REPORT_JSON set."
+    ],
+    verification_notes = [
+      "Set CLASP_SWARM_CAPABILITY_SWARM_PROOF_JSON to a managed swarm proof artifact to let this audit consume broad manager-run evidence."
+    ]
+  }
+
+readManagedSwarmProofEvidence : Str -> ManagedVerificationEvidence
+readManagedSwarmProofEvidence path =
+  if path == "" then
+    missingManagedSwarmProofEvidence
+  else
+    match readFile path {
+      Err message ->
+        ManagedVerificationEvidence {
+          proven = false,
+          evidence = [
+            textConcat ["Managed swarm proof report could not be read at ", path, ": ", message]
+          ],
+          blocking_gaps = [
+            "Managed swarm proof report path was configured but unreadable."
+          ],
+          required_closure = [
+            "Provide a readable managed swarm proof artifact."
+          ],
+          verification_notes = [
+            textConcat ["Managed swarm proof read failed: ", path]
+          ]
+        },
+      Ok raw ->
+        match tryDecode ManagedSwarmProofReport raw {
+          Ok report -> managedSwarmProofEvidenceFromReport path report,
+          Err message ->
+            ManagedVerificationEvidence {
+              proven = false,
+              evidence = [
+                textConcat ["Managed swarm proof report could not be decoded at ", path, ": ", message]
+              ],
+              blocking_gaps = [
+                "Managed swarm proof report exists but does not match the expected proof schema."
+              ],
+              required_closure = [
+                "Provide an unmodified managed swarm proof artifact."
+              ],
+              verification_notes = [
+                textConcat ["Managed swarm proof decode failed: ", path]
+              ]
+            }
+        }
+    }
+
+managedSwarmProofEvidence : ManagedVerificationEvidence
+managedSwarmProofEvidence = readManagedSwarmProofEvidence managedSwarmProofReportPath
+
+standaloneClosureReportPassed : StandaloneClosureReport -> Bool
+standaloneClosureReportPassed report =
+  if report.schemaVersion == 1 then
+    if report.kind == "standalone-swarm-verifier-report" then
+      if report.mode == "closure" then
+        if report.status == "closed" then
+          if report.requiredSurfaceCount == 8 then
+            if report.workspaceRoot != "" then
+              if report.builderReport != "" then
+                if report.verifierReport != "" then
+                  if report.proofPath != "" then
+                    if report.workspaceFingerprintManifest != "" then
+                      if report.workspaceFingerprintManifestSha256 != "" then
+                        if textListIncludes report.evidence "fixed-standalone-swarm-markers" then
+                          if textListIncludes report.evidence "direct-source-edit-proof" then
+                            if textListIncludes report.evidence "workspace-fingerprint-manifest" then
+                              if textListIncludes report.evidence "local-agent-builder-report" then
+                                if textListIncludes report.evidence "local-agent-verifier-report" then
+                                  textListIncludes report.evidence "typed-local-verifier-gate"
+                                else
+                                  false
+                              else
+                                false
+                            else
+                              false
+                          else
+                            false
+                        else
+                          false
+                      else
+                        false
+                    else
+                      false
+                  else
+                    false
+                else
+                  false
+              else
+                false
+            else
+              false
+          else
+            false
+        else
+          false
+      else
+        false
+    else
+      false
+  else
+    false
+
+standaloneClosureEvidenceFromReport : Str -> StandaloneClosureReport -> ManagedVerificationEvidence
+standaloneClosureEvidenceFromReport path report =
+  if standaloneClosureReportPassed report then
+    ManagedVerificationEvidence {
+      proven = true,
+      evidence = [
+        textConcat [
+          "Standalone closure report passed from ",
+          path,
+          " with requiredSurfaceCount=",
+          encode report.requiredSurfaceCount,
+          "."
+        ],
+        "The closure report proves fixed standalone-swarm markers, direct-source-edit proof, local builder/verifier reports, and typed local verifier gate evidence."
+      ],
+      blocking_gaps = emptyTexts,
+      required_closure = emptyTexts,
+      verification_notes = [
+        textConcat ["Standalone closure report consumed: ", path]
+      ]
+    }
+  else
+    ManagedVerificationEvidence {
+      proven = false,
+      evidence = [
+        textConcat ["Standalone closure report was present at ", path, " but did not satisfy the closure report contract."]
+      ],
+      blocking_gaps = [
+        "Standalone closure report exists but does not prove fixed markers, source-edit proof, builder/verifier reports, and typed local verifier gate evidence."
+      ],
+      required_closure = [
+        "Re-run scripts/standalone-swarm-verify.sh --closure --json with the fixed workspace and local-agent reports, then provide the passing report path."
+      ],
+      verification_notes = [
+        textConcat ["Standalone closure report consumed but rejected: ", path]
+      ]
+    }
+
+missingStandaloneClosureEvidence : ManagedVerificationEvidence
+missingStandaloneClosureEvidence =
+  ManagedVerificationEvidence {
+    proven = false,
+    evidence = [
+      "No standalone closure report path was provided to this lightweight audit."
+    ],
+    blocking_gaps = emptyTexts,
+    required_closure = emptyTexts,
+    verification_notes = [
+      "Set CLASP_SWARM_CAPABILITY_STANDALONE_CLOSURE_REPORT_JSON to a standalone closure report artifact when current closure proof evidence should be consumed."
+    ]
+  }
+
+readStandaloneClosureEvidence : Str -> ManagedVerificationEvidence
+readStandaloneClosureEvidence path =
+  if path == "" then
+    missingStandaloneClosureEvidence
+  else
+    match readFile path {
+      Err message ->
+        ManagedVerificationEvidence {
+          proven = false,
+          evidence = [
+            textConcat ["Standalone closure report could not be read at ", path, ": ", message]
+          ],
+          blocking_gaps = [
+            "Standalone closure report path was configured but unreadable."
+          ],
+          required_closure = [
+            "Provide a readable standalone closure report artifact."
+          ],
+          verification_notes = [
+            textConcat ["Standalone closure report read failed: ", path]
+          ]
+        },
+      Ok raw ->
+        match tryDecode StandaloneClosureReport raw {
+          Ok report -> standaloneClosureEvidenceFromReport path report,
+          Err message ->
+            ManagedVerificationEvidence {
+              proven = false,
+              evidence = [
+                textConcat ["Standalone closure report could not be decoded at ", path, ": ", message]
+              ],
+              blocking_gaps = [
+                "Standalone closure report exists but does not match the expected closure report schema."
+              ],
+              required_closure = [
+                "Provide an unmodified scripts/standalone-swarm-verify.sh --closure --json report artifact."
+              ],
+              verification_notes = [
+                textConcat ["Standalone closure report decode failed: ", path]
+              ]
+            }
+        }
+    }
+
+standaloneClosureEvidence : ManagedVerificationEvidence
+standaloneClosureEvidence = readStandaloneClosureEvidence standaloneClosureReportPath
+
+managedSpeedReportPassedRaw : Str -> Bool
+managedSpeedReportPassedRaw raw =
+  if jsonStringFieldEquals raw "scenario" "selfhost-body-change" then
+    if jsonBoolFieldTrue raw "matchesExpectations" then
+      if jsonStringFieldEquals raw "buildPlan" "hit" then
+        if textIncludes raw "checkBodyChange" then
+          textIncludes raw "imageBodyChange"
+        else
+          false
+      else
+        false
+    else
+      false
+  else
+    false
+
+managedSpeedEvidenceFromRaw : Str -> Str -> ManagedVerificationEvidence
+managedSpeedEvidenceFromRaw path raw =
+  if managedSpeedReportPassedRaw raw then
+    ManagedVerificationEvidence {
+      proven = true,
+      evidence = [
+        textConcat [
+          "Selfhost incremental speed report passed from ",
+          path,
+          ": body-change check/image paths are guarded and the selfhost image buildPlan is a hit."
+        ],
+        "The speed evidence confirms the old ~20s selfhost body-change image cliff is covered by the normal selfhost gate."
+      ],
+      blocking_gaps = emptyTexts,
+      required_closure = emptyTexts,
+      verification_notes = [
+        textConcat ["Selfhost iteration-speed report consumed: ", path]
+      ]
+    }
+  else
+    ManagedVerificationEvidence {
+      proven = false,
+      evidence = [
+        textConcat [
+          "Selfhost incremental speed report was present at ",
+          path,
+          " but did not prove scenario=selfhost-body-change, matchesExpectations=true, and buildPlan=hit."
+        ]
+      ],
+      blocking_gaps = [
+        "Selfhost incremental speed report exists but does not clear the compiler rebuild latency blocker."
+      ],
+      required_closure = [
+        "Re-run scripts/measure-native-incremental.sh --scenario selfhost-body-change through scripts/run-managed-job.sh and provide the passing report path."
+      ],
+      verification_notes = [
+        textConcat ["Selfhost iteration-speed report consumed but rejected: ", path]
+      ]
+    }
+
+missingManagedSpeedEvidence : ManagedVerificationEvidence
+missingManagedSpeedEvidence =
+  ManagedVerificationEvidence {
+    proven = false,
+    evidence = [
+      "No selfhost incremental speed report path was provided to this lightweight audit."
+    ],
+    blocking_gaps = [
+      "No selfhost incremental speed report was provided, so this audit cannot clear the compiler rebuild latency blocker."
+    ],
+    required_closure = [
+      "Provide CLASP_SWARM_CAPABILITY_SPEED_REPORT_JSON from a passing selfhost-body-change native incremental report."
+    ],
+    verification_notes = [
+      "Set CLASP_SWARM_CAPABILITY_SPEED_REPORT_JSON to a passing selfhost-body-change speed report artifact to let this audit consume current iteration-speed evidence."
+    ]
+  }
+
+readManagedSpeedEvidence : Str -> ManagedVerificationEvidence
+readManagedSpeedEvidence path =
+  if path == "" then
+    missingManagedSpeedEvidence
+  else
+    match readFile path {
+      Err message ->
+        ManagedVerificationEvidence {
+          proven = false,
+          evidence = [
+            textConcat ["Selfhost incremental speed report could not be read at ", path, ": ", message]
+          ],
+          blocking_gaps = [
+            "Selfhost incremental speed report path was configured but unreadable."
+          ],
+          required_closure = [
+            "Provide a readable selfhost-body-change speed report artifact."
+          ],
+          verification_notes = [
+            textConcat ["Selfhost iteration-speed report read failed: ", path]
+          ]
+        },
+      Ok raw -> managedSpeedEvidenceFromRaw path raw
+    }
+
+managedSpeedEvidence : ManagedVerificationEvidence
+managedSpeedEvidence = readManagedSpeedEvidence managedSpeedReportPath
+
+managedCompilerModuleSpeedReportPassedRaw : Str -> Bool
+managedCompilerModuleSpeedReportPassedRaw raw =
+  if jsonStringFieldEquals raw "scenario" "selfhost-compiler-module-body-change" then
+    if jsonBoolFieldTrue raw "matchesExpectations" then
+      if textIncludes raw "Compiler.Ast" then
+        if textIncludes raw "validated-hit" then
+          if textIncludes raw "compilerCheckBodyChange" then
+            jsonStringFieldEquals raw "compilerModuleImageProbe" "skipped"
+          else
+            false
+        else
+          false
+      else
+        false
+    else
+      false
+  else
+    false
+
+managedCompilerModuleSpeedEvidenceFromRaw : Str -> Str -> ManagedVerificationEvidence
+managedCompilerModuleSpeedEvidenceFromRaw path raw =
+  if managedCompilerModuleSpeedReportPassedRaw raw then
+    ManagedVerificationEvidence {
+      proven = true,
+      evidence = [
+        textConcat [
+          "Large compiler-module speed report passed from ",
+          path,
+          ": Compiler.Ast body-change check was a validated-hit and the full native-image diagnostic was explicitly skipped."
+        ],
+        "The large compiler-module proof keeps the default gate bounded while proving real self-host compiler edit reuse."
+      ],
+      blocking_gaps = emptyTexts,
+      required_closure = emptyTexts,
+      verification_notes = [
+        textConcat ["Large compiler-module speed report consumed: ", path]
+      ]
+    }
+  else
+    ManagedVerificationEvidence {
+      proven = false,
+      evidence = [
+        textConcat [
+          "Large compiler-module speed report was present at ",
+          path,
+          " but did not prove scenario=selfhost-compiler-module-body-change, matchesExpectations=true, Compiler.Ast validated-hit, and compilerModuleImageProbe=skipped."
+        ]
+      ],
+      blocking_gaps = [
+        "Large compiler-module speed report exists but does not clear the large compiler edit blocker."
+      ],
+      required_closure = [
+        "Re-run scripts/measure-native-incremental.sh --scenario selfhost-compiler-module-body-change with CLASP_NATIVE_INCREMENTAL_COMPILER_MODULE_IMAGE_PROBE=0 through scripts/run-managed-job.sh and provide the passing report path."
+      ],
+      verification_notes = [
+        textConcat ["Large compiler-module speed report consumed but rejected: ", path]
+      ]
+    }
+
+missingManagedCompilerModuleSpeedEvidence : ManagedVerificationEvidence
+missingManagedCompilerModuleSpeedEvidence =
+  ManagedVerificationEvidence {
+    proven = false,
+    evidence = [
+      "No large compiler-module speed report path was provided to this lightweight audit."
+    ],
+    blocking_gaps = [
+      "No large compiler-module speed report was provided, so this audit cannot clear the real compiler edit speed blocker."
+    ],
+    required_closure = [
+      "Provide CLASP_SWARM_CAPABILITY_COMPILER_MODULE_SPEED_REPORT_JSON from a passing selfhost-compiler-module-body-change report."
+    ],
+    verification_notes = [
+      "Set CLASP_SWARM_CAPABILITY_COMPILER_MODULE_SPEED_REPORT_JSON to a passing large compiler-module speed report artifact to let this audit consume current compiler edit evidence."
+    ]
+  }
+
+readManagedCompilerModuleSpeedEvidence : Str -> ManagedVerificationEvidence
+readManagedCompilerModuleSpeedEvidence path =
+  if path == "" then
+    missingManagedCompilerModuleSpeedEvidence
+  else
+    match readFile path {
+      Err message ->
+        ManagedVerificationEvidence {
+          proven = false,
+          evidence = [
+            textConcat ["Large compiler-module speed report could not be read at ", path, ": ", message]
+          ],
+          blocking_gaps = [
+            "Large compiler-module speed report path was configured but unreadable."
+          ],
+          required_closure = [
+            "Provide a readable selfhost-compiler-module-body-change speed report artifact."
+          ],
+          verification_notes = [
+            textConcat ["Large compiler-module speed report read failed: ", path]
+          ]
+        },
+      Ok raw -> managedCompilerModuleSpeedEvidenceFromRaw path raw
+    }
+
+managedCompilerModuleSpeedEvidence : ManagedVerificationEvidence
+managedCompilerModuleSpeedEvidence = readManagedCompilerModuleSpeedEvidence managedCompilerModuleSpeedReportPath
+
+ordinaryProgramExecution : CapabilityStatus
+ordinaryProgramExecution =
+  capabilityStatus
+    "ordinary_program_execution"
+    "pass"
+    [
+      "FeedbackLoop.clasp runs the builder/verifier loop through claspc run as an ordinary Clasp program.",
+      "GoalManager and ManagedLoop keep durable state, reports, and loop status in repo-owned runtime storage.",
+      "Agent backend defaults are gpt-5.5 with xhigh reasoning and can be replaced by command templates.",
+      "The ordinary feedback-loop Main.clasp applies CLASP_LOOP_BUILDER_MEMORY_MB_JSON and CLASP_LOOP_VERIFIER_MEMORY_MB_JSON as role-specific launch caps over CLASP_LOOP_WATCH_MEMORY_MB_JSON before spawning builder and verifier agents."
+    ]
+    emptyTexts
+    emptyTexts
+
+durableNativeSubstrate : CapabilityStatus
+durableNativeSubstrate =
+  capabilityStatus
+    "durable_native_substrate"
+    "pass"
+    [
+      "Native swarm state stores objectives, tasks, runs, artifacts, memory, approvals, policies, events, and merge decisions.",
+      "Resource guards expose host memory and disk health before child launch.",
+      "Managed jobs provide process isolation metadata, cooperative stop requests, memory caps, and disk headroom checks."
+    ]
+    emptyTexts
+    emptyTexts
+
+claspNativeControlApi : CapabilityStatus
+claspNativeControlApi =
+  capabilityStatus
+    "clasp_native_control_api"
+    "pass"
+    [
+      "Swarm.clasp exposes ordinary typed helpers for objectives, tasks, runs, policies, verification plans, memory, and artifacts.",
+      "Child loops are launched by Clasp programs rather than by a special claspc swarm subcommand.",
+      "GoalManager propagates configured model, reasoning, sandbox, command-template, and memory-budget settings into children."
+    ]
+    emptyTexts
+    emptyTexts
+
+orchestrationViability : CapabilityStatus
+orchestrationViability =
+  capabilityStatus
+    "orchestration_viability"
+    "partial"
+    (append
+      [
+        "GoalManager can plan task waves, launch child loops, inspect child health, and retry recoverable failures.",
+        "FeedbackLoop persists builder and verifier attempts with structured reports and capability statuses.",
+        "LocalPlanner, LocalAgent, and AgentBackend support provider-neutral task execution paths.",
+        "Direct destructive filesystem targets are resolved against task filesystem roots before spawn, so approved commands cannot delete outside the allowed workspace by absolute path.",
+        "Simple bash/sh/zsh -c destructive shell snippets are now target-scoped before spawn, and dynamic shell filesystem operands fail closed instead of bypassing task roots.",
+        "Opaque subprocess filesystem writes can be mediated through CLASP_SWARM_FILESYSTEM_MEDIATOR_JSON and the checked-in LD_PRELOAD filesystem write guard, so libc write/create/delete/rename paths are scoped to task workspace roots.",
+        "For hostile/static tools, CLASP_SWARM_FILESYSTEM_WRITE_BACKEND_JSON can route the same mediator contract to scripts/clasp-filesystem-write-kernel-backend.mjs, which runs the command in a fresh user/mount namespace and chroot with only allowed workspace roots bind-mounted read-write.",
+        "For non-static hostile tools, task policy can carry allowed read-only dependency roots through SwarmTaskCapabilities, CLASP_MANAGER_TASK_ALLOWED_READONLY_ROOTS_JSON, and swarmPolicySetWithFilesystemAccessJson; the runtime passes them to filesystem mediation as --readonly-roots-json for read-only bind mounts.",
+        "Swarm.clasp exposes typed sparse semantic-memory embeddings and model-scoped overlap ranking through SwarmSparseEmbedding, SwarmEmbeddedMemoryValue, and swarmEmbeddedMemorySearchFromMemory, so standalone agents can rank durable memory by semantic dimensions instead of only native text search.",
+        "Swarm.clasp also exposes fixed-point weighted semantic-memory embeddings through SwarmWeightedEmbedding, SwarmWeightedEmbeddedMemoryValue, and swarmWeightedEmbeddedMemorySearchFromMemory, so provider or local embedding weights can be persisted and ranked as ordinary Clasp data.",
+        "Swarm.clasp now has a provider-style embedding trust boundary and persistent weighted vector index through SwarmEmbeddingProviderRequest, UntrustedEmbeddingProviderOutput, validateWeightedEmbeddingProviderOutput, SwarmWeightedVectorIndex, swarmWeightedVectorIndexFromMemory, and swarmWeightedVectorIndexSearch, so local or future remote embedding outputs can be schema-checked, stored as JSON, reloaded, and searched by ordinary Clasp programs.",
+        "Swarm.clasp now also exposes a JSON-persistent sharded weighted vector store through SwarmWeightedVectorStore, swarmWeightedVectorStoreFromIndexes, swarmWeightedVectorStoreText, swarmWeightedVectorStoreFromText, swarmWeightedVectorStoreShardCountForQuery, and swarmWeightedVectorStoreSearch, so ordinary agents can keep provider/model/scale vector indexes separated while querying the matching shard as data.",
+        "Swarm.clasp also exposes command-template embedding provider transport through SwarmEmbeddingProviderCommandTransport, swarmEmbeddingProviderCommand, and swarmRunEmbeddingProviderCommand, so ordinary Clasp programs can render provider/model/input/scale placeholders, run an external embedding command, and keep the result untrusted until the weighted embedding payload validates.",
+        "Swarm.clasp now exposes authenticated/network embedding adapter configuration and reusable provider profiles through SwarmEmbeddingProviderNetworkAdapter, SwarmEmbeddingProviderNetworkAdapterSummary, swarmEmbeddingProviderNetworkAdapterValidationMessage, swarmEmbeddingProviderNetworkAdapterSummary, swarmEmbeddingProviderNetworkAdapterCommandTransport, swarmEmbeddingProviderBearerNetworkAdapter, swarmOpenAiEmbeddingProviderNetworkAdapter, swarmEmbeddingProviderNetworkAdapterCommand, and swarmRunEmbeddingProviderNetworkAdapter, so endpoint, auth env, allowlisted network destination, timeout, provider/model matching, common bearer/OpenAI-compatible setup, command rendering, and untrusted-output validation are ordinary Clasp data rather than compiler or shell-wrapper behavior."
+      ]
+      managedSwarmProofEvidence.evidence)
+    (append
+      managedSwarmProofEvidence.blocking_gaps
+      [
+        "Authenticated/network embedding adapters now have first-class config validation, reusable bearer/OpenAI-compatible profiles, and weighted vector stores can be sharded by provider/model/scale, but native/provider-specific HTTP adapter execution plus large-scale approximate vector-store persistence remain follow-on beyond the current network-adapter config, command-transport, and provider-validated weighted vector store surface."
+      ])
+    (append
+      managedSwarmProofEvidence.required_closure
+      [
+        "Add native/provider-specific HTTP embedding adapter execution and approximate/vector-database persistence once the validated network-adapter config, command transport, provider profiles, and sharded weighted vector store are no longer sufficient."
+      ])
+
+ergonomics : CapabilityStatus
+ergonomics =
+  capabilityStatus
+    "ergonomics"
+    "partial"
+    (append
+      (append
+        [
+          "The language now supports rank-1 polymorphic collection use, empty-list inference, fold/map/reduce-style helpers, records, Dict-heavy state, and JSON decode flows used by the manager.",
+          "Large Clasp programs can express agent loops, planner reports, resource guards, and runtime policies directly.",
+          "Native cache-key generation memoizes image and launcher file bytes within each claspc invocation, reducing repeated large file reads across native-image, source-export, module-summary, and run-binary cache paths.",
+          "Changed-declaration native-image exports now default to the in-process route under managed memory caps, cutting the focused body-change probe from 21.11s to 1.44s.",
+          "Compiler native export hosts are content-scoped for compiler images across XDG cache roots, so isolated agent/test cache directories can reuse an already-warm compiler host.",
+          "Native image JSON array loading now scans arrays once instead of repeatedly rescanning by index; the forced-fresh compiler export-host probe loaded embedded.compiler.native.image.json in 651ms with total command real time 1.09s.",
+          "Current guarded speed probes report native-cli checkCold=1.41s, nativeImageCold=3.45s, checkBodyChange=0.61s, nativeImageBodyChange=1.50s, selfhost checkCold=0.89s, selfhost imageCold=2.63s, checkBodyChange=0.50s, and imageBodyChange=1.37s.",
+          "Large compiler-module body-change check proof reports Compiler.Ast validated-hit reuse with compilerCheckCold=5.64s and compilerCheckBodyChange=7.89s under a managed memory cap; the full compiler native-image diagnostic is opt-in to avoid VM-wide OOM pressure.",
+          "Affected verification now routes iteration-speed evidence changes to the native incremental guard instead of the broad verify-fast fallback.",
+          "Affected verification reports now expose per-command resourceClass, oomRisk, requiresManagedGuard, executionAdvice, compilerStateAccess, and a commandResourceSummary with static/focused/heavy, safe-direct, managed-guard, compiler-state-free, compiler-state-touching counts, and canRunWithoutCompilerState so standalone agents can distinguish static checks from focused or heavy verifier work before launching commands.",
+          "Affected verification routes AgentErgonomics changes through the explicit static ergonomics contract instead of launching the full claspc harness by default; the full ordinary-Clasp harness remains available as an opt-in check.",
+          "GoalManagerPlannerInputState keeps planner reuse fingerprints in a lightweight module while preserving goal, planner policy, benchmark summary, planner memory, backlog, rendered mailbox summary/details, and workspace task-catalog evidence for standalone planners.",
+          "LocalPlanner.clasp reads configured planner catalogs through LocalPlannerCatalogReadResult, validates routes with localRoutePlannerRouteKeyKnown, validates configured tasks with localPlannerCatalogTaskIssues, localPlannerCatalogTaskDependencyIssues, and localPlannerCatalogCycleBlockedTaskIds, filters invalid and cycle-blocked configured tasks before catalog merging, and surfaces malformed inline catalogs, bad configured catalog paths, malformed workspace catalogs, missing routes, unknown route, missing taskId, reserved taskId, missing role, missing detail, missing taskPrompt, missing dependency, self dependency, unknown dependency, duplicate taskId, and cycle dependency as planner-catalog-error residual risks plus clasp-local-planner-task-catalog-error report evidence instead of silently falling back to defaults.",
+          "LocalRouting.clasp now exposes localRouteTaskKindIterationSpeed, localRouteTaskKindResourcePressure, localRouteTaskKindAffectedVerification, localRouteTaskKindCapabilityAudit, localRouteTaskKindStandaloneSwarm, localRouteTaskKindSemanticContext, localRoutePlannerRouteKeyProviderNeutral, localRoutePlannerRouteKeyWildcard, localRouteSelectsProviderNeutral, and localRoutePlannerRouteKeyForPrompt so provider-neutral planner routing, wildcard catalog matching, and task-kind comparisons share the same ordinary-Clasp route policy as resource-pressure, capability-audit, semantic-context, and standalone-swarm work.",
+          "Root-confined workspace APIs now include bounded recursive workspaceListTree inventory, bounded workspaceSearchText source search, and bounded workspaceReplaceText exact source edits, so ordinary Clasp agents can inspect workspace shape, find source lines, and apply checked edits without shelling out to find/rg/sed/perl/apply_patch or traversing outside the declared root.",
+          "LocalSourceEdit.clasp now renders sourceEditPromptSection, sourceEditPatchPromptLine, and standaloneSwarmSourceEditPromptSection from the same Source edit plan and Source edit patches headings parsed by sourceEditPlanTargetsFromPrompt and sourceEditPatchesFromPrompt, so standalone planners and agents share one source-edit prompt contract.",
+          "AgentErgonomics.clasp now exposes capability-audit prompt helpers including AgentCapabilityAuditClosureDecision, AgentCapabilityAuditClosureInput, AgentCapabilityAuditClosureVerificationPlan, AgentFocusedVerificationLaunchPolicy, AgentAutonomousLaunchGateInput, AgentAutonomousLaunchGate, agentCapabilityAuditJsonFromPrompt, agentCapabilityAuditJsonPathFromPrompt, agentBoundedCapabilityAuditJsonFromPath, agentCapabilityAuditDecisionJsonFromPrompt, agentCapabilityAuditDecisionJsonPathFromPrompt, agentBoundedCapabilityAuditDecisionJsonFromPath, agentCapabilityAuditClosureKindFromPrompt, agentCapabilityAuditClosureRoleForKind, agentCapabilityAuditClosureRoleFromPrompt, agentCapabilityAuditClosureVerificationPlanForKind, agentCapabilityAuditClosureVerificationSectionForKind, agentCapabilityAuditClosureVerificationPlanFromPrompt, agentCapabilityAuditClosureVerificationPlanValidationFromPrompt, agentFocusedVerificationLaunchPolicyFromPrompt, agentFocusedVerificationLaunchPolicyJsonFromPrompt, agentFocusedVerificationLaunchPolicyFromJson, agentAutonomousLaunchGate, agentAutonomousLaunchGateJsonFromPrompt, agentAutonomousLaunchGateFromJson, agentPromptHasCapabilityAuditClosureVerificationPlan, agentCapabilityAuditClosureDecisionFromPrompt, agentCapabilityAuditClosureDecisionFromEntries, agentCapabilityAuditClosureDecisionFromJson, agentCapabilityAuditClosureDecisionFromDecisionJson, agentPromptHasCapabilityAuditVerifyAllGap, agentPromptHasCapabilityAuditSwarmProofGap, agentPromptHasCapabilityAuditNativeRuntimeGap, agentPromptHasCapabilityAuditBackendSurfaceGap, agentPromptHasCapabilityAuditCompilerSpeedGap, agentPromptHasCapabilityAuditEmbeddingGap, agentPromptHasCapabilityAuditSafetyGap, agentPromptHasCapabilityAuditErgonomicsGap, agentCapabilityAuditClosurePromptFromPrompt, and agentCapabilityAuditCoordinationFocusFromPrompt so standalone planners can turn prompt text, bounded full audit JSON/path handoffs, direct decision JSON/path handoffs, direct Focused verification launch policy JSON: handoffs, direct Autonomous launch gate JSON: handoffs, or machine-readable blocking_gaps/required_closure arrays into one typed bounded verification, managed-swarm-proof, native-runtime-parity, backend-surface-parity, speed, embedding/vector-store, safety/governance, ergonomics closure, or autonomous launch decision with a focused verification plan and explicit launch policy, then parse, validate, and classify that plan as direct-safe, focused-verification-launch:managed-required, blocked-dirty-worktree, blocked-resource-admission, blocked-unmanaged-launch, blocked-compiler-mutation, or repair work before launching commands instead of duplicating audit-string parsing or guessing whether verify-all is safe to launch.",
+          "LocalPlanner uses agentCapabilityAuditClosureRoleForKind decision.kind when materializing capability-audit closure tasks, so typed closure kinds become specialized roles such as compiler-speed-worker, semantic-memory-worker, backend-surface-worker, safety-policy-worker, or agent-ergonomics-worker instead of a generic swarm-audit-worker.",
+          "AgentErgonomics.clasp also exposes managed-swarm-proof handoff helpers including AgentManagedSwarmProofReport, AgentManagedSwarmProofDecision, agentManagedSwarmProofJsonFromPrompt, agentManagedSwarmProofJsonPathFromPrompt, agentBoundedManagedSwarmProofJsonFromPath, agentManagedSwarmProofDecisionFromJson, and agentManagedSwarmProofDecisionFromPromptOrJson, backed by CLASP_LOOP_MANAGED_SWARM_PROOF_CONTEXT_MAX_MB_JSON and tryDecode AgentManagedSwarmProofReport raw; LocalRouting and LocalPlanner consume clasp-managed-swarm-proof handoffs through localRouteHasManagedSwarmProofHandoff, managedSwarmProofTaskForJson, and managedSwarmProofTaskForPrompt so accepted proof artifacts move planning to the iteration-speed gap while invalid proof artifacts become focused GoalManager proof repair work.",
+          "AgentErgonomics.clasp now exposes planner task-budget prompt helpers including agentPlannerTaskBudgetContractLine, agentPromptHasTaskBudgetContract, and agentPromptTaskBudgetOrDefault so standalone planners share the same Plan 1-N task budget contract.",
+          "AgentErgonomics.clasp now exposes canonical planner task ids including agentPlannerTaskIdProviderNeutral, agentPlannerTaskIdIterationSpeed, agentPlannerTaskIdSemanticContext, agentPlannerTaskIdDiskResourcePressure, agentPlannerTaskIdMemoryResourcePressure, agentPlannerTaskIdAffectedVerifierLaunch, agentPlannerTaskIdCapabilityAuditClosure, agentPlannerTaskIdStandaloneSwarmReadiness, and agentPlannerReservedTaskId so local planner task catalogs, dependency lists, reserved planner task id checks, and task comparisons share one ordinary-Clasp identifier surface.",
+          "AgentErgonomics.clasp now exposes AgentCapabilityMailboxSummary plus agentCapabilityMailboxSummaryFromPrompt, agentPromptHasCapabilityMailboxGaps, agentCapabilityMailboxClosureDetail, and agentCapabilityMailboxClosurePrompt for typed parsing of GoalManager capability-evidence=, capability-gap=, and capability-closure= mailbox detail lines; mailbox closure prompts preserve the concrete mailbox gap/closure context and append the focused verification plan from agentCapabilityAuditClosureVerificationSectionForKind \"capability-mailbox\"; LocalRouting consumes capability-gap or capability-closure prompts through localRouteHasCapabilityMailboxHandoff so new typed capability findings route to capability-audit closure work instead of adding route-specific string checks.",
+          "AgentErgonomics.clasp exposes reusable polymorphic Result helpers, typed validation issues/summaries for report and process preflight errors, batch validation-summary aggregation for report, JSON, process, and source-edit preflight errors, JSON decode and required-field validation summaries around tryDecode, checked workspace patch specs/results with preflighted root-confined exact replacements, root-confined workspace search/replace/read/write wrappers, typed process JSON wrappers, prompt block parsing/rendering helpers through agentPromptBlockText and agentPromptBlockOrEmpty, context-pack/task/dependency prompt helpers through agentPromptHasBuilderContextPack, agentPromptHasVerifierContextPack, agentPromptHasPlannerContextPack, agentPromptHasTaskFileContent, and agentPromptHasDependencyCompletionEvidence, affected-verifier prompt handoff helpers through agentAffectedVerificationPlanJsonFromPrompt, agentAffectedVerificationLaunchPolicyJsonFromPrompt, and agentPromptWithAffectedVerificationPathContext, focused-verifier launch handoff helpers through agentFocusedVerificationLaunchPolicyJsonFromPrompt and agentFocusedVerificationLaunchPolicyFromJson, autonomous launch gate helpers through AgentAutonomousLaunchGateInput, AgentAutonomousLaunchGate, agentAutonomousLaunchGate, agentAutonomousLaunchGateJsonFromPrompt, and agentAutonomousLaunchGateFromJson, backend-policy repair prompt helpers through agentPromptHasAgentBackendPolicyRepair and agentPromptHasPlannerBackendPolicyRepair, AgentCheckedProcessRun/agentRunWorkspaceCommandTimeoutChecked for preflighted workspace command execution, AgentCommandStep/AgentCommandPlanResult plus agentRunCommandPlanFailFast for typed verifier command plans with aggregated evidence, AgentVerifierMemoryPolicy/agentVerifierMemoryPolicySummary for validating managed and direct verifier memory caps before launch, AgentVerifierGate/agentVerifierGate for one typed verifier pass/fail decision from memory policy plus command-plan results, AgentAffectedVerificationPlanDecision for turning verify-affected --plan-only JSON into safe-direct, focused-managed, heavy-managed, or invalid-plan launch decisions with compiler-state access evidence and a canRunWithoutCompilerState decision, agentAffectedCommandResourceConsistencyIssues for rejecting safe-direct commands that require managed guards or carry high OOM risk, and agentBoundedAffectedVerificationPlanJsonFromPath/agentBoundedAffectedVerificationLaunchPolicyJsonFromPath for reusable size-checked affected-verifier path handoff, with coverage for contextual empty record/text lists."
+        ]
+        managedSpeedEvidence.evidence)
+      managedCompilerModuleSpeedEvidence.evidence)
+    (if managedSpeedEvidence.proven then
+      if managedCompilerModuleSpeedEvidence.proven then
+        [
+          "The stdlib and error surfaces are usable but still thinner than ideal for autonomous agents."
+        ]
+      else
+        [
+          "Focused cold and body-change probes are now fast, but large real compiler-module edits still need a dedicated speed proof before high-concurrency self-improvement.",
+          "The stdlib and error surfaces are usable but still thinner than ideal for autonomous agents."
+        ]
+    else
+      [
+        "Compiler/module iteration speed is still a major constraint for rapid self-improvement.",
+        "The stdlib and error surfaces are usable but still thinner than ideal for autonomous agents."
+      ])
+    (if managedSpeedEvidence.proven then
+      if managedCompilerModuleSpeedEvidence.proven then
+        [
+          "Grow focused stdlib helpers around filesystem, process, JSON, result, and collection-heavy workflows."
+        ]
+      else
+        [
+          "Add a large compiler-module edit speed proof before increasing concurrency aggressively.",
+          "Grow focused stdlib helpers around filesystem, process, JSON, result, and collection-heavy workflows."
+        ]
+    else
+      [
+        "Keep reducing promotion and rebuild latency.",
+        "Grow focused stdlib helpers around filesystem, process, JSON, result, and collection-heavy workflows."
+      ])
+
+verificationGate : CapabilityStatus
+verificationGate =
+  if managedVerifyEvidence.proven then
+    capabilityStatus
+      "verification_gate"
+      "pass"
+      (append
+        [
+          "Focused affected verification and scenario tests cover the ordinary-program loop, resource guards, policy helpers, context packs, ready gate, and native runtime slices.",
+          "Affected verification plans carry commandResourceSummary, per-command resource metadata, and compilerStateAccess, so a local verifier or planner can decide whether a route is static-only, compiler-state-free, focused-managed, or heavy-managed before running it.",
+          "verify-affected reports include affectedVerificationLaunchPolicy, so non-Clasp report consumers can read the ready flag, launch mode, blocking gaps, required closure, and launch evidence without duplicating the policy tree.",
+          "AgentAffectedVerificationLaunchPolicy turns affected verification decisions into explicit direct-compiler-state-free, direct-compiler-state-access, focused-managed, heavy-managed, or invalid-plan launch modes before agents run follow-up verifier work, and command-level consistency validation fails closed on safe-direct/high-OOM or managed-guard conflicts.",
+          "The ready gate records structural expectations for swarm readiness features."
+        ]
+        managedVerifyEvidence.evidence)
+      emptyTexts
+      [
+        "Keep heavy verification under managed memory and disk guards for future runs."
+      ]
+  else
+    capabilityStatus
+      "verification_gate"
+      "partial"
+      (append
+        [
+          "Focused affected verification and scenario tests cover the ordinary-program loop, resource guards, policy helpers, context packs, ready gate, and native runtime slices.",
+          "The ready gate records structural expectations for swarm readiness features."
+        ]
+        managedVerifyEvidence.evidence)
+      (append
+        managedVerifyEvidence.blocking_gaps
+        [
+          "Heavy verification must run under managed memory and disk guards to avoid host OOM or disk pressure."
+        ])
+      (append
+        managedVerifyEvidence.required_closure
+        [
+          "Treat any full verification OOM as a verifier/runtime blocker, not as a reason to continue unguarded."
+        ])
+
+safetyGovernance : CapabilityStatus
+safetyGovernance =
+  capabilityStatus
+    "safety_governance"
+    "partial"
+    [
+      "Task policies include approvals, required verifiers, process allowlists, workspace root allowlists, network access modes, and allowed network destinations.",
+      "Swarm.clasp exposes SwarmTaskCapabilities plus helpers that derive access and verification policy from explicit process, writable filesystem, read-only dependency filesystem, network, approval, and verifier requirements.",
+      "Allowlisted network access fails closed unless CLASP_SWARM_NETWORK_MEDIATOR_JSON or CLASP_SWARM_NETWORK_MEDIATOR configures a host mediator.",
+      "Mediated allowlisted runs pass the allowed destinations and original command to the host mediator before exec and emit network_mediation_started evidence.",
+      "scripts/clasp-network-egress-enforcer.mjs provides a checked-in fail-closed mediator adapter that validates host:port destinations, checks command-json parity, and requires CLASP_SWARM_NETWORK_EGRESS_BACKEND_JSON before execution.",
+      "scripts/clasp-network-egress-backend.mjs and scripts/clasp-network-egress-guard.c provide a checked-in host-side connect backend that resolves allowed destinations, injects an LD_PRELOAD guard, and returns EACCES for non-allowlisted outbound connect calls.",
+      "scripts/clasp-network-egress-kernel-backend.mjs provides a checked-in kernel-isolated backend for hostile hostname/IP tools: it runs the command in a fresh user/network/mount namespace and exposes only allowed IPv4 host:port destinations through namespace-local proxy listeners.",
+      "Policy helper coverage includes a direct SYS_connect client, proving the kernel-isolated backend can allow the explicit proxied endpoint while blocking a non-allowlisted loopback endpoint without relying on LD_PRELOAD.",
+      "The kernel-isolated backend writes a namespace-private /etc/hosts allowlist, sets CLASP_NETWORK_EGRESS_HOSTNAME_TRANSPARENT, and has policy-helper coverage for a hostname-resolving direct SYS_connect client.",
+      "Approval-required destructive commands are rejected before spawn until the task has a granted destructive-action approval.",
+      "Approved direct destructive commands still resolve rm/rmdir/unlink and git clean/reset targets against allowed workspace roots; out-of-root targets emit filesystem_permission_denied and are not spawned.",
+      "Approved bash/sh/zsh -c snippets now parse simple rm/rmdir/unlink and git clean/reset targets against task roots before spawn; dynamic shell filesystem operands emit filesystem_permission_denied and fail closed.",
+      "Configured CLASP_SWARM_FILESYSTEM_MEDIATOR_JSON runs wrap policy-scoped commands with scripts/clasp-filesystem-write-enforcer.mjs, which injects scripts/clasp-filesystem-write-guard.c through LD_PRELOAD and denies libc write/create/delete/rename operations outside allowed workspace roots.",
+      "When CLASP_SWARM_FILESYSTEM_WRITE_BACKEND_JSON points at scripts/clasp-filesystem-write-kernel-backend.mjs, the same filesystem mediator contract runs hostile commands in a fresh user/mount namespace and chroot with only allowed workspace roots bind-mounted read-write.",
+      "Allowed read-only dependency roots are now first-class in policy JSON as allowedReadonlyRoots and capabilities.readonlyFilesystemRoots, configurable for manager-created tasks through CLASP_MANAGER_TASK_ALLOWED_READONLY_ROOTS_JSON.",
+      "The filesystem mediator receives policy read-only roots through --readonly-roots-json and forwards them to the kernel backend for read-only bind mounts, so non-static tools can run without receiving writable authority outside the task workspace.",
+      "Filesystem kernel policy coverage compiles static direct-syscall clients with cc -nostdlib -static and proves an out-of-workspace open syscall is blocked while an in-workspace open syscall succeeds.",
+      "The same coverage compiles dynamic direct-syscall clients and proves read-only dependency mounts let the in-workspace write succeed while the out-of-workspace write remains blocked.",
+      "Memory-limited native swarm tool/verifier runs use a systemd MemoryMax scope when available and preserve the same ulimit inside the scoped command.",
+      "Ordinary feedback-loop builder and verifier launches use spawnWatchedProcessWithLimits with CLASP_LOOP_BUILDER_MEMORY_MB_JSON and CLASP_LOOP_VERIFIER_MEMORY_MB_JSON role-specific caps, falling back through CLASP_LOOP_WATCH_MEMORY_MB_JSON and CLASP_LOOP_AGENT_MEMORY_MB_JSON instead of running unbounded.",
+      "Ordinary feedback-loop timeout cleanup calls cancel step.heartbeatPath through the watched-process runtime API, so early stop uses heartbeat/token-scoped cancellation instead of ad hoc PID, child-PID, kill, or pkill signalling.",
+      "Managed jobs refuse unbounded jobs by default and enforce memory/disk admission before launch.",
+      "ResourceGuardPolicy exposes ResourceGuardAdmissionDecision and ResourceGuardConcurrencyDecision so ordinary Clasp planners can classify admitted, host-memory, projected-child, external-agent, and configured-concurrency memory pressure before launching work.",
+      "GoalManagerResourceHealth includes memory-admission and memory-concurrency-admission summary lines backed by typed ResourceGuard decisions, so planner prompts carry launch status, safe admittedChildCapacity, effectiveMaxChildren, reason, required memory, headroom, and recommended action.",
+      "GoalManagerResourceHealth now includes a read-only GeneratedStateCleanupPlan section in managerResourceHealthSummary when disk pressure is detected or CLASP_MANAGER_INCLUDE_GENERATED_CLEANUP_PLAN_JSON is enabled, exposing generated-state-cleanup-action, safe-to-clean status, reclaimable MB, projected available disk, guard shortfall after cleanup, generated-state-cleanup-can-satisfy-reserve, generated-state-cleanup-can-satisfy-guard, and generated-state-cleanup-apply-requires evidence before any cleanup is applied.",
+      "LocalRouting recognizes memory-admission blocked reasons plus memory-concurrency-admission reduced or blocked states, so typed admission pressure routes to resource-memory-pressure recovery rather than disk cleanup or generic retry work.",
+      "ResourceRecoveryPolicy classifies memory-admission and memory-concurrency-admission messages, retry evidence, and OOM-kill signatures such as exit-status=137, SIGKILL, Killed, and oom-kill as resource-memory-pressure recovery, preserving the same typed admission route after failed launches are recorded.",
+      "ResourceRecoveryDecision gives ordinary Clasp agents a typed task, kind, guidance, resource-policy, pressure-kind, control-plane-kind, retry-review, and memory-admission decision for resource block messages and retry evidence.",
+      "scripts/clasp-swarm-preflight.sh and scripts/clasp-swarm-start.sh --preflight let operators and planners run the same managed admission in preflight-only mode for the next ready swarm lane before any worker process starts.",
+      "Direct verify-all and verify-affected current-shell paths still apply virtual-memory caps by default through CLASP_VERIFY_DIRECT_MEMORY_LIMIT_MB and CLASP_VERIFY_AFFECTED_DIRECT_MEMORY_LIMIT_MB, and direct mode now preflights CLASP_VERIFY_DIRECT_HOST_RESERVE plus CLASP_VERIFY_AFFECTED_DIRECT_HOST_RESERVE memory/disk reserves before any verifier command runs.",
+      "AgentErgonomics exposes reusable bounded affected-verifier path handoff helpers backed by hostFileSizeMb and CLASP_LOOP_AFFECTED_VERIFICATION_CONTEXT_MAX_MB_JSON; LocalAgent and LocalPlanner use them to return tiny invalid affected-verifier JSON markers for oversized or unreadable context artifacts instead of reading unbounded files into memory.",
+      "Managed-job force stops are exact-marker-only: stop-managed-job.sh validates job metadata, refuses current shell process group or session metadata, refuses unmarked same-session members, has no CLASP_MANAGED_JOB_FORCE_STOP_UNMARKED_SESSION bypass, and signals only processes carrying the exact CLASP_MANAGED_JOB_ID, CLASP_MANAGED_JOB_ROOT, and optional CLASP_MANAGED_JOB_TOKEN marker."
+    ]
+    [
+      "Task capabilities now have a first-class Clasp record plus direct, simple shell, LD_PRELOAD-backed libc write mediation, kernel-backed static/dynamic direct-syscall mediation, and policy-owned read-only dependency roots.",
+      "Destructive-action approval coverage is focused on known destructive commands, simple shell snippets, libc-mediated writes, and direct-syscall clients; richer hostile-tool packaging remains follow-on work."
+    ]
+    [
+      "Expand approval-required destructive workflows beyond direct, simple shell, and libc-mediated command targets."
+    ]
+
+standaloneSwarmExecution : CapabilityStatus
+standaloneSwarmExecution =
+  capabilityStatus
+    "standalone_swarm_execution"
+    (if standaloneClosureReportPath == "" then
+      "pass"
+    else if standaloneClosureEvidence.proven then
+      "pass"
+    else
+      "partial")
+    (append
+      [
+        "The next-generation loop is a Clasp program launched by claspc run and can use Codex as just one backend.",
+        "AgentBackend separates provider command construction from manager behavior.",
+        "AgentBackend capability profiles record planner, builder, verifier, workspace-edit, child-task-planning, structured-report, and external-model properties as ordinary Clasp data.",
+        "GoalManagerAgentBackendConfig makes standalone-required manager runs default to managerClaspcBin plus agentBackendLocalAgentTemplate and agentBackendLocalPlannerTemplate, while explicit CLASP_LOOP_AGENT_COMMAND_JSON and CLASP_MANAGER_PLANNER_AGENT_COMMAND_JSON still override those defaults.",
+        "Standalone-required GoalManager runs default loop and planner capability profiles to local-clasp, so non-Codex backend capability evidence is present before launch instead of depending on a shell wrapper.",
+        "FeedbackLoop and GoalManager expose backend capability summaries in status JSON and inject capability repair context into builder, verifier, and planner prompts.",
+        "GoalManager supports local planner and local agent harnesses for non-Codex execution paths.",
+        "GoalManager planner reuse fingerprints include planner memory, backlog, rendered mailbox detail lines, benchmark summary, and workspace-local task catalogs through GoalManagerPlannerInputState, so standalone planner behavior can change between waves without stale report replay.",
+        "LocalAgent can route capability-audit work and produce a concrete ordinary-Clasp closure source artifact plus verifier proof evidence without Codex-specific control flow.",
+        "LocalAgent verifier reports include a local_verifier_gate capability status derived from AgentVerifierGate, so local pass/fail outcomes carry typed memory-policy and command-plan evidence.",
+        "LocalAgent verifier prompts can include an Affected verification plan JSON block, a direct Affected verification launch policy JSON block, a Focused verification plan section, a direct Focused verification launch policy JSON block, or a direct Autonomous launch gate JSON block; the ordinary Clasp verifier decodes affected plans through AgentAffectedVerificationPlanDecision, derives AgentAffectedVerificationLaunchPolicy, can decode direct launch policies through agentAffectedVerificationLaunchPolicyFromJson, validates focused plans through agentCapabilityAuditClosureVerificationPlanValidationFromPrompt, derives AgentFocusedVerificationLaunchPolicy through agentFocusedVerificationLaunchPolicyFromPrompt, can decode direct focused launch policies through agentFocusedVerificationLaunchPolicyFromJson, can decode direct autonomous gates through agentAutonomousLaunchGateFromJson, and emits affected_verification_plan, affected_verification_launch_policy, focused_verification_plan, focused_verification_launch_policy, or autonomous_launch_gate capability status evidence before launching follow-up verifier work. Safe-direct plans that touch compiler/cache state are partial with the affected-verification-plan:safe-direct-compiler-state-access closure recommendation instead of a silent pass, autonomous_launch_gate states with ready=false remain partial or fail with autonomous-launch:* required closure, and internally inconsistent safe-direct/high-OOM command metadata or unmanaged heavy focused plans are repair work rather than launch permission.",
+        "Affected-verifier path handoffs stay bounded through shared AgentErgonomics helpers and CLASP_LOOP_AFFECTED_VERIFICATION_CONTEXT_MAX_MB_JSON, so a planner or verifier can consume file-backed context without loading oversized artifacts into prompts or process memory.",
+        "LocalRouting and LocalPlanner route affected-verifier launch-policy gaps to affected-verifier-launch-preflight, so planner context containing affected-launch-mode=direct-compiler-state-access or managed affected-verifier recommendations becomes a bounded verifier preflight/admission task instead of generic swarm work.",
+        "GoalManager mailbox summaries preserve capability evidence, blocking gaps, and required closure entries as capability-evidence=, capability-gap=, and capability-closure= detail lines for sibling agents; focused_verification_plan or focused_verification_launch_policy mailbox evidence with focused-verification-plan-safe-direct:false, focused-verification-launch-policy-mode:managed-required, focused-verification-launch-mode=invalid-plan, capability-gap=focused_verification_plan:, or capability-gap=focused_verification_launch_policy: routes through localRouteFocusedVerificationPlanRequiresManaged to the affected-verifier launch preflight task before a sibling agent runs verifier work.",
+        "GoalManagerResourceHealth now derives managerAutonomousLaunchGate from the current manager project Git dirty state, managerWorkspaceCheckpointReadyDefault clean-worktree checkpoint evidence, a matching ManagerWorktreeCheckpoint state-root manifest from scripts/clasp-manager-worktree-checkpoint.sh, explicit CLASP_MANAGER_WORKSPACE_CHECKPOINT_READY_JSON checkpoint evidence, resource admission, managed launch readiness from CLASP_MANAGED_JOB_ID or CLASP_MANAGER_ASSUME_MANAGED_LAUNCH_JSON, configured/requested child count, admitted child capacity, focused-verification readiness, full-verification, promotion, and compiler-mutation intent flags, then emits Autonomous launch gate JSON plus autonomous-launch-gate-may-spawn-repair, autonomous-launch-worktree-checkpoint-matches, and autonomous-launch-gate-repair-recommendation through managerResourceHealthSummary so plannerPromptFor carries current launch permission before the planner creates tasks. The same managerResourceHealthSummary carries read-only GeneratedStateCleanupPlan evidence with generated-state-cleanup-action, generated-state-cleanup-projected-available-mb, generated-state-cleanup-can-satisfy-guard, and generated-state-cleanup-apply-requires when disk pressure needs a Clasp-planned cleanup decision before launch. GoalManagerTaskExecutionHelpers enforces that same gate at launchReadyTaskForActiveChildren and launchChildLoopForActiveChildren with task launch blocked by autonomous launch gate reports, capability-gap=autonomous_launch_gate evidence, autonomous-launch-gate-blocker retry recovery records, manager-replan-blocker=autonomous-launch-gate evidence, resourceRecoveryReplanAvailable support through taskIdsHaveManagerReplanBlocker, and watchedProcessError handoff instead of spawning unmanaged child loops. A closed ordinary gate can only admit a child when plannerTaskSpecIsAutonomousLaunchGateRepair recognizes standalone-swarm readiness work carrying retryRecordRecoveryTask=standalone-swarm-autonomous-launch-gate-repair or equivalent autonomous-gate recovery markers and managerAutonomousLaunchGateRepairMaySpawnForActiveChildren confirms checkpoint, resource admission, child capacity, managed launch, and no full-verification or promotion blocker. GoalManagerBootstrapPlanner includes Prior swarm mailbox/recovery context via mailboxSummaryText wave in plannerPromptFor so the next planner wave sees retry recovery and autonomous gate blocker details directly. ResourceRecoveryPolicy classifies those retry records through resourceRecoveryMessageIsAutonomousLaunchGateBlocker into retryRecordRecoveryTask=standalone-swarm-autonomous-launch-gate-repair, retryRecordRecoveryKind=autonomous-launch-gate, and non-resource retry decisions, while LocalRouting recognizes the concise retryRecordRecoveryTask and manager-replan-blocker markers as standalone-swarm repair work.",
+        "LocalRouting recognizes blocked Autonomous launch gate JSON through localRouteHasAutonomousLaunchGateGap, including autonomous-launch-ready=false evidence, autonomous-launch-gate-mode:blocked-* evidence, capability-gap=autonomous_launch_gate: mailbox lines, retryRecordRecoveryTask=standalone-swarm-autonomous-launch-gate-repair, retryRecordRecoveryKind=autonomous-launch-gate, retryRecordLatest=phase=autonomous-launch-gate, manager-replan-blocker=autonomous-launch-gate, and autonomous-launch-gate-blocker retry-record markers; LocalPlanner preserves autonomous launch gate JSON and retry-record evidence and routes those states to standalone-swarm readiness work focused on checkpoint, resource-admission, managed-supervisor, focused-verification-policy, or bounded-task closure before spawning more agents.",
+        "LocalPlanner plans standalone-swarm child work with an explicit autonomous-launch-gate repair path plus repo-scale multi-surface direct-source-edit requirement, source-edit plan, and source-patch plan.",
+        "LocalAgent can route standalone-swarm work, consume prompt source-edit and source-patch plans, preflight every planned patch before writing, apply targeted replacements through the root-confined workspaceReplaceText primitive plus workspaceReadFile/workspaceWriteFile/workspaceMkdirAll support APIs inside existing Clasp, script, doc, and runtime source files, verify post-write source fingerprints plus shared standaloneSwarmDirectSourceEditProofMetadataPresent proof metadata before accepting proof evidence, and emit localVerifierFindingsFor plus standaloneSwarmDirectSourceEditIssueTexts and standaloneSwarmDirectSourceEditRepairHints source-edit-specific repair findings when proof, patch replacement, postcheck, or manifest validation fails.",
+        "LocalPlanner consumes standaloneSwarmDirectSourceEditRepairHints feedback through standaloneSwarmSourceEditRepairKindForPrompt and standaloneSwarmSourceEditRepairTaskForPrompt, so missing planned patch replacements, postchecks, proof metadata, or manifest fingerprints become bounded source-edit repair workers such as swarm-source-patch-repair-worker instead of another broad source-edit attempt.",
+        "scripts/standalone-swarm-verify.sh --closure --json validates fixed standalone-swarm source markers, direct-source-edit proof metadata, a workspace fingerprint manifest, and local-agent builder/verifier JSON evidence before reporting closed; it recomputes manifest target fingerprints from candidate workspace bytes, cross-checks the Clasp manifest fingerprint claimed by both builder and verifier reports, and emits the manifest SHA-256 in the closure report.",
+        "StandaloneSwarmClosureReport.clasp decodes the closure JSON into an ordinary typed Clasp decision, accepts inline Standalone swarm closure report JSON blocks, accepts bounded Standalone swarm closure report JSON path handoffs through CLASP_LOOP_STANDALONE_SWARM_CLOSURE_CONTEXT_MAX_MB_JSON, exposes standaloneSwarmClosureDecisionFromJson and standaloneSwarmClosureDecisionFromPath for direct artifact consumption, and classifies malformed, unreadable, oversized, manifest-missing, proof-missing, builder/verifier-report-missing, and local-verifier-gate-missing closure reports through standaloneSwarmClosureRepairKindForDecision so managers and planners do not have to scrape shell output or redo source-edit proof unnecessarily.",
+        "LocalRouting and LocalPlanner consume standalone closure-report handoffs through localRouteHasStandaloneSwarmClosureHandoff, standaloneSwarmTaskForPrompt, standaloneSwarmTaskForClosureReportJson, and standaloneSwarmTaskForClosureReportPath, so accepted closure reports become proof-recording work while invalid reports become bounded repair tasks with targeted roles such as swarm-manifest-repair-worker.",
+        "The local agent proof now covers repo-scale source patching across src, examples, scripts, docs, and runtime surfaces."
+      ]
+      standaloneClosureEvidence.evidence)
+    (if standaloneClosureReportPath == "" then
+      emptyTexts
+    else
+      standaloneClosureEvidence.blocking_gaps)
+    (if standaloneClosureReportPath == "" then
+      emptyTexts
+    else
+      standaloneClosureEvidence.required_closure)
+
+capabilityStatuses : [CapabilityStatus]
+capabilityStatuses = [
+  ordinaryProgramExecution,
+  durableNativeSubstrate,
+  claspNativeControlApi,
+  orchestrationViability,
+  ergonomics,
+  verificationGate,
+  safetyGovernance,
+  standaloneSwarmExecution
+]
+
+baseBlockingGaps : [Str]
+baseBlockingGaps =
+  if managedSpeedEvidence.proven then
+    if managedCompilerModuleSpeedEvidence.proven then
+      emptyTexts
+    else
+      [
+        "Focused cold and body-change probes are now fast, but large real compiler-module edits still need a dedicated speed proof before high-concurrency self-improvement."
+      ]
+  else
+    [
+      "Compiler rebuild and promotion latency still slows autonomous iteration."
+    ]
+
+blockingGaps : [Str]
+blockingGaps =
+  append
+    (if standaloneClosureReportPath == "" then
+      emptyTexts
+    else
+      standaloneClosureEvidence.blocking_gaps)
+    (append
+      managedSwarmProofEvidence.blocking_gaps
+      (if managedVerifyEvidence.proven then
+        baseBlockingGaps
+      else
+        append managedVerifyEvidence.blocking_gaps baseBlockingGaps))
+
+baseRequiredClosure : [Str]
+baseRequiredClosure =
+  if managedSpeedEvidence.proven then
+    if managedCompilerModuleSpeedEvidence.proven then
+      [
+        "Keep all swarm orchestration as ordinary Clasp programs launched by claspc run."
+      ]
+    else
+      [
+        "Make a large compiler-module edit speed proof the next swarm objective before increasing concurrency aggressively.",
+        "Keep all swarm orchestration as ordinary Clasp programs launched by claspc run."
+      ]
+  else
+    [
+      "Make iteration-speed work the next swarm objective before increasing concurrency.",
+      "Keep all swarm orchestration as ordinary Clasp programs launched by claspc run."
+    ]
+
+requiredClosure : [Str]
+requiredClosure =
+  append
+    (if standaloneClosureReportPath == "" then
+      emptyTexts
+    else
+      standaloneClosureEvidence.required_closure)
+    (append
+      managedSwarmProofEvidence.required_closure
+      (if managedVerifyEvidence.proven then
+        baseRequiredClosure
+      else
+        append managedVerifyEvidence.required_closure baseRequiredClosure))
+
+verificationProgressNote : Str
+verificationProgressNote =
+  if managedVerifyEvidence.proven && managedSwarmProofEvidence.proven then
+    if managedSpeedEvidence.proven then
+      if managedCompilerModuleSpeedEvidence.proven then
+        "overall_status remains partial until remaining capability ergonomics pass."
+      else
+        "overall_status remains partial until large compiler-module speed proof and remaining capability ergonomics pass."
+    else
+      "overall_status remains partial until iteration speed and remaining capability ergonomics pass."
+  else if managedVerifyEvidence.proven then
+    "overall_status remains partial until the broad swarm proof and remaining capability gaps pass."
+  else
+    "overall_status remains partial until full managed verification and broad swarm proof both pass."
+
+baseVerificationNotes : [Str]
+baseVerificationNotes = [
+  "This audit is intentionally lightweight and does not launch agents.",
+  verificationProgressNote,
+  "AgentErgonomics can decode this machine-readable audit JSON through agentCapabilityAuditClosureDecisionFromJson for bounded planner tasks.",
+  "OOM prevention is part of readiness: unguarded heavy loops are not acceptable verification evidence."
+]
+
+verificationNotes : [Str]
+verificationNotes =
+  append
+    baseVerificationNotes
+    (append
+      managedVerifyEvidence.verification_notes
+      (append
+        managedSwarmProofEvidence.verification_notes
+        (append
+          standaloneClosureEvidence.verification_notes
+          (append managedSpeedEvidence.verification_notes managedCompilerModuleSpeedEvidence.verification_notes))))
+
+audit : SwarmCapabilityAudit
+audit =
+  SwarmCapabilityAudit {
+    schema_version = 1,
+    kind = "clasp-swarm-capability-audit",
+    objective = "Assess whether Clasp is ready to host a self-improving agent swarm as ordinary Clasp programs.",
+    overall_status = "partial",
+    default_agent_model = "gpt-5.5",
+    default_agent_reasoning = "xhigh",
+    capability_statuses = capabilityStatuses,
+    blocking_gaps = blockingGaps,
+    required_closure = requiredClosure,
+    verification_notes = verificationNotes
+  }
+
+main : Str
+main = encode audit

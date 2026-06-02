@@ -1,0 +1,40 @@
+module GoalManagerCapabilityMailbox
+
+record CapabilityMailboxStatus = {
+  name : Str,
+  status : Str,
+  evidence : [Str],
+  blocking_gaps : [Str],
+  required_closure : [Str]
+}
+
+capabilityMailboxAppendPrefixedDetails : [Str] -> Str -> [Str] -> [Str]
+capabilityMailboxAppendPrefixedDetails details prefix values = {
+  let mut rendered = details;
+  for value in values {
+    if value == "" then
+      rendered
+    else {
+      rendered = append rendered [textConcat [prefix, value]];
+      rendered
+    }
+  };
+  rendered
+}
+
+appendCapabilityMailboxStatusDetails : [Str] -> [CapabilityMailboxStatus] -> [Str]
+appendCapabilityMailboxStatusDetails details statuses = {
+  let mut rendered = details;
+  for status in statuses {
+    rendered =
+      append rendered [textConcat ["capability=", status.name, ":", status.status]];
+    rendered =
+      capabilityMailboxAppendPrefixedDetails rendered (textConcat ["capability-evidence=", status.name, ":"]) status.evidence;
+    rendered =
+      capabilityMailboxAppendPrefixedDetails rendered (textConcat ["capability-gap=", status.name, ":"]) status.blocking_gaps;
+    rendered =
+      capabilityMailboxAppendPrefixedDetails rendered (textConcat ["capability-closure=", status.name, ":"]) status.required_closure;
+    rendered
+  };
+  rendered
+}

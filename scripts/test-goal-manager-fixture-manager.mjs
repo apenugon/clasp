@@ -36,6 +36,258 @@ function renderTemplate(template, replacements) {
   return template.map((arg) => renderTemplateArg(arg, replacements));
 }
 
+function templateContains(template, needle) {
+  return template.some((arg) => String(arg).includes(needle));
+}
+
+function backendPromptTransport(template) {
+  if (!Array.isArray(template) || template.length === 0) return "argument";
+  const hasPromptPath = templateContains(template, "{prompt_path}");
+  const hasInlinePrompt = templateContains(template, "{prompt}");
+  if (hasPromptPath && hasInlinePrompt) return "prompt-path+inline";
+  if (hasPromptPath) return "prompt-path";
+  if (hasInlinePrompt) return "inline-prompt";
+  return "missing";
+}
+
+function agentBackendSummary({ template, agentBin, agentModel, agentReasoning, agentSandbox, workspaceRoot }) {
+  const isTemplate = Array.isArray(template) && template.length > 0;
+  const promptTransport = backendPromptTransport(template);
+  const hasRoleInput = !isTemplate || templateContains(template, "{role}");
+  const hasPromptPathInput = !isTemplate || templateContains(template, "{prompt_path}");
+  const hasInlinePromptInput = !isTemplate || templateContains(template, "{prompt}");
+  const hasReportOutput = !isTemplate || templateContains(template, "{report_path}");
+  const hasSchemaInput = !isTemplate || templateContains(template, "{schema_path}");
+  const hasWorkspaceInput = !isTemplate || templateContains(template, "{workspace_root}");
+  const hasModelInput = !isTemplate || templateContains(template, "{model}");
+  const hasReasoningInput = !isTemplate || templateContains(template, "{reasoning}");
+  let validationMessage = "";
+  if (isTemplate && !hasRoleInput) {
+    validationMessage = "agent-backend-template-missing-role";
+  } else if (isTemplate && promptTransport === "missing") {
+    validationMessage = "agent-backend-template-missing-prompt-input";
+  } else if (isTemplate && !hasReportOutput) {
+    validationMessage = "agent-backend-template-missing-report-output";
+  }
+  const warnings = [];
+  if (isTemplate && !hasSchemaInput) warnings.push("agent-backend-template-missing-schema-path");
+  if (isTemplate && !hasWorkspaceInput) warnings.push("agent-backend-template-missing-workspace-root");
+  if (isTemplate && !hasModelInput) warnings.push("agent-backend-template-missing-model");
+  if (isTemplate && !hasReasoningInput) warnings.push("agent-backend-template-missing-reasoning");
+  return {
+    kind: isTemplate ? "template" : "codex",
+    agentBin,
+    model: agentModel,
+    reasoning: agentReasoning,
+    sandbox: agentSandbox,
+    workspaceRoot,
+    templateArgCount: Array.isArray(template) ? template.length : 0,
+    promptTransport,
+    hasRoleInput,
+    hasPromptPathInput,
+    hasInlinePromptInput,
+    hasReportOutput,
+    hasSchemaInput,
+    hasWorkspaceInput,
+    hasModelInput,
+    hasReasoningInput,
+    valid: validationMessage === "",
+    validationMessage,
+    warnings,
+  };
+}
+
+const agentBackendStandaloneRecommendedTemplate = [
+  "{agent_bin}",
+  "--role",
+  "{role}",
+  "--schema",
+  "{schema_path}",
+  "--report",
+  "{report_path}",
+  "--prompt-path",
+  "{prompt_path}",
+  "--workspace",
+  "{workspace_root}",
+  "--model",
+  "{model}",
+  "--reasoning",
+  "{reasoning}",
+  "--sandbox",
+  "{sandbox}",
+];
+
+function agentBackendValidationMessages(summary) {
+  if (summary.kind !== "template") return [];
+  const messages = [];
+  if (!summary.hasRoleInput) messages.push("agent-backend-template-missing-role");
+  if (summary.promptTransport === "missing") messages.push("agent-backend-template-missing-prompt-input");
+  if (!summary.hasReportOutput) messages.push("agent-backend-template-missing-report-output");
+  return messages;
+}
+
+function agentBackendPolicyValidationMessages(policy, summary) {
+  const messages = agentBackendValidationMessages(summary);
+  if (!policy.allowCodexFallback && summary.kind === "codex") {
+    messages.push("agent-backend-policy-disallows-codex-fallback");
+  }
+  if (policy.requirePromptPath && !summary.hasPromptPathInput) {
+    messages.push("agent-backend-policy-requires-prompt-path");
+  }
+  if (policy.requireSchemaInput && !summary.hasSchemaInput) {
+    messages.push("agent-backend-policy-requires-schema-path");
+  }
+  if (policy.requireWorkspaceInput && !summary.hasWorkspaceInput) {
+    messages.push("agent-backend-policy-requires-workspace-root");
+  }
+  if (policy.requireModelInput && !summary.hasModelInput) {
+    messages.push("agent-backend-policy-requires-model");
+  }
+  if (policy.requireReasoningInput && !summary.hasReasoningInput) {
+    messages.push("agent-backend-policy-requires-reasoning");
+  }
+  return messages;
+}
+
+function agentBackendPolicyBlockingGap(message) {
+  switch (message) {
+    case "agent-backend-template-missing-role":
+      return "backend template does not pass the agent role through {role}";
+    case "agent-backend-template-missing-prompt-input":
+      return "backend template does not pass the prompt through {prompt_path} or {prompt}";
+    case "agent-backend-template-missing-report-output":
+      return "backend template does not pass the structured report path through {report_path}";
+    case "agent-backend-policy-disallows-codex-fallback":
+      return "backend policy requires a configured non-Codex command template";
+    case "agent-backend-policy-requires-prompt-path":
+      return "backend policy requires durable prompt-path transport through {prompt_path}";
+    case "agent-backend-policy-requires-schema-path":
+      return "backend policy requires schema transport through {schema_path}";
+    case "agent-backend-policy-requires-workspace-root":
+      return "backend policy requires workspace transport through {workspace_root}";
+    case "agent-backend-policy-requires-model":
+      return "backend policy requires model transport through {model}";
+    case "agent-backend-policy-requires-reasoning":
+      return "backend policy requires reasoning transport through {reasoning}";
+    default:
+      return `backend policy failed with unknown validation message: ${message}`;
+  }
+}
+
+function agentBackendPolicyRequiredClosure(message) {
+  switch (message) {
+    case "agent-backend-template-missing-role":
+      return ["Add {role} to the backend command template arguments."];
+    case "agent-backend-template-missing-prompt-input":
+      return ["Add {prompt_path} for durable prompt transport or {prompt} for inline prompt transport."];
+    case "agent-backend-template-missing-report-output":
+      return ["Add {report_path} so the backend can write the required structured report."];
+    case "agent-backend-policy-disallows-codex-fallback":
+      return [
+        "Set CLASP_LOOP_AGENT_COMMAND_JSON or CLASP_MANAGER_PLANNER_AGENT_COMMAND_JSON to a non-Codex backend template.",
+        "Use agentBackendStandaloneRecommendedTemplate as the minimum command shape for standalone agents.",
+      ];
+    case "agent-backend-policy-requires-prompt-path":
+      return ["Add {prompt_path} to the backend command template."];
+    case "agent-backend-policy-requires-schema-path":
+      return ["Add {schema_path} to the backend command template."];
+    case "agent-backend-policy-requires-workspace-root":
+      return ["Add {workspace_root} to the backend command template."];
+    case "agent-backend-policy-requires-model":
+      return ["Add {model} to the backend command template or relax the active backend policy."];
+    case "agent-backend-policy-requires-reasoning":
+      return ["Add {reasoning} to the backend command template or relax the active backend policy."];
+    default:
+      return ["Inspect the active AgentBackendPolicy and backend template placeholders."];
+  }
+}
+
+function agentBackendPolicyMissingPlaceholders(policy, summary) {
+  const missing = [];
+  if (!summary.hasRoleInput) missing.push("{role}");
+  if (!summary.hasReportOutput) missing.push("{report_path}");
+  if ((policy.requirePromptPath && !summary.hasPromptPathInput) || summary.promptTransport === "missing") {
+    missing.push("{prompt_path}");
+  }
+  if (policy.requireSchemaInput && !summary.hasSchemaInput) missing.push("{schema_path}");
+  if (policy.requireWorkspaceInput && !summary.hasWorkspaceInput) missing.push("{workspace_root}");
+  if (policy.requireModelInput && !summary.hasModelInput) missing.push("{model}");
+  if (policy.requireReasoningInput && !summary.hasReasoningInput) missing.push("{reasoning}");
+  if (!policy.allowCodexFallback && summary.kind === "codex") {
+    return ["{agent_bin}", "{role}", "{schema_path}", "{report_path}", "{prompt_path}", "{workspace_root}"];
+  }
+  return Array.from(new Set(missing));
+}
+
+function agentBackendPolicySummary(policyName, policy, summary) {
+  const validationMessages = agentBackendPolicyValidationMessages(policy, summary);
+  return {
+    policyName,
+    backendKind: summary.kind,
+    promptTransport: summary.promptTransport,
+    valid: validationMessages.length === 0,
+    validationMessage: validationMessages[0] || "",
+    validationMessages,
+    allowCodexFallback: policy.allowCodexFallback,
+    requirePromptPath: policy.requirePromptPath,
+    requireSchemaInput: policy.requireSchemaInput,
+    requireWorkspaceInput: policy.requireWorkspaceInput,
+    requireModelInput: policy.requireModelInput,
+    requireReasoningInput: policy.requireReasoningInput,
+    blockingGaps: validationMessages.map(agentBackendPolicyBlockingGap),
+    requiredClosure: validationMessages.flatMap(agentBackendPolicyRequiredClosure),
+    missingPlaceholders: agentBackendPolicyMissingPlaceholders(policy, summary),
+    recommendedTemplate: agentBackendStandaloneRecommendedTemplate,
+  };
+}
+
+function defaultBackendPolicy() {
+  return {
+    allowCodexFallback: true,
+    requirePromptPath: false,
+    requireSchemaInput: false,
+    requireWorkspaceInput: false,
+    requireModelInput: false,
+    requireReasoningInput: false,
+  };
+}
+
+function standaloneBackendPolicy() {
+  return {
+    allowCodexFallback: false,
+    requirePromptPath: true,
+    requireSchemaInput: true,
+    requireWorkspaceInput: true,
+    requireModelInput: false,
+    requireReasoningInput: false,
+  };
+}
+
+function plannerBackendPolicySummary(summary) {
+  return agentBackendPolicySummary("default", defaultBackendPolicy(), summary);
+}
+
+function plannerBackendCapabilitySummary(summary) {
+  const validationMessages = agentBackendPolicyValidationMessages(standaloneBackendPolicy(), summary);
+  return {
+    profileName: "local-clasp",
+    backendKind: summary.kind,
+    promptTransport: summary.promptTransport,
+    standaloneReady: validationMessages.length === 0,
+    roleCoverage: ["planner", "builder", "verifier"],
+    supportsPlannerRole: true,
+    supportsBuilderRole: true,
+    supportsVerifierRole: true,
+    supportsWorkspaceEdits: true,
+    supportsChildTaskPlanning: true,
+    supportsStructuredReports: true,
+    requiresExternalModel: false,
+    validationMessages,
+    blockingGaps: validationMessages.map(agentBackendPolicyBlockingGap),
+    requiredClosure: validationMessages.flatMap(agentBackendPolicyRequiredClosure),
+  };
+}
+
 function runCommand(command, options) {
   const result = childProcess.spawnSync(command[0], command.slice(1), {
     cwd: options.cwd,
@@ -72,6 +324,25 @@ function copyDirFiltered(sourceRoot, destinationRoot) {
   }
 }
 
+function taskDependencyEvidence(stateRoot, dependencies) {
+  if (!Array.isArray(dependencies) || dependencies.length === 0) {
+    return "No declared task dependencies.";
+  }
+
+  const lines = [];
+  for (const taskId of dependencies) {
+    const feedbackPath = path.join(stateRoot, `loop-${taskId}`, "feedback.json");
+    if (fs.existsSync(feedbackPath)) {
+      const report = readJsonFile(feedbackPath);
+      lines.push(`- ${taskId} verifier=${report.verdict || ""} summary=${report.summary || ""}`);
+    } else {
+      lines.push(`- ${taskId} verifier=missing`);
+    }
+    lines.push("  builder=missing");
+  }
+  return lines.join("\n");
+}
+
 function defaultStatus() {
   return {
     state: {
@@ -85,7 +356,7 @@ function defaultStatus() {
   };
 }
 
-function plannerPrompt(maxTaskLoops, goalText, stateRoot, workspaceRoot) {
+function plannerPrompt(maxTaskLoops, goalText, stateRoot, workspaceRoot, plannerBackend, plannerBackendPolicy, plannerBackendCapability) {
   return [
     "You are the planner subagent for the Clasp repository.",
     "Plan the next bounded tasks needed to improve Clasp autonomously.",
@@ -96,9 +367,28 @@ function plannerPrompt(maxTaskLoops, goalText, stateRoot, workspaceRoot) {
     `wave=1`,
     `stateRoot=${stateRoot}`,
     `taskWorkspaceRoot=${path.join(workspaceRoot, ".clasp-task-workspaces")}`,
+    `Planner agent backend: kind=${plannerBackend.kind} promptTransport=${plannerBackend.promptTransport} valid=${plannerBackend.valid ? "true" : "false"}`,
+    "Planner agent backend policy repair:",
+    `policyName=${plannerBackendPolicy.policyName}`,
+    `policyValid=${plannerBackendPolicy.valid ? "true" : "false"}`,
+    `policyMessage=${plannerBackendPolicy.validationMessage}`,
+    `policyMessages=${plannerBackendPolicy.validationMessages.join(",")}`,
+    `policyBlockingGaps=${plannerBackendPolicy.blockingGaps.join(" | ")}`,
+    `policyRequiredClosure=${plannerBackendPolicy.requiredClosure.join(" | ")}`,
+    `policyMissingPlaceholders=${plannerBackendPolicy.missingPlaceholders.join(",")}`,
+    `policyRecommendedTemplate=${plannerBackendPolicy.recommendedTemplate.join(" ")}`,
+    "Planner agent backend capability repair:",
+    `capabilityProfile=${plannerBackendCapability.profileName} backendKind=${plannerBackendCapability.backendKind} promptTransport=${plannerBackendCapability.promptTransport} standaloneReady=${plannerBackendCapability.standaloneReady ? "true" : "false"} roleCoverage=${plannerBackendCapability.roleCoverage.join(",")}`,
+    `capabilitySupports=planner:${plannerBackendCapability.supportsPlannerRole ? "true" : "false"} builder:${plannerBackendCapability.supportsBuilderRole ? "true" : "false"} verifier:${plannerBackendCapability.supportsVerifierRole ? "true" : "false"} workspaceEdits:${plannerBackendCapability.supportsWorkspaceEdits ? "true" : "false"} childTaskPlanning:${plannerBackendCapability.supportsChildTaskPlanning ? "true" : "false"} structuredReports:${plannerBackendCapability.supportsStructuredReports ? "true" : "false"} externalModel:${plannerBackendCapability.requiresExternalModel ? "true" : "false"}`,
+    `capabilityMessages=${plannerBackendCapability.validationMessages.join(",")}`,
+    `capabilityBlockingGaps=${plannerBackendCapability.blockingGaps.join(" | ")}`,
+    `capabilityRequiredClosure=${plannerBackendCapability.requiredClosure.join(" | ")}`,
     "Planner context pack:",
     "task: planner-1 status=ready ready=true attempts=0",
     "objective: fixture-manager manager-action=plan manager-task=planner-1 manager-task-status=ready",
+    `spawn policy: parent= depth=0/1 children=0/${maxTaskLoops} remaining-child-budget=${maxTaskLoops}`,
+    "child task ids:",
+    "- none",
     "ready tasks: planner-1",
     "mailbox: runs=0 artifacts=0 memory=0 latest-run=/ latest-verifier=/",
     "planner task memory matches:",
@@ -158,9 +448,41 @@ function main() {
   );
   const managerClaspcBin = readJsonEnv("CLASP_MANAGER_CLASPC_BIN_JSON", "claspc");
   const childLoopProgram = readJsonEnv("CLASP_MANAGER_CHILD_LOOP_JSON", "examples/feedback-loop/Main.clasp");
+  const plannerBackend = agentBackendSummary({
+    template: plannerTemplate,
+    agentBin,
+    agentModel,
+    agentReasoning,
+    agentSandbox,
+    workspaceRoot,
+  });
+  const plannerBackendPolicy = plannerBackendPolicySummary(plannerBackend);
+  const plannerBackendCapability = plannerBackendCapabilitySummary(plannerBackend);
 
   ensureDir(stateRoot);
   ensureDir(workspaceRoot);
+
+  if (!plannerBackend.valid) {
+    const state = {
+      phase: "planner-failed",
+      verdict: "fail",
+      final: true,
+    };
+    const status = {
+      objectiveId,
+      state,
+      plannedTaskIds: [],
+      completedTaskIds: [],
+      objectiveProjectedStatus: "failed",
+      plannerBackend,
+      plannerBackendPolicy,
+      plannerBackendCapability,
+      failure: `planner backend config invalid: ${plannerBackend.validationMessage}`,
+    };
+    writeJson(statusPath, status);
+    process.stdout.write(`${JSON.stringify(status)}\n`);
+    return;
+  }
 
   const plannerReportPath = path.join(stateRoot, "planner-1.json");
   const plannerPromptPath = path.join(stateRoot, "planner-1.prompt.txt");
@@ -170,7 +492,7 @@ function main() {
   );
   const plannerStdoutPath = path.join(stateRoot, "planner-1.stdout.log");
   const plannerStderrPath = path.join(stateRoot, "planner-1.stderr.log");
-  const prompt = plannerPrompt(maxTaskLoops, goalText, stateRoot, workspaceRoot);
+  const prompt = plannerPrompt(maxTaskLoops, goalText, stateRoot, workspaceRoot, plannerBackend, plannerBackendPolicy, plannerBackendCapability);
   fs.writeFileSync(plannerPromptPath, prompt);
 
   const replacements = {
@@ -239,6 +561,8 @@ function main() {
         `detail: ${task.detail || ""}`,
         "prompt:",
         task.taskPrompt || "",
+        "Dependency completion evidence:",
+        taskDependencyEvidence(stateRoot, task.dependencies),
         "coordinationFocus:",
         ...(Array.isArray(task.coordinationFocus) ? task.coordinationFocus.map((item) => `- ${item}`) : []),
         "",
@@ -292,6 +616,9 @@ function main() {
   const status = {
     objectiveId,
     state,
+    plannerBackend,
+    plannerBackendPolicy,
+    plannerBackendCapability,
     plannedTaskIds: tasks.map((task) => task.taskId),
     completedTaskIds,
     objectiveProjectedStatus: "completed",
@@ -300,7 +627,7 @@ function main() {
   writeJson(path.join(stateRoot, "state.json"), state);
   writeJson(feedbackPath, feedback);
   writeJson(statusPath, status);
-  process.stdout.write(`${JSON.stringify({ state, plannedTaskIds: status.plannedTaskIds, completedTaskIds })}\n`);
+  process.stdout.write(`${JSON.stringify({ state, plannerBackend, plannerBackendPolicy, plannerBackendCapability, plannedTaskIds: status.plannedTaskIds, completedTaskIds })}\n`);
 }
 
 try {

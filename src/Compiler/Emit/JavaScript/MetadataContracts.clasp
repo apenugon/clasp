@@ -1,0 +1,60 @@
+module Compiler.Emit.JavaScript.MetadataContracts
+
+import Compiler.Ast
+import Compiler.Emit.JavaScript.MetadataCore
+import Compiler.Emit.JavaScript.Util
+
+emitHooks : [HostedHookDeclAst] -> [Str]
+emitHooks hooks = if hasHookDeclarations hooks then {
+  let mut rendered = ["export const __claspHooks = Object.freeze(["];
+  for hookDecl in hooks {
+    rendered = append rendered ["  Object.freeze({", textConcat ["    name: ", emitJsString (hookDeclName hookDecl), ","], textConcat ["    id: ", emitJsString (textConcat ["hook:", hookDeclName hookDecl]), ","], textConcat ["    event: ", emitJsString (hookDeclEvent hookDecl), ","], textConcat ["    requestType: ", emitOptionalJsString (hookDeclRequestType hookDecl), ","], textConcat ["    responseType: ", emitOptionalJsString (hookDeclResponseType hookDecl), ","], textConcat ["    handlerName: ", emitOptionalJsString (hookDeclHandlerName hookDecl), ","], "    invoke(value, options = null) {", "      const handler = __claspExports[this.handlerName] ?? null;", "      if (typeof handler !== \"function\") {", "        throw new Error(`Missing Clasp hook handler: ${String(this.handlerName)}`);", "      }", "      return handler(value);", "    }", "  }),"];
+    rendered
+  };
+  append rendered ["]);", ""]
+} else emptyRenderedTexts
+
+emitToolServers : [HostedToolServerDeclAst] -> [Str]
+emitToolServers servers = if hasToolServerDeclarations servers then {
+  let mut rendered = ["export const __claspToolServers = Object.freeze(["];
+  for serverDecl in servers {
+    rendered = append rendered ["  Object.freeze({", textConcat ["    kind: ", emitJsString "toolServer", ","], textConcat ["    name: ", emitJsString (toolServerDeclName serverDecl), ","], textConcat ["    id: ", emitJsString (textConcat ["toolserver:", toolServerDeclName serverDecl]), ","], textConcat ["    protocol: ", emitOptionalJsString (toolServerDeclProtocol serverDecl), ","], textConcat ["    location: ", emitOptionalJsString (toolServerDeclLocation serverDecl), ","], textConcat ["    policyName: ", emitOptionalJsString (toolServerDeclPolicyName serverDecl)], "  }),"];
+    rendered
+  };
+  append rendered ["]);", "const $claspToolServerMap = Object.freeze(Object.fromEntries(__claspToolServers.map((server) => [server.name, server])));", ""]
+} else ["export const __claspToolServers = Object.freeze([]);", "const $claspToolServerMap = Object.freeze({});", ""]
+
+emitTools : [HostedToolDeclAst] -> [Str]
+emitTools tools = if hasToolDeclarations tools then {
+  let mut rendered = ["export const __claspTools = Object.freeze(["];
+  for toolDecl in tools {
+    rendered = append rendered ["  Object.freeze({", textConcat ["    name: ", emitJsString (toolDeclName toolDecl), ","], textConcat ["    id: ", emitJsString (textConcat ["tool:", toolDeclName toolDecl]), ","], textConcat ["    serverName: ", emitOptionalJsString (toolDeclServerName toolDecl), ","], textConcat ["    operation: ", emitOptionalJsString (toolDeclOperation toolDecl), ","], textConcat ["    requestType: ", emitOptionalJsString (toolDeclRequestType toolDecl), ","], textConcat ["    requestSchema: (__claspSchemas[", emitJsString (toolDeclRequestType toolDecl), "] ?? null),"], textConcat ["    responseType: ", emitOptionalJsString (toolDeclResponseType toolDecl), ","], textConcat ["    responseSchema: (__claspSchemas[", emitJsString (toolDeclResponseType toolDecl), "] ?? null),"], "    prepare(value, id = null, options = null) { return this.prepareCall(value, id, options); },", "    prepareCall(value, id = null, options = null) {", "      const params = this.requestSchema ? this.requestSchema.toHost(this.requestSchema.fromHost(value, \"params\"), \"params\") : value;", "      $claspMaybeRecordTrace(options, \"tool\", this.name, \"prepare_call\");", "      return Object.freeze({ jsonrpc: \"2.0\", id: id ?? this.name, method: this.operation, params });", "    },", "    evaluateResult(payload, options = null) {", "      const result = this.responseSchema ? this.responseSchema.toHost(this.responseSchema.fromHost(payload, \"result\"), \"result\") : payload;", "      $claspMaybeRecordTrace(options, \"tool\", this.name, \"parse_result\");", "      return Object.freeze({ result, output: result });", "    },", "    parseResult(payload, options = null) { return this.evaluateResult(payload, options).result; },", "    decodeResultEnvelope(value, path = \"response\") {", "      const objectValue = $claspExpectObject(value, path);", "      return Object.freeze({", "        jsonrpc: typeof objectValue.jsonrpc === \"string\" ? objectValue.jsonrpc : \"2.0\",", "        id: objectValue.id ?? null,", "        result: this.parseResult(objectValue.result)", "      });", "    },", "    parseResultEnvelope(jsonText) { return this.decodeResultEnvelope(JSON.parse(jsonText)); }", "  }),"];
+    rendered
+  };
+  append rendered ["]);", "export const __claspToolCallContracts = Object.freeze(__claspTools.map((tool) => Object.freeze({", "  kind: \"clasp-tool-call-contract\",", "  version: 1,", "  name: tool.name,", "  toolName: tool.name,", "  toolId: tool.id,", "  serverName: tool.serverName,", "  serverProtocol: ($claspToolServerMap[tool.serverName] ?? null)?.protocol ?? null,", "  operation: tool.operation,", "  requestType: tool.requestType,", "  requestSchema: tool.requestSchema,", "  responseType: tool.responseType,", "  responseSchema: tool.responseSchema,", "  prepare(value, id = null, options = null) { return tool.prepare(value, id, options); },", "  evaluateResult(payload, options = null) { return tool.evaluateResult(payload, options); },", "  parse(payload, options = null) { return tool.parseResult(payload, options); },", "  decodeResultEnvelope(value, path = \"response\") { return tool.decodeResultEnvelope(value, path); },", "  parseResultEnvelope(jsonText) { return tool.parseResultEnvelope(jsonText); }", "})));", "const $claspToolCallContractMap = Object.freeze(Object.fromEntries(__claspToolCallContracts.map((tool) => [tool.name, tool])));", ""]
+} else ["export const __claspTools = Object.freeze([]);", "export const __claspToolCallContracts = Object.freeze([]);", "const $claspToolCallContractMap = Object.freeze({});", ""]
+
+emitVerifiers : [HostedVerifierDeclAst] -> [Str]
+emitVerifiers verifiers = if hasVerifierDeclarations verifiers then {
+  let mut rendered = ["export const __claspVerifiers = Object.freeze(["];
+  for verifierDecl in verifiers {
+    rendered = append rendered ["  Object.freeze({", textConcat ["    name: ", emitJsString (verifierDeclName verifierDecl), ","], textConcat ["    id: ", emitJsString (textConcat ["verifier:", verifierDeclName verifierDecl]), ","], textConcat ["    toolName: ", emitOptionalJsString (verifierDeclToolName verifierDecl), ","], "    prepareRun(value, id = null, options = null) {", "      const tool = $claspToolCallContractMap[this.toolName] ?? null;", "      if (tool === null) {", "        throw new Error(`Unknown Clasp tool contract: ${String(this.toolName)}`);", "      }", "      return tool.prepare(value, id, options);", "    },", "    parseResult(payload, options = null) {", "      const tool = $claspToolCallContractMap[this.toolName] ?? null;", "      if (tool === null) {", "        throw new Error(`Unknown Clasp tool contract: ${String(this.toolName)}`);", "      }", "      return tool.parse(payload, options);", "    }", "  }),"];
+    rendered
+  };
+  append rendered ["]);", "const $claspVerifierMap = Object.freeze(Object.fromEntries(__claspVerifiers.map((verifier) => [verifier.name, verifier])));", ""]
+} else ["export const __claspVerifiers = Object.freeze([]);", "const $claspVerifierMap = Object.freeze({});", ""]
+
+emitMergeGates : [HostedMergeGateDeclAst] -> [Str]
+emitMergeGates mergeGates = if hasMergeGateDeclarations mergeGates then {
+  let mut rendered = ["export const __claspMergeGates = Object.freeze(["];
+  for mergeGateDecl in mergeGates {
+    let mut verifierNames = emptyRenderedTexts;
+    for verifierName in mergeGateDeclVerifierNames mergeGateDecl {
+      verifierNames = appendRenderedText verifierNames (emitJsString verifierName);
+      verifierNames
+    };
+    rendered = append rendered ["  Object.freeze({", textConcat ["    name: ", emitJsString (mergeGateDeclName mergeGateDecl), ","], textConcat ["    id: ", emitJsString (textConcat ["mergegate:", mergeGateDeclName mergeGateDecl]), ","], textConcat ["    verifierNames: Object.freeze([", textJoin ", " verifierNames, "]),"], "    plan(value, idSeed = this.name) {", "      return this.verifierNames.map((name, index) => {", "        const verifier = $claspVerifierMap[name] ?? null;", "        if (verifier === null) {", "          throw new Error(`Unknown Clasp verifier: ${String(name)}`);", "        }", "        return verifier.prepareRun(value, `${idSeed}:${index}`);", "      });", "    }", "  }),"];
+    rendered
+  };
+  append rendered ["]);", ""]
+} else emptyRenderedTexts

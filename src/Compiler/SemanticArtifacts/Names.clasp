@@ -1,0 +1,165 @@
+module Compiler.SemanticArtifacts.Names
+
+import Compiler.Ast
+import Compiler.Checker
+import Compiler.Checker.Types
+import Compiler.Json
+import Compiler.Project
+import Compiler.SemanticArtifacts.Base
+
+semanticRecordNames : HostedModuleAst -> [Str]
+semanticRecordNames modl = recordDeclNames modl
+
+semanticTypeNames : HostedModuleAst -> [Str]
+semanticTypeNames modl = typeDeclNames modl
+
+semanticDeclNames : HostedModuleAst -> [Str]
+semanticDeclNames modl = declNames modl
+
+semanticForeignNames : HostedModuleAst -> [Str]
+semanticForeignNames modl = {
+  let mut names = emptyRenderedTexts;
+  for foreignDecl in moduleForeignDeclarations modl {
+    names = appendRenderedText names (foreignDeclName foreignDecl);
+    names
+  };
+  names
+}
+
+semanticGuideNames : HostedModuleAst -> [Str]
+semanticGuideNames modl = {
+  let mut names = emptyRenderedTexts;
+  for guideDecl in moduleGuideDeclarations modl {
+    names = appendRenderedText names (guideDeclName guideDecl);
+    names
+  };
+  names
+}
+
+semanticPolicyNames : HostedModuleAst -> [Str]
+semanticPolicyNames modl = {
+  let mut names = emptyRenderedTexts;
+  for policyDecl in modulePolicyDeclarations modl {
+    names = appendRenderedText names (policyDeclName policyDecl);
+    names
+  };
+  names
+}
+
+semanticProjectionNames : HostedModuleAst -> [Str]
+semanticProjectionNames modl = {
+  let mut names = emptyRenderedTexts;
+  for projectionDecl in moduleProjectionDeclarations modl {
+    names = appendRenderedText names (projectionDeclName projectionDecl);
+    names
+  };
+  names
+}
+
+semanticAgentRoleNames : HostedModuleAst -> [Str]
+semanticAgentRoleNames modl = {
+  let mut names = emptyRenderedTexts;
+  for roleDecl in moduleAgentRoleDeclarations modl {
+    names = appendRenderedText names (agentRoleDeclName roleDecl);
+    names
+  };
+  names
+}
+
+semanticAgentNames : HostedModuleAst -> [Str]
+semanticAgentNames modl = {
+  let mut names = emptyRenderedTexts;
+  for agentDecl in moduleAgentDeclarations modl {
+    names = appendRenderedText names (agentDeclName agentDecl);
+    names
+  };
+  names
+}
+
+semanticWorkflowNames : HostedModuleAst -> [Str]
+semanticWorkflowNames modl = {
+  let mut names = emptyRenderedTexts;
+  for workflowDecl in moduleWorkflowDeclarations modl {
+    names = appendRenderedText names (workflowDeclName workflowDecl);
+    names
+  };
+  names
+}
+
+semanticRouteNames : HostedModuleAst -> [Str]
+semanticRouteNames modl = {
+  let mut names = emptyRenderedTexts;
+  for routeDecl in moduleRouteDeclarations modl {
+    names = appendRenderedText names (routeDeclName routeDecl);
+    names
+  };
+  names
+}
+
+semanticHookNames : HostedModuleAst -> [Str]
+semanticHookNames modl = {
+  let mut names = emptyRenderedTexts;
+  for hookDecl in moduleHookDeclarations modl {
+    names = appendRenderedText names (hookDeclName hookDecl);
+    names
+  };
+  names
+}
+
+semanticToolServerNames : HostedModuleAst -> [Str]
+semanticToolServerNames modl = {
+  let mut names = emptyRenderedTexts;
+  for toolServerDecl in moduleToolServerDeclarations modl {
+    names = appendRenderedText names (toolServerDeclName toolServerDecl);
+    names
+  };
+  names
+}
+
+semanticToolNames : HostedModuleAst -> [Str]
+semanticToolNames modl = {
+  let mut names = emptyRenderedTexts;
+  for toolDecl in moduleToolDeclarations modl {
+    names = appendRenderedText names (toolDeclName toolDecl);
+    names
+  };
+  names
+}
+
+semanticVerifierNames : HostedModuleAst -> [Str]
+semanticVerifierNames modl = {
+  let mut names = emptyRenderedTexts;
+  for verifierDecl in moduleVerifierDeclarations modl {
+    names = appendRenderedText names (verifierDeclName verifierDecl);
+    names
+  };
+  names
+}
+
+semanticMergeGateNames : HostedModuleAst -> [Str]
+semanticMergeGateNames modl = {
+  let mut names = emptyRenderedTexts;
+  for mergeGateDecl in moduleMergeGateDeclarations modl {
+    names = appendRenderedText names (mergeGateDeclName mergeGateDecl);
+    names
+  };
+  names
+}
+
+semanticContainsText : [Str] -> Str -> Bool
+semanticContainsText values target = containsText values target
+
+semanticNonEmptyContainsText : [Str] -> Str -> Bool
+semanticNonEmptyContainsText values target =
+  if target == "" then false else semanticContainsText values target
+
+semanticAppendUniqueText : [Str] -> Str -> [Str]
+semanticAppendUniqueText values value =
+  if semanticContainsText values value then values else appendRenderedText values value
+
+semanticAppendNamedTargetEdge : [Str] -> [Str] -> Str -> Str -> Str -> Str -> [Str]
+semanticAppendNamedTargetEdge edges availableNames targetName fromId targetPrefix kind =
+  if semanticNonEmptyContainsText availableNames targetName then
+    appendRenderedText edges (semanticJsonEdge fromId (textConcat [targetPrefix, targetName]) kind)
+  else
+    edges

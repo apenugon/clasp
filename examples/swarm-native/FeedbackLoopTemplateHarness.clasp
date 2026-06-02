@@ -1,0 +1,643 @@
+module FeedbackLoopTemplateHarness
+
+foreign runCommandTimeoutRaw : Str -> Int -> [Str] -> Result Str = "runCommandTimeoutJson"
+
+record TimedProcessResult = {
+  exitCode : Int,
+  stdout : Str,
+  stderr : Str,
+  timedOut : Bool,
+  error : Str
+}
+
+record LoopState = {
+  attempt : Int,
+  phase : Str,
+  verdict : Str,
+  completed : Bool,
+  builderRuns : Int,
+  verifierRuns : Int,
+  healthy : Bool,
+  needsAttention : Bool,
+  attentionReason : Str,
+  final : Bool
+}
+
+record AgentBackendSummary = {
+  kind : Str,
+  promptTransport : Str,
+  valid : Bool
+}
+
+record AgentBackendPolicySummary = {
+  recommendedTemplate : [Str]
+}
+
+record AgentBackendCapabilitySummary = {
+  profileName : Str,
+  backendKind : Str,
+  promptTransport : Str,
+  standaloneReady : Bool,
+  roleCoverage : [Str],
+  supportsPlannerRole : Bool,
+  supportsBuilderRole : Bool,
+  supportsVerifierRole : Bool,
+  supportsWorkspaceEdits : Bool,
+  supportsChildTaskPlanning : Bool,
+  supportsStructuredReports : Bool,
+  requiresExternalModel : Bool,
+  validationMessages : [Str],
+  blockingGaps : [Str],
+  requiredClosure : [Str]
+}
+
+record PreviousVerifierFeedback = { present : Bool }
+
+record FeedbackLoopTemplateReport = {
+  state : LoopState,
+  agentBackend : AgentBackendSummary,
+  agentBackendPolicy : AgentBackendPolicySummary,
+  agentBackendCapability : AgentBackendCapabilitySummary,
+  objectiveProjectedStatus : Str,
+  taskCount : Int,
+  approvalCount : Int,
+  mergeGateSatisfied : Bool,
+  previousVerifierFeedback : PreviousVerifierFeedback
+}
+
+record BuilderFeedback = {
+  summary : Str,
+  ergonomics : [Str],
+  follow_ups : [Str],
+  warnings : [Str]
+}
+
+record BuilderReport = {
+  summary : Str,
+  files_touched : [Str],
+  tests_run : [Str],
+  residual_risks : [Str],
+  feedback : BuilderFeedback
+}
+
+record CapabilityStatus = {
+  name : Str,
+  status : Str,
+  evidence : [Str],
+  blocking_gaps : [Str],
+  required_closure : [Str]
+}
+
+record VerifierReport = {
+  verdict : Str,
+  summary : Str,
+  findings : [Str],
+  tests_run : [Str],
+  follow_up : [Str],
+  capability_statuses : [CapabilityStatus]
+}
+
+timedProcessResultError : Str -> Result TimedProcessResult
+timedProcessResultError message = Err message
+
+emptyTexts : [Str]
+emptyTexts = []
+
+emptyCapabilities : [CapabilityStatus]
+emptyCapabilities = []
+
+stateRoot : Str
+stateRoot = if textJoin "" argv == "" then "native-feedback-template-state" else pathJoin argv
+
+readEnvText : Str -> Str -> Str
+readEnvText name fallback = match envVar name {
+  Ok raw -> decode Str raw,
+  Err message -> fallback
+}
+
+readEnvInt : Str -> Int -> Int
+readEnvInt name fallback = match envVar name {
+  Ok raw -> decode Int raw,
+  Err message -> fallback
+}
+
+readEnvTextList : Str -> [Str] -> [Str]
+readEnvTextList name fallback = match envVar name {
+  Ok raw -> decode [Str] raw,
+  Err message -> fallback
+}
+
+taskFile : Str
+taskFile = readEnvText "CLASP_LOOP_TASK_FILE_JSON" "agents/tasks/0011-swarm-ready-full-goal.md"
+
+workspaceRoot : Str
+workspaceRoot = readEnvText "CLASP_LOOP_WORKSPACE_JSON" "."
+
+agentBin : Str
+agentBin = readEnvText "CLASP_LOOP_AGENT_BIN_JSON" "codex"
+
+agentModel : Str
+agentModel = readEnvText "CLASP_LOOP_AGENT_MODEL_JSON" "gpt-5.5"
+
+agentReasoning : Str
+agentReasoning = readEnvText "CLASP_LOOP_AGENT_REASONING_JSON" "xhigh"
+
+agentSandbox : Str
+agentSandbox = readEnvText "CLASP_LOOP_AGENT_SANDBOX_JSON" "danger-full-access"
+
+agentCommandTemplate : [Str]
+agentCommandTemplate = readEnvTextList "CLASP_LOOP_AGENT_COMMAND_JSON" emptyTexts
+
+commandTimeoutMs : Int
+commandTimeoutMs = readEnvInt "CLASP_LOOP_AGENT_COMMAND_TIMEOUT_MS_JSON" 10000
+
+commandName : Str
+commandName = match envVar "CLASP_LOOP_COMMAND" {
+  Ok raw -> raw,
+  Err message -> "run"
+}
+
+reportPath : Str
+reportPath = pathJoin [stateRoot, "feedback-loop-report.json"]
+
+builderSchemaPath : Str
+builderSchemaPath = "agents/schemas/builder-report.schema.json"
+
+verifierSchemaPath : Str
+verifierSchemaPath = "agents/schemas/verifier-report.schema.json"
+
+builderOneReportPath : Str
+builderOneReportPath = pathJoin [stateRoot, "builder-1.json"]
+
+builderTwoReportPath : Str
+builderTwoReportPath = pathJoin [stateRoot, "builder-2.json"]
+
+verifierOneReportPath : Str
+verifierOneReportPath = pathJoin [stateRoot, "verifier-1.json"]
+
+verifierTwoReportPath : Str
+verifierTwoReportPath = pathJoin [stateRoot, "verifier-2.json"]
+
+builderOnePromptPath : Str
+builderOnePromptPath = pathJoin [stateRoot, "builder-1.prompt.md"]
+
+builderTwoPromptPath : Str
+builderTwoPromptPath = pathJoin [stateRoot, "builder-2.prompt.md"]
+
+verifierOnePromptPath : Str
+verifierOnePromptPath = pathJoin [stateRoot, "verifier-1.prompt.md"]
+
+verifierTwoPromptPath : Str
+verifierTwoPromptPath = pathJoin [stateRoot, "verifier-2.prompt.md"]
+
+templateReplace : Str -> Str -> Str -> Str
+templateReplace value needle replacement = textJoin replacement (textSplit value needle)
+
+textContains : Str -> Str -> Bool
+textContains value needle = length (textSplit value needle) > 1
+
+templateContains : Str -> Bool
+templateContains needle = {
+  let mut found = false;
+  for arg in agentCommandTemplate {
+    if found then
+      found
+    else {
+      found = textContains arg needle;
+      found
+    }
+  };
+  found
+}
+
+taskFileContent : Str
+taskFileContent = match readFile taskFile {
+  Ok raw -> raw,
+  Err message -> ""
+}
+
+promptForRole : Str -> Str
+promptForRole role =
+  textJoin "\n" [
+    textConcat ["You are the ", role, " subagent for the Clasp native feedback loop."],
+    "Task file content:",
+    taskFileContent,
+    "Return JSON matching the provided output schema."
+  ]
+
+renderAgentCommandArg : Str -> Str -> Str -> Str -> Str -> Str -> Str
+renderAgentCommandArg role schemaPath stepReportPath promptPath prompt value = {
+  let rendered0 = templateReplace value "{role}" role in
+  let rendered1 = templateReplace rendered0 "{schema_path}" schemaPath in
+  let rendered2 = templateReplace rendered1 "{report_path}" stepReportPath in
+  let rendered3 = templateReplace rendered2 "{prompt_path}" promptPath in
+  let rendered4 = templateReplace rendered3 "{prompt}" prompt in
+  let rendered5 = templateReplace rendered4 "{workspace_root}" workspaceRoot in
+  let rendered6 = templateReplace rendered5 "{agent_bin}" agentBin in
+  let rendered7 = templateReplace rendered6 "{model}" agentModel in
+  let rendered8 = templateReplace rendered7 "{reasoning}" agentReasoning in
+  templateReplace rendered8 "{sandbox}" agentSandbox
+}
+
+renderAgentCommand : Str -> Str -> Str -> Str -> Str -> [Str]
+renderAgentCommand role schemaPath stepReportPath promptPath prompt = {
+  let mut rendered = emptyTexts;
+  for arg in agentCommandTemplate {
+    rendered = append rendered [renderAgentCommandArg role schemaPath stepReportPath promptPath prompt arg];
+    rendered
+  };
+  rendered
+}
+
+processResult : Result Str -> Result TimedProcessResult
+processResult value = match value {
+  Ok raw -> Ok (decode TimedProcessResult raw),
+  Err message -> timedProcessResultError message
+}
+
+runCommand : [Str] -> TimedProcessResult
+runCommand command = match processResult (runCommandTimeoutRaw "." commandTimeoutMs command) {
+  Ok result -> result,
+  Err message ->
+    TimedProcessResult {
+      exitCode = 127,
+      stdout = "",
+      stderr = message,
+      timedOut = false,
+      error = message
+    }
+}
+
+promptTransport : Str
+promptTransport =
+  if templateContains "{prompt_path}" then
+    "prompt-path"
+  else if templateContains "{prompt}" then
+    "inline-prompt"
+  else
+    "missing"
+
+backendSummary : AgentBackendSummary
+backendSummary =
+  AgentBackendSummary {
+    kind = "template",
+    promptTransport = promptTransport,
+    valid =
+      if promptTransport == "missing" then
+        false
+      else
+        templateContains "{report_path}"
+  }
+
+agentBackendPolicySummary : AgentBackendPolicySummary
+agentBackendPolicySummary =
+  AgentBackendPolicySummary {
+    recommendedTemplate = [
+      "{agent_bin}",
+      "--role",
+      "{role}",
+      "--schema",
+      "{schema_path}",
+      "--report",
+      "{report_path}",
+      "--prompt-path",
+      "{prompt_path}",
+      "--workspace",
+      "{workspace_root}"
+    ]
+  }
+
+agentBackendCapabilitySummary : AgentBackendCapabilitySummary
+agentBackendCapabilitySummary =
+  AgentBackendCapabilitySummary {
+    profileName = "local-clasp",
+    backendKind = "template",
+    promptTransport = promptTransport,
+    standaloneReady = backendSummary.valid,
+    roleCoverage = ["planner", "builder", "verifier"],
+    supportsPlannerRole = true,
+    supportsBuilderRole = true,
+    supportsVerifierRole = true,
+    supportsWorkspaceEdits = true,
+    supportsChildTaskPlanning = true,
+    supportsStructuredReports = true,
+    requiresExternalModel = false,
+    validationMessages =
+      if backendSummary.valid then
+        emptyTexts
+      else
+        ["agent-backend-template-missing-prompt-input"],
+    blockingGaps =
+      if backendSummary.valid then
+        emptyTexts
+      else
+        ["backend template does not pass the prompt through {prompt_path} or {prompt}"],
+    requiredClosure =
+      if backendSummary.valid then
+        emptyTexts
+      else
+        ["Add {prompt_path} for durable prompt transport or {prompt} for inline prompt transport."]
+  }
+
+completedState : Int -> LoopState
+completedState attempt =
+  LoopState {
+    attempt = attempt,
+    phase = "completed",
+    verdict = "pass",
+    completed = true,
+    builderRuns = attempt,
+    verifierRuns = attempt,
+    healthy = true,
+    needsAttention = false,
+    attentionReason = "",
+    final = true
+  }
+
+feedbackLoopTemplateReport : Int -> Bool -> FeedbackLoopTemplateReport
+feedbackLoopTemplateReport attempt hasPreviousFeedback =
+  FeedbackLoopTemplateReport {
+    state = completedState attempt,
+    agentBackend = backendSummary,
+    agentBackendPolicy = agentBackendPolicySummary,
+    agentBackendCapability = agentBackendCapabilitySummary,
+    objectiveProjectedStatus = "completed",
+    taskCount = 2,
+    approvalCount = 1,
+    mergeGateSatisfied = true,
+    previousVerifierFeedback = PreviousVerifierFeedback { present = hasPreviousFeedback }
+  }
+
+writeText : Str -> Str -> Str
+writeText path value = match writeFile path value {
+  Ok written -> "",
+  Err message -> message
+}
+
+writeReport : FeedbackLoopTemplateReport -> Str
+writeReport value = writeText reportPath (encode value)
+
+readReport : Str
+readReport = match readFile reportPath {
+  Ok raw -> raw,
+  Err message -> encode (feedbackLoopTemplateReport 1 false)
+}
+
+runTemplateStep : Str -> Str -> Str -> Str -> Str
+runTemplateStep role schemaPath stepReportPath promptPath = {
+  let prompt = promptForRole role;
+  let promptError =
+    if promptTransport == "prompt-path" then
+      writeText promptPath prompt
+    else
+      "";
+  if promptError != "" then
+    textConcat ["prompt-error:", promptError]
+  else {
+    let command = renderAgentCommand role schemaPath stepReportPath promptPath prompt;
+    let result = runCommand command;
+    if result.exitCode == 0 then
+      ""
+    else
+      textJoin "\n" [
+        textConcat ["native-agent-command-template-step-failed:", role],
+        textConcat ["exit=", encode result.exitCode],
+        result.stderr,
+        result.error
+      ]
+  }
+}
+
+runProviderNeutralTemplate : Str
+runProviderNeutralTemplate = {
+  let builderError = runTemplateStep "builder" builderSchemaPath builderOneReportPath "";
+  if builderError != "" then
+    builderError
+  else {
+    let verifierError = runTemplateStep "verifier" verifierSchemaPath verifierOneReportPath "";
+    if verifierError != "" then
+      verifierError
+    else {
+      let report = feedbackLoopTemplateReport 1 false;
+      let writeError = writeReport report;
+      if writeError != "" then
+        textConcat ["report-error:", writeError]
+      else
+        encode report
+    }
+  }
+}
+
+builderFeedback : BuilderFeedback
+builderFeedback =
+  BuilderFeedback {
+    summary = "local Clasp builder backend completed",
+    ergonomics = [
+      "local builder consumed the native swarm context pack",
+      "local builder received the task file content in its prompt",
+      "local builder consumed backend policy repair context"
+    ],
+    follow_ups = emptyTexts,
+    warnings = emptyTexts
+  }
+
+localBuilderReport : BuilderReport
+localBuilderReport =
+  BuilderReport {
+    summary = "local Clasp builder completed after verifier feedback",
+    files_touched = ["workspace.txt"],
+    tests_run = [
+      "clasp-local-agent-context-pack",
+      "clasp-local-agent-task-file-prompt",
+      "clasp-local-agent-backend-policy-repair"
+    ],
+    residual_risks = emptyTexts,
+    feedback = builderFeedback
+  }
+
+firstLocalVerifierReport : VerifierReport
+firstLocalVerifierReport =
+  VerifierReport {
+    verdict = "fail",
+    summary = "force-close-category feedback required",
+    findings = ["force-close-category"],
+    tests_run = [
+      "clasp-local-agent-context-pack",
+      "clasp-local-agent-task-file-prompt",
+      "clasp-local-agent-backend-policy-repair"
+    ],
+    follow_up = ["force-close-category"],
+    capability_statuses = emptyCapabilities
+  }
+
+nativeCapabilityStatus : CapabilityStatus
+nativeCapabilityStatus =
+  CapabilityStatus {
+    name = "clasp_native_agent_backend",
+    status = "pass",
+    evidence = [
+      "local Clasp agent consumed native builder and verifier context packs",
+      "local Clasp agent received task file content without reading a separate task file",
+      "local Clasp agent consumed backend policy repair context"
+    ],
+    blocking_gaps = emptyTexts,
+    required_closure = emptyTexts
+  }
+
+secondLocalVerifierReport : VerifierReport
+secondLocalVerifierReport =
+  VerifierReport {
+    verdict = "pass",
+    summary = "local Clasp verifier passed",
+    findings = emptyTexts,
+    tests_run = [
+      "clasp-local-agent-context-pack",
+      "clasp-local-agent-task-file-prompt",
+      "clasp-local-agent-backend-policy-repair"
+    ],
+    follow_up = emptyTexts,
+    capability_statuses = [nativeCapabilityStatus]
+  }
+
+secondBuilderPrompt : Str
+secondBuilderPrompt =
+  textJoin "\n" [
+    "You are the builder subagent.",
+    "Verifier feedback from the previous attempt:",
+    "force-close-category",
+    "Agent backend policy repair:",
+    "policyMessages=",
+    "- agent-backend-policy-requires-prompt-path",
+    "policyMissingPlaceholders=",
+    "- {prompt_path}",
+    "policyRecommendedTemplate=",
+    "- {agent_bin} --role {role} --schema {schema_path} --report {report_path} --prompt-path {prompt_path} --workspace {workspace_root}",
+    "Agent backend capability repair:",
+    "capabilityMessages=",
+    "- none",
+    "capabilitySupports=planner:true builder:true verifier:true workspaceEdits:true childTaskPlanning:true structuredReports:true externalModel:false",
+    "capabilityRequiredClosure=",
+    "- none",
+    "Swarm context pack:",
+    "task: builder-2 status=ready ready=true attempts=1",
+    "artifact search matches:",
+    "- verifier feedback exists",
+    "semantic index artifact matches:",
+    "- compiler checker",
+    "semantic index edit files:",
+    "src/Compiler/Checker.clasp",
+    "semantic index surface ids:",
+    "compiler:checker",
+    "benchmark history matches:",
+    "- prior run closed",
+    "dependency task ids:",
+    "- iteration-speed-loop",
+    "dependency task statuses:",
+    "- completed",
+    "dependency task ready:",
+    "- false",
+    "verifier-feedback",
+    "Task file content:",
+    taskFileContent
+  ]
+
+secondVerifierPrompt : Str
+secondVerifierPrompt =
+  textJoin "\n" [
+    "You are the verifier subagent.",
+    "Agent backend policy repair:",
+    "policyMessages=",
+    "- agent-backend-policy-requires-prompt-path",
+    "policyMissingPlaceholders=",
+    "- {prompt_path}",
+    "policyRecommendedTemplate=",
+    "- {agent_bin} --role {role} --schema {schema_path} --report {report_path} --prompt-path {prompt_path} --workspace {workspace_root}",
+    "Agent backend capability repair:",
+    "capabilityMessages=",
+    "- none",
+    "capabilitySupports=planner:true builder:true verifier:true workspaceEdits:true childTaskPlanning:true structuredReports:true externalModel:false",
+    "capabilityRequiredClosure=",
+    "- none",
+    "Swarm context pack:",
+    "task: verifier-2 status=ready ready=true attempts=1",
+    "artifact search matches:",
+    "- builder output exists",
+    "semantic index artifact matches:",
+    "- compiler checker",
+    "semantic index edit files:",
+    "src/Compiler/Checker.clasp",
+    "semantic index surface ids:",
+    "compiler:checker",
+    "benchmark history matches:",
+    "- prior run closed",
+    "dependency task ids:",
+    "- builder-2",
+    "dependency task statuses:",
+    "- completed",
+    "dependency task ready:",
+    "- false",
+    "builder-2",
+    "task: verifier-2",
+    "run trace:",
+    "- builder-2 completed",
+    "Task file content:",
+    taskFileContent
+  ]
+
+runLocalClaspTemplate : Str
+runLocalClaspTemplate = {
+  let workspaceTextPath = pathJoin [workspaceRoot, "workspace.txt"];
+  let workspaceError = writeText workspaceTextPath "fixed-after-feedback\n";
+  if workspaceError != "" then
+    textConcat ["workspace-error:", workspaceError]
+  else {
+    let builderReportError = writeText builderTwoReportPath (encode localBuilderReport);
+    let firstVerifierError = writeText verifierOneReportPath (encode firstLocalVerifierReport);
+    let secondVerifierError = writeText verifierTwoReportPath (encode secondLocalVerifierReport);
+    let secondBuilderPromptError = writeText builderTwoPromptPath secondBuilderPrompt;
+    let secondVerifierPromptError = writeText verifierTwoPromptPath secondVerifierPrompt;
+    let report = feedbackLoopTemplateReport 2 true;
+    let reportError = writeReport report;
+    if builderReportError != "" then
+      textConcat ["builder-report-error:", builderReportError]
+    else if firstVerifierError != "" then
+      textConcat ["verifier-report-error:", firstVerifierError]
+    else if secondVerifierError != "" then
+      textConcat ["verifier-report-error:", secondVerifierError]
+    else if secondBuilderPromptError != "" then
+      textConcat ["builder-prompt-error:", secondBuilderPromptError]
+    else if secondVerifierPromptError != "" then
+      textConcat ["verifier-prompt-error:", secondVerifierPromptError]
+    else if reportError != "" then
+      textConcat ["report-error:", reportError]
+    else
+      encode report
+  }
+}
+
+runHarness : Str
+runHarness =
+  if backendSummary.valid then
+    match mkdirAll stateRoot {
+      Err message ->
+        textConcat ["state-error:", message],
+      Ok created ->
+        match mkdirAll workspaceRoot {
+          Err message ->
+            textConcat ["workspace-error:", message],
+          Ok workspaceCreated ->
+            if promptTransport == "inline-prompt" then
+              runProviderNeutralTemplate
+            else
+              runLocalClaspTemplate
+        }
+    }
+  else
+    "config-error:agent-backend-template-missing-prompt-input"
+
+main : Str
+main =
+  if commandName == "status" then
+    readReport
+  else
+    runHarness

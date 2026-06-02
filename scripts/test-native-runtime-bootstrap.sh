@@ -62,9 +62,26 @@ grep -F 'native_runtime_artifacts_ready()' "$test_root/scripts/test-native-runti
 grep -F 'export CARGO_TARGET_DIR="$runtime_target_dir"' "$test_root/scripts/test-native-runtime.sh" >/dev/null
 grep -F 'env -u CLASP_CLASPC -u CLASPC_BIN CLASP_PROJECT_ROOT="$project_root" "$project_root/scripts/resolve-claspc.sh"' "$test_root/scripts/test-native-runtime.sh" >/dev/null
 grep -F 'rust_link_args=(-lm)' "$test_root/scripts/test-native-runtime.sh" >/dev/null
+grep -F 'CLASP_VERIFY_IN_NIX_DEVELOP' "$test_root/scripts/test-native-runtime.sh" >/dev/null
+grep -F 'refusing nested nix re-entry inside current verification shell' "$test_root/scripts/test-native-runtime.sh" >/dev/null
 grep -F 'return 0' "$test_root/scripts/test-native-runtime.sh" >/dev/null
 grep -F 'nativeImageSourceText' "$test_root/scripts/test-native-runtime.sh" >/dev/null
 if grep -F '"$claspc_bin" native-image examples/compiler-parser.clasp' "$test_root/scripts/test-native-runtime.sh" >/dev/null 2>&1; then
   printf 'test-native-runtime bootstrap unexpectedly compiles compiler-parser native images directly\n' >&2
   exit 1
 fi
+
+: >"$nix_log"
+nix_boundary_stderr="$test_root/nix-boundary.stderr"
+if PATH="$test_root/bin:$PATH" \
+  IN_NIX_SHELL=1 \
+  CARGO="$test_root/bin/missing-cargo" \
+  RUSTC="$test_root/bin/missing-rustc" \
+  CLASPC_BIN="$test_root/bin/fake-claspc" \
+  CLASP_TEST_NATIVE_RUNTIME_NIX_LOG="$nix_log" \
+  "$bash_bin" "$test_root/scripts/test-native-runtime.sh" >/dev/null 2>"$nix_boundary_stderr"; then
+  printf 'expected native runtime test to fail fast when already inside nix without cargo or current artifacts\n' >&2
+  exit 1
+fi
+[[ ! -s "$nix_log" ]]
+grep -F 'native runtime library is missing or stale and cargo is unavailable' "$nix_boundary_stderr" >/dev/null

@@ -1,0 +1,3481 @@
+module AgentErgonomics
+
+foreign agentWorkspaceReadFileRaw : Str -> Str -> Result Str = "workspaceReadFile"
+foreign agentWorkspaceWriteFileRaw : Str -> Str -> Str -> Result Str = "workspaceWriteFile"
+foreign agentWorkspaceAppendFileRaw : Str -> Str -> Str -> Result Str = "workspaceAppendFile"
+foreign agentWorkspaceMkdirAllRaw : Str -> Str -> Result Str = "workspaceMkdirAll"
+foreign agentWorkspaceSearchTextRaw : Str -> Str -> Str -> Int -> Int -> Int -> Int -> Result [Str] = "workspaceSearchText"
+foreign agentWorkspaceReplaceTextRaw : Str -> Str -> Str -> Str -> Int -> Int -> Result Int = "workspaceReplaceText"
+foreign agentRunWorkspaceCommandTimeoutRaw : Str -> Str -> Int -> [Str] -> Result Str = "runWorkspaceCommandTimeoutJson"
+foreign agentHostFileSizeMbRaw : Str -> Result Int = "hostFileSizeMb"
+
+textIncludes : Str -> Str -> Bool
+textIncludes value needle = length (textSplit value needle) > 1
+
+record AgentProcessResult = {
+  exitCode : Int,
+  stdout : Str,
+  stderr : Str,
+  timedOut : Bool,
+  error : Str
+}
+
+record AgentValidationIssue = {
+  field : Str,
+  message : Str
+}
+
+record AgentValidationSummary = {
+  ok : Bool,
+  issueCount : Int,
+  issues : [AgentValidationIssue],
+  evidence : [Str]
+}
+
+record AgentCheckedProcessRun = {
+  validation : AgentValidationSummary,
+  result : AgentProcessResult,
+  ok : Bool,
+  status : Str,
+  issueTexts : [Str],
+  evidence : [Str]
+}
+
+record AgentCommandStep = {
+  label : Str,
+  cwd : Str,
+  timeoutMs : Int,
+  command : [Str]
+}
+
+record AgentCommandStepResult = {
+  label : Str,
+  ok : Bool,
+  status : Str,
+  processSummary : Str,
+  stdout : Str,
+  stderr : Str,
+  issueTexts : [Str],
+  evidence : [Str]
+}
+
+record AgentCommandPlanResult = {
+  ok : Bool,
+  stepCount : Int,
+  completedCount : Int,
+  failedCount : Int,
+  results : [AgentCommandStepResult],
+  issueTexts : [Str],
+  evidence : [Str]
+}
+
+record AgentVerifierMemoryPolicy = {
+  managedMemoryMb : Int,
+  minAvailableMemoryMb : Int,
+  directMemoryLimitMb : Int,
+  affectedDirectMemoryLimitMb : Int,
+  directMemoryLimitEnabled : Bool,
+  affectedDirectMemoryLimitEnabled : Bool
+}
+
+record AgentVerifierMemoryPolicySummary = {
+  ok : Bool,
+  issueCount : Int,
+  issueTexts : [Str],
+  evidence : [Str],
+  recommendation : Str
+}
+
+record AgentVerifierGate = {
+  ok : Bool,
+  status : Str,
+  memoryPolicyOk : Bool,
+  commandPlanOk : Bool,
+  commandStepCount : Int,
+  commandCompletedCount : Int,
+  commandFailedCount : Int,
+  issueCount : Int,
+  issueTexts : [Str],
+  evidence : [Str],
+  recommendation : Str
+}
+
+record AgentAffectedCommandResource = {
+  id : Str,
+  command : Str,
+  resourceClass : Str,
+  oomRisk : Str,
+  requiresManagedGuard : Bool,
+  executionAdvice : Str,
+  compilerStateAccess : Str
+}
+
+record AgentAffectedCommandResourceSummary = {
+  commandCount : Int,
+  staticCommandCount : Int,
+  focusedCommandCount : Int,
+  heavyCommandCount : Int,
+  safeDirectCommandCount : Int,
+  managedGuardCommandCount : Int,
+  compilerStateFreeCommandCount : Int,
+  compilerStateTouchingCommandCount : Int,
+  canRunWithoutCompilerState : Bool,
+  requiresManagedGuard : Bool,
+  overallAdvice : Str
+}
+
+record AgentAffectedVerificationPlan = {
+  selectedCommands : [AgentAffectedCommandResource],
+  commandResourceSummary : AgentAffectedCommandResourceSummary,
+  planOnly : Bool,
+  finalVerdict : Str
+}
+
+record AgentAffectedVerificationPlanDecision = {
+  ok : Bool,
+  status : Str,
+  commandCount : Int,
+  staticCommandCount : Int,
+  focusedCommandCount : Int,
+  heavyCommandCount : Int,
+  safeDirectCommandCount : Int,
+  managedGuardCommandCount : Int,
+  compilerStateFreeCommandCount : Int,
+  compilerStateTouchingCommandCount : Int,
+  requiresManagedGuard : Bool,
+  canRunDirect : Bool,
+  canRunWithoutCompilerState : Bool,
+  issueCount : Int,
+  issueTexts : [Str],
+  evidence : [Str],
+  recommendation : Str
+}
+
+record AgentAffectedVerificationLaunchPolicy = {
+  valid : Bool,
+  ready : Bool,
+  mode : Str,
+  canRunDirect : Bool,
+  canRunWithoutCompilerState : Bool,
+  requiresManagedGuard : Bool,
+  recommendation : Str,
+  verificationPlanRecommendation : Str,
+  blockingGaps : [Str],
+  requiredClosure : [Str],
+  evidence : [Str]
+}
+
+record AgentCapabilityAuditClosureDecision = {
+  kind : Str,
+  detail : Str,
+  taskPrompt : Str,
+  coordinationFocus : [Str]
+}
+
+record AgentCapabilityAuditClosureVerificationPlan = {
+  kind : Str,
+  command : Str,
+  resourceClass : Str,
+  oomRisk : Str,
+  managedRequired : Bool,
+  recommendation : Str
+}
+
+record AgentFocusedVerificationLaunchPolicy = {
+  valid : Bool,
+  ready : Bool,
+  mode : Str,
+  command : Str,
+  resourceClass : Str,
+  oomRisk : Str,
+  managedRequired : Bool,
+  safeDirect : Bool,
+  recommendation : Str,
+  verificationPlanRecommendation : Str,
+  blockingGaps : [Str],
+  requiredClosure : [Str],
+  evidence : [Str]
+}
+
+record AgentAutonomousLaunchGateInput = {
+  workspaceCheckpointReady : Bool,
+  dirtyWorktree : Bool,
+  resourceAdmissionOk : Bool,
+  loopAlreadyRunning : Bool,
+  boundedTaskCount : Int,
+  requestedChildAgents : Int,
+  admittedChildCapacity : Int,
+  managedLaunch : Bool,
+  focusedVerificationReady : Bool,
+  fullVerificationRequested : Bool,
+  promotionRequested : Bool,
+  compilerMutationRequested : Bool
+}
+
+record AgentAutonomousLaunchGate = {
+  valid : Bool,
+  ready : Bool,
+  mode : Str,
+  maySpawn : Bool,
+  mayMutateCompiler : Bool,
+  requestedChildAgents : Int,
+  admittedChildCapacity : Int,
+  recommendation : Str,
+  blockingGaps : [Str],
+  requiredClosure : [Str],
+  evidence : [Str]
+}
+
+agentAutonomousLaunchGateRepairMaySpawn : AgentAutonomousLaunchGateInput -> Bool
+agentAutonomousLaunchGateRepairMaySpawn input =
+  if input.workspaceCheckpointReady == false then
+    false
+  else if input.resourceAdmissionOk == false then
+    false
+  else if input.loopAlreadyRunning then
+    false
+  else if input.boundedTaskCount <= 0 then
+    false
+  else if input.requestedChildAgents <= 0 then
+    false
+  else if input.admittedChildCapacity <= 0 then
+    false
+  else if input.requestedChildAgents > input.admittedChildCapacity then
+    false
+  else if input.managedLaunch == false then
+    false
+  else if input.fullVerificationRequested then
+    false
+  else if input.promotionRequested then
+    false
+  else
+    true
+
+agentAutonomousLaunchGateRepairRecommendation : AgentAutonomousLaunchGateInput -> Str
+agentAutonomousLaunchGateRepairRecommendation input =
+  if agentAutonomousLaunchGateRepairMaySpawn input then
+    "autonomous-launch-repair:ready-managed-gate-repair-loop"
+  else if input.workspaceCheckpointReady == false then
+    "autonomous-launch-repair:checkpoint-current-worktree-before-child-repair"
+  else if input.resourceAdmissionOk == false then
+    "autonomous-launch-repair:wait-or-lower-concurrency-before-child-repair"
+  else if input.loopAlreadyRunning then
+    "autonomous-launch-repair:attach-or-stop-existing-loop-before-child-repair"
+  else if input.boundedTaskCount <= 0 then
+    "autonomous-launch-repair:declare-bounded-task-count-before-child-repair"
+  else if input.requestedChildAgents <= 0 then
+    "autonomous-launch-repair:declare-requested-child-agents-before-child-repair"
+  else if input.admittedChildCapacity <= 0 then
+    "autonomous-launch-repair:restore-child-admission-before-child-repair"
+  else if input.requestedChildAgents > input.admittedChildCapacity then
+    "autonomous-launch-repair:lower-requested-child-agents-before-child-repair"
+  else if input.managedLaunch == false then
+    "autonomous-launch-repair:use-managed-supervisor-before-child-repair"
+  else if input.fullVerificationRequested then
+    "autonomous-launch-repair:replace-full-verification-before-child-repair"
+  else if input.promotionRequested then
+    "autonomous-launch-repair:defer-promotion-before-child-repair"
+  else
+    "autonomous-launch-repair:close-launch-gaps-before-child-repair"
+
+record AgentManagedSwarmProofReport = {
+  schemaVersion : Int,
+  kind : Str,
+  verdict : Str,
+  managerCompleted : Bool,
+  managerFinal : Bool,
+  plannerBackendKind : Str,
+  plannerBackendTransport : Str,
+  codexFallbackInvoked : Bool,
+  taskCount : Int,
+  completedTaskCount : Int,
+  dependencyOrdered : Bool,
+  localPlannerBackend : Bool,
+  localAgentCommandPropagated : Bool,
+  sourceEditPlanDelivered : Bool,
+  sourcePatchPlanDelivered : Bool,
+  dependencyEvidenceDelivered : Bool
+}
+
+record AgentManagedSwarmProofDecision = {
+  ok : Bool,
+  status : Str,
+  passed : Bool,
+  issueCount : Int,
+  issueTexts : [Str],
+  evidence : [Str],
+  recommendation : Str
+}
+
+record AgentCapabilityMailboxSummary = {
+  hasEvidence : Bool,
+  hasBlockingGaps : Bool,
+  hasRequiredClosure : Bool,
+  evidenceCount : Int,
+  blockingGapCount : Int,
+  requiredClosureCount : Int,
+  evidence : [Str],
+  blockingGaps : [Str],
+  requiredClosure : [Str],
+  firstBlockingGap : Str,
+  recommendation : Str
+}
+
+record AgentCapabilityAuditClosureInput = {
+  blockingGaps : [Str],
+  requiredClosure : [Str]
+}
+
+record AgentCapabilityAuditJsonStatus = {
+  name : Str,
+  status : Str,
+  evidence : [Str],
+  blocking_gaps : [Str],
+  required_closure : [Str]
+}
+
+record AgentCapabilityAuditJsonReport = {
+  schema_version : Int,
+  kind : Str,
+  objective : Str,
+  overall_status : Str,
+  default_agent_model : Str,
+  default_agent_reasoning : Str,
+  capability_statuses : [AgentCapabilityAuditJsonStatus],
+  blocking_gaps : [Str],
+  required_closure : [Str],
+  verification_notes : [Str]
+}
+
+record AgentWorkspacePatch = {
+  relative : Str,
+  findText : Str,
+  replaceText : Str
+}
+
+record AgentWorkspacePatchResult = {
+  relative : Str,
+  ok : Bool,
+  replacements : Int,
+  status : Str,
+  issueTexts : [Str],
+  evidence : [Str]
+}
+
+agentResultIsOk : Result a -> Bool
+agentResultIsOk value = match value {
+  Ok inner -> true,
+  Err message -> false
+}
+
+agentResultIsErr : Result a -> Bool
+agentResultIsErr value = match value {
+  Ok inner -> false,
+  Err message -> true
+}
+
+agentResultWithDefault : a -> Result a -> a
+agentResultWithDefault fallback value = match value {
+  Ok inner -> inner,
+  Err message -> fallback
+}
+
+agentResultErrorOr : Str -> Result a -> Str
+agentResultErrorOr fallback value = match value {
+  Ok inner -> fallback,
+  Err message -> message
+}
+
+agentResultToList : Result a -> [a]
+agentResultToList value = match value {
+  Ok inner -> [inner],
+  Err message -> []
+}
+
+agentResultStatus : Str -> Str -> Result a -> Str
+agentResultStatus okStatus errPrefix value = match value {
+  Ok inner -> okStatus,
+  Err message -> textConcat [errPrefix, message]
+}
+
+agentReadTextOr : Str -> Str -> Str
+agentReadTextOr path fallback =
+  match readFile path {
+    Ok raw -> raw,
+    Err message -> fallback
+  }
+
+agentReadEnvInt : Str -> Int -> Int
+agentReadEnvInt name fallback = match envVar name {
+  Ok raw -> if raw == "" then fallback else decode Int raw,
+  Err message -> fallback
+}
+
+agentNonEmptyText : Str -> Bool
+agentNonEmptyText value = value != ""
+
+agentTextOr : Str -> Str -> Str
+agentTextOr fallback value =
+  if value == "" then fallback else value
+
+agentNonEmptyTexts : [Str] -> [Str]
+agentNonEmptyTexts values = {
+  let mut kept = [];
+  for value in values {
+    if value == "" then
+      kept
+    else {
+      kept = append kept [value];
+      kept
+    }
+  };
+  kept
+}
+
+agentJoinNonEmpty : Str -> [Str] -> Str
+agentJoinNonEmpty separator values =
+  textJoin separator (agentNonEmptyTexts values)
+
+agentFirstTextOrEmpty : [Str] -> Str
+agentFirstTextOrEmpty values = {
+  let mut first = "";
+  let mut found = false;
+  for value in values {
+    if found then
+      found
+    else {
+      first = value;
+      found = true;
+      found
+    }
+  };
+  first
+}
+
+agentSecondTextOrEmpty : [Str] -> Str
+agentSecondTextOrEmpty values = {
+  let mut second = "";
+  let mut index = 0;
+  for value in values {
+    if index == 0 then {
+      index = 1;
+      index
+    } else if index == 1 then {
+      second = value;
+      index = 2;
+      index
+    } else
+      index
+  };
+  second
+}
+
+agentPromptBlockText : Str -> Str -> Str -> Str
+agentPromptBlockText prompt startMarker endMarker = {
+  let afterMarker = agentSecondTextOrEmpty (textSplit prompt startMarker);
+  if afterMarker == "" then
+    ""
+  else
+    agentFirstTextOrEmpty (textSplit afterMarker endMarker)
+}
+
+agentPromptBlockPresent : Str -> Str -> Str -> Bool
+agentPromptBlockPresent prompt startMarker endMarker =
+  agentPromptBlockText prompt startMarker endMarker != ""
+
+agentPromptBlockOrEmpty : Str -> Str -> Str -> Str
+agentPromptBlockOrEmpty header footer raw =
+  if raw == "" then
+    ""
+  else
+    textJoin "\n" [header, raw, footer]
+
+agentPromptPrefixedLines : Str -> Str -> [Str]
+agentPromptPrefixedLines prompt prefix = {
+  let mut matches = [];
+  for line in textSplit prompt "\n" {
+    let bulletPrefix = textConcat ["- ", prefix];
+    let indentedBulletPrefix = textConcat ["  - ", prefix];
+    let remainder = match textPrefix line prefix {
+      Ok value -> value,
+      Err message ->
+        match textPrefix line bulletPrefix {
+          Ok value -> value,
+          Err bulletMessage ->
+            match textPrefix line indentedBulletPrefix {
+              Ok value -> value,
+              Err indentedMessage -> ""
+            }
+        }
+    };
+    if remainder == "" then
+      matches
+    else {
+      matches = append matches [remainder];
+      matches
+    }
+  };
+  matches
+}
+
+agentCapabilityMailboxEvidenceFromPrompt : Str -> [Str]
+agentCapabilityMailboxEvidenceFromPrompt prompt =
+  agentPromptPrefixedLines prompt "capability-evidence="
+
+agentCapabilityMailboxBlockingGapsFromPrompt : Str -> [Str]
+agentCapabilityMailboxBlockingGapsFromPrompt prompt =
+  agentPromptPrefixedLines prompt "capability-gap="
+
+agentCapabilityMailboxRequiredClosureFromPrompt : Str -> [Str]
+agentCapabilityMailboxRequiredClosureFromPrompt prompt =
+  agentPromptPrefixedLines prompt "capability-closure="
+
+agentCapabilityMailboxSummaryFromPrompt : Str -> AgentCapabilityMailboxSummary
+agentCapabilityMailboxSummaryFromPrompt prompt = {
+  let evidence = agentCapabilityMailboxEvidenceFromPrompt prompt;
+  let blockingGaps = agentCapabilityMailboxBlockingGapsFromPrompt prompt;
+  let requiredClosure = agentCapabilityMailboxRequiredClosureFromPrompt prompt;
+  AgentCapabilityMailboxSummary {
+    hasEvidence = length evidence > 0,
+    hasBlockingGaps = length blockingGaps > 0,
+    hasRequiredClosure = length requiredClosure > 0,
+    evidenceCount = length evidence,
+    blockingGapCount = length blockingGaps,
+    requiredClosureCount = length requiredClosure,
+    evidence = evidence,
+    blockingGaps = blockingGaps,
+    requiredClosure = requiredClosure,
+    firstBlockingGap = agentFirstTextOrEmpty blockingGaps,
+    recommendation =
+      if length blockingGaps > 0 then
+        "plan capability-audit closure from mailbox capability-gap details"
+      else if length requiredClosure > 0 then
+        "track required capability closure from mailbox detail lines"
+      else if length evidence > 0 then
+        "reuse mailbox capability evidence"
+      else
+        "no mailbox capability details found"
+  }
+}
+
+agentPromptHasCapabilityMailboxGaps : Str -> Bool
+agentPromptHasCapabilityMailboxGaps prompt = {
+  let summary = agentCapabilityMailboxSummaryFromPrompt prompt;
+  summary.hasBlockingGaps || summary.hasRequiredClosure
+}
+
+agentCapabilityMailboxFirstRequiredClosure : AgentCapabilityMailboxSummary -> Str
+agentCapabilityMailboxFirstRequiredClosure summary =
+  agentFirstTextOrEmpty summary.requiredClosure
+
+agentCapabilityMailboxClosureDetail : AgentCapabilityMailboxSummary -> Str
+agentCapabilityMailboxClosureDetail summary =
+  if summary.firstBlockingGap != "" then
+    textConcat ["Close typed capability mailbox gap: ", summary.firstBlockingGap]
+  else if agentCapabilityMailboxFirstRequiredClosure summary != "" then
+    textConcat ["Close typed capability mailbox closure: ", agentCapabilityMailboxFirstRequiredClosure summary]
+  else
+    "Close one typed capability gap from GoalManager mailbox capability detail lines."
+
+agentCapabilityMailboxClosurePrompt : AgentCapabilityMailboxSummary -> Str
+agentCapabilityMailboxClosurePrompt summary =
+  textJoin
+    "\n"
+    [
+      "Use the typed GoalManager mailbox capability details below to close one bounded capability gap. Preserve the concrete capability detail in the resulting evidence, prefer focused ordinary-Clasp helper or planner/runtime work, and verify with the narrow static or affected route that covers the changed surface. Do not launch a broad swarm, full verify-all, promotion, or unmanaged compiler rebuild from this task.",
+      "Capability mailbox evidence:",
+      textJoin "\n" summary.evidence,
+      "Capability mailbox blocking gaps:",
+      textJoin "\n" summary.blockingGaps,
+      "Capability mailbox required closure:",
+      textJoin "\n" summary.requiredClosure,
+      agentCapabilityAuditClosureVerificationSectionForKind "capability-mailbox"
+    ]
+
+agentCapabilityAuditJsonStartMarker : Str
+agentCapabilityAuditJsonStartMarker = "Capability audit JSON:\n"
+
+agentCapabilityAuditJsonEndMarker : Str
+agentCapabilityAuditJsonEndMarker = "\nEnd capability audit JSON."
+
+agentCapabilityAuditJsonPathStartMarker : Str
+agentCapabilityAuditJsonPathStartMarker = "Capability audit JSON path:\n"
+
+agentCapabilityAuditJsonPathEndMarker : Str
+agentCapabilityAuditJsonPathEndMarker = "\nEnd capability audit JSON path."
+
+agentCapabilityAuditDecisionJsonStartMarker : Str
+agentCapabilityAuditDecisionJsonStartMarker = "Capability audit decision JSON:\n"
+
+agentCapabilityAuditDecisionJsonEndMarker : Str
+agentCapabilityAuditDecisionJsonEndMarker = "\nEnd capability audit decision JSON."
+
+agentCapabilityAuditDecisionJsonPathStartMarker : Str
+agentCapabilityAuditDecisionJsonPathStartMarker = "Capability audit decision JSON path:\n"
+
+agentCapabilityAuditDecisionJsonPathEndMarker : Str
+agentCapabilityAuditDecisionJsonPathEndMarker = "\nEnd capability audit decision JSON path."
+
+agentManagedSwarmProofJsonStartMarker : Str
+agentManagedSwarmProofJsonStartMarker = "Managed swarm proof JSON:\n"
+
+agentManagedSwarmProofJsonEndMarker : Str
+agentManagedSwarmProofJsonEndMarker = "\nEnd managed swarm proof JSON."
+
+agentManagedSwarmProofJsonPathStartMarker : Str
+agentManagedSwarmProofJsonPathStartMarker = "Managed swarm proof JSON path:\n"
+
+agentManagedSwarmProofJsonPathEndMarker : Str
+agentManagedSwarmProofJsonPathEndMarker = "\nEnd managed swarm proof JSON path."
+
+agentAffectedVerificationPlanJsonStartMarker : Str
+agentAffectedVerificationPlanJsonStartMarker = "Affected verification plan JSON:\n"
+
+agentAffectedVerificationPlanJsonEndMarker : Str
+agentAffectedVerificationPlanJsonEndMarker = "\nEnd affected verification plan JSON."
+
+agentAffectedVerificationPlanPathStartMarker : Str
+agentAffectedVerificationPlanPathStartMarker = "Affected verification plan path:\n"
+
+agentAffectedVerificationPlanPathEndMarker : Str
+agentAffectedVerificationPlanPathEndMarker = "\nEnd affected verification plan path."
+
+agentAffectedVerificationLaunchPolicyJsonStartMarker : Str
+agentAffectedVerificationLaunchPolicyJsonStartMarker = "Affected verification launch policy JSON:\n"
+
+agentAffectedVerificationLaunchPolicyJsonEndMarker : Str
+agentAffectedVerificationLaunchPolicyJsonEndMarker = "\nEnd affected verification launch policy JSON."
+
+agentAffectedVerificationLaunchPolicyPathStartMarker : Str
+agentAffectedVerificationLaunchPolicyPathStartMarker = "Affected verification launch policy path:\n"
+
+agentAffectedVerificationLaunchPolicyPathEndMarker : Str
+agentAffectedVerificationLaunchPolicyPathEndMarker = "\nEnd affected verification launch policy path."
+
+agentFocusedVerificationLaunchPolicyJsonStartMarker : Str
+agentFocusedVerificationLaunchPolicyJsonStartMarker = "Focused verification launch policy JSON:\n"
+
+agentFocusedVerificationLaunchPolicyJsonEndMarker : Str
+agentFocusedVerificationLaunchPolicyJsonEndMarker = "\nEnd focused verification launch policy JSON."
+
+agentAutonomousLaunchGateJsonStartMarker : Str
+agentAutonomousLaunchGateJsonStartMarker = "Autonomous launch gate JSON:\n"
+
+agentAutonomousLaunchGateJsonEndMarker : Str
+agentAutonomousLaunchGateJsonEndMarker = "\nEnd autonomous launch gate JSON."
+
+agentCapabilityAuditInlineJsonFromPrompt : Str -> Str
+agentCapabilityAuditInlineJsonFromPrompt prompt =
+  agentPromptBlockText prompt agentCapabilityAuditJsonStartMarker agentCapabilityAuditJsonEndMarker
+
+agentCapabilityAuditJsonPathFromPrompt : Str -> Str
+agentCapabilityAuditJsonPathFromPrompt prompt =
+  agentPromptBlockText prompt agentCapabilityAuditJsonPathStartMarker agentCapabilityAuditJsonPathEndMarker
+
+agentHasCapabilityAuditJsonPath : Str -> Bool
+agentHasCapabilityAuditJsonPath prompt =
+  agentCapabilityAuditJsonPathFromPrompt prompt != ""
+
+agentCapabilityAuditJsonFromPrompt : Str -> Str
+agentCapabilityAuditJsonFromPrompt prompt = {
+  let inlineJson = agentCapabilityAuditInlineJsonFromPrompt prompt;
+  if inlineJson != "" then
+    inlineJson
+  else {
+    let auditPath = agentCapabilityAuditJsonPathFromPrompt prompt;
+    if auditPath == "" then
+      ""
+    else
+      agentBoundedCapabilityAuditJsonFromPath auditPath
+  }
+}
+
+agentHasCapabilityAuditJson : Str -> Bool
+agentHasCapabilityAuditJson prompt =
+  agentCapabilityAuditJsonFromPrompt prompt != ""
+
+agentCapabilityAuditJsonBlock : Str -> Str
+agentCapabilityAuditJsonBlock raw =
+  agentPromptBlockOrEmpty agentCapabilityAuditJsonStartMarker agentCapabilityAuditJsonEndMarker raw
+
+agentCapabilityAuditJsonBlockFromPath : Str -> Str
+agentCapabilityAuditJsonBlockFromPath path =
+  if path == "" then
+    ""
+  else
+    agentPromptBlockOrEmpty
+      "Capability audit JSON:"
+      "End capability audit JSON."
+      (agentBoundedCapabilityAuditJsonFromPath path)
+
+agentCapabilityAuditDecisionInlineJsonFromPrompt : Str -> Str
+agentCapabilityAuditDecisionInlineJsonFromPrompt prompt =
+  agentPromptBlockText prompt agentCapabilityAuditDecisionJsonStartMarker agentCapabilityAuditDecisionJsonEndMarker
+
+agentCapabilityAuditDecisionJsonPathFromPrompt : Str -> Str
+agentCapabilityAuditDecisionJsonPathFromPrompt prompt =
+  agentPromptBlockText prompt agentCapabilityAuditDecisionJsonPathStartMarker agentCapabilityAuditDecisionJsonPathEndMarker
+
+agentHasCapabilityAuditDecisionJsonPath : Str -> Bool
+agentHasCapabilityAuditDecisionJsonPath prompt =
+  agentCapabilityAuditDecisionJsonPathFromPrompt prompt != ""
+
+agentCapabilityAuditDecisionJsonFromPrompt : Str -> Str
+agentCapabilityAuditDecisionJsonFromPrompt prompt = {
+  let inlineJson = agentCapabilityAuditDecisionInlineJsonFromPrompt prompt;
+  if inlineJson != "" then
+    inlineJson
+  else {
+    let decisionPath = agentCapabilityAuditDecisionJsonPathFromPrompt prompt;
+    if decisionPath == "" then
+      ""
+    else
+      agentBoundedCapabilityAuditDecisionJsonFromPath decisionPath
+  }
+}
+
+agentHasCapabilityAuditDecisionJson : Str -> Bool
+agentHasCapabilityAuditDecisionJson prompt =
+  agentCapabilityAuditDecisionJsonFromPrompt prompt != ""
+
+agentCapabilityAuditDecisionJsonBlock : Str -> Str
+agentCapabilityAuditDecisionJsonBlock raw =
+  agentPromptBlockOrEmpty agentCapabilityAuditDecisionJsonStartMarker agentCapabilityAuditDecisionJsonEndMarker raw
+
+agentCapabilityAuditDecisionJsonBlockFromPath : Str -> Str
+agentCapabilityAuditDecisionJsonBlockFromPath path =
+  if path == "" then
+    ""
+  else
+    agentPromptBlockOrEmpty
+      "Capability audit decision JSON:"
+      "End capability audit decision JSON."
+      (agentBoundedCapabilityAuditDecisionJsonFromPath path)
+
+agentManagedSwarmProofInlineJsonFromPrompt : Str -> Str
+agentManagedSwarmProofInlineJsonFromPrompt prompt =
+  agentPromptBlockText prompt agentManagedSwarmProofJsonStartMarker agentManagedSwarmProofJsonEndMarker
+
+agentManagedSwarmProofJsonPathFromPrompt : Str -> Str
+agentManagedSwarmProofJsonPathFromPrompt prompt =
+  agentPromptBlockText prompt agentManagedSwarmProofJsonPathStartMarker agentManagedSwarmProofJsonPathEndMarker
+
+agentHasManagedSwarmProofJsonPath : Str -> Bool
+agentHasManagedSwarmProofJsonPath prompt =
+  agentManagedSwarmProofJsonPathFromPrompt prompt != ""
+
+agentManagedSwarmProofJsonFromPrompt : Str -> Str
+agentManagedSwarmProofJsonFromPrompt prompt = {
+  let inlineJson = agentManagedSwarmProofInlineJsonFromPrompt prompt;
+  if inlineJson != "" then
+    inlineJson
+  else {
+    let proofPath = agentManagedSwarmProofJsonPathFromPrompt prompt;
+    if proofPath == "" then
+      ""
+    else
+      agentBoundedManagedSwarmProofJsonFromPath proofPath
+  }
+}
+
+agentHasManagedSwarmProofJson : Str -> Bool
+agentHasManagedSwarmProofJson prompt =
+  if agentManagedSwarmProofJsonFromPrompt prompt != "" then
+    true
+  else
+    textIncludes prompt "clasp-managed-swarm-proof"
+
+agentManagedSwarmProofJsonBlock : Str -> Str
+agentManagedSwarmProofJsonBlock raw =
+  agentPromptBlockOrEmpty agentManagedSwarmProofJsonStartMarker agentManagedSwarmProofJsonEndMarker raw
+
+agentManagedSwarmProofJsonBlockFromPath : Str -> Str
+agentManagedSwarmProofJsonBlockFromPath path =
+  if path == "" then
+    ""
+  else
+    agentPromptBlockOrEmpty
+      "Managed swarm proof JSON:"
+      "End managed swarm proof JSON."
+      (agentBoundedManagedSwarmProofJsonFromPath path)
+
+agentAffectedVerificationPlanInlineJsonFromPrompt : Str -> Str
+agentAffectedVerificationPlanInlineJsonFromPrompt prompt =
+  agentPromptBlockText prompt agentAffectedVerificationPlanJsonStartMarker agentAffectedVerificationPlanJsonEndMarker
+
+agentAffectedVerificationPlanPathFromPrompt : Str -> Str
+agentAffectedVerificationPlanPathFromPrompt prompt =
+  agentPromptBlockText prompt agentAffectedVerificationPlanPathStartMarker agentAffectedVerificationPlanPathEndMarker
+
+agentHasAffectedVerificationPlanPath : Str -> Bool
+agentHasAffectedVerificationPlanPath prompt =
+  agentAffectedVerificationPlanPathFromPrompt prompt != ""
+
+agentAffectedVerificationPlanJsonFromPrompt : Str -> Str
+agentAffectedVerificationPlanJsonFromPrompt prompt = {
+  let inlineJson = agentAffectedVerificationPlanInlineJsonFromPrompt prompt;
+  if inlineJson != "" then
+    inlineJson
+  else {
+    let planPath = agentAffectedVerificationPlanPathFromPrompt prompt;
+    if planPath == "" then
+      ""
+    else
+      agentBoundedAffectedVerificationPlanJsonFromPath planPath
+  }
+}
+
+agentHasAffectedVerificationPlanJson : Str -> Bool
+agentHasAffectedVerificationPlanJson prompt =
+  agentAffectedVerificationPlanJsonFromPrompt prompt != ""
+
+agentAffectedVerificationLaunchPolicyInlineJsonFromPrompt : Str -> Str
+agentAffectedVerificationLaunchPolicyInlineJsonFromPrompt prompt =
+  agentPromptBlockText prompt agentAffectedVerificationLaunchPolicyJsonStartMarker agentAffectedVerificationLaunchPolicyJsonEndMarker
+
+agentAffectedVerificationLaunchPolicyPathFromPrompt : Str -> Str
+agentAffectedVerificationLaunchPolicyPathFromPrompt prompt =
+  agentPromptBlockText prompt agentAffectedVerificationLaunchPolicyPathStartMarker agentAffectedVerificationLaunchPolicyPathEndMarker
+
+agentHasAffectedVerificationLaunchPolicyPath : Str -> Bool
+agentHasAffectedVerificationLaunchPolicyPath prompt =
+  agentAffectedVerificationLaunchPolicyPathFromPrompt prompt != ""
+
+agentAffectedVerificationLaunchPolicyJsonFromPrompt : Str -> Str
+agentAffectedVerificationLaunchPolicyJsonFromPrompt prompt = {
+  let inlineJson = agentAffectedVerificationLaunchPolicyInlineJsonFromPrompt prompt;
+  if inlineJson != "" then
+    inlineJson
+  else {
+    let policyPath = agentAffectedVerificationLaunchPolicyPathFromPrompt prompt;
+    if policyPath == "" then
+      ""
+    else
+      agentBoundedAffectedVerificationLaunchPolicyJsonFromPath policyPath
+  }
+}
+
+agentHasAffectedVerificationLaunchPolicyJson : Str -> Bool
+agentHasAffectedVerificationLaunchPolicyJson prompt =
+  agentAffectedVerificationLaunchPolicyJsonFromPrompt prompt != ""
+
+agentFocusedVerificationLaunchPolicyInlineJsonFromPrompt : Str -> Str
+agentFocusedVerificationLaunchPolicyInlineJsonFromPrompt prompt =
+  agentPromptBlockText prompt agentFocusedVerificationLaunchPolicyJsonStartMarker agentFocusedVerificationLaunchPolicyJsonEndMarker
+
+agentFocusedVerificationLaunchPolicyJsonFromPrompt : Str -> Str
+agentFocusedVerificationLaunchPolicyJsonFromPrompt prompt =
+  agentFocusedVerificationLaunchPolicyInlineJsonFromPrompt prompt
+
+agentHasFocusedVerificationLaunchPolicyJson : Str -> Bool
+agentHasFocusedVerificationLaunchPolicyJson prompt =
+  agentFocusedVerificationLaunchPolicyJsonFromPrompt prompt != ""
+
+agentFocusedVerificationLaunchPolicyJsonBlock : Str -> Str
+agentFocusedVerificationLaunchPolicyJsonBlock raw =
+  agentPromptBlockOrEmpty agentFocusedVerificationLaunchPolicyJsonStartMarker agentFocusedVerificationLaunchPolicyJsonEndMarker raw
+
+agentAutonomousLaunchGateInlineJsonFromPrompt : Str -> Str
+agentAutonomousLaunchGateInlineJsonFromPrompt prompt =
+  agentPromptBlockText prompt agentAutonomousLaunchGateJsonStartMarker agentAutonomousLaunchGateJsonEndMarker
+
+agentAutonomousLaunchGateJsonFromPrompt : Str -> Str
+agentAutonomousLaunchGateJsonFromPrompt prompt =
+  agentAutonomousLaunchGateInlineJsonFromPrompt prompt
+
+agentHasAutonomousLaunchGateJson : Str -> Bool
+agentHasAutonomousLaunchGateJson prompt =
+  agentAutonomousLaunchGateJsonFromPrompt prompt != ""
+
+agentAutonomousLaunchGateJsonBlock : Str -> Str
+agentAutonomousLaunchGateJsonBlock raw =
+  agentPromptBlockOrEmpty agentAutonomousLaunchGateJsonStartMarker agentAutonomousLaunchGateJsonEndMarker raw
+
+agentAffectedVerificationPlanJsonBlockFromPath : Str -> Str
+agentAffectedVerificationPlanJsonBlockFromPath path =
+  if path == "" then
+    ""
+  else
+    agentPromptBlockOrEmpty
+      "Affected verification plan JSON:"
+      "End affected verification plan JSON."
+      (agentBoundedAffectedVerificationPlanJsonFromPath path)
+
+agentAffectedVerificationLaunchPolicyJsonBlockFromPath : Str -> Str
+agentAffectedVerificationLaunchPolicyJsonBlockFromPath path =
+  if path == "" then
+    ""
+  else
+    agentPromptBlockOrEmpty
+      "Affected verification launch policy JSON:"
+      "End affected verification launch policy JSON."
+      (agentBoundedAffectedVerificationLaunchPolicyJsonFromPath path)
+
+agentPromptWithAffectedVerificationPathContext : Str -> Str
+agentPromptWithAffectedVerificationPathContext prompt =
+  textJoin
+    "\n"
+    [
+      prompt,
+      agentAffectedVerificationPlanJsonBlockFromPath (agentAffectedVerificationPlanPathFromPrompt prompt),
+      agentAffectedVerificationLaunchPolicyJsonBlockFromPath (agentAffectedVerificationLaunchPolicyPathFromPrompt prompt)
+    ]
+
+agentPromptHasBackendPolicyRepairShape : Str -> Bool
+agentPromptHasBackendPolicyRepairShape prompt =
+  if textIncludes prompt "policyMessages=" then
+    if textIncludes prompt "policyMissingPlaceholders=" then
+      textIncludes prompt "policyRecommendedTemplate="
+    else
+      false
+  else
+    false
+
+agentPromptHasBackendConfigRepairSignal : Str -> Bool
+agentPromptHasBackendConfigRepairSignal prompt =
+  if textIncludes prompt "backendConfigRepair=agent-backend" then
+    true
+  else if textIncludes prompt "plannerBackendConfigRepair=agent-backend" then
+    true
+  else
+    textIncludes prompt "plannerBackendConfigError="
+
+agentPromptHasBackendPolicyRepairSection : Str -> Str -> Bool
+agentPromptHasBackendPolicyRepairSection prompt heading =
+  if textIncludes prompt heading then
+    agentPromptHasBackendPolicyRepairShape prompt
+  else
+    false
+
+agentPromptHasAgentBackendPolicyRepair : Str -> Bool
+agentPromptHasAgentBackendPolicyRepair prompt =
+  if agentPromptHasBackendConfigRepairSignal prompt then
+    true
+  else
+    agentPromptHasBackendPolicyRepairSection prompt "Agent backend policy repair:"
+
+agentPromptHasPlannerBackendPolicyRepair : Str -> Bool
+agentPromptHasPlannerBackendPolicyRepair prompt =
+  if agentPromptHasBackendConfigRepairSignal prompt then
+    true
+  else if agentPromptHasBackendPolicyRepairSection prompt "Planner agent backend policy repair:" then
+    true
+  else
+    agentPromptHasBackendPolicyRepairSection prompt "Agent backend policy repair:"
+
+agentPromptHasNonEmptySection : Str -> Str -> Bool
+agentPromptHasNonEmptySection prompt title =
+  if textIncludes prompt (textConcat [title, "\n- none"]) then
+    false
+  else
+    textIncludes prompt title
+
+agentPromptHasRoleContextPack : Str -> Str -> Str -> Bool
+agentPromptHasRoleContextPack prompt contextHeading taskPrefix =
+  if textIncludes prompt contextHeading then
+    textIncludes prompt (textConcat ["task: ", taskPrefix])
+  else
+    false
+
+agentPromptHasBuilderContextPack : Str -> Bool
+agentPromptHasBuilderContextPack prompt =
+  agentPromptHasRoleContextPack prompt "Swarm context pack:" "builder-"
+
+agentPromptHasVerifierContextPack : Str -> Bool
+agentPromptHasVerifierContextPack prompt =
+  agentPromptHasRoleContextPack prompt "Swarm context pack:" "verifier-"
+
+agentPromptHasPlannerContextPack : Str -> Bool
+agentPromptHasPlannerContextPack prompt =
+  agentPromptHasRoleContextPack prompt "Planner context pack:" "planner-1"
+
+agentPromptHasTaskFileContent : Str -> Bool
+agentPromptHasTaskFileContent prompt =
+  textIncludes prompt "Task file content:"
+
+agentPromptHasDependencyCompletionEvidence : Str -> Bool
+agentPromptHasDependencyCompletionEvidence prompt =
+  if textIncludes prompt "Dependency completion evidence:" then
+    textIncludes prompt " verifier=pass"
+  else
+    if agentPromptHasNonEmptySection prompt "dependency task ids:" then
+      agentPromptHasNonEmptySection prompt "dependency task statuses:"
+    else
+      false
+
+agentPromptHasCapabilityAuditVerifyAllGap : Str -> Bool
+agentPromptHasCapabilityAuditVerifyAllGap prompt =
+  if textIncludes prompt "verify-all" then
+    true
+  else
+    textIncludes prompt "Managed verify-all"
+
+agentPromptHasCapabilityAuditContextGap : Str -> Bool
+agentPromptHasCapabilityAuditContextGap prompt =
+  if textIncludes prompt "capability-audit-context" then
+    true
+  else if textIncludes prompt "capability-audit-json-decode-failed" then
+    true
+  else
+    textIncludes prompt "capability-audit-json:repair-context"
+
+agentPromptHasCapabilityAuditSwarmProofGap : Str -> Bool
+agentPromptHasCapabilityAuditSwarmProofGap prompt =
+  if textIncludes prompt "Broad self-improving swarm" then
+    true
+  else if textIncludes prompt "broad swarm proof" then
+    true
+  else if textIncludes prompt "managed swarm proof" then
+    true
+  else
+    textIncludes prompt "CLASP_SWARM_CAPABILITY_SWARM_PROOF_JSON"
+
+agentPromptHasCapabilityAuditNativeRuntimeGap : Str -> Bool
+agentPromptHasCapabilityAuditNativeRuntimeGap prompt =
+  if textIncludes prompt "full native workflow/supervisor/runtime parity" then
+    true
+  else if textIncludes prompt "native workflow runtime" then
+    true
+  else if textIncludes prompt "supervisor trees" then
+    true
+  else if textIncludes prompt "native tool / verifier / mergegate surfaces" then
+    true
+  else if textIncludes prompt "verifier / mergegate runtime surfaces" then
+    true
+  else
+    textIncludes prompt "native tool execution"
+
+agentPromptHasCapabilityAuditBackendSurfaceGap : Str -> Bool
+agentPromptHasCapabilityAuditBackendSurfaceGap prompt =
+  if textIncludes prompt "full backend surface parity without JS helpers" then
+    true
+  else if textIncludes prompt "backend surface parity" then
+    true
+  else if textIncludes prompt "JS helper files" then
+    true
+  else if textIncludes prompt "JS helper semantics" then
+    true
+  else
+    textIncludes prompt "backend semantics should depend"
+
+agentPromptHasCapabilityAuditCompilerSpeedGap : Str -> Bool
+agentPromptHasCapabilityAuditCompilerSpeedGap prompt =
+  if textIncludes prompt "Compiler rebuild" then
+    true
+  else if textIncludes prompt "compiler-module speed" then
+    true
+  else
+    textIncludes prompt "iteration speed"
+
+agentPromptHasCapabilityAuditEmbeddingGap : Str -> Bool
+agentPromptHasCapabilityAuditEmbeddingGap prompt =
+  if textIncludes prompt "Provider-specific authenticated/network embedding adapters" then
+    true
+  else if textIncludes prompt "native/provider-specific HTTP embedding adapter execution" then
+    true
+  else
+    textIncludes prompt "vector-store persistence"
+
+agentPromptHasCapabilityAuditSafetyGap : Str -> Bool
+agentPromptHasCapabilityAuditSafetyGap prompt =
+  if textIncludes prompt "hostile-tool packaging" then
+    true
+  else if textIncludes prompt "richer hostile-tool" then
+    true
+  else if textIncludes prompt "safety_governance" then
+    true
+  else if textIncludes prompt "destructive-action" then
+    true
+  else if textIncludes prompt "filesystem mediation" then
+    true
+  else
+    textIncludes prompt "network mediation"
+
+agentPromptHasCapabilityAuditErgonomicsGap : Str -> Bool
+agentPromptHasCapabilityAuditErgonomicsGap prompt =
+  if textIncludes prompt "stdlib and error surfaces" then
+    true
+  else
+    textIncludes prompt "capability ergonomics"
+
+agentCapabilityAuditClosureKindFromPrompt : Str -> Str
+agentCapabilityAuditClosureKindFromPrompt prompt =
+  if agentPromptHasCapabilityAuditContextGap prompt then
+    "capability-audit-context"
+  else if agentPromptHasCapabilityAuditVerifyAllGap prompt then
+    "managed-verify-all"
+  else if agentPromptHasCapabilityAuditSwarmProofGap prompt then
+    "managed-swarm-proof"
+  else if agentPromptHasCapabilityAuditNativeRuntimeGap prompt then
+    "native-runtime-parity"
+  else if agentPromptHasCapabilityAuditBackendSurfaceGap prompt then
+    "backend-surface-parity"
+  else if agentPromptHasCapabilityAuditCompilerSpeedGap prompt then
+    "iteration-speed"
+  else if agentPromptHasCapabilityAuditEmbeddingGap prompt then
+    "semantic-memory"
+  else if agentPromptHasCapabilityAuditSafetyGap prompt then
+    "safety-governance"
+  else if agentPromptHasCapabilityAuditErgonomicsGap prompt then
+    "agent-ergonomics"
+  else if agentPromptHasCapabilityMailboxGaps prompt then
+    "capability-mailbox"
+  else
+    "swarm-readiness"
+
+agentCapabilityAuditClosureDetailForKind : Str -> Str
+agentCapabilityAuditClosureDetailForKind kind =
+  if kind == "capability-audit-context" then
+    "Repair the capability-audit JSON handoff before planning broader swarm closure work."
+  else if kind == "managed-verify-all" then
+    "Close the managed verification evidence gap reported by the swarm capability audit."
+  else if kind == "managed-swarm-proof" then
+    "Close the broad managed swarm proof gap reported by the swarm capability audit."
+  else if kind == "native-runtime-parity" then
+    "Close one native workflow/supervisor/tool/verifier/mergegate runtime parity gap for standalone Clasp swarms."
+  else if kind == "backend-surface-parity" then
+    "Close one backend-surface parity gap so standalone Clasp agent backends do not depend on JS helper semantics."
+  else if kind == "iteration-speed" then
+    "Close the compiler iteration-speed evidence gap reported by the swarm capability audit."
+  else if kind == "semantic-memory" then
+    "Close one semantic-memory embedding adapter or vector-store persistence gap from the swarm capability audit."
+  else if kind == "safety-governance" then
+    "Close one safety/governance hostile-tool policy gap from the swarm capability audit."
+  else if kind == "agent-ergonomics" then
+    "Close one agent ergonomics helper gap from the swarm capability audit."
+  else if kind == "capability-mailbox" then
+    "Close one typed capability gap from GoalManager mailbox capability detail lines."
+  else
+    "Convert the machine-readable swarm capability audit into the next bounded implementation task."
+
+agentCapabilityAuditClosureDetailFromPrompt : Str -> Str
+agentCapabilityAuditClosureDetailFromPrompt prompt =
+  agentCapabilityAuditClosureDetailForKind (agentCapabilityAuditClosureKindFromPrompt prompt)
+
+agentCapabilityAuditClosureRoleForKind : Str -> Str
+agentCapabilityAuditClosureRoleForKind kind =
+  if kind == "capability-audit-context" then
+    "capability-audit-context-repair-worker"
+  else if kind == "managed-verify-all" then
+    "managed-verify-worker"
+  else if kind == "managed-swarm-proof" then
+    "managed-swarm-proof-worker"
+  else if kind == "native-runtime-parity" then
+    "native-runtime-worker"
+  else if kind == "backend-surface-parity" then
+    "backend-surface-worker"
+  else if kind == "iteration-speed" then
+    "compiler-speed-worker"
+  else if kind == "semantic-memory" then
+    "semantic-memory-worker"
+  else if kind == "safety-governance" then
+    "safety-policy-worker"
+  else if kind == "agent-ergonomics" then
+    "agent-ergonomics-worker"
+  else if kind == "capability-mailbox" then
+    "capability-mailbox-worker"
+  else
+    "swarm-audit-worker"
+
+agentCapabilityAuditClosureRoleFromPrompt : Str -> Str
+agentCapabilityAuditClosureRoleFromPrompt prompt =
+  agentCapabilityAuditClosureRoleForKind (agentCapabilityAuditClosureKindFromPrompt prompt)
+
+agentCapabilityAuditClosureVerificationPlanForKind : Str -> AgentCapabilityAuditClosureVerificationPlan
+agentCapabilityAuditClosureVerificationPlanForKind kind =
+  if kind == "capability-audit-context" then
+    AgentCapabilityAuditClosureVerificationPlan {
+      kind = kind,
+      command = "bash scripts/test-swarm-capability-audit.sh static",
+      resourceClass = "static",
+      oomRisk = "low",
+      managedRequired = false,
+      recommendation = "Run the static capability-audit contract only after fixing the audit handoff; do not run full audit mode or broad verification."
+    }
+  else if kind == "managed-verify-all" then
+    AgentCapabilityAuditClosureVerificationPlan {
+      kind = kind,
+      command = "bash scripts/verify-all.sh",
+      resourceClass = "heavy",
+      oomRisk = "high",
+      managedRequired = true,
+      recommendation = "Run this only through scripts/run-managed-job.sh with explicit memory, disk, timeout, and low-parallelism caps; never launch it directly from a child agent."
+    }
+  else if kind == "managed-swarm-proof" then
+    AgentCapabilityAuditClosureVerificationPlan {
+      kind = kind,
+      command = "bash scripts/test-goal-manager-agent-command-template.sh",
+      resourceClass = "focused",
+      oomRisk = "medium",
+      managedRequired = true,
+      recommendation = "Use managed GoalManager proof coverage with child-count, memory, and disk admission before any broad non-Codex swarm proof run."
+    }
+  else if kind == "native-runtime-parity" then
+    AgentCapabilityAuditClosureVerificationPlan {
+      kind = kind,
+      command = "bash scripts/test-swarm-ready-benchmark.sh",
+      resourceClass = "focused",
+      oomRisk = "medium",
+      managedRequired = true,
+      recommendation = "Prefer focused native runtime or ready-benchmark coverage inside a managed job; fall back to the static ready gate when memory is constrained."
+    }
+  else if kind == "backend-surface-parity" then
+    AgentCapabilityAuditClosureVerificationPlan {
+      kind = kind,
+      command = "bash scripts/test-agent-backend-static.sh",
+      resourceClass = "static",
+      oomRisk = "low",
+      managedRequired = false,
+      recommendation = "Verify backend-surface policy/data changes with the static backend contract before any runtime backend probe."
+    }
+  else if kind == "iteration-speed" then
+    AgentCapabilityAuditClosureVerificationPlan {
+      kind = kind,
+      command = "bash scripts/test-native-incremental-guard.sh",
+      resourceClass = "focused",
+      oomRisk = "medium",
+      managedRequired = true,
+      recommendation = "Run incremental speed probes only through managed memory/disk admission and keep native-image diagnostics opt-in."
+    }
+  else if kind == "semantic-memory" then
+    AgentCapabilityAuditClosureVerificationPlan {
+      kind = kind,
+      command = "bash scripts/test-swarm-memory.sh",
+      resourceClass = "focused",
+      oomRisk = "medium",
+      managedRequired = true,
+      recommendation = "Keep embedding and vector-store coverage provider-scoped and managed; use static gate evidence when provider execution is unavailable."
+    }
+  else if kind == "safety-governance" then
+    AgentCapabilityAuditClosureVerificationPlan {
+      kind = kind,
+      command = "bash scripts/test-swarm-policy-helpers.sh",
+      resourceClass = "focused",
+      oomRisk = "medium",
+      managedRequired = true,
+      recommendation = "Run hostile-tool policy coverage with managed bounds and no broad process-kill cleanup."
+    }
+  else if kind == "agent-ergonomics" then
+    AgentCapabilityAuditClosureVerificationPlan {
+      kind = kind,
+      command = "bash scripts/test-agent-ergonomics-helpers.sh static",
+      resourceClass = "static",
+      oomRisk = "low",
+      managedRequired = false,
+      recommendation = "Use the static ordinary-Clasp ergonomics contract by default; reserve the full claspc harness for explicit managed verification."
+    }
+  else if kind == "capability-mailbox" then
+    AgentCapabilityAuditClosureVerificationPlan {
+      kind = kind,
+      command = "bash scripts/test-goal-manager-mailbox-capability-details.sh",
+      resourceClass = "static",
+      oomRisk = "low",
+      managedRequired = false,
+      recommendation = "Verify typed mailbox detail parsing with the static mailbox contract and preserve the concrete capability evidence in the task report."
+    }
+  else
+    AgentCapabilityAuditClosureVerificationPlan {
+      kind = kind,
+      command = "bash scripts/test-swarm-ready-gate.sh",
+      resourceClass = "static",
+      oomRisk = "low",
+      managedRequired = false,
+      recommendation = "Use the static ready gate for first-pass closure evidence before any broad swarm or full verification run."
+    }
+
+agentCapabilityAuditClosureVerificationSectionForKind : Str -> Str
+agentCapabilityAuditClosureVerificationSectionForKind kind = {
+  let plan = agentCapabilityAuditClosureVerificationPlanForKind kind in
+  textJoin "\n" [
+    "Focused verification plan:",
+    textConcat ["- command=", plan.command],
+    textConcat ["- resourceClass=", plan.resourceClass],
+    textConcat ["- oomRisk=", plan.oomRisk],
+    textConcat ["- managedRequired=", if plan.managedRequired then "true" else "false"],
+    textConcat ["- recommendation=", plan.recommendation]
+  ]
+}
+
+agentCapabilityAuditClosureVerificationSectionFromPrompt : Str -> Str
+agentCapabilityAuditClosureVerificationSectionFromPrompt prompt =
+  agentCapabilityAuditClosureVerificationSectionForKind (agentCapabilityAuditClosureKindFromPrompt prompt)
+
+agentCapabilityAuditClosureVerificationPromptSection : Str -> Str
+agentCapabilityAuditClosureVerificationPromptSection prompt =
+  agentSecondTextOrEmpty (textSplit prompt "Focused verification plan:")
+
+agentCapabilityAuditClosureVerificationPromptValue : Str -> Str -> Str
+agentCapabilityAuditClosureVerificationPromptValue prompt field =
+  agentFirstTextOrEmpty (agentPromptPrefixedLines (agentCapabilityAuditClosureVerificationPromptSection prompt) field)
+
+agentCapabilityAuditClosureVerificationManagedRequiredFromText : Str -> Bool
+agentCapabilityAuditClosureVerificationManagedRequiredFromText raw =
+  raw == "true"
+
+agentCapabilityAuditClosureVerificationManagedRequiredTextValid : Str -> Bool
+agentCapabilityAuditClosureVerificationManagedRequiredTextValid raw =
+  raw == "true" || raw == "false"
+
+agentCapabilityAuditClosureVerificationPlanFromPrompt : Str -> AgentCapabilityAuditClosureVerificationPlan
+agentCapabilityAuditClosureVerificationPlanFromPrompt prompt = {
+  let managedRequiredText = agentCapabilityAuditClosureVerificationPromptValue prompt "managedRequired=" in
+  AgentCapabilityAuditClosureVerificationPlan {
+    kind = agentCapabilityAuditClosureKindFromPrompt prompt,
+    command = agentCapabilityAuditClosureVerificationPromptValue prompt "command=",
+    resourceClass = agentCapabilityAuditClosureVerificationPromptValue prompt "resourceClass=",
+    oomRisk = agentCapabilityAuditClosureVerificationPromptValue prompt "oomRisk=",
+    managedRequired = agentCapabilityAuditClosureVerificationManagedRequiredFromText managedRequiredText,
+    recommendation = agentCapabilityAuditClosureVerificationPromptValue prompt "recommendation="
+  }
+}
+
+agentCapabilityAuditClosureVerificationPlanSafeDirect : AgentCapabilityAuditClosureVerificationPlan -> Bool
+agentCapabilityAuditClosureVerificationPlanSafeDirect plan =
+  if plan.managedRequired then
+    false
+  else if plan.resourceClass == "heavy" then
+    false
+  else if plan.oomRisk == "high" then
+    false
+  else if plan.command == "bash scripts/verify-all.sh" then
+    false
+  else
+    true
+
+agentCapabilityAuditClosureVerificationPlanIssuesFromPrompt : Str -> AgentCapabilityAuditClosureVerificationPlan -> [AgentValidationIssue]
+agentCapabilityAuditClosureVerificationPlanIssuesFromPrompt prompt plan = {
+  let managedRequiredText = agentCapabilityAuditClosureVerificationPromptValue prompt "managedRequired=";
+  let issues0 =
+    if agentCapabilityAuditClosureVerificationPromptSection prompt == "" then
+      [agentValidationIssue "focusedVerificationPlan" "missing Focused verification plan section"]
+    else
+      [];
+  let issues1 =
+    if plan.command == "" then
+      append issues0 [agentValidationIssue "focusedVerificationPlan.command" "required non-empty text"]
+    else
+      issues0;
+  let issues2 =
+    if plan.resourceClass == "" then
+      append issues1 [agentValidationIssue "focusedVerificationPlan.resourceClass" "required non-empty text"]
+    else
+      issues1;
+  let issues3 =
+    if plan.oomRisk == "" then
+      append issues2 [agentValidationIssue "focusedVerificationPlan.oomRisk" "required non-empty text"]
+    else
+      issues2;
+  let issues4 =
+    if agentCapabilityAuditClosureVerificationManagedRequiredTextValid managedRequiredText then
+      issues3
+    else
+      append issues3 [agentValidationIssue "focusedVerificationPlan.managedRequired" "must be true or false"];
+  let issues5 =
+    if plan.recommendation == "" then
+      append issues4 [agentValidationIssue "focusedVerificationPlan.recommendation" "required non-empty text"]
+    else
+      issues4;
+  let issues6 =
+    if plan.resourceClass == "heavy" then
+      if plan.managedRequired then
+        issues5
+      else
+        append issues5 [agentValidationIssue "focusedVerificationPlan.managedRequired" "heavy verifier plans require managed launch"]
+    else
+      issues5;
+  let issues7 =
+    if plan.oomRisk == "high" then
+      if plan.managedRequired then
+        issues6
+      else
+        append issues6 [agentValidationIssue "focusedVerificationPlan.managedRequired" "high OOM risk verifier plans require managed launch"]
+    else
+      issues6;
+  if plan.command == "bash scripts/verify-all.sh" then
+    if plan.managedRequired then
+      issues7
+    else
+      append issues7 [agentValidationIssue "focusedVerificationPlan.managedRequired" "verify-all must be managed"]
+  else
+    issues7
+}
+
+agentCapabilityAuditClosureVerificationPlanValidationFromPrompt : Str -> AgentValidationSummary
+agentCapabilityAuditClosureVerificationPlanValidationFromPrompt prompt = {
+  let plan = agentCapabilityAuditClosureVerificationPlanFromPrompt prompt;
+  agentValidationFromIssues
+    [
+      "focused-verification-plan",
+      textConcat ["focused-verification-kind=", plan.kind],
+      textConcat ["focused-verification-command=", plan.command],
+      textConcat ["focused-verification-resource-class=", plan.resourceClass],
+      textConcat ["focused-verification-oom-risk=", plan.oomRisk],
+      textConcat ["focused-verification-managed-required=", if plan.managedRequired then "true" else "false"],
+      textConcat ["focused-verification-safe-direct=", if agentCapabilityAuditClosureVerificationPlanSafeDirect plan then "true" else "false"]
+    ]
+    (agentCapabilityAuditClosureVerificationPlanIssuesFromPrompt prompt plan)
+}
+
+agentPromptHasCapabilityAuditClosureVerificationPlan : Str -> Bool
+agentPromptHasCapabilityAuditClosureVerificationPlan prompt = {
+  let validation = agentCapabilityAuditClosureVerificationPlanValidationFromPrompt prompt in
+  validation.ok
+}
+
+agentFocusedVerificationLaunchMode : AgentValidationSummary -> AgentCapabilityAuditClosureVerificationPlan -> Str
+agentFocusedVerificationLaunchMode validation plan =
+  if validation.ok then
+    if agentCapabilityAuditClosureVerificationPlanSafeDirect plan then
+      "direct-safe"
+    else
+      "managed-required"
+  else
+    "invalid-plan"
+
+agentFocusedVerificationLaunchReady : AgentValidationSummary -> AgentCapabilityAuditClosureVerificationPlan -> Bool
+agentFocusedVerificationLaunchReady validation plan =
+  if validation.ok then
+    agentCapabilityAuditClosureVerificationPlanSafeDirect plan
+  else
+    false
+
+agentFocusedVerificationLaunchRecommendation : AgentValidationSummary -> AgentCapabilityAuditClosureVerificationPlan -> Str
+agentFocusedVerificationLaunchRecommendation validation plan =
+  if validation.ok then
+    if agentCapabilityAuditClosureVerificationPlanSafeDirect plan then
+      "focused-verification-launch:direct-safe"
+    else
+      "focused-verification-launch:managed-required"
+  else
+    "focused-verification-launch:repair-plan-section"
+
+agentFocusedVerificationLaunchBlockingGaps : AgentValidationSummary -> AgentCapabilityAuditClosureVerificationPlan -> [Str]
+agentFocusedVerificationLaunchBlockingGaps validation plan =
+  if validation.ok then
+    if agentCapabilityAuditClosureVerificationPlanSafeDirect plan then
+      []
+    else
+      ["focused verification plan requires managed launch"]
+  else
+    agentValidationIssueTexts validation.issues
+
+agentFocusedVerificationLaunchRequiredClosure : AgentValidationSummary -> AgentCapabilityAuditClosureVerificationPlan -> [Str]
+agentFocusedVerificationLaunchRequiredClosure validation plan =
+  if agentFocusedVerificationLaunchReady validation plan then
+    []
+  else if validation.ok then
+    [plan.recommendation]
+  else
+    ["Repair the Focused verification plan section before launching verifier commands."]
+
+agentFocusedVerificationLaunchEvidence : Str -> AgentValidationSummary -> AgentCapabilityAuditClosureVerificationPlan -> [Str]
+agentFocusedVerificationLaunchEvidence mode validation plan =
+  append
+    validation.evidence
+    [
+      textConcat ["focused-verification-launch-mode=", mode],
+      textConcat ["focused-verification-launch-ready=", if agentFocusedVerificationLaunchReady validation plan then "true" else "false"],
+      textConcat ["focused-verification-launch-command=", plan.command],
+      textConcat ["focused-verification-launch-resource-class=", plan.resourceClass],
+      textConcat ["focused-verification-launch-oom-risk=", plan.oomRisk],
+      textConcat ["focused-verification-launch-managed-required=", if plan.managedRequired then "true" else "false"],
+      textConcat ["focused-verification-launch-safe-direct=", if agentCapabilityAuditClosureVerificationPlanSafeDirect plan then "true" else "false"],
+      textConcat ["focused-verification-launch-recommendation=", agentFocusedVerificationLaunchRecommendation validation plan]
+    ]
+
+agentFocusedVerificationLaunchPolicy : AgentValidationSummary -> AgentCapabilityAuditClosureVerificationPlan -> AgentFocusedVerificationLaunchPolicy
+agentFocusedVerificationLaunchPolicy validation plan = {
+  let mode = agentFocusedVerificationLaunchMode validation plan;
+  AgentFocusedVerificationLaunchPolicy {
+    valid = validation.ok,
+    ready = agentFocusedVerificationLaunchReady validation plan,
+    mode = mode,
+    command = plan.command,
+    resourceClass = plan.resourceClass,
+    oomRisk = plan.oomRisk,
+    managedRequired = plan.managedRequired,
+    safeDirect = agentCapabilityAuditClosureVerificationPlanSafeDirect plan,
+    recommendation = agentFocusedVerificationLaunchRecommendation validation plan,
+    verificationPlanRecommendation = plan.recommendation,
+    blockingGaps = agentFocusedVerificationLaunchBlockingGaps validation plan,
+    requiredClosure = agentFocusedVerificationLaunchRequiredClosure validation plan,
+    evidence = agentFocusedVerificationLaunchEvidence mode validation plan
+  }
+}
+
+agentFocusedVerificationLaunchPolicyFromPrompt : Str -> AgentFocusedVerificationLaunchPolicy
+agentFocusedVerificationLaunchPolicyFromPrompt prompt = {
+  let plan = agentCapabilityAuditClosureVerificationPlanFromPrompt prompt;
+  let validation = agentCapabilityAuditClosureVerificationPlanValidationFromPrompt prompt;
+  agentFocusedVerificationLaunchPolicy validation plan
+}
+
+agentFocusedVerificationInvalidLaunchPolicy : AgentValidationSummary -> AgentFocusedVerificationLaunchPolicy
+agentFocusedVerificationInvalidLaunchPolicy summary =
+  AgentFocusedVerificationLaunchPolicy {
+    valid = false,
+    ready = false,
+    mode = "invalid-plan",
+    command = "",
+    resourceClass = "",
+    oomRisk = "",
+    managedRequired = false,
+    safeDirect = false,
+    recommendation = "focused-verification-launch:repair-plan-json",
+    verificationPlanRecommendation = "focused-verification-plan:repair-plan-section",
+    blockingGaps = agentValidationIssueTexts summary.issues,
+    requiredClosure = ["focused-verification-launch:repair-plan-json"],
+    evidence = summary.evidence
+  }
+
+agentFocusedVerificationLaunchPolicyDecodeSummary : Str -> AgentValidationSummary
+agentFocusedVerificationLaunchPolicyDecodeSummary raw =
+  agentJsonDecodeAndRequireFields
+    "AgentFocusedVerificationLaunchPolicy"
+    raw
+    (tryDecode AgentFocusedVerificationLaunchPolicy raw)
+    ["valid", "ready", "mode", "command", "recommendation", "verificationPlanRecommendation"]
+
+agentFocusedVerificationLaunchPolicyFromJson : Str -> AgentFocusedVerificationLaunchPolicy
+agentFocusedVerificationLaunchPolicyFromJson raw = {
+  let decodeSummary = agentFocusedVerificationLaunchPolicyDecodeSummary raw;
+  match tryDecode AgentFocusedVerificationLaunchPolicy raw {
+    Ok policy ->
+      if decodeSummary.ok then
+        policy
+      else
+        agentFocusedVerificationInvalidLaunchPolicy decodeSummary,
+    Err message ->
+      agentFocusedVerificationInvalidLaunchPolicy decodeSummary
+  }
+}
+
+agentAutonomousLaunchGateInputStaticTiny : AgentAutonomousLaunchGateInput
+agentAutonomousLaunchGateInputStaticTiny =
+  AgentAutonomousLaunchGateInput {
+    workspaceCheckpointReady = true,
+    dirtyWorktree = false,
+    resourceAdmissionOk = true,
+    loopAlreadyRunning = false,
+    boundedTaskCount = 1,
+    requestedChildAgents = 1,
+    admittedChildCapacity = 1,
+    managedLaunch = true,
+    focusedVerificationReady = true,
+    fullVerificationRequested = false,
+    promotionRequested = false,
+    compilerMutationRequested = false
+  }
+
+agentAutonomousLaunchGateInputCurrentDirty : AgentAutonomousLaunchGateInput
+agentAutonomousLaunchGateInputCurrentDirty =
+  AgentAutonomousLaunchGateInput {
+    workspaceCheckpointReady = false,
+    dirtyWorktree = true,
+    resourceAdmissionOk = true,
+    loopAlreadyRunning = false,
+    boundedTaskCount = 1,
+    requestedChildAgents = 1,
+    admittedChildCapacity = 1,
+    managedLaunch = true,
+    focusedVerificationReady = false,
+    fullVerificationRequested = false,
+    promotionRequested = false,
+    compilerMutationRequested = true
+  }
+
+agentAutonomousLaunchGateEvidence : AgentAutonomousLaunchGateInput -> [Str]
+agentAutonomousLaunchGateEvidence input =
+  [
+    textConcat ["autonomous-launch-checkpoint-ready=", if input.workspaceCheckpointReady then "true" else "false"],
+    textConcat ["autonomous-launch-dirty-worktree=", if input.dirtyWorktree then "true" else "false"],
+    textConcat ["autonomous-launch-resource-admission=", if input.resourceAdmissionOk then "pass" else "blocked"],
+    textConcat ["autonomous-launch-loop-already-running=", if input.loopAlreadyRunning then "true" else "false"],
+    textConcat ["autonomous-launch-bounded-task-count=", encode input.boundedTaskCount],
+    textConcat ["autonomous-launch-requested-child-agents=", encode input.requestedChildAgents],
+    textConcat ["autonomous-launch-admitted-child-capacity=", encode input.admittedChildCapacity],
+    textConcat ["autonomous-launch-managed=", if input.managedLaunch then "true" else "false"],
+    textConcat ["autonomous-launch-focused-verification-ready=", if input.focusedVerificationReady then "true" else "false"],
+    textConcat ["autonomous-launch-full-verification-requested=", if input.fullVerificationRequested then "true" else "false"],
+    textConcat ["autonomous-launch-promotion-requested=", if input.promotionRequested then "true" else "false"],
+    textConcat ["autonomous-launch-compiler-mutation-requested=", if input.compilerMutationRequested then "true" else "false"],
+    textConcat ["autonomous-launch-repair-may-spawn=", if agentAutonomousLaunchGateRepairMaySpawn input then "true" else "false"],
+    textConcat ["autonomous-launch-repair-recommendation=", agentAutonomousLaunchGateRepairRecommendation input]
+  ]
+
+agentAutonomousLaunchGateIssues : AgentAutonomousLaunchGateInput -> [AgentValidationIssue]
+agentAutonomousLaunchGateIssues input = {
+  let issues0 =
+    if input.workspaceCheckpointReady then
+      []
+    else
+      [agentValidationIssue "autonomousLaunch.workspaceCheckpointReady" "workspace checkpoint is required before autonomous launch"];
+  let issues1 =
+    if input.dirtyWorktree then
+      if input.workspaceCheckpointReady then
+        issues0
+      else
+        append issues0 [agentValidationIssue "autonomousLaunch.dirtyWorktree" "dirty worktree must be checkpointed before autonomous launch"]
+    else
+      issues0;
+  let issues2 =
+    if input.resourceAdmissionOk then
+      issues1
+    else
+      append issues1 [agentValidationIssue "autonomousLaunch.resourceAdmissionOk" "resource admission is blocked"];
+  let issues3 =
+    if input.loopAlreadyRunning then
+      append issues2 [agentValidationIssue "autonomousLaunch.loopAlreadyRunning" "attach to or stop the existing loop before launching another one"]
+    else
+      issues2;
+  let issues4 =
+    if input.boundedTaskCount > 0 then
+      issues3
+    else
+      append issues3 [agentValidationIssue "autonomousLaunch.boundedTaskCount" "autonomous launch requires a positive bounded task count"];
+  let issues5 =
+    if input.requestedChildAgents > 0 then
+      issues4
+    else
+      append issues4 [agentValidationIssue "autonomousLaunch.requestedChildAgents" "autonomous launch requires at least one requested child agent"];
+  let issues6 =
+    if input.admittedChildCapacity > 0 then
+      issues5
+    else
+      append issues5 [agentValidationIssue "autonomousLaunch.admittedChildCapacity" "resource guard must admit at least one child agent"];
+  let issues7 =
+    if input.requestedChildAgents <= input.admittedChildCapacity then
+      issues6
+    else
+      append issues6 [agentValidationIssue "autonomousLaunch.requestedChildAgents" "requested child agents exceed admitted child capacity"];
+  let issues8 =
+    if input.managedLaunch then
+      issues7
+    else
+      append issues7 [agentValidationIssue "autonomousLaunch.managedLaunch" "autonomous launch must use the managed supervisor"];
+  let issues9 =
+    if input.compilerMutationRequested then
+      if input.focusedVerificationReady then
+        issues8
+      else
+        append issues8 [agentValidationIssue "autonomousLaunch.focusedVerificationReady" "compiler mutation requires focused verification launch policy before launch"]
+    else
+      issues8;
+  let issues10 =
+    if input.fullVerificationRequested then
+      append issues9 [agentValidationIssue "autonomousLaunch.fullVerificationRequested" "full verification is not an autonomous launch precondition"]
+    else
+      issues9;
+  if input.promotionRequested then
+    append issues10 [agentValidationIssue "autonomousLaunch.promotionRequested" "promotion must be deferred to an explicit managed proof"]
+  else
+    issues10
+}
+
+agentAutonomousLaunchGateValidation : AgentAutonomousLaunchGateInput -> AgentValidationSummary
+agentAutonomousLaunchGateValidation input =
+  agentValidationFromIssues
+    (agentAutonomousLaunchGateEvidence input)
+    (agentAutonomousLaunchGateIssues input)
+
+agentAutonomousLaunchGateMode : AgentAutonomousLaunchGateInput -> AgentValidationSummary -> Str
+agentAutonomousLaunchGateMode input validation =
+  if validation.ok then
+    if input.compilerMutationRequested then
+      "ready-managed-compiler-mutation-loop"
+    else if input.boundedTaskCount <= 3 then
+      "ready-managed-tiny-loop"
+    else
+      "ready-managed-bounded-loop"
+  else if input.workspaceCheckpointReady == false then
+    "blocked-dirty-worktree"
+  else if input.loopAlreadyRunning then
+    "blocked-active-loop"
+  else if input.resourceAdmissionOk == false then
+    "blocked-resource-admission"
+  else if input.managedLaunch == false then
+    "blocked-unmanaged-launch"
+  else if input.fullVerificationRequested then
+    "blocked-full-verification"
+  else if input.promotionRequested then
+    "blocked-promotion"
+  else if input.compilerMutationRequested then
+    if input.focusedVerificationReady then
+      "blocked-launch-preflight"
+    else
+      "blocked-compiler-mutation"
+  else
+    "blocked-launch-preflight"
+
+agentAutonomousLaunchGateRecommendation : Str -> AgentAutonomousLaunchGateInput -> AgentValidationSummary -> Str
+agentAutonomousLaunchGateRecommendation mode input validation =
+  if validation.ok then
+    if input.compilerMutationRequested then
+      "autonomous-launch:ready-managed-compiler-mutation-loop"
+    else
+      "autonomous-launch:ready-managed-bounded-loop"
+  else if mode == "blocked-dirty-worktree" then
+    "autonomous-launch:checkpoint-current-worktree"
+  else if mode == "blocked-active-loop" then
+    "autonomous-launch:attach-or-stop-existing-loop"
+  else if mode == "blocked-resource-admission" then
+    "autonomous-launch:wait-or-lower-concurrency"
+  else if mode == "blocked-unmanaged-launch" then
+    "autonomous-launch:use-managed-supervisor"
+  else if mode == "blocked-full-verification" then
+    "autonomous-launch:replace-full-verification-with-focused-policy"
+  else if mode == "blocked-promotion" then
+    "autonomous-launch:defer-promotion-to-explicit-managed-proof"
+  else if mode == "blocked-compiler-mutation" then
+    "autonomous-launch:attach-focused-verification-launch-policy"
+  else
+    "autonomous-launch:close-launch-gaps"
+
+agentAutonomousLaunchGateRequiredClosure : Str -> AgentAutonomousLaunchGateInput -> AgentValidationSummary -> [Str]
+agentAutonomousLaunchGateRequiredClosure mode input validation = {
+  if validation.ok then
+    []
+  else {
+    let closure0 =
+      if input.workspaceCheckpointReady then
+        []
+      else
+        ["autonomous-launch:checkpoint-current-worktree"];
+    let closure1 =
+      if input.resourceAdmissionOk then
+        closure0
+      else
+        append closure0 ["autonomous-launch:wait-or-lower-concurrency"];
+    let closure2 =
+      if input.loopAlreadyRunning then
+        append closure1 ["autonomous-launch:attach-or-stop-existing-loop"]
+      else
+        closure1;
+    let closure3 =
+      if input.boundedTaskCount > 0 then
+        closure2
+      else
+        append closure2 ["autonomous-launch:declare-bounded-task-count"];
+    let closure4 =
+      if input.requestedChildAgents > 0 then
+        closure3
+      else
+        append closure3 ["autonomous-launch:declare-requested-child-agents"];
+    let closure5 =
+      if input.admittedChildCapacity > 0 then
+        closure4
+      else
+        append closure4 ["autonomous-launch:restore-child-admission-capacity"];
+    let closure6 =
+      if input.requestedChildAgents <= input.admittedChildCapacity then
+        closure5
+      else
+        append closure5 ["autonomous-launch:lower-requested-child-agents"];
+    let closure7 =
+      if input.managedLaunch then
+        closure6
+      else
+        append closure6 ["autonomous-launch:use-managed-supervisor"];
+    let closure8 =
+      if input.compilerMutationRequested then
+        if input.focusedVerificationReady then
+          closure7
+        else
+          append closure7 ["autonomous-launch:attach-focused-verification-launch-policy"]
+      else
+        closure7;
+    let closure9 =
+      if input.fullVerificationRequested then
+        append closure8 ["autonomous-launch:replace-full-verification-with-focused-policy"]
+      else
+        closure8;
+    if input.promotionRequested then
+      append closure9 ["autonomous-launch:defer-promotion-to-explicit-managed-proof"]
+    else
+      closure9
+  }
+}
+
+agentAutonomousLaunchGate : AgentAutonomousLaunchGateInput -> AgentAutonomousLaunchGate
+agentAutonomousLaunchGate input = {
+  let validation = agentAutonomousLaunchGateValidation input;
+  let mode = agentAutonomousLaunchGateMode input validation;
+  AgentAutonomousLaunchGate {
+    valid = validation.ok,
+    ready = validation.ok,
+    mode = mode,
+    maySpawn = validation.ok,
+    mayMutateCompiler = validation.ok && input.compilerMutationRequested,
+    requestedChildAgents = input.requestedChildAgents,
+    admittedChildCapacity = input.admittedChildCapacity,
+    recommendation = agentAutonomousLaunchGateRecommendation mode input validation,
+    blockingGaps = agentValidationIssueTexts validation.issues,
+    requiredClosure = agentAutonomousLaunchGateRequiredClosure mode input validation,
+    evidence =
+      append
+        validation.evidence
+        [
+          textConcat ["autonomous-launch-mode=", mode],
+          textConcat ["autonomous-launch-ready=", if validation.ok then "true" else "false"],
+          textConcat ["autonomous-launch-may-spawn=", if validation.ok then "true" else "false"],
+          textConcat ["autonomous-launch-may-mutate-compiler=", if validation.ok && input.compilerMutationRequested then "true" else "false"],
+          textConcat ["autonomous-launch-recommendation=", agentAutonomousLaunchGateRecommendation mode input validation]
+        ]
+  }
+}
+
+agentAutonomousInvalidLaunchGate : AgentValidationSummary -> AgentAutonomousLaunchGate
+agentAutonomousInvalidLaunchGate summary =
+  AgentAutonomousLaunchGate {
+    valid = false,
+    ready = false,
+    mode = "invalid-gate-json",
+    maySpawn = false,
+    mayMutateCompiler = false,
+    requestedChildAgents = 0,
+    admittedChildCapacity = 0,
+    recommendation = "autonomous-launch:repair-gate-json",
+    blockingGaps = agentValidationIssueTexts summary.issues,
+    requiredClosure = ["autonomous-launch:repair-gate-json"],
+    evidence = summary.evidence
+  }
+
+agentAutonomousLaunchGateDecodeSummary : Str -> AgentValidationSummary
+agentAutonomousLaunchGateDecodeSummary raw =
+  agentJsonDecodeAndRequireFields
+    "AgentAutonomousLaunchGate"
+    raw
+    (tryDecode AgentAutonomousLaunchGate raw)
+    ["valid", "ready", "mode", "recommendation", "blockingGaps", "requiredClosure", "evidence"]
+
+agentAutonomousLaunchGateFromJson : Str -> AgentAutonomousLaunchGate
+agentAutonomousLaunchGateFromJson raw = {
+  let decodeSummary = agentAutonomousLaunchGateDecodeSummary raw;
+  match tryDecode AgentAutonomousLaunchGate raw {
+    Ok gate ->
+      if decodeSummary.ok then
+        gate
+      else
+        agentAutonomousInvalidLaunchGate decodeSummary,
+    Err message ->
+      agentAutonomousInvalidLaunchGate decodeSummary
+  }
+}
+
+agentCapabilityAuditClosurePromptBodyForKind : Str -> Str
+agentCapabilityAuditClosurePromptBodyForKind kind =
+  if kind == "capability-audit-context" then
+    "Repair the capability-audit JSON handoff before broader swarm work. If the prompt carries a Capability audit JSON path, keep it bounded by CLASP_LOOP_CAPABILITY_AUDIT_CONTEXT_MAX_MB_JSON, fix unreadable or malformed JSON, reduce oversized audit artifacts, and rerun only the focused static audit or ready-gate checks needed to prove the planner can decode the audit. Do not launch a broad swarm, full verify-all, promotion, or unmanaged compiler rebuild from this task."
+  else if kind == "managed-verify-all" then
+    "Use the machine-readable capability audit blocking_gaps and required_closure entries to close the managed verify-all evidence gap. Run or prepare bash scripts/verify-all.sh only through scripts/run-managed-job.sh with explicit memory, disk, and low-parallelism settings, and provide the resulting report through CLASP_SWARM_CAPABILITY_VERIFY_REPORT_JSON. Do not run full verification outside managed guards."
+  else if kind == "managed-swarm-proof" then
+    "Use the machine-readable capability audit blocking_gaps and required_closure entries to close the broad managed swarm proof gap. Produce or consume a GoalManager local planner/child-loop proof for a multi-task non-Codex run, keep child budgets and managed memory/disk admission explicit, and provide the resulting artifact through CLASP_SWARM_CAPABILITY_SWARM_PROOF_JSON. Do not launch an unbounded swarm or Codex-specific control path."
+  else if kind == "native-runtime-parity" then
+    "Use the machine-readable capability audit blocking_gaps, required_closure entries, or readiness-spec gaps to close one native workflow/supervisor/tool/verifier/mergegate parity issue. Prefer an ordinary Clasp API over the @swarm/native runtime lane, keep workflow state durable and bounded, avoid shell wrappers or JS helper semantics, and verify with focused swarm-runtime, ready-benchmark, or ready-gate coverage."
+  else if kind == "backend-surface-parity" then
+    "Use the machine-readable capability audit blocking_gaps, required_closure entries, or readiness-spec gaps to close one backend-surface parity issue without relying on JS helper semantics. Prefer ordinary Clasp backend policy/data types, native runtime bindings, and focused local-agent or agent-backend coverage; keep Codex as one configurable backend option rather than a required control path."
+  else if kind == "iteration-speed" then
+    "Use the machine-readable capability audit blocking_gaps and required_closure entries to close one compiler iteration-speed gap. Prefer a focused selfhost-body-change or selfhost-compiler-module-body-change incremental proof through scripts/measure-native-incremental.sh inside scripts/run-managed-job.sh, then provide CLASP_SWARM_CAPABILITY_SPEED_REPORT_JSON or CLASP_SWARM_CAPABILITY_COMPILER_MODULE_SPEED_REPORT_JSON. Avoid broad native-image rebuilds unless the managed report explicitly requires them."
+  else if kind == "semantic-memory" then
+    "Use the machine-readable capability audit blocking_gaps and required_closure entries to close one provider-specific embedding adapter or vector-store persistence gap. Keep the change as ordinary Clasp data/API surface over SwarmEmbeddingProviderCommandTransport or SwarmWeightedVectorIndex, validate provider output before trust, and verify with focused memory/provider coverage."
+  else if kind == "safety-governance" then
+    "Use the machine-readable capability audit blocking_gaps and required_closure entries to close one safety/governance gap around hostile-tool packaging, destructive-action mediation, filesystem mediation, or network mediation. Keep the work policy-scoped, fail closed on ambiguous targets, avoid broad process kills or unguarded hostile tools, and verify with focused policy/static coverage before broader swarm work."
+  else if kind == "agent-ergonomics" then
+    "Use the machine-readable capability audit blocking_gaps and required_closure entries to close one agent ergonomics gap. Add a focused ordinary-Clasp helper for filesystem, process, JSON, Result, or collection-heavy workflows, and verify it with the narrow harness that exercises the helper."
+  else if kind == "capability-mailbox" then
+    "Use the typed capability-evidence, capability-gap, and capability-closure mailbox detail lines to close one bounded capability gap. Prefer a focused ordinary-Clasp helper or planner/runtime surface, preserve the capability detail in evidence, and verify with the narrow static or affected route that covers the changed surface. Do not launch a broad swarm, full verify-all, promotion, or unmanaged compiler rebuild from this task."
+  else
+    "Read or run examples/swarm-native/SwarmCapabilityAudit.clasp, choose the highest-priority partial or failing capability gap, make one bounded improvement, and verify it with the focused audit, ready-gate, affected route, or targeted runtime coverage. Do not launch a broad swarm or full verify without managed memory and disk guards."
+
+agentCapabilityAuditClosurePromptForKind : Str -> Str
+agentCapabilityAuditClosurePromptForKind kind =
+  textJoin "\n\n" [
+    agentCapabilityAuditClosurePromptBodyForKind kind,
+    agentCapabilityAuditClosureVerificationSectionForKind kind
+  ]
+
+agentCapabilityAuditClosurePromptFromPrompt : Str -> Str
+agentCapabilityAuditClosurePromptFromPrompt prompt =
+  agentCapabilityAuditClosurePromptForKind (agentCapabilityAuditClosureKindFromPrompt prompt)
+
+agentCapabilityAuditCoordinationFocusForKind : Str -> [Str]
+agentCapabilityAuditCoordinationFocusForKind kind =
+  if kind == "capability-audit-context" then
+    ["capability-audit", "json-context", "bounded-file-handoff", "oom-safe-iteration"]
+  else if kind == "managed-verify-all" then
+    ["capability-audit", "managed-verify-all", "run-managed-job", "oom-safe-iteration"]
+  else if kind == "managed-swarm-proof" then
+    ["capability-audit", "managed-swarm-proof", "goal-manager", "non-codex-backend", "bounded-child-loop"]
+  else if kind == "native-runtime-parity" then
+    ["capability-audit", "native-runtime-parity", "workflow-supervisor", "tool-verifier-mergegate"]
+  else if kind == "backend-surface-parity" then
+    ["capability-audit", "backend-surface-parity", "js-helper-free", "non-codex-backend"]
+  else if kind == "iteration-speed" then
+    ["capability-audit", "iteration-speed", "incremental-compiler-proof", "bounded-verification"]
+  else if kind == "semantic-memory" then
+    ["capability-audit", "semantic-memory", "embedding-provider", "vector-store"]
+  else if kind == "safety-governance" then
+    ["capability-audit", "safety-governance", "hostile-tool-policy", "filesystem-network-mediation"]
+  else if kind == "agent-ergonomics" then
+    ["capability-audit", "agent-ergonomics", "ordinary-clasp-helper", "bounded-verification"]
+  else if kind == "capability-mailbox" then
+    ["capability-audit", "capability-mailbox", "typed-mailbox-detail", "bounded-verification"]
+  else
+    ["capability-audit", "swarm-readiness", "bounded-verification", "oom-safe-iteration"]
+
+agentCapabilityAuditCoordinationFocusFromPrompt : Str -> [Str]
+agentCapabilityAuditCoordinationFocusFromPrompt prompt =
+  agentCapabilityAuditCoordinationFocusForKind (agentCapabilityAuditClosureKindFromPrompt prompt)
+
+agentCapabilityAuditClosureDecisionFromPrompt : Str -> AgentCapabilityAuditClosureDecision
+agentCapabilityAuditClosureDecisionFromPrompt prompt = {
+  let kind = agentCapabilityAuditClosureKindFromPrompt prompt in
+  if kind == "capability-mailbox" then {
+    let mailboxSummary = agentCapabilityMailboxSummaryFromPrompt prompt;
+    AgentCapabilityAuditClosureDecision {
+      kind = kind,
+      detail = agentCapabilityMailboxClosureDetail mailboxSummary,
+      taskPrompt = agentCapabilityMailboxClosurePrompt mailboxSummary,
+      coordinationFocus = agentCapabilityAuditCoordinationFocusForKind kind
+    }
+  } else
+    AgentCapabilityAuditClosureDecision {
+      kind = kind,
+      detail = agentCapabilityAuditClosureDetailForKind kind,
+      taskPrompt = agentCapabilityAuditClosurePromptForKind kind,
+      coordinationFocus = agentCapabilityAuditCoordinationFocusForKind kind
+    }
+}
+
+agentCapabilityAuditClosureInputText : AgentCapabilityAuditClosureInput -> Str
+agentCapabilityAuditClosureInputText input =
+  textJoin "\n" (append input.blockingGaps input.requiredClosure)
+
+agentCapabilityAuditClosureInputFromEntries : [Str] -> [Str] -> AgentCapabilityAuditClosureInput
+agentCapabilityAuditClosureInputFromEntries blockingGaps requiredClosure =
+  AgentCapabilityAuditClosureInput {
+    blockingGaps = blockingGaps,
+    requiredClosure = requiredClosure
+  }
+
+agentCapabilityAuditClosureDecisionFromInput : AgentCapabilityAuditClosureInput -> AgentCapabilityAuditClosureDecision
+agentCapabilityAuditClosureDecisionFromInput input =
+  agentCapabilityAuditClosureDecisionFromPrompt (agentCapabilityAuditClosureInputText input)
+
+agentCapabilityAuditClosureDecisionFromEntries : [Str] -> [Str] -> AgentCapabilityAuditClosureDecision
+agentCapabilityAuditClosureDecisionFromEntries blockingGaps requiredClosure =
+  agentCapabilityAuditClosureDecisionFromInput (agentCapabilityAuditClosureInputFromEntries blockingGaps requiredClosure)
+
+agentCapabilityAuditClosureInputFromReport : AgentCapabilityAuditJsonReport -> AgentCapabilityAuditClosureInput
+agentCapabilityAuditClosureInputFromReport report =
+  AgentCapabilityAuditClosureInput {
+    blockingGaps = report.blocking_gaps,
+    requiredClosure = report.required_closure
+  }
+
+agentCapabilityAuditClosureDecisionFromReport : AgentCapabilityAuditJsonReport -> AgentCapabilityAuditClosureDecision
+agentCapabilityAuditClosureDecisionFromReport report =
+  agentCapabilityAuditClosureDecisionFromInput (agentCapabilityAuditClosureInputFromReport report)
+
+agentCapabilityAuditInvalidReportForReason : Str -> AgentCapabilityAuditJsonReport
+agentCapabilityAuditInvalidReportForReason reason =
+  AgentCapabilityAuditJsonReport {
+    schema_version = 1,
+    kind = "clasp-swarm-capability-audit",
+    objective = "Repair capability-audit JSON context before planning swarm closure.",
+    overall_status = "invalid",
+    default_agent_model = "",
+    default_agent_reasoning = "",
+    capability_statuses = [],
+    blocking_gaps = [reason],
+    required_closure = ["capability-audit-json:repair-context"],
+    verification_notes = [reason]
+  }
+
+agentCapabilityAuditInvalidJsonForReason : Str -> Str
+agentCapabilityAuditInvalidJsonForReason reason =
+  encode (agentCapabilityAuditInvalidReportForReason reason)
+
+agentCapabilityAuditInvalidDecisionForReason : Str -> AgentCapabilityAuditClosureDecision
+agentCapabilityAuditInvalidDecisionForReason reason =
+  AgentCapabilityAuditClosureDecision {
+    kind = "capability-audit-context",
+    detail = reason,
+    taskPrompt = agentCapabilityAuditClosurePromptForKind "capability-audit-context",
+    coordinationFocus = agentCapabilityAuditCoordinationFocusForKind "capability-audit-context"
+  }
+
+agentCapabilityAuditInvalidDecisionJsonForReason : Str -> Str
+agentCapabilityAuditInvalidDecisionJsonForReason reason =
+  textConcat [
+    "{\"kind\":\"capability-audit-context\",\"detail\":",
+    encode reason,
+    ",\"taskPrompt\":\"Repair capability audit context before planning swarm closure.\",\"coordinationFocus\":[\"capability-audit\",\"context-repair\"]}"
+  ]
+
+agentManagedSwarmProofReportForReason : Str -> AgentManagedSwarmProofReport
+agentManagedSwarmProofReportForReason reason =
+  AgentManagedSwarmProofReport {
+    schemaVersion = 1,
+    kind = "clasp-managed-swarm-proof",
+    verdict = "invalid",
+    managerCompleted = false,
+    managerFinal = false,
+    plannerBackendKind = "",
+    plannerBackendTransport = "",
+    codexFallbackInvoked = true,
+    taskCount = 0,
+    completedTaskCount = 0,
+    dependencyOrdered = false,
+    localPlannerBackend = false,
+    localAgentCommandPropagated = false,
+    sourceEditPlanDelivered = false,
+    sourcePatchPlanDelivered = false,
+    dependencyEvidenceDelivered = false
+  }
+
+agentManagedSwarmProofInvalidJsonForReason : Str -> Str
+agentManagedSwarmProofInvalidJsonForReason reason =
+  encode (agentManagedSwarmProofReportForReason reason)
+
+agentManagedSwarmProofAppendIssue : [Str] -> Bool -> Str -> [Str]
+agentManagedSwarmProofAppendIssue issues ok message =
+  if ok then issues else append issues [message]
+
+agentManagedSwarmProofReportPassed : AgentManagedSwarmProofReport -> Bool
+agentManagedSwarmProofReportPassed report =
+  if report.kind == "clasp-managed-swarm-proof" then
+    if report.verdict == "pass" then
+      if report.managerCompleted && report.managerFinal then
+        if report.plannerBackendKind == "template" && report.plannerBackendTransport == "prompt-path" then
+          if report.codexFallbackInvoked == false then
+            if report.taskCount >= 3 && report.completedTaskCount >= report.taskCount then
+              if report.dependencyOrdered && report.localPlannerBackend then
+                if report.localAgentCommandPropagated then
+                  if report.sourceEditPlanDelivered && report.sourcePatchPlanDelivered then
+                    report.dependencyEvidenceDelivered
+                  else
+                    false
+                else
+                  false
+              else
+                false
+            else
+              false
+          else
+            false
+        else
+          false
+      else
+        false
+    else
+      false
+  else
+    false
+
+agentManagedSwarmProofDecisionFromReport : AgentManagedSwarmProofReport -> AgentManagedSwarmProofDecision
+agentManagedSwarmProofDecisionFromReport report = {
+  let mut issues = [];
+  issues = agentManagedSwarmProofAppendIssue issues (report.kind == "clasp-managed-swarm-proof") "kind must be clasp-managed-swarm-proof";
+  issues = agentManagedSwarmProofAppendIssue issues (report.verdict == "pass") "verdict must be pass";
+  issues = agentManagedSwarmProofAppendIssue issues (report.managerCompleted && report.managerFinal) "manager must be completed and final";
+  issues = agentManagedSwarmProofAppendIssue issues (report.plannerBackendKind == "template") "plannerBackendKind must be template";
+  issues = agentManagedSwarmProofAppendIssue issues (report.plannerBackendTransport == "prompt-path") "plannerBackendTransport must be prompt-path";
+  issues = agentManagedSwarmProofAppendIssue issues (report.codexFallbackInvoked == false) "codexFallbackInvoked must be false";
+  issues = agentManagedSwarmProofAppendIssue issues (report.taskCount >= 3) "taskCount must be at least 3";
+  issues = agentManagedSwarmProofAppendIssue issues (report.completedTaskCount >= report.taskCount) "completedTaskCount must cover taskCount";
+  issues = agentManagedSwarmProofAppendIssue issues report.dependencyOrdered "dependencyOrdered must be true";
+  issues = agentManagedSwarmProofAppendIssue issues report.localPlannerBackend "localPlannerBackend must be true";
+  issues = agentManagedSwarmProofAppendIssue issues report.localAgentCommandPropagated "localAgentCommandPropagated must be true";
+  issues = agentManagedSwarmProofAppendIssue issues report.sourceEditPlanDelivered "sourceEditPlanDelivered must be true";
+  issues = agentManagedSwarmProofAppendIssue issues report.sourcePatchPlanDelivered "sourcePatchPlanDelivered must be true";
+  issues = agentManagedSwarmProofAppendIssue issues report.dependencyEvidenceDelivered "dependencyEvidenceDelivered must be true";
+  AgentManagedSwarmProofDecision {
+    ok = length issues == 0,
+    status = if length issues == 0 then "pass" else "invalid-managed-swarm-proof",
+    passed = length issues == 0,
+    issueCount = length issues,
+    issueTexts = issues,
+    evidence = [
+      textConcat ["taskCount=", encode report.taskCount],
+      textConcat ["completedTaskCount=", encode report.completedTaskCount],
+      textConcat ["plannerBackendKind=", report.plannerBackendKind],
+      textConcat ["plannerBackendTransport=", report.plannerBackendTransport]
+    ],
+    recommendation =
+      if length issues == 0 then
+        "managed-swarm-proof-accepted"
+      else
+        "rerun the GoalManager local planner/child-loop proof through scripts/run-managed-job.sh and provide CLASP_SWARM_CAPABILITY_SWARM_PROOF_JSON"
+  }
+}
+
+agentManagedSwarmProofDecisionFromJson : Str -> AgentManagedSwarmProofDecision
+agentManagedSwarmProofDecisionFromJson raw =
+  match tryDecode AgentManagedSwarmProofReport raw {
+    Ok report -> agentManagedSwarmProofDecisionFromReport report,
+    Err message ->
+      AgentManagedSwarmProofDecision {
+        ok = false,
+        status = "managed-swarm-proof-json-decode-failed",
+        passed = false,
+        issueCount = 1,
+        issueTexts = [textConcat ["managed-swarm-proof-json-decode-failed:", message]],
+        evidence = [],
+        recommendation = "provide an unmodified clasp-managed-swarm-proof JSON artifact"
+      }
+  }
+
+agentManagedSwarmProofDecisionFromPromptOrJson : Str -> AgentManagedSwarmProofDecision
+agentManagedSwarmProofDecisionFromPromptOrJson prompt = {
+  let proofJson = agentManagedSwarmProofJsonFromPrompt prompt;
+  if proofJson == "" then
+    agentManagedSwarmProofDecisionFromJson prompt
+  else
+    agentManagedSwarmProofDecisionFromJson proofJson
+}
+
+agentCapabilityAuditJsonDecodeSummary : Str -> AgentValidationSummary
+agentCapabilityAuditJsonDecodeSummary raw =
+  agentJsonDecodeAndRequireFields
+    "AgentCapabilityAuditJsonReport"
+    raw
+    (tryDecode AgentCapabilityAuditJsonReport raw)
+    ["kind", "overall_status", "blocking_gaps", "required_closure"]
+
+agentCapabilityAuditClosureDecisionFromJson : Str -> AgentCapabilityAuditClosureDecision
+agentCapabilityAuditClosureDecisionFromJson raw = {
+  let decodeSummary = agentCapabilityAuditJsonDecodeSummary raw;
+  match tryDecode AgentCapabilityAuditJsonReport raw {
+    Ok report ->
+      if decodeSummary.ok then
+        agentCapabilityAuditClosureDecisionFromReport report
+      else
+        agentCapabilityAuditClosureDecisionFromPrompt (textJoin "\n" (agentValidationIssueTexts decodeSummary.issues)),
+    Err message ->
+      agentCapabilityAuditClosureDecisionFromPrompt (textConcat ["capability-audit-json-decode-failed:", message])
+  }
+}
+
+agentCapabilityAuditClosureDecisionValid : AgentCapabilityAuditClosureDecision -> Bool
+agentCapabilityAuditClosureDecisionValid decision =
+  if decision.kind == "" then
+    false
+  else if decision.taskPrompt == "" then
+    false
+  else
+    length decision.coordinationFocus > 0
+
+agentCapabilityAuditClosureDecisionFromDecisionJson : Str -> AgentCapabilityAuditClosureDecision
+agentCapabilityAuditClosureDecisionFromDecisionJson raw = {
+  let invalidShapeFallback = agentCapabilityAuditInvalidDecisionJsonForReason "capability-audit-decision-json:invalid-shape";
+  let decodeFailedFallback = agentCapabilityAuditInvalidDecisionJsonForReason "capability-audit-decision-json-decode-failed";
+  match tryDecode AgentCapabilityAuditClosureDecision raw {
+    Ok decision ->
+      if agentCapabilityAuditClosureDecisionValid decision then
+        decision
+      else
+        decode AgentCapabilityAuditClosureDecision invalidShapeFallback,
+    Err message ->
+      decode AgentCapabilityAuditClosureDecision decodeFailedFallback
+  }
+}
+
+agentCapabilityAuditClosureDecisionFromPromptOrJson : Str -> AgentCapabilityAuditClosureDecision
+agentCapabilityAuditClosureDecisionFromPromptOrJson prompt = {
+  let decisionJson = agentCapabilityAuditDecisionJsonFromPrompt prompt;
+  if decisionJson != "" then
+    agentCapabilityAuditClosureDecisionFromDecisionJson decisionJson
+  else {
+    let auditJson = agentCapabilityAuditJsonFromPrompt prompt;
+    if auditJson == "" then
+      agentCapabilityAuditClosureDecisionFromPrompt prompt
+    else
+      agentCapabilityAuditClosureDecisionFromJson auditJson
+  }
+}
+
+agentPlannerTaskBudgetContractSuffix : Str
+agentPlannerTaskBudgetContractSuffix = " bounded tasks with explicit dependencies and task prompts."
+
+agentPlannerTaskBudgetContractLine : Int -> Str
+agentPlannerTaskBudgetContractLine budget =
+  textConcat ["Plan 1-", encode budget, agentPlannerTaskBudgetContractSuffix]
+
+agentPromptHasExactTaskBudget : Str -> Int -> Bool
+agentPromptHasExactTaskBudget prompt budget =
+  textIncludes prompt (agentPlannerTaskBudgetContractLine budget)
+
+agentPromptHasTaskBudgetContract : Str -> Bool
+agentPromptHasTaskBudgetContract prompt =
+  if textIncludes prompt "Plan 1-" then
+    textIncludes prompt agentPlannerTaskBudgetContractSuffix
+  else
+    false
+
+agentPromptTaskBudgetOrDefault : Str -> Int -> Int
+agentPromptTaskBudgetOrDefault prompt fallback =
+  if agentPromptHasExactTaskBudget prompt 1 then
+    1
+  else if agentPromptHasExactTaskBudget prompt 2 then
+    2
+  else if agentPromptHasExactTaskBudget prompt 3 then
+    3
+  else
+    fallback
+
+agentPlannerTaskIdProviderNeutral : Str
+agentPlannerTaskIdProviderNeutral = "provider-neutral-child"
+
+agentPlannerTaskIdIterationSpeed : Str
+agentPlannerTaskIdIterationSpeed = "iteration-speed-loop"
+
+agentPlannerTaskIdSemanticContext : Str
+agentPlannerTaskIdSemanticContext = "semantic-context-routing"
+
+agentPlannerTaskIdDiskResourcePressure : Str
+agentPlannerTaskIdDiskResourcePressure = "resource-pressure-recovery"
+
+agentPlannerTaskIdMemoryResourcePressure : Str
+agentPlannerTaskIdMemoryResourcePressure = "resource-memory-pressure-recovery"
+
+agentPlannerTaskIdAffectedVerifierLaunch : Str
+agentPlannerTaskIdAffectedVerifierLaunch = "affected-verifier-launch-preflight"
+
+agentPlannerTaskIdCapabilityAuditClosure : Str
+agentPlannerTaskIdCapabilityAuditClosure = "capability-audit-closure"
+
+agentPlannerTaskIdStandaloneSwarmReadiness : Str
+agentPlannerTaskIdStandaloneSwarmReadiness = "standalone-swarm-readiness"
+
+agentPlannerReservedTaskId : Str
+agentPlannerReservedTaskId = "planner"
+
+agentAppendIfNonEmpty : [Str] -> Str -> [Str]
+agentAppendIfNonEmpty values value =
+  if value == "" then values else append values [value]
+
+agentValidationIssue : Str -> Str -> AgentValidationIssue
+agentValidationIssue field message =
+  AgentValidationIssue {
+    field = field,
+    message = message
+  }
+
+agentValidationIssueText : AgentValidationIssue -> Str
+agentValidationIssueText issue =
+  textConcat [issue.field, ":", issue.message]
+
+agentValidationIssueTexts : [AgentValidationIssue] -> [Str]
+agentValidationIssueTexts issues = map agentValidationIssueText issues
+
+agentValidationFromIssues : [Str] -> [AgentValidationIssue] -> AgentValidationSummary
+agentValidationFromIssues evidence issues =
+  AgentValidationSummary {
+    ok = length issues == 0,
+    issueCount = length issues,
+    issues = issues,
+    evidence = evidence
+  }
+
+agentValidationPass : [Str] -> AgentValidationSummary
+agentValidationPass evidence =
+  agentValidationFromIssues evidence []
+
+agentValidationFail : [Str] -> [AgentValidationIssue] -> AgentValidationSummary
+agentValidationFail evidence issues =
+  agentValidationFromIssues evidence issues
+
+agentValidationOk : AgentValidationSummary -> Bool
+agentValidationOk summary = summary.ok
+
+agentValidationMerge : AgentValidationSummary -> AgentValidationSummary -> AgentValidationSummary
+agentValidationMerge left right =
+  agentValidationFromIssues
+    (append left.evidence right.evidence)
+    (append left.issues right.issues)
+
+agentValidationMergeAll : [AgentValidationSummary] -> AgentValidationSummary
+agentValidationMergeAll summaries = {
+  let mut merged = agentValidationPass [];
+  for summary in summaries {
+    merged = agentValidationMerge merged summary;
+    merged
+  };
+  merged
+}
+
+agentValidationSummariesOk : [AgentValidationSummary] -> Bool
+agentValidationSummariesOk summaries =
+  all agentValidationOk summaries
+
+agentValidationSummariesIssues : [AgentValidationSummary] -> [AgentValidationIssue]
+agentValidationSummariesIssues summaries = {
+  let mut issues = [];
+  for summary in summaries {
+    issues = append issues summary.issues;
+    issues
+  };
+  issues
+}
+
+agentValidationSummariesIssueTexts : [AgentValidationSummary] -> [Str]
+agentValidationSummariesIssueTexts summaries =
+  agentValidationIssueTexts (agentValidationSummariesIssues summaries)
+
+agentValidationSummariesEvidence : [AgentValidationSummary] -> [Str]
+agentValidationSummariesEvidence summaries = {
+  let mut evidence = [];
+  for summary in summaries {
+    evidence = append evidence summary.evidence;
+    evidence
+  };
+  evidence
+}
+
+agentRequireNonEmptyText : Str -> Str -> [AgentValidationIssue]
+agentRequireNonEmptyText field value =
+  if agentNonEmptyText value then
+    []
+  else
+    [agentValidationIssue field "required non-empty text"]
+
+agentRequireNonEmptyList : Str -> [a] -> [AgentValidationIssue]
+agentRequireNonEmptyList field values =
+  if length values > 0 then
+    []
+  else
+    [agentValidationIssue field "required non-empty list"]
+
+agentRequirePositiveInt : Str -> Int -> [AgentValidationIssue]
+agentRequirePositiveInt field value =
+  if value > 0 then
+    []
+  else
+    [agentValidationIssue field "required positive integer"]
+
+agentRequireEnabledMemoryLimit : Str -> Bool -> Int -> [AgentValidationIssue]
+agentRequireEnabledMemoryLimit field enabled value =
+  if enabled then
+    agentRequirePositiveInt field value
+  else
+    [agentValidationIssue field "memory limit must stay enabled"]
+
+agentRequireOk : Str -> Result a -> [AgentValidationIssue]
+agentRequireOk field value = match value {
+  Ok inner -> [],
+  Err message -> [agentValidationIssue field message]
+}
+
+agentVerifierMemoryPolicyDefault : AgentVerifierMemoryPolicy
+agentVerifierMemoryPolicyDefault =
+  AgentVerifierMemoryPolicy {
+    managedMemoryMb = 8192,
+    minAvailableMemoryMb = 45056,
+    directMemoryLimitMb = 8192,
+    affectedDirectMemoryLimitMb = 8192,
+    directMemoryLimitEnabled = true,
+    affectedDirectMemoryLimitEnabled = true
+  }
+
+agentVerifierMemoryPolicyEvidence : AgentVerifierMemoryPolicy -> [Str]
+agentVerifierMemoryPolicyEvidence policy =
+  [
+    textConcat ["CLASP_VERIFY_MANAGED_MEMORY_MB=", encode policy.managedMemoryMb],
+    textConcat ["CLASP_VERIFY_MANAGED_MIN_AVAILABLE_MEMORY_MB=", encode policy.minAvailableMemoryMb],
+    textConcat ["CLASP_VERIFY_DIRECT_MEMORY_LIMIT_MB=", encode policy.directMemoryLimitMb],
+    textConcat ["CLASP_VERIFY_AFFECTED_DIRECT_MEMORY_LIMIT_MB=", encode policy.affectedDirectMemoryLimitMb],
+    textConcat ["CLASP_VERIFY_DIRECT_MEMORY_LIMIT=", if policy.directMemoryLimitEnabled then "enabled" else "disabled"],
+    textConcat ["CLASP_VERIFY_AFFECTED_DIRECT_MEMORY_LIMIT=", if policy.affectedDirectMemoryLimitEnabled then "enabled" else "disabled"]
+  ]
+
+agentVerifierMemoryPolicyIssues : AgentVerifierMemoryPolicy -> [AgentValidationIssue]
+agentVerifierMemoryPolicyIssues policy =
+  append
+    (agentRequirePositiveInt "CLASP_VERIFY_MANAGED_MEMORY_MB" policy.managedMemoryMb)
+    (append
+      (agentRequirePositiveInt "CLASP_VERIFY_MANAGED_MIN_AVAILABLE_MEMORY_MB" policy.minAvailableMemoryMb)
+      (append
+        (agentRequireEnabledMemoryLimit "CLASP_VERIFY_DIRECT_MEMORY_LIMIT_MB" policy.directMemoryLimitEnabled policy.directMemoryLimitMb)
+        (agentRequireEnabledMemoryLimit "CLASP_VERIFY_AFFECTED_DIRECT_MEMORY_LIMIT_MB" policy.affectedDirectMemoryLimitEnabled policy.affectedDirectMemoryLimitMb)))
+
+agentVerifierMemoryPolicyValidation : AgentVerifierMemoryPolicy -> AgentValidationSummary
+agentVerifierMemoryPolicyValidation policy =
+  agentValidationFromIssues
+    (agentVerifierMemoryPolicyEvidence policy)
+    (agentVerifierMemoryPolicyIssues policy)
+
+agentVerifierMemoryPolicyRecommendation : AgentValidationSummary -> Str
+agentVerifierMemoryPolicyRecommendation validation =
+  if validation.ok then
+    "verifier-memory-policy:bounded"
+  else
+    "verifier-memory-policy:reduce-demand-or-enable-caps"
+
+agentVerifierMemoryPolicySummary : AgentVerifierMemoryPolicy -> AgentVerifierMemoryPolicySummary
+agentVerifierMemoryPolicySummary policy = {
+  let validation = agentVerifierMemoryPolicyValidation policy;
+  AgentVerifierMemoryPolicySummary {
+    ok = validation.ok,
+    issueCount = validation.issueCount,
+    issueTexts = agentValidationIssueTexts validation.issues,
+    evidence = validation.evidence,
+    recommendation = agentVerifierMemoryPolicyRecommendation validation
+  }
+}
+
+agentRequireTextIncludes : Str -> Str -> Str -> [AgentValidationIssue]
+agentRequireTextIncludes field haystack needle =
+  if length (textSplit haystack needle) > 1 then
+    []
+  else
+    [agentValidationIssue field (textConcat ["missing text: ", needle])]
+
+agentJsonRawHasField : Str -> Str -> Bool
+agentJsonRawHasField raw field =
+  length (textSplit raw (textConcat ["\"", field, "\""])) > 1
+
+agentJsonRequireRawField : Str -> Str -> Str -> [AgentValidationIssue]
+agentJsonRequireRawField schema raw field =
+  if agentJsonRawHasField raw field then
+    []
+  else
+    [agentValidationIssue schema (textConcat ["missing json field: ", field])]
+
+agentJsonRequireRawFields : Str -> Str -> [Str] -> [AgentValidationIssue]
+agentJsonRequireRawFields schema raw fields = {
+  let mut issues = [];
+  for field in fields {
+    issues = append issues (agentJsonRequireRawField schema raw field);
+    issues
+  };
+  issues
+}
+
+agentJsonDecodeIssues : Str -> Result a -> [AgentValidationIssue]
+agentJsonDecodeIssues schema decoded = match decoded {
+  Ok value -> [],
+  Err message -> [agentValidationIssue schema (textConcat ["json decode failed: ", message])]
+}
+
+agentJsonDecodeEvidence : Str -> [Str]
+agentJsonDecodeEvidence schema =
+  [textConcat ["json-decode:", schema]]
+
+agentJsonDecodeSummary : Str -> Result a -> AgentValidationSummary
+agentJsonDecodeSummary schema decoded =
+  agentValidationFromIssues
+    (agentJsonDecodeEvidence schema)
+    (agentJsonDecodeIssues schema decoded)
+
+agentJsonDecodeAndRequireFields : Str -> Str -> Result a -> [Str] -> AgentValidationSummary
+agentJsonDecodeAndRequireFields schema raw decoded fields =
+  agentValidationFromIssues
+    (append
+      (agentJsonDecodeEvidence schema)
+      [textConcat ["json-required-fields:", schema]])
+    (append
+      (agentJsonDecodeIssues schema decoded)
+      (agentJsonRequireRawFields schema raw fields))
+
+agentJsonDecodeOk : Result a -> Bool
+agentJsonDecodeOk decoded = agentResultIsOk decoded
+
+agentRequireProcessSucceeded : Str -> AgentProcessResult -> [AgentValidationIssue]
+agentRequireProcessSucceeded field result =
+  if agentProcessSucceeded result then
+    []
+  else
+    [agentValidationIssue field (agentProcessSummary result)]
+
+agentWorkspacePatchPreflightIssues : Str -> AgentWorkspacePatch -> [AgentValidationIssue]
+agentWorkspacePatchPreflightIssues root patch =
+  append
+    (agentRequireNonEmptyText "relative" patch.relative)
+    (append
+      (agentRequireNonEmptyText "findText" patch.findText)
+      (match agentWorkspaceReadText root patch.relative {
+        Err message -> [agentValidationIssue patch.relative message],
+        Ok currentText -> agentRequireTextIncludes patch.relative currentText patch.findText
+      }))
+
+agentWorkspacePatchResult : AgentWorkspacePatch -> Bool -> Int -> Str -> [AgentValidationIssue] -> [Str] -> AgentWorkspacePatchResult
+agentWorkspacePatchResult patch ok replacements status issues evidence =
+  AgentWorkspacePatchResult {
+    relative = patch.relative,
+    ok = ok,
+    replacements = replacements,
+    status = status,
+    issueTexts = agentValidationIssueTexts issues,
+    evidence = evidence
+  }
+
+agentWorkspaceApplyPatch : Str -> AgentWorkspacePatch -> AgentWorkspacePatchResult
+agentWorkspaceApplyPatch root patch = {
+  let issues = agentWorkspacePatchPreflightIssues root patch;
+  let preflight = agentValidationFromIssues ["workspace-patch-preflight"] issues;
+  if preflight.ok then
+    match agentWorkspaceReplaceText root patch.relative patch.findText patch.replaceText {
+      Err message ->
+        agentWorkspacePatchResult
+          patch
+          false
+          0
+          "replace-error"
+          [agentValidationIssue patch.relative message]
+          preflight.evidence,
+      Ok count ->
+        if count > 0 then
+          agentWorkspacePatchResult
+            patch
+            true
+            count
+            "ok"
+            []
+            (append preflight.evidence ["workspace-patch-applied"])
+        else
+          agentWorkspacePatchResult
+            patch
+            false
+            count
+            "no-replacements"
+            [agentValidationIssue patch.relative "no replacements applied"]
+            preflight.evidence
+    }
+  else
+    agentWorkspacePatchResult patch false 0 "preflight-error" issues preflight.evidence
+}
+
+agentWorkspaceApplyPatches : Str -> [AgentWorkspacePatch] -> [AgentWorkspacePatchResult]
+agentWorkspaceApplyPatches root patches = {
+  let mut results = [];
+  for patch in patches {
+    results = append results [agentWorkspaceApplyPatch root patch];
+    results
+  };
+  results
+}
+
+agentWorkspacePatchResultOk : AgentWorkspacePatchResult -> Bool
+agentWorkspacePatchResultOk result = result.ok
+
+agentWorkspacePatchResultsOk : [AgentWorkspacePatchResult] -> Bool
+agentWorkspacePatchResultsOk results =
+  all agentWorkspacePatchResultOk results
+
+agentWorkspacePatchResultsReplacementCount : [AgentWorkspacePatchResult] -> Int
+agentWorkspacePatchResultsReplacementCount results = {
+  let mut count = 0;
+  for result in results {
+    count = intAdd count result.replacements;
+    count
+  };
+  count
+}
+
+agentWorkspacePatchResultsIssueTexts : [AgentWorkspacePatchResult] -> [Str]
+agentWorkspacePatchResultsIssueTexts results = {
+  let mut issues = [];
+  for result in results {
+    issues = append issues result.issueTexts;
+    issues
+  };
+  issues
+}
+
+agentProcessResultFromJson : Result Str -> Result AgentProcessResult
+agentProcessResultFromJson value = match value {
+  Ok raw -> Ok (decode AgentProcessResult raw),
+  Err message -> Err message
+}
+
+agentRunWorkspaceCommandTimeout : Str -> Str -> Int -> [Str] -> Result AgentProcessResult
+agentRunWorkspaceCommandTimeout root cwd timeoutMs command =
+  agentProcessResultFromJson (agentRunWorkspaceCommandTimeoutRaw root cwd timeoutMs command)
+
+agentProcessSucceeded : AgentProcessResult -> Bool
+agentProcessSucceeded result =
+  result.exitCode == 0 && result.timedOut == false && result.error == ""
+
+agentProcessSummary : AgentProcessResult -> Str
+agentProcessSummary result =
+  textJoin ":" [
+    if agentProcessSucceeded result then "pass" else "fail",
+    encode result.exitCode,
+    if result.timedOut then "timeout" else "finished",
+    agentTextOr "no-error" result.error
+  ]
+
+agentProcessUnavailableResult : Str -> AgentProcessResult
+agentProcessUnavailableResult error =
+  AgentProcessResult {
+    exitCode = 127,
+    stdout = "",
+    stderr = "",
+    timedOut = false,
+    error = error
+  }
+
+agentProcessRunPreflightIssues : Str -> Str -> Int -> [Str] -> [AgentValidationIssue]
+agentProcessRunPreflightIssues root cwd timeoutMs command =
+  append
+    (agentRequireNonEmptyText "workspaceRoot" root)
+    (append
+      (agentRequireNonEmptyText "cwd" cwd)
+      (append
+        (agentRequirePositiveInt "timeoutMs" timeoutMs)
+        (agentRequireNonEmptyList "command" command)))
+
+agentProcessRunPreflightSummary : Str -> Str -> Int -> [Str] -> AgentValidationSummary
+agentProcessRunPreflightSummary root cwd timeoutMs command =
+  agentValidationFromIssues
+    [
+      textConcat ["process-preflight:cwd=", agentTextOr "<empty>" cwd],
+      textConcat ["process-preflight:timeoutMs=", encode timeoutMs],
+      textConcat ["process-preflight:commandCount=", encode (length command)]
+    ]
+    (agentProcessRunPreflightIssues root cwd timeoutMs command)
+
+agentCheckedProcessRunFromValidation : AgentValidationSummary -> AgentProcessResult -> Str -> AgentCheckedProcessRun
+agentCheckedProcessRunFromValidation validation result status =
+  AgentCheckedProcessRun {
+    validation = validation,
+    result = result,
+    ok = if validation.ok then agentProcessSucceeded result else false,
+    status = status,
+    issueTexts = agentValidationIssueTexts validation.issues,
+    evidence =
+      append
+        validation.evidence
+        [
+          textConcat ["process-status:", status],
+          textConcat ["process-summary:", agentProcessSummary result]
+        ]
+  }
+
+agentRunWorkspaceCommandTimeoutChecked : Str -> Str -> Int -> [Str] -> AgentCheckedProcessRun
+agentRunWorkspaceCommandTimeoutChecked root cwd timeoutMs command = {
+  let validation = agentProcessRunPreflightSummary root cwd timeoutMs command;
+  if validation.ok then
+    match agentRunWorkspaceCommandTimeout root cwd timeoutMs command {
+      Ok result ->
+        agentCheckedProcessRunFromValidation
+          validation
+          result
+          (if agentProcessSucceeded result then "ok" else "process-failed"),
+      Err message ->
+        agentCheckedProcessRunFromValidation
+          validation
+          (agentProcessUnavailableResult message)
+          "process-error"
+    }
+  else
+    agentCheckedProcessRunFromValidation
+      validation
+      (agentProcessUnavailableResult "preflight-failed")
+      "preflight-error"
+}
+
+agentCommandStepValidation : Str -> AgentCommandStep -> AgentValidationSummary
+agentCommandStepValidation root step =
+  agentValidationMerge
+    (agentValidationFromIssues
+      [textConcat ["command-step:", agentTextOr "<empty>" step.label]]
+      (agentRequireNonEmptyText "label" step.label))
+    (agentProcessRunPreflightSummary root step.cwd step.timeoutMs step.command)
+
+agentCheckedProcessRunFromCommandStepValidation : Str -> AgentCommandStep -> AgentCheckedProcessRun
+agentCheckedProcessRunFromCommandStepValidation root step = {
+  let validation = agentCommandStepValidation root step;
+  if validation.ok then
+    match agentRunWorkspaceCommandTimeout root step.cwd step.timeoutMs step.command {
+      Ok result ->
+        agentCheckedProcessRunFromValidation
+          validation
+          result
+          (if agentProcessSucceeded result then "ok" else "process-failed"),
+      Err message ->
+        agentCheckedProcessRunFromValidation
+          validation
+          (agentProcessUnavailableResult message)
+          "process-error"
+    }
+  else
+    agentCheckedProcessRunFromValidation
+      validation
+      (agentProcessUnavailableResult "preflight-failed")
+      "preflight-error"
+}
+
+agentRunCommandStep : Str -> AgentCommandStep -> AgentCommandStepResult
+agentRunCommandStep root step = {
+  let checked = agentCheckedProcessRunFromCommandStepValidation root step;
+  AgentCommandStepResult {
+    label = step.label,
+    ok = checked.ok,
+    status = checked.status,
+    processSummary = agentProcessSummary checked.result,
+    stdout = checked.result.stdout,
+    stderr = checked.result.stderr,
+    issueTexts = checked.issueTexts,
+    evidence = checked.evidence
+  }
+}
+
+agentCommandStepResultIssueTexts : AgentCommandStepResult -> [Str]
+agentCommandStepResultIssueTexts result = result.issueTexts
+
+agentCommandStepResultEvidence : AgentCommandStepResult -> [Str]
+agentCommandStepResultEvidence result = result.evidence
+
+agentCommandStepResultFailureCount : AgentCommandStepResult -> Int
+agentCommandStepResultFailureCount result =
+  if result.ok then
+    0
+  else
+    1
+
+agentCommandStepShouldStopPlan : Bool -> AgentCommandStepResult -> Bool
+agentCommandStepShouldStopPlan failFast result =
+  if failFast then
+    if result.ok then
+      false
+    else
+      true
+  else
+    false
+
+agentCommandStepResultStatusText : AgentCommandStepResult -> Str
+agentCommandStepResultStatusText result =
+  textConcat [result.label, ":", result.status]
+
+agentCommandStepResultStatusTexts : [AgentCommandStepResult] -> [Str]
+agentCommandStepResultStatusTexts results =
+  map agentCommandStepResultStatusText results
+
+agentCommandPlanResultFromResults : Int -> [AgentCommandStepResult] -> AgentCommandPlanResult
+agentCommandPlanResultFromResults stepCount results = {
+  let mut failedCount = 0;
+  let mut issueTexts = [];
+  let mut evidence = [];
+  for result in results {
+    failedCount = intAdd failedCount (agentCommandStepResultFailureCount result);
+    issueTexts = append issueTexts (agentCommandStepResultIssueTexts result);
+    evidence = append evidence (agentCommandStepResultEvidence result);
+    evidence
+  };
+  AgentCommandPlanResult {
+    ok = failedCount == 0 && length results == stepCount,
+    stepCount = stepCount,
+    completedCount = length results,
+    failedCount = failedCount,
+    results = results,
+    issueTexts = issueTexts,
+    evidence = evidence
+  }
+}
+
+agentRunCommandPlanWithMode : Str -> Bool -> [AgentCommandStep] -> AgentCommandPlanResult
+agentRunCommandPlanWithMode root failFast steps = {
+  let mut results = [];
+  let mut stopped = false;
+  for step in steps {
+    if stopped then
+      results
+    else {
+      let result = agentRunCommandStep root step;
+      results = append results [result];
+      stopped = agentCommandStepShouldStopPlan failFast result;
+      results
+    }
+  };
+  agentCommandPlanResultFromResults (length steps) results
+}
+
+agentRunCommandPlan : Str -> [AgentCommandStep] -> AgentCommandPlanResult
+agentRunCommandPlan root steps =
+  agentRunCommandPlanWithMode root false steps
+
+agentRunCommandPlanFailFast : Str -> [AgentCommandStep] -> AgentCommandPlanResult
+agentRunCommandPlanFailFast root steps =
+  agentRunCommandPlanWithMode root true steps
+
+agentVerifierGateStatus : AgentVerifierMemoryPolicySummary -> AgentCommandPlanResult -> Str
+agentVerifierGateStatus memoryPolicy commandPlan =
+  if memoryPolicy.ok then
+    if commandPlan.ok then
+      "pass"
+    else if commandPlan.failedCount > 0 then
+      "commands-failed"
+    else
+      "incomplete-command-plan"
+  else
+    "memory-policy-failed"
+
+agentVerifierGateRecommendation : AgentVerifierMemoryPolicySummary -> AgentCommandPlanResult -> Str
+agentVerifierGateRecommendation memoryPolicy commandPlan =
+  if memoryPolicy.ok then
+    if commandPlan.ok then
+      "verifier-gate:pass"
+    else if commandPlan.failedCount > 0 then
+      "verifier-gate:fix-failed-checks"
+    else
+      "verifier-gate:complete-command-plan"
+  else
+    memoryPolicy.recommendation
+
+agentVerifierGateEvidence : AgentVerifierMemoryPolicySummary -> AgentCommandPlanResult -> [Str]
+agentVerifierGateEvidence memoryPolicy commandPlan =
+  append
+    memoryPolicy.evidence
+    (append
+      commandPlan.evidence
+      [
+        textConcat ["verifier-gate:stepCount=", encode commandPlan.stepCount],
+        textConcat ["verifier-gate:completedCount=", encode commandPlan.completedCount],
+        textConcat ["verifier-gate:failedCount=", encode commandPlan.failedCount],
+        textConcat ["verifier-gate:commandStatuses=", textJoin "," (agentCommandStepResultStatusTexts commandPlan.results)]
+      ])
+
+agentVerifierGate : AgentVerifierMemoryPolicySummary -> AgentCommandPlanResult -> AgentVerifierGate
+agentVerifierGate memoryPolicy commandPlan = {
+  let issues = append memoryPolicy.issueTexts commandPlan.issueTexts;
+  AgentVerifierGate {
+    ok = memoryPolicy.ok && commandPlan.ok,
+    status = agentVerifierGateStatus memoryPolicy commandPlan,
+    memoryPolicyOk = memoryPolicy.ok,
+    commandPlanOk = commandPlan.ok,
+    commandStepCount = commandPlan.stepCount,
+    commandCompletedCount = commandPlan.completedCount,
+    commandFailedCount = commandPlan.failedCount,
+    issueCount = length issues,
+    issueTexts = issues,
+    evidence = agentVerifierGateEvidence memoryPolicy commandPlan,
+    recommendation = agentVerifierGateRecommendation memoryPolicy commandPlan
+  }
+}
+
+agentAffectedCommandResourceIssues : AgentAffectedCommandResource -> [AgentValidationIssue]
+agentAffectedCommandResourceIssues command =
+  append
+    (agentRequireNonEmptyText "id" command.id)
+    (append
+      (agentRequireNonEmptyText "command" command.command)
+      (append
+        (agentRequireNonEmptyText "resourceClass" command.resourceClass)
+        (append
+          (agentRequireNonEmptyText "oomRisk" command.oomRisk)
+          (append
+            (agentRequireNonEmptyText "executionAdvice" command.executionAdvice)
+            (agentRequireNonEmptyText "compilerStateAccess" command.compilerStateAccess)))))
+
+agentAffectedCommandResourceConsistencyIssues : AgentAffectedCommandResource -> [AgentValidationIssue]
+agentAffectedCommandResourceConsistencyIssues command =
+  if command.executionAdvice == "safe-direct" then
+    if command.requiresManagedGuard then
+      [agentValidationIssue command.id "safe-direct command requires managed guard"]
+    else if command.oomRisk == "high" then
+      [agentValidationIssue command.id "safe-direct command has high OOM risk"]
+    else
+      []
+  else if command.oomRisk == "high" then
+    if command.requiresManagedGuard then
+      []
+    else
+      [agentValidationIssue command.id "high OOM risk command must require managed guard"]
+  else
+    []
+
+agentAffectedCommandResourceEvidence : AgentAffectedCommandResource -> [Str]
+agentAffectedCommandResourceEvidence command =
+  [
+    textConcat ["affected-command=", command.id],
+    textConcat ["affected-resource-class=", command.resourceClass],
+    textConcat ["affected-oom-risk=", command.oomRisk],
+    textConcat ["affected-requires-managed=", if command.requiresManagedGuard then "true" else "false"],
+    textConcat ["affected-execution-advice=", command.executionAdvice],
+    textConcat ["affected-compiler-state-access=", command.compilerStateAccess]
+  ]
+
+agentAffectedCommandResourceValidation : AgentAffectedCommandResource -> AgentValidationSummary
+agentAffectedCommandResourceValidation command =
+  agentValidationFromIssues
+    (agentAffectedCommandResourceEvidence command)
+    (append
+      (agentAffectedCommandResourceIssues command)
+      (agentAffectedCommandResourceConsistencyIssues command))
+
+agentAffectedCommandResourceValidations : [AgentAffectedCommandResource] -> [AgentValidationSummary]
+agentAffectedCommandResourceValidations commands =
+  map agentAffectedCommandResourceValidation commands
+
+agentAffectedVerificationPlanCountIssues : AgentAffectedVerificationPlan -> [AgentValidationIssue]
+agentAffectedVerificationPlanCountIssues plan =
+  if plan.commandResourceSummary.commandCount == length plan.selectedCommands then
+    []
+  else
+    [agentValidationIssue "commandResourceSummary.commandCount" "selected command count mismatch"]
+
+agentAffectedVerificationPlanStaticIssues : AgentAffectedVerificationPlan -> [AgentValidationIssue]
+agentAffectedVerificationPlanStaticIssues plan =
+  if plan.commandResourceSummary.staticCommandCount > plan.commandResourceSummary.commandCount then
+    [agentValidationIssue "commandResourceSummary.staticCommandCount" "static count exceeds command count"]
+  else
+    []
+
+agentAffectedVerificationPlanHeavyIssues : AgentAffectedVerificationPlan -> [AgentValidationIssue]
+agentAffectedVerificationPlanHeavyIssues plan =
+  if plan.commandResourceSummary.heavyCommandCount > plan.commandResourceSummary.commandCount then
+    [agentValidationIssue "commandResourceSummary.heavyCommandCount" "heavy count exceeds command count"]
+  else
+    []
+
+agentAffectedVerificationPlanFocusedIssues : AgentAffectedVerificationPlan -> [AgentValidationIssue]
+agentAffectedVerificationPlanFocusedIssues plan =
+  if plan.commandResourceSummary.focusedCommandCount > plan.commandResourceSummary.commandCount then
+    [agentValidationIssue "commandResourceSummary.focusedCommandCount" "focused count exceeds command count"]
+  else
+    []
+
+agentAffectedVerificationPlanDirectManagedIssues : AgentAffectedVerificationPlan -> [AgentValidationIssue]
+agentAffectedVerificationPlanDirectManagedIssues plan =
+  if intAdd plan.commandResourceSummary.safeDirectCommandCount plan.commandResourceSummary.managedGuardCommandCount == plan.commandResourceSummary.commandCount then
+    []
+  else
+    [agentValidationIssue "commandResourceSummary.safeDirectCommandCount" "safe-direct and managed-guard counts must cover command count"]
+
+agentAffectedVerificationPlanCompilerStateIssues : AgentAffectedVerificationPlan -> [AgentValidationIssue]
+agentAffectedVerificationPlanCompilerStateIssues plan =
+  if intAdd plan.commandResourceSummary.compilerStateFreeCommandCount plan.commandResourceSummary.compilerStateTouchingCommandCount == plan.commandResourceSummary.commandCount then
+    []
+  else
+    [agentValidationIssue "commandResourceSummary.compilerStateFreeCommandCount" "compiler-state counts must cover command count"]
+
+agentAffectedVerificationPlanCompilerStateFlagIssues : AgentAffectedVerificationPlan -> [AgentValidationIssue]
+agentAffectedVerificationPlanCompilerStateFlagIssues plan =
+  if plan.commandResourceSummary.canRunWithoutCompilerState then
+    if plan.commandResourceSummary.compilerStateTouchingCommandCount == 0 then
+      []
+    else
+      [agentValidationIssue "commandResourceSummary.canRunWithoutCompilerState" "compiler-state-free flag conflicts with touching command count"]
+  else if plan.commandResourceSummary.compilerStateTouchingCommandCount > 0 then
+    []
+  else
+    [agentValidationIssue "commandResourceSummary.canRunWithoutCompilerState" "compiler-state-free flag conflicts with touching command count"]
+
+agentAffectedVerificationPlanIssues : AgentAffectedVerificationPlan -> [AgentValidationIssue]
+agentAffectedVerificationPlanIssues plan =
+  append
+    (agentRequireNonEmptyList "selectedCommands" plan.selectedCommands)
+    (append
+      (agentRequireNonEmptyText "finalVerdict" plan.finalVerdict)
+      (append
+        (agentRequireNonEmptyText "commandResourceSummary.overallAdvice" plan.commandResourceSummary.overallAdvice)
+        (append
+          (agentAffectedVerificationPlanCountIssues plan)
+          (append
+            (agentAffectedVerificationPlanStaticIssues plan)
+            (append
+              (agentAffectedVerificationPlanHeavyIssues plan)
+              (append
+                (agentAffectedVerificationPlanFocusedIssues plan)
+                (append
+                  (agentAffectedVerificationPlanDirectManagedIssues plan)
+                  (append
+                    (agentAffectedVerificationPlanCompilerStateIssues plan)
+                    (agentAffectedVerificationPlanCompilerStateFlagIssues plan)))))))))
+
+agentAffectedVerificationPlanEvidence : AgentAffectedVerificationPlan -> [Str]
+agentAffectedVerificationPlanEvidence plan =
+  [
+    textConcat ["affected-plan-final-verdict=", plan.finalVerdict],
+    textConcat ["affected-plan-command-count=", encode plan.commandResourceSummary.commandCount],
+    textConcat ["affected-plan-static-command-count=", encode plan.commandResourceSummary.staticCommandCount],
+    textConcat ["affected-plan-focused-command-count=", encode plan.commandResourceSummary.focusedCommandCount],
+    textConcat ["affected-plan-heavy-command-count=", encode plan.commandResourceSummary.heavyCommandCount],
+    textConcat ["affected-plan-safe-direct-command-count=", encode plan.commandResourceSummary.safeDirectCommandCount],
+    textConcat ["affected-plan-managed-guard-command-count=", encode plan.commandResourceSummary.managedGuardCommandCount],
+    textConcat ["affected-plan-compiler-state-free-command-count=", encode plan.commandResourceSummary.compilerStateFreeCommandCount],
+    textConcat ["affected-plan-compiler-state-touching-command-count=", encode plan.commandResourceSummary.compilerStateTouchingCommandCount],
+    textConcat ["affected-plan-can-run-without-compiler-state=", if plan.commandResourceSummary.canRunWithoutCompilerState then "true" else "false"],
+    textConcat ["affected-plan-requires-managed=", if plan.commandResourceSummary.requiresManagedGuard then "true" else "false"],
+    textConcat ["affected-plan-overall-advice=", plan.commandResourceSummary.overallAdvice]
+  ]
+
+agentAffectedVerificationPlanValidation : AgentAffectedVerificationPlan -> AgentValidationSummary
+agentAffectedVerificationPlanValidation plan =
+  agentValidationMerge
+    (agentValidationFromIssues
+      (agentAffectedVerificationPlanEvidence plan)
+      (agentAffectedVerificationPlanIssues plan))
+    (agentValidationMergeAll (agentAffectedCommandResourceValidations plan.selectedCommands))
+
+agentAffectedVerificationPlanStatus : AgentValidationSummary -> AgentAffectedCommandResourceSummary -> Str
+agentAffectedVerificationPlanStatus validation summary =
+  if validation.ok then
+    if summary.heavyCommandCount > 0 then
+      "heavy-managed"
+    else if summary.requiresManagedGuard then
+      "focused-managed"
+    else
+      "safe-direct"
+  else
+    "invalid-plan"
+
+agentAffectedVerificationPlanCanRunWithoutCompilerState : AgentAffectedCommandResourceSummary -> Bool
+agentAffectedVerificationPlanCanRunWithoutCompilerState summary =
+  summary.canRunWithoutCompilerState
+
+agentAffectedVerificationPlanRecommendation : Str -> Bool -> Str
+agentAffectedVerificationPlanRecommendation status canRunWithoutCompilerState =
+  if status == "safe-direct" then
+    if canRunWithoutCompilerState then
+      "affected-verification-plan:safe-direct-compiler-state-free"
+    else
+      "affected-verification-plan:safe-direct-compiler-state-access"
+  else if status == "focused-managed" then
+    "affected-verification-plan:run-managed-focused"
+  else if status == "heavy-managed" then
+    "affected-verification-plan:run-managed-memory-disk-admission"
+  else
+    "affected-verification-plan:repair-plan-json"
+
+agentAffectedVerificationPlanCanRunDirect : Str -> Bool
+agentAffectedVerificationPlanCanRunDirect status =
+  status == "safe-direct"
+
+agentAffectedVerificationPlanDecision : AgentAffectedVerificationPlan -> AgentAffectedVerificationPlanDecision
+agentAffectedVerificationPlanDecision plan = {
+  let validation = agentAffectedVerificationPlanValidation plan;
+  let status = agentAffectedVerificationPlanStatus validation plan.commandResourceSummary;
+  let canRunWithoutCompilerState = agentAffectedVerificationPlanCanRunWithoutCompilerState plan.commandResourceSummary;
+  AgentAffectedVerificationPlanDecision {
+    ok = validation.ok,
+    status = status,
+    commandCount = plan.commandResourceSummary.commandCount,
+    staticCommandCount = plan.commandResourceSummary.staticCommandCount,
+    focusedCommandCount = plan.commandResourceSummary.focusedCommandCount,
+    heavyCommandCount = plan.commandResourceSummary.heavyCommandCount,
+    safeDirectCommandCount = plan.commandResourceSummary.safeDirectCommandCount,
+    managedGuardCommandCount = plan.commandResourceSummary.managedGuardCommandCount,
+    compilerStateFreeCommandCount = plan.commandResourceSummary.compilerStateFreeCommandCount,
+    compilerStateTouchingCommandCount = plan.commandResourceSummary.compilerStateTouchingCommandCount,
+    requiresManagedGuard = plan.commandResourceSummary.requiresManagedGuard,
+    canRunDirect = agentAffectedVerificationPlanCanRunDirect status,
+    canRunWithoutCompilerState = canRunWithoutCompilerState,
+    issueCount = validation.issueCount,
+    issueTexts = agentValidationIssueTexts validation.issues,
+    evidence = validation.evidence,
+    recommendation = agentAffectedVerificationPlanRecommendation status canRunWithoutCompilerState
+  }
+}
+
+agentAffectedVerificationPlanDecodeSummary : Str -> AgentValidationSummary
+agentAffectedVerificationPlanDecodeSummary raw =
+  agentJsonDecodeAndRequireFields
+    "AgentAffectedVerificationPlan"
+    raw
+    (tryDecode AgentAffectedVerificationPlan raw)
+    ["selectedCommands", "commandResourceSummary", "finalVerdict"]
+
+agentAffectedVerificationPlanDecisionFromJson : Str -> AgentAffectedVerificationPlanDecision
+agentAffectedVerificationPlanDecisionFromJson raw = {
+  let decodeSummary = agentAffectedVerificationPlanDecodeSummary raw;
+  match tryDecode AgentAffectedVerificationPlan raw {
+    Ok plan ->
+      if decodeSummary.ok then
+        agentAffectedVerificationPlanDecision plan
+      else
+        AgentAffectedVerificationPlanDecision {
+          ok = false,
+          status = "invalid-plan",
+          commandCount = 0,
+          staticCommandCount = 0,
+          focusedCommandCount = 0,
+          heavyCommandCount = 0,
+          safeDirectCommandCount = 0,
+          managedGuardCommandCount = 0,
+          compilerStateFreeCommandCount = 0,
+          compilerStateTouchingCommandCount = 0,
+          requiresManagedGuard = false,
+          canRunDirect = false,
+          canRunWithoutCompilerState = false,
+          issueCount = decodeSummary.issueCount,
+          issueTexts = agentValidationIssueTexts decodeSummary.issues,
+          evidence = decodeSummary.evidence,
+          recommendation = "affected-verification-plan:repair-plan-json"
+        },
+    Err message ->
+      AgentAffectedVerificationPlanDecision {
+        ok = false,
+        status = "invalid-plan",
+        commandCount = 0,
+        staticCommandCount = 0,
+        focusedCommandCount = 0,
+        heavyCommandCount = 0,
+        safeDirectCommandCount = 0,
+        managedGuardCommandCount = 0,
+        compilerStateFreeCommandCount = 0,
+        compilerStateTouchingCommandCount = 0,
+        requiresManagedGuard = false,
+        canRunDirect = false,
+        canRunWithoutCompilerState = false,
+        issueCount = decodeSummary.issueCount,
+        issueTexts = agentValidationIssueTexts decodeSummary.issues,
+        evidence = decodeSummary.evidence,
+        recommendation = "affected-verification-plan:repair-plan-json"
+      }
+  }
+}
+
+agentAffectedVerificationLaunchMode : AgentAffectedVerificationPlanDecision -> Str
+agentAffectedVerificationLaunchMode decision =
+  if decision.ok then
+    if decision.canRunDirect then
+      if decision.canRunWithoutCompilerState then
+        "direct-compiler-state-free"
+      else
+        "direct-compiler-state-access"
+    else if decision.status == "heavy-managed" then
+      "heavy-managed"
+    else
+      "focused-managed"
+  else
+    "invalid-plan"
+
+agentAffectedVerificationLaunchReady : AgentAffectedVerificationPlanDecision -> Bool
+agentAffectedVerificationLaunchReady decision =
+  if decision.ok then
+    if decision.canRunDirect then
+      decision.canRunWithoutCompilerState
+    else
+      false
+  else
+    false
+
+agentAffectedVerificationLaunchRecommendation : AgentAffectedVerificationPlanDecision -> Str
+agentAffectedVerificationLaunchRecommendation decision =
+  if decision.ok then
+    if decision.canRunDirect then
+      if decision.canRunWithoutCompilerState then
+        "affected-verification-launch:direct-compiler-state-free"
+      else
+        "affected-verification-launch:direct-compiler-state-access-preflight"
+    else if decision.status == "heavy-managed" then
+      "affected-verification-launch:managed-heavy-memory-disk"
+    else
+      "affected-verification-launch:managed-focused"
+  else
+    "affected-verification-launch:repair-plan-json"
+
+agentAffectedVerificationLaunchBlockingGaps : AgentAffectedVerificationPlanDecision -> [Str]
+agentAffectedVerificationLaunchBlockingGaps decision =
+  if decision.ok then
+    if decision.canRunDirect then
+      if decision.canRunWithoutCompilerState then
+        []
+      else
+        ["affected verifier plan touches compiler/cache state before launch"]
+    else if decision.status == "heavy-managed" then
+      ["affected verifier plan requires managed memory/disk admission before launch"]
+    else
+      ["affected verifier plan requires managed guard before launch"]
+  else
+    decision.issueTexts
+
+agentAffectedVerificationLaunchRequiredClosure : AgentAffectedVerificationPlanDecision -> [Str]
+agentAffectedVerificationLaunchRequiredClosure decision =
+  if agentAffectedVerificationLaunchReady decision then
+    []
+  else
+    [decision.recommendation]
+
+agentAffectedVerificationLaunchEvidence : Str -> AgentAffectedVerificationPlanDecision -> [Str]
+agentAffectedVerificationLaunchEvidence mode decision =
+  [
+    textConcat ["affected-launch-mode=", mode],
+    textConcat ["affected-launch-ready=", if agentAffectedVerificationLaunchReady decision then "true" else "false"],
+    textConcat ["affected-launch-can-run-direct=", if decision.canRunDirect then "true" else "false"],
+    textConcat ["affected-launch-can-run-without-compiler-state=", if decision.canRunWithoutCompilerState then "true" else "false"],
+    textConcat ["affected-launch-requires-managed=", if decision.requiresManagedGuard then "true" else "false"],
+    textConcat ["affected-launch-recommendation=", agentAffectedVerificationLaunchRecommendation decision]
+  ]
+
+agentAffectedVerificationLaunchPolicy : AgentAffectedVerificationPlanDecision -> AgentAffectedVerificationLaunchPolicy
+agentAffectedVerificationLaunchPolicy decision = {
+  let mode = agentAffectedVerificationLaunchMode decision;
+  AgentAffectedVerificationLaunchPolicy {
+    valid = decision.ok,
+    ready = agentAffectedVerificationLaunchReady decision,
+    mode = mode,
+    canRunDirect = decision.canRunDirect,
+    canRunWithoutCompilerState = decision.canRunWithoutCompilerState,
+    requiresManagedGuard = decision.requiresManagedGuard,
+    recommendation = agentAffectedVerificationLaunchRecommendation decision,
+    verificationPlanRecommendation = decision.recommendation,
+    blockingGaps = agentAffectedVerificationLaunchBlockingGaps decision,
+    requiredClosure = agentAffectedVerificationLaunchRequiredClosure decision,
+    evidence = agentAffectedVerificationLaunchEvidence mode decision
+  }
+}
+
+agentAffectedVerificationInvalidLaunchPolicy : AgentValidationSummary -> AgentAffectedVerificationLaunchPolicy
+agentAffectedVerificationInvalidLaunchPolicy summary =
+  AgentAffectedVerificationLaunchPolicy {
+    valid = false,
+    ready = false,
+    mode = "invalid-plan",
+    canRunDirect = false,
+    canRunWithoutCompilerState = false,
+    requiresManagedGuard = false,
+    recommendation = "affected-verification-launch:repair-plan-json",
+    verificationPlanRecommendation = "affected-verification-plan:repair-plan-json",
+    blockingGaps = agentValidationIssueTexts summary.issues,
+    requiredClosure = ["affected-verification-plan:repair-plan-json"],
+    evidence = summary.evidence
+  }
+
+agentAffectedVerificationLaunchPolicyDecodeSummary : Str -> AgentValidationSummary
+agentAffectedVerificationLaunchPolicyDecodeSummary raw =
+  agentJsonDecodeAndRequireFields
+    "AgentAffectedVerificationLaunchPolicy"
+    raw
+    (tryDecode AgentAffectedVerificationLaunchPolicy raw)
+    ["valid", "ready", "mode", "recommendation", "verificationPlanRecommendation"]
+
+agentAffectedVerificationLaunchPolicyFromJson : Str -> AgentAffectedVerificationLaunchPolicy
+agentAffectedVerificationLaunchPolicyFromJson raw = {
+  let decodeSummary = agentAffectedVerificationLaunchPolicyDecodeSummary raw;
+  match tryDecode AgentAffectedVerificationLaunchPolicy raw {
+    Ok policy ->
+      if decodeSummary.ok then
+        policy
+      else
+        agentAffectedVerificationInvalidLaunchPolicy decodeSummary,
+    Err message ->
+      agentAffectedVerificationInvalidLaunchPolicy decodeSummary
+  }
+}
+
+agentAffectedVerificationInvalidPlanForReason : Str -> AgentAffectedVerificationPlan
+agentAffectedVerificationInvalidPlanForReason reason =
+  AgentAffectedVerificationPlan {
+    selectedCommands = [],
+    commandResourceSummary =
+      AgentAffectedCommandResourceSummary {
+        commandCount = 0,
+        staticCommandCount = 0,
+        focusedCommandCount = 0,
+        heavyCommandCount = 0,
+        safeDirectCommandCount = 0,
+        managedGuardCommandCount = 0,
+        compilerStateFreeCommandCount = 0,
+        compilerStateTouchingCommandCount = 0,
+        canRunWithoutCompilerState = true,
+        requiresManagedGuard = false,
+        overallAdvice = reason
+      },
+    planOnly = true,
+    finalVerdict = "invalid-plan"
+  }
+
+agentAffectedVerificationInvalidPlanJsonForReason : Str -> Str
+agentAffectedVerificationInvalidPlanJsonForReason reason =
+  encode (agentAffectedVerificationInvalidPlanForReason reason)
+
+agentAffectedVerificationInvalidLaunchPolicyForReason : Str -> AgentAffectedVerificationLaunchPolicy
+agentAffectedVerificationInvalidLaunchPolicyForReason reason =
+  AgentAffectedVerificationLaunchPolicy {
+    valid = false,
+    ready = false,
+    mode = "invalid-plan",
+    canRunDirect = false,
+    canRunWithoutCompilerState = false,
+    requiresManagedGuard = false,
+    recommendation = "affected-verification-launch:repair-plan-json",
+    verificationPlanRecommendation = "affected-verification-plan:repair-plan-json",
+    blockingGaps = [reason],
+    requiredClosure = ["affected-verification-plan:repair-plan-json"],
+    evidence = [reason]
+  }
+
+agentAffectedVerificationInvalidLaunchPolicyJsonForReason : Str -> Str
+agentAffectedVerificationInvalidLaunchPolicyJsonForReason reason =
+  encode (agentAffectedVerificationInvalidLaunchPolicyForReason reason)
+
+agentAffectedVerificationContextMaxMb : Int
+agentAffectedVerificationContextMaxMb =
+  agentReadEnvInt "CLASP_LOOP_AFFECTED_VERIFICATION_CONTEXT_MAX_MB_JSON" 4
+
+agentCapabilityAuditContextMaxMb : Int
+agentCapabilityAuditContextMaxMb =
+  agentReadEnvInt "CLASP_LOOP_CAPABILITY_AUDIT_CONTEXT_MAX_MB_JSON" 4
+
+agentManagedSwarmProofContextMaxMb : Int
+agentManagedSwarmProofContextMaxMb =
+  agentReadEnvInt "CLASP_LOOP_MANAGED_SWARM_PROOF_CONTEXT_MAX_MB_JSON" 4
+
+agentCapabilityAuditPathOversizeReason : Int -> Int -> Str
+agentCapabilityAuditPathOversizeReason sizeMb maxMb =
+  textConcat [
+    "capability-audit-context:oversize sizeMb=",
+    encode sizeMb,
+    " maxMb=",
+    encode maxMb
+  ]
+
+agentManagedSwarmProofPathOversizeReason : Int -> Int -> Str
+agentManagedSwarmProofPathOversizeReason sizeMb maxMb =
+  textConcat [
+    "managed-swarm-proof-context:oversize sizeMb=",
+    encode sizeMb,
+    " maxMb=",
+    encode maxMb
+  ]
+
+agentAffectedVerificationPathOversizeReason : Int -> Int -> Str
+agentAffectedVerificationPathOversizeReason sizeMb maxMb =
+  textConcat [
+    "affected-verification-context:oversize sizeMb=",
+    encode sizeMb,
+    " maxMb=",
+    encode maxMb
+  ]
+
+agentBoundedCapabilityAuditJsonFromPathWithLimit : Int -> Str -> Str
+agentBoundedCapabilityAuditJsonFromPathWithLimit maxMb path =
+  match agentHostFileSizeMbRaw path {
+    Err message ->
+      agentCapabilityAuditInvalidJsonForReason "capability-audit-context:size-check-failed",
+    Ok sizeMb ->
+      if sizeMb > maxMb then
+        agentCapabilityAuditInvalidJsonForReason (agentCapabilityAuditPathOversizeReason sizeMb maxMb)
+      else
+        agentReadTextOr path ""
+  }
+
+agentBoundedCapabilityAuditDecisionJsonFromPathWithLimit : Int -> Str -> Str
+agentBoundedCapabilityAuditDecisionJsonFromPathWithLimit maxMb path =
+  match agentHostFileSizeMbRaw path {
+    Err message ->
+      agentCapabilityAuditInvalidDecisionJsonForReason "capability-audit-context:size-check-failed",
+    Ok sizeMb ->
+      if sizeMb > maxMb then
+        agentCapabilityAuditInvalidDecisionJsonForReason (agentCapabilityAuditPathOversizeReason sizeMb maxMb)
+      else
+        agentReadTextOr path ""
+  }
+
+agentBoundedManagedSwarmProofJsonFromPathWithLimit : Int -> Str -> Str
+agentBoundedManagedSwarmProofJsonFromPathWithLimit maxMb path =
+  match agentHostFileSizeMbRaw path {
+    Err message ->
+      agentManagedSwarmProofInvalidJsonForReason "managed-swarm-proof-context:size-check-failed",
+    Ok sizeMb ->
+      if sizeMb > maxMb then
+        agentManagedSwarmProofInvalidJsonForReason (agentManagedSwarmProofPathOversizeReason sizeMb maxMb)
+      else
+        agentReadTextOr path ""
+  }
+
+agentBoundedAffectedVerificationPlanJsonFromPathWithLimit : Int -> Str -> Str
+agentBoundedAffectedVerificationPlanJsonFromPathWithLimit maxMb path =
+  match agentHostFileSizeMbRaw path {
+    Err message ->
+      agentAffectedVerificationInvalidPlanJsonForReason "affected-verification-context:size-check-failed",
+    Ok sizeMb ->
+      if sizeMb > maxMb then
+        agentAffectedVerificationInvalidPlanJsonForReason (agentAffectedVerificationPathOversizeReason sizeMb maxMb)
+      else
+        agentReadTextOr path ""
+  }
+
+agentBoundedAffectedVerificationLaunchPolicyJsonFromPathWithLimit : Int -> Str -> Str
+agentBoundedAffectedVerificationLaunchPolicyJsonFromPathWithLimit maxMb path =
+  match agentHostFileSizeMbRaw path {
+    Err message ->
+      agentAffectedVerificationInvalidLaunchPolicyJsonForReason "affected-verification-context:size-check-failed",
+    Ok sizeMb ->
+      if sizeMb > maxMb then
+        agentAffectedVerificationInvalidLaunchPolicyJsonForReason (agentAffectedVerificationPathOversizeReason sizeMb maxMb)
+      else
+        agentReadTextOr path ""
+  }
+
+agentBoundedAffectedVerificationPlanJsonFromPath : Str -> Str
+agentBoundedAffectedVerificationPlanJsonFromPath path =
+  agentBoundedAffectedVerificationPlanJsonFromPathWithLimit agentAffectedVerificationContextMaxMb path
+
+agentBoundedAffectedVerificationLaunchPolicyJsonFromPath : Str -> Str
+agentBoundedAffectedVerificationLaunchPolicyJsonFromPath path =
+  agentBoundedAffectedVerificationLaunchPolicyJsonFromPathWithLimit agentAffectedVerificationContextMaxMb path
+
+agentBoundedCapabilityAuditJsonFromPath : Str -> Str
+agentBoundedCapabilityAuditJsonFromPath path =
+  agentBoundedCapabilityAuditJsonFromPathWithLimit agentCapabilityAuditContextMaxMb path
+
+agentBoundedCapabilityAuditDecisionJsonFromPath : Str -> Str
+agentBoundedCapabilityAuditDecisionJsonFromPath path =
+  agentBoundedCapabilityAuditDecisionJsonFromPathWithLimit agentCapabilityAuditContextMaxMb path
+
+agentBoundedManagedSwarmProofJsonFromPath : Str -> Str
+agentBoundedManagedSwarmProofJsonFromPath path =
+  agentBoundedManagedSwarmProofJsonFromPathWithLimit agentManagedSwarmProofContextMaxMb path
+
+agentWorkspaceReadText : Str -> Str -> Result Str
+agentWorkspaceReadText root relative = agentWorkspaceReadFileRaw root relative
+
+agentWorkspaceReadTextOr : Str -> Str -> Str -> Str
+agentWorkspaceReadTextOr root relative fallback =
+  agentResultWithDefault fallback (agentWorkspaceReadText root relative)
+
+agentWorkspaceWriteText : Str -> Str -> Str -> Result Str
+agentWorkspaceWriteText root relative contents =
+  agentWorkspaceWriteFileRaw root relative contents
+
+agentWorkspaceAppendText : Str -> Str -> Str -> Result Str
+agentWorkspaceAppendText root relative contents =
+  agentWorkspaceAppendFileRaw root relative contents
+
+agentWorkspaceMkdirAll : Str -> Str -> Result Str
+agentWorkspaceMkdirAll root relative =
+  agentWorkspaceMkdirAllRaw root relative
+
+agentWorkspaceSearchTextBounded : Str -> Str -> Str -> Int -> Int -> Int -> Int -> Result [Str]
+agentWorkspaceSearchTextBounded root relative needle maxMatches maxFiles maxFileBytes maxDepth =
+  agentWorkspaceSearchTextRaw root relative needle maxMatches maxFiles maxFileBytes maxDepth
+
+agentWorkspaceSearchText : Str -> Str -> Str -> Result [Str]
+agentWorkspaceSearchText root relative needle =
+  agentWorkspaceSearchTextBounded root relative needle 64 2000 262144 16
+
+agentWorkspaceReplaceTextBounded : Str -> Str -> Str -> Str -> Int -> Int -> Result Int
+agentWorkspaceReplaceTextBounded root relative findText replaceText maxReplacements maxFileBytes =
+  agentWorkspaceReplaceTextRaw root relative findText replaceText maxReplacements maxFileBytes
+
+agentWorkspaceReplaceText : Str -> Str -> Str -> Str -> Result Int
+agentWorkspaceReplaceText root relative findText replaceText =
+  agentWorkspaceReplaceTextBounded root relative findText replaceText 64 262144
+
+agentWorkspaceStatus : Result a -> Str
+agentWorkspaceStatus value = agentResultStatus "ok" "error:" value
+
+agentWorkspaceWriteTextStatus : Str -> Str -> Str -> Str
+agentWorkspaceWriteTextStatus root relative contents =
+  agentWorkspaceStatus (agentWorkspaceWriteText root relative contents)
+
+agentWorkspaceAppendTextStatus : Str -> Str -> Str -> Str
+agentWorkspaceAppendTextStatus root relative contents =
+  agentWorkspaceStatus (agentWorkspaceAppendText root relative contents)
+
+agentWorkspaceMkdirAllStatus : Str -> Str -> Str
+agentWorkspaceMkdirAllStatus root relative =
+  agentWorkspaceStatus (agentWorkspaceMkdirAll root relative)
+
+agentWorkspaceReplaceTextCount : Str -> Str -> Str -> Str -> Int
+agentWorkspaceReplaceTextCount root relative findText replaceText =
+  agentResultWithDefault 0 (agentWorkspaceReplaceText root relative findText replaceText)
+
+agentWorkspaceSearchTextOrEmpty : Str -> Str -> Str -> [Str]
+agentWorkspaceSearchTextOrEmpty root relative needle =
+  agentResultWithDefault [] (agentWorkspaceSearchText root relative needle)

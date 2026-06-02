@@ -1,5 +1,6 @@
 module GoalManagerReportIO
 
+import GoalManagerPlannerInputTypes
 import GoalManagerWatch
 import GoalManagerPreludeProject
 import GoalManagerPrelude
@@ -10,6 +11,44 @@ import Swarm
 
 plannerReportError : Str -> Result PlannerReport
 plannerReportError message = Err message
+
+record PlannerReportBoundarySummary = {
+  schemaName : Str,
+  schemaVersion : Str,
+  trustPolicy : Str,
+  trust : Str,
+  accepted : Bool,
+  reason : Str,
+  format : Str
+}
+
+record TrustedPlannerReport = {
+  summary : PlannerReportBoundarySummary,
+  report : PlannerReport
+}
+
+plannerReportBoundarySummary : Str -> Bool -> Str -> PlannerReportBoundarySummary
+plannerReportBoundarySummary format accepted reason =
+  PlannerReportBoundarySummary {
+    schemaName = "PlannerReport",
+    schemaVersion = "v1",
+    trustPolicy = "untrusted-until-planner-report-decode",
+    trust = if accepted then "validated" else "untrusted",
+    accepted = accepted,
+    reason = reason,
+    format = format
+  }
+
+trustedPlannerReportOk : Str -> PlannerReport -> Result TrustedPlannerReport
+trustedPlannerReportOk format report =
+  Ok
+    (TrustedPlannerReport {
+      summary = plannerReportBoundarySummary format true "",
+      report = report
+    })
+
+trustedPlannerReportError : Str -> Result TrustedPlannerReport
+trustedPlannerReportError message = Err message
 
 defaultPlannerTaskRole : Str -> Str -> Str
 defaultPlannerTaskRole taskId detail =
@@ -93,14 +132,34 @@ plannerReportRawLooksLegacy raw =
   else
     false
 
+trustedPlannerReportFromRaw : Str -> Result TrustedPlannerReport
+trustedPlannerReportFromRaw raw =
+  if plannerReportRawLooksCurrent raw then
+    match tryDecode PlannerReport raw {
+      Ok report -> trustedPlannerReportOk "current" report,
+      Err message -> trustedPlannerReportError (textConcat ["planner report decode failed: ", message])
+    }
+  else if plannerReportRawLooksLegacy raw then
+    match tryDecode LegacyPlannerReport raw {
+      Ok report -> trustedPlannerReportOk "legacy" (legacyPlannerReportToCurrent report),
+      Err message -> trustedPlannerReportError (textConcat ["legacy planner report decode failed: ", message])
+    }
+  else
+    trustedPlannerReportError "planner report missing required fields"
+
+plannerReportBoundarySummaryFromRaw : Str -> PlannerReportBoundarySummary
+plannerReportBoundarySummaryFromRaw raw =
+  match trustedPlannerReportFromRaw raw {
+    Ok trusted -> trusted.summary,
+    Err message -> plannerReportBoundarySummary "unknown" false message
+  }
+
 plannerReportFromRaw : Str -> Result PlannerReport
 plannerReportFromRaw raw =
-  if plannerReportRawLooksCurrent raw then
-    Ok (decode PlannerReport raw)
-  else if plannerReportRawLooksLegacy raw then
-    Ok (legacyPlannerReportToCurrent (decode LegacyPlannerReport raw))
-  else
-    plannerReportError "planner report missing required fields"
+  match trustedPlannerReportFromRaw raw {
+    Ok trusted -> Ok trusted.report,
+    Err message -> plannerReportError message
+  }
 
 readPlannerReportPath : Str -> Result PlannerReport
 readPlannerReportPath path = match readFile path {
@@ -122,16 +181,22 @@ legacyPlannerInputStateToCurrent state =
     mailboxSummary = ""
   }
 
-plannerInputStateFromRaw : Str -> PlannerInputState
+plannerInputStateFromRaw : Str -> Result PlannerInputState
 plannerInputStateFromRaw raw =
   if length (textSplit raw "\"mailboxSummary\":") > 1 then
-    decode PlannerInputState raw
+    match tryDecode PlannerInputState raw {
+      Ok state -> Ok state,
+      Err message -> plannerInputStateError (textConcat ["planner input state decode failed: ", message])
+    }
   else
-    legacyPlannerInputStateToCurrent (decode LegacyPlannerInputState raw)
+    match tryDecode LegacyPlannerInputState raw {
+      Ok state -> Ok (legacyPlannerInputStateToCurrent state),
+      Err message -> plannerInputStateError (textConcat ["legacy planner input state decode failed: ", message])
+    }
 
 readPlannerInputStatePath : Str -> Result PlannerInputState
 readPlannerInputStatePath path = match readFile path {
-  Ok raw -> Ok (plannerInputStateFromRaw raw),
+  Ok raw -> plannerInputStateFromRaw raw,
   Err message -> plannerInputStateError message
 }
 
@@ -148,7 +213,14 @@ syntheticFailureReport summary detail =
 
 readVerifierReportPath : Str -> VerifierReport
 readVerifierReportPath path = match readFile path {
-  Ok raw -> decode VerifierReport raw,
+  Ok raw ->
+    match tryDecode VerifierReport raw {
+      Ok report -> report,
+      Err message ->
+        syntheticFailureReport
+          (textConcat ["invalid verifier report: ", message])
+          message
+    },
   Err message ->
     syntheticFailureReport
       (textConcat ["missing verifier report: ", message])
@@ -160,7 +232,7 @@ builderFeedbackError message = Err message
 
 readBuilderReportPath : Str -> Result BuilderReport
 readBuilderReportPath path = match readFile path {
-  Ok raw -> Ok (decode BuilderReport raw),
+  Ok raw -> tryDecode BuilderReport raw,
   Err message -> builderFeedbackError message
 }
 

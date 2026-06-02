@@ -1,11 +1,13 @@
 module GoalManagerConfig
 
+import GoalManagerAgentBackendConfig
 import GoalManagerCounters
 import GoalManagerTypes
 import Swarm
 
 foreign runCommandRaw : Str -> [Str] -> Result Str = "runCommandJson"
 foreign spawnCommandRaw : Str -> Str -> Str -> Str -> Int -> [Str] -> Result Str = "spawnCommandJson"
+foreign spawnCommandWithLimitsRaw : Str -> Str -> Str -> Str -> Int -> Int -> [Str] -> Result Str = "spawnCommandWithLimitsJson"
 foreign watchCommandRaw : Str -> Str -> Str -> Str -> Int -> [Str] -> Result Str = "watchCommandJson"
 foreign reconcileWatchedProcessRaw : Str -> Result Str = "reconcileWatchedProcessJson"
 foreign awaitWatchedProcessRaw : Str -> Int -> Result Str = "awaitWatchedProcessJson"
@@ -58,6 +60,42 @@ readEnvInt name fallback = match envVar name {
   Ok raw -> if raw == "" then fallback else decode Int raw,
   Err message -> fallback
 }
+
+configEnvPresent : Str -> Bool
+configEnvPresent name = match envVar name {
+  Ok raw -> raw != "",
+  Err message -> false
+}
+
+configTruthyText : Str -> Bool
+configTruthyText value =
+  if value == "1" then
+    true
+  else if value == "true" then
+    true
+  else if value == "yes" then
+    true
+  else
+    value == "on"
+
+allowUnmanagedAgentRuntime : Bool
+allowUnmanagedAgentRuntime = match envVar "CLASP_ALLOW_UNMANAGED_AGENT_RUNTIME" {
+  Ok raw ->
+    if raw == "dangerous" then
+      configTruthyText (readEnvText "CLASP_UNMANAGED_AGENT_RUNTIME_DANGER_ACCEPTED" "false")
+    else if configTruthyText raw then
+      configEnvPresent "CLASP_TEST_CODEX_MODE"
+    else
+      false,
+  Err message -> false
+}
+
+managedAgentRuntimeReady : Bool
+managedAgentRuntimeReady =
+  if configEnvPresent "CLASP_MANAGED_JOB_ID" then
+    true
+  else
+    allowUnmanagedAgentRuntime
 
 goalText : Str
 goalText =
@@ -156,12 +194,6 @@ taskWorkspaceBaseRoot =
     "CLASP_MANAGER_TASK_WORKSPACE_ROOT_JSON"
     (pathJoin ["/tmp", textConcat ["clasp-goal-manager-workspaces-", textFingerprint64Hex stateRootPath]])
 
-codexBin : Str
-codexBin = readEnvText "CLASP_LOOP_CODEX_BIN_JSON" (readEnvText "CLASP_LOOP_AGENT_BIN_JSON" "codex")
-
-managerClaspcBin : Str
-managerClaspcBin = readEnvText "CLASP_MANAGER_CLASPC_BIN_JSON" "claspc"
-
 currentExecutablePath : Str
 currentExecutablePath = readEnvText "CLASP_RT_CURRENT_EXECUTABLE_PATH_JSON" ""
 
@@ -171,41 +203,31 @@ childLoopProgramPath = readEnvText "CLASP_MANAGER_CHILD_LOOP_JSON" "examples/fee
 plannerSchemaPath : Str
 plannerSchemaPath = readEnvText "CLASP_MANAGER_PLANNER_SCHEMA_JSON" "agents/schemas/planner-report.schema.json"
 
-codexModel : Str
-codexModel = readEnvText "CLASP_LOOP_CODEX_MODEL_JSON" (readEnvText "CLASP_LOOP_AGENT_MODEL_JSON" "gpt-5.5")
-
-codexReasoning : Str
-codexReasoning = readEnvText "CLASP_LOOP_CODEX_REASONING_JSON" (readEnvText "CLASP_LOOP_AGENT_REASONING_JSON" "xhigh")
-
-codexSandbox : Str
-codexSandbox = readEnvText "CLASP_LOOP_CODEX_SANDBOX_JSON" (readEnvText "CLASP_LOOP_AGENT_SANDBOX_JSON" "danger-full-access")
-
-agentBin : Str
-agentBin = readEnvText "CLASP_LOOP_AGENT_BIN_JSON" codexBin
-
-agentModel : Str
-agentModel = readEnvText "CLASP_LOOP_AGENT_MODEL_JSON" codexModel
-
-agentReasoning : Str
-agentReasoning = readEnvText "CLASP_LOOP_AGENT_REASONING_JSON" codexReasoning
-
-agentSandbox : Str
-agentSandbox = readEnvText "CLASP_LOOP_AGENT_SANDBOX_JSON" codexSandbox
-
-agentCommandTemplate : [Str]
-agentCommandTemplate = readEnvTextList "CLASP_LOOP_AGENT_COMMAND_JSON" emptyTexts
-
-plannerAgentCommandTemplate : [Str]
-plannerAgentCommandTemplate = readEnvTextList "CLASP_MANAGER_PLANNER_AGENT_COMMAND_JSON" agentCommandTemplate
-
 agentMemoryLimitMb : Int
 agentMemoryLimitMb = readEnvInt "CLASP_LOOP_AGENT_MEMORY_MB_JSON" 8192
+
+plannerMemoryLimitMb : Int
+plannerMemoryLimitMb = readEnvInt "CLASP_MANAGER_PLANNER_MEMORY_MB_JSON" agentMemoryLimitMb
 
 builderMemoryLimitMb : Int
 builderMemoryLimitMb = readEnvInt "CLASP_LOOP_BUILDER_MEMORY_MB_JSON" agentMemoryLimitMb
 
 verifierMemoryLimitMb : Int
 verifierMemoryLimitMb = readEnvInt "CLASP_LOOP_VERIFIER_MEMORY_MB_JSON" agentMemoryLimitMb
+
+managerChildMemoryReserveMb : Int
+managerChildMemoryReserveMb =
+  readEnvInt "CLASP_MANAGER_CHILD_MEMORY_RESERVE_MB_JSON" agentMemoryLimitMb
+
+managerExternalAgentReserveMb : Int
+managerExternalAgentReserveMb =
+  readEnvInt
+    "CLASP_MANAGER_EXTERNAL_AGENT_RESERVE_MB_JSON"
+    (readEnvInt "CLASP_MANAGED_JOB_EXTERNAL_AGENT_RESERVE_MB" 1024)
+
+managerExternalAgentProcessNames : [Str]
+managerExternalAgentProcessNames =
+  readEnvTextList "CLASP_MANAGER_EXTERNAL_AGENT_PROCESS_NAMES_JSON" ["codex"]
 
 childLoopWatchPollMs : Int
 childLoopWatchPollMs = match envVar "CLASP_LOOP_WATCH_POLL_MS_JSON" {
@@ -249,6 +271,17 @@ benchmarkTimeoutMs = match envVar "CLASP_MANAGER_BENCHMARK_TIMEOUT_MS_JSON" {
   Err message -> 3600000
 }
 
+benchmarkMemoryLimitMb : Int
+benchmarkMemoryLimitMb = readEnvInt "CLASP_MANAGER_BENCHMARK_MEMORY_MB_JSON" agentMemoryLimitMb
+
+managerServiceMemoryReserveMb : Int
+managerServiceMemoryReserveMb =
+  readEnvInt "CLASP_MANAGER_SERVICE_MEMORY_RESERVE_MB_JSON" agentMemoryLimitMb
+
+managerUpgradeMemoryReserveMb : Int
+managerUpgradeMemoryReserveMb =
+  readEnvInt "CLASP_MANAGER_UPGRADE_MEMORY_RESERVE_MB_JSON" agentMemoryLimitMb
+
 maxWaves : Int
 maxWaves = match envVar "CLASP_MANAGER_MAX_WAVES_JSON" {
   Ok raw -> decode Int raw,
@@ -265,9 +298,17 @@ configuredPlannerWaveCount =
   else
     1
 
+resourceRecoveryExtraWaves : Int
+resourceRecoveryExtraWaves =
+  readEnvInt "CLASP_MANAGER_RESOURCE_RECOVERY_EXTRA_WAVES_JSON" 1
+
+configuredObjectiveWaveCount : Int
+configuredObjectiveWaveCount =
+  addManagerCounters configuredPlannerWaveCount resourceRecoveryExtraWaves
+
 configuredObjectiveBudgetFloor : Int
 configuredObjectiveBudgetFloor =
-  repeatAdd configuredPlannerWaveCount (incrementManagerCounter maxTaskLoops)
+  repeatAdd configuredObjectiveWaveCount (incrementManagerCounter maxTaskLoops)
 
 objectiveTaskBudget : Int
 objectiveTaskBudget = match envVar "CLASP_MANAGER_OBJECTIVE_MAX_TASKS_JSON" {
@@ -293,6 +334,50 @@ childMaxAttempts = match envVar "CLASP_MANAGER_CHILD_MAX_ATTEMPTS_JSON" {
   Err message -> 3
 }
 
+plannedTaskApprovalName : Str
+plannedTaskApprovalName =
+  readEnvText "CLASP_MANAGER_TASK_APPROVAL_JSON" "merge-ready"
+
+plannedTaskMergegateName : Str
+plannedTaskMergegateName =
+  readEnvText "CLASP_MANAGER_TASK_MERGEGATE_JSON" "trunk"
+
+plannedTaskRequiredApprovals : [Str]
+plannedTaskRequiredApprovals =
+  readEnvTextList "CLASP_MANAGER_TASK_REQUIRED_APPROVALS_JSON" [plannedTaskApprovalName]
+
+plannedTaskRequiredVerifiers : [Str]
+plannedTaskRequiredVerifiers =
+  readEnvTextList "CLASP_MANAGER_TASK_REQUIRED_VERIFIERS_JSON" emptyTexts
+
+plannedTaskAllowedProcesses : [Str]
+plannedTaskAllowedProcesses =
+  readEnvTextList "CLASP_MANAGER_TASK_ALLOWED_PROCESSES_JSON" emptyTexts
+
+plannedTaskAllowedWorkspaceRoots : [Str]
+plannedTaskAllowedWorkspaceRoots =
+  readEnvTextList "CLASP_MANAGER_TASK_ALLOWED_WORKSPACE_ROOTS_JSON" emptyTexts
+
+plannedTaskAllowedReadonlyRoots : [Str]
+plannedTaskAllowedReadonlyRoots =
+  readEnvTextList "CLASP_MANAGER_TASK_ALLOWED_READONLY_ROOTS_JSON" emptyTexts
+
+plannedTaskAllowedNetworkDestinations : [Str]
+plannedTaskAllowedNetworkDestinations =
+  readEnvTextList "CLASP_MANAGER_TASK_ALLOWED_NETWORK_DESTINATIONS_JSON" emptyTexts
+
+plannedTaskNetworkAccess : Str
+plannedTaskNetworkAccess =
+  readEnvText "CLASP_MANAGER_TASK_NETWORK_ACCESS_JSON" (if length plannedTaskAllowedNetworkDestinations > 0 then swarmNetworkAllowlisted else swarmNetworkAmbient)
+
+plannedTaskAccessPolicy : SwarmAccessPolicy
+plannedTaskAccessPolicy =
+  swarmAccessPolicyWithReadonlyRoots plannedTaskAllowedProcesses plannedTaskAllowedWorkspaceRoots plannedTaskAllowedReadonlyRoots plannedTaskNetworkAccess plannedTaskAllowedNetworkDestinations
+
+plannedTaskVerificationPolicy : SwarmVerificationPolicy
+plannedTaskVerificationPolicy =
+  swarmVerificationPolicy plannedTaskMergegateName plannedTaskRequiredApprovals plannedTaskRequiredVerifiers plannedTaskAccessPolicy
+
 childReportSettlePolls : Int
 childReportSettlePolls = readEnvInt "CLASP_MANAGER_CHILD_REPORT_SETTLE_POLLS_JSON" 3
 
@@ -301,6 +386,32 @@ maxConcurrentChildren = match envVar "CLASP_MANAGER_MAX_CONCURRENT_CHILDREN_JSON
   Ok raw -> decode Int raw,
   Err message -> 2
 }
+
+managerResourceGuardEnabled : Bool
+managerResourceGuardEnabled = readEnvBool "CLASP_MANAGER_RESOURCE_GUARD_JSON" true
+
+managerDiskReservePath : Str
+managerDiskReservePath = readEnvText "CLASP_MANAGER_DISK_RESERVE_PATH_JSON" ""
+
+managerMinAvailableDiskMb : Int
+managerMinAvailableDiskMb =
+  readEnvInt
+    "CLASP_MANAGER_MIN_AVAILABLE_DISK_MB_JSON"
+    (readEnvInt "CLASP_VERIFY_MANAGED_MIN_AVAILABLE_DISK_MB" 16384)
+
+managerMinDiskHeadroomMb : Int
+managerMinDiskHeadroomMb =
+  readEnvInt
+    "CLASP_MANAGER_MIN_DISK_HEADROOM_MB_JSON"
+    (readEnvInt
+      "CLASP_VERIFY_MANAGED_MIN_DISK_HEADROOM_MB"
+      (readEnvInt "CLASP_GENERATED_STATE_MIN_HEADROOM_MB" 1024))
+
+managerMinAvailableMemoryMb : Int
+managerMinAvailableMemoryMb =
+  readEnvInt
+    "CLASP_MANAGER_MIN_AVAILABLE_MEMORY_MB_JSON"
+    (readEnvInt "CLASP_VERIFY_MANAGED_MIN_AVAILABLE_MEMORY_MB" 45056)
 
 taskWorkspaceCacheMaxMb : Int
 taskWorkspaceCacheMaxMb = readEnvInt "CLASP_MANAGER_TASK_WORKSPACE_CACHE_MAX_MB_JSON" 4096
@@ -332,8 +443,48 @@ childFocusedVerifyCommands =
 childFullVerifyCommand : Str
 childFullVerifyCommand = readEnvText "CLASP_MANAGER_CHILD_FULL_VERIFY_COMMAND_JSON" "bash scripts/verify-all.sh"
 
+childAffectedVerificationPlanInlineJson : Str
+childAffectedVerificationPlanInlineJson = readEnvText "CLASP_LOOP_AFFECTED_VERIFICATION_PLAN_JSON" ""
+
+childAffectedVerificationPlanPath : Str
+childAffectedVerificationPlanPath = readEnvText "CLASP_LOOP_AFFECTED_VERIFICATION_PLAN_PATH_JSON" ""
+
+childAffectedVerificationPlanJson : Str
+childAffectedVerificationPlanJson =
+  if childAffectedVerificationPlanInlineJson != "" then
+    childAffectedVerificationPlanInlineJson
+  else if childAffectedVerificationPlanPath == "" then
+    ""
+  else
+    match readFile childAffectedVerificationPlanPath {
+      Ok contents -> contents,
+      Err message -> ""
+    }
+
+childAffectedVerificationLaunchPolicyInlineJson : Str
+childAffectedVerificationLaunchPolicyInlineJson = readEnvText "CLASP_LOOP_AFFECTED_VERIFICATION_LAUNCH_POLICY_JSON" ""
+
+childAffectedVerificationLaunchPolicyPath : Str
+childAffectedVerificationLaunchPolicyPath = readEnvText "CLASP_LOOP_AFFECTED_VERIFICATION_LAUNCH_POLICY_PATH_JSON" ""
+
+childAffectedVerificationLaunchPolicyJson : Str
+childAffectedVerificationLaunchPolicyJson =
+  if childAffectedVerificationLaunchPolicyInlineJson != "" then
+    childAffectedVerificationLaunchPolicyInlineJson
+  else if childAffectedVerificationLaunchPolicyPath == "" then
+    ""
+  else
+    match readFile childAffectedVerificationLaunchPolicyPath {
+      Ok contents -> contents,
+      Err message -> ""
+    }
+
 taskFailureLogTailBytes : Int
 taskFailureLogTailBytes = readEnvInt "CLASP_MANAGER_TASK_FAILURE_LOG_TAIL_BYTES_JSON" 12000
+
+taskPromotionDiffMaxBytes : Int
+taskPromotionDiffMaxBytes =
+  readEnvInt "CLASP_MANAGER_TASK_PROMOTION_DIFF_MAX_BYTES_JSON" 262144
 
 retainFailedTaskWorkspaces : Bool
 retainFailedTaskWorkspaces = readEnvBool "CLASP_MANAGER_RETAIN_FAILED_TASK_WORKSPACES_JSON" false

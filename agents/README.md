@@ -39,6 +39,9 @@ bash scripts/clasp-autopilot-stop.sh
 bash scripts/clasp-swarm-start.sh wave1
 bash scripts/clasp-swarm-status.sh wave1
 bash scripts/clasp-swarm-stop.sh wave1
+
+bash scripts/clasp-swarm-start.sh --profile bounded-low-memory --preflight-json wave1
+bash scripts/clasp-swarm-start.sh --profile bounded-low-memory wave1
 ```
 
 By default, `clasp-swarm-start.sh` starts at most one running lane and launches
@@ -49,7 +52,14 @@ the user systemd manager is available it also runs the workload in a
 can still record an exit status after a kernel-enforced memory stop. A lane that
 fans out into multiple large children is stopped before it can exhaust the VM. Use
 `CLASP_SWARM_MAX_RUNNING_LANES`, `CLASP_SWARM_LANE_MEMORY_MB`, and
-`CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB` to tune larger machines deliberately.
+`CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB` to tune larger machines deliberately. Use
+`--profile bounded-low-memory` to preflight or start one managed lane with a
+4 GiB lane memory cap and 32 GiB host-memory reserve on a constrained machine.
+The `clasp-swarm-start.sh --preflight` and `--preflight-json` paths also check
+the launch repository gate, so a dirty worktree or non-main branch is reported
+as a blocked start before any lane is launched. Direct
+`clasp-swarm-preflight.sh` remains available for resource-only checks unless
+`--include-repository-gate` is passed.
 The standalone codex-loop and autopilot launchers use the same managed-job
 memory guard by default.
 Raw agent entrypoints such as `clasp-codex-loop.sh`, `clasp-autopilot.sh`,

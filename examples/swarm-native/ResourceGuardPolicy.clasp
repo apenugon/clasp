@@ -1,0 +1,408 @@
+module ResourceGuardPolicy
+
+record ResourceGuardAdmissionDecision = {
+  admitted : Bool,
+  status : Str,
+  reason : Str,
+  availableMb : Int,
+  requiredMb : Int,
+  headroomMb : Int,
+  childReserveMb : Int,
+  projectedActiveChildren : Int,
+  externalAgentReserveMb : Int,
+  externalAgentCount : Int,
+  externalAgentRssMb : Int,
+  externalAgentReservedMb : Int,
+  blockingMessage : Str,
+  recommendedAction : Str
+}
+
+record ResourceGuardConcurrencyDecision = {
+  status : Str,
+  reason : Str,
+  configuredMaxChildren : Int,
+  capacityLimit : Int,
+  admittedChildCapacity : Int,
+  effectiveMaxChildren : Int,
+  availableMb : Int,
+  requiredMb : Int,
+  headroomMb : Int,
+  childReserveMb : Int,
+  externalAgentReservedMb : Int,
+  recommendedAction : Str
+}
+
+resourceGuardMaxConcurrencyCapacityLimit : Int
+resourceGuardMaxConcurrencyCapacityLimit = 64
+
+resourceGuardConfiguredChildLimit : Int -> Int
+resourceGuardConfiguredChildLimit configuredMaxChildren =
+  if configuredMaxChildren < 1 then
+    1
+  else if configuredMaxChildren > resourceGuardMaxConcurrencyCapacityLimit then
+    resourceGuardMaxConcurrencyCapacityLimit
+  else
+    configuredMaxChildren
+
+resourceGuardMemoryChildCapacityStep : Int -> Int -> Int -> Int -> Int
+resourceGuardMemoryChildCapacityStep childReserveMb remainingMb capacity limit =
+  if capacity >= limit then
+    capacity
+  else if childReserveMb < 1 then
+    limit
+  else if remainingMb < childReserveMb then
+    capacity
+  else
+    resourceGuardMemoryChildCapacityStep
+      childReserveMb
+      (intSubtract remainingMb childReserveMb)
+      (intAdd capacity 1)
+      limit
+
+resourceGuardMemoryAdmittedChildCapacityWithExternalStats : Int -> Int -> Int -> Int -> Int -> Int -> Int -> Int
+resourceGuardMemoryAdmittedChildCapacityWithExternalStats minAvailableMb childReserveMb configuredMaxChildren externalAgentReserveMb externalAgentCount externalAgentRssMb availableMb = {
+  let limit = resourceGuardConfiguredChildLimit configuredMaxChildren;
+  let externalReservedMb = resourceGuardExternalAgentReservedMemoryMb externalAgentReserveMb externalAgentCount externalAgentRssMb;
+  let remainingMb = intSubtract (intSubtract availableMb minAvailableMb) externalReservedMb;
+  if minAvailableMb > 0 && availableMb < minAvailableMb then
+    0
+  else if remainingMb < 0 then
+    0
+  else
+    resourceGuardMemoryChildCapacityStep childReserveMb remainingMb 0 limit
+}
+
+resourceGuardMemoryConcurrencyReason : Int -> Int -> Str
+resourceGuardMemoryConcurrencyReason configuredMaxChildren admittedChildCapacity = {
+  let limit = resourceGuardConfiguredChildLimit configuredMaxChildren;
+  if admittedChildCapacity >= limit then
+    "configured-concurrency-admitted"
+  else if admittedChildCapacity < 1 then
+    "no-child-memory-capacity"
+  else
+    "configured-concurrency-exceeds-memory-capacity"
+}
+
+resourceGuardMemoryConcurrencyStatus : Int -> Int -> Str
+resourceGuardMemoryConcurrencyStatus configuredMaxChildren admittedChildCapacity = {
+  let reason = resourceGuardMemoryConcurrencyReason configuredMaxChildren admittedChildCapacity;
+  if reason == "configured-concurrency-admitted" then
+    "admitted"
+  else if reason == "no-child-memory-capacity" then
+    "blocked"
+  else
+    "reduced"
+}
+
+resourceGuardMemoryConcurrencyRecommendedAction : Str -> Str
+resourceGuardMemoryConcurrencyRecommendedAction reason =
+  if reason == "configured-concurrency-admitted" then
+    "launch-managed-job"
+  else if reason == "configured-concurrency-exceeds-memory-capacity" then
+    "lower-concurrency-to-admitted-child-capacity"
+  else if reason == "no-child-memory-capacity" then
+    "wait-for-memory-or-lower-concurrency-before-launch"
+  else
+    "inspect-memory-concurrency-admission"
+
+resourceGuardMemoryConcurrencyDecisionWithExternalStats : Int -> Int -> Int -> Int -> Int -> Int -> Int -> ResourceGuardConcurrencyDecision
+resourceGuardMemoryConcurrencyDecisionWithExternalStats minAvailableMb childReserveMb configuredMaxChildren externalAgentReserveMb externalAgentCount externalAgentRssMb availableMb = {
+  let limit = resourceGuardConfiguredChildLimit configuredMaxChildren;
+  let capacity =
+    resourceGuardMemoryAdmittedChildCapacityWithExternalStats
+      minAvailableMb
+      childReserveMb
+      configuredMaxChildren
+      externalAgentReserveMb
+      externalAgentCount
+      externalAgentRssMb
+      availableMb;
+  let reason = resourceGuardMemoryConcurrencyReason configuredMaxChildren capacity;
+  ResourceGuardConcurrencyDecision {
+    status = resourceGuardMemoryConcurrencyStatus configuredMaxChildren capacity,
+    reason = reason,
+    configuredMaxChildren = configuredMaxChildren,
+    capacityLimit = limit,
+    admittedChildCapacity = capacity,
+    effectiveMaxChildren = capacity,
+    availableMb = availableMb,
+    requiredMb =
+      resourceGuardMemoryProjectedLaunchRequiredWithExternalStatsMb
+        minAvailableMb
+        childReserveMb
+        limit
+        externalAgentReserveMb
+        externalAgentCount
+        externalAgentRssMb,
+    headroomMb = resourceGuardMemoryHeadroomMb minAvailableMb availableMb,
+    childReserveMb = childReserveMb,
+    externalAgentReservedMb = resourceGuardExternalAgentReservedMemoryMb externalAgentReserveMb externalAgentCount externalAgentRssMb,
+    recommendedAction = resourceGuardMemoryConcurrencyRecommendedAction reason
+  }
+}
+
+resourceGuardMemoryLaunchRequiredMb : Int -> Int -> Int
+resourceGuardMemoryLaunchRequiredMb minAvailableMb childReserveMb =
+  if childReserveMb < 1 then
+    minAvailableMb
+  else
+    intAdd minAvailableMb childReserveMb
+
+resourceGuardProjectedChildCount : Int -> Int
+resourceGuardProjectedChildCount projectedActiveChildren =
+  if projectedActiveChildren < 1 then
+    1
+  else
+    projectedActiveChildren
+
+resourceGuardRepeatChildReserveMb : Int -> Int -> Int
+resourceGuardRepeatChildReserveMb childReserveMb projectedActiveChildren =
+  if projectedActiveChildren < 1 then
+    0
+  else
+    intAdd childReserveMb (resourceGuardRepeatChildReserveMb childReserveMb (intSubtract projectedActiveChildren 1))
+
+resourceGuardMemoryProjectedLaunchRequiredMb : Int -> Int -> Int -> Int
+resourceGuardMemoryProjectedLaunchRequiredMb minAvailableMb childReserveMb projectedActiveChildren =
+  if childReserveMb < 1 then
+    minAvailableMb
+  else
+    intAdd minAvailableMb (resourceGuardRepeatChildReserveMb childReserveMb (resourceGuardProjectedChildCount projectedActiveChildren))
+
+resourceGuardExternalAgentReserveMb : Int -> Int -> Int
+resourceGuardExternalAgentReserveMb externalAgentReserveMb externalAgentCount =
+  if externalAgentReserveMb < 1 then
+    0
+  else if externalAgentCount < 1 then
+    0
+  else
+    intAdd externalAgentReserveMb (resourceGuardExternalAgentReserveMb externalAgentReserveMb (intSubtract externalAgentCount 1))
+
+resourceGuardExternalAgentReservedMemoryMb : Int -> Int -> Int -> Int
+resourceGuardExternalAgentReservedMemoryMb externalAgentReserveMb externalAgentCount externalAgentRssMb =
+  if externalAgentReserveMb < 1 then
+    0
+  else if externalAgentCount < 1 then
+    0
+  else if externalAgentRssMb < 1 then
+    resourceGuardExternalAgentReserveMb externalAgentReserveMb externalAgentCount
+  else
+    intAdd externalAgentRssMb (resourceGuardExternalAgentReserveMb externalAgentReserveMb externalAgentCount)
+
+resourceGuardMemoryProjectedLaunchRequiredWithExternalMb : Int -> Int -> Int -> Int -> Int -> Int
+resourceGuardMemoryProjectedLaunchRequiredWithExternalMb minAvailableMb childReserveMb projectedActiveChildren externalAgentReserveMb externalAgentCount =
+  intAdd
+    (resourceGuardMemoryProjectedLaunchRequiredMb minAvailableMb childReserveMb projectedActiveChildren)
+    (resourceGuardExternalAgentReserveMb externalAgentReserveMb externalAgentCount)
+
+resourceGuardMemoryProjectedLaunchRequiredWithExternalStatsMb : Int -> Int -> Int -> Int -> Int -> Int -> Int
+resourceGuardMemoryProjectedLaunchRequiredWithExternalStatsMb minAvailableMb childReserveMb projectedActiveChildren externalAgentReserveMb externalAgentCount externalAgentRssMb =
+  intAdd
+    (resourceGuardMemoryProjectedLaunchRequiredMb minAvailableMb childReserveMb projectedActiveChildren)
+    (resourceGuardExternalAgentReservedMemoryMb externalAgentReserveMb externalAgentCount externalAgentRssMb)
+
+resourceGuardMemoryHeadroomMb : Int -> Int -> Int
+resourceGuardMemoryHeadroomMb minAvailableMb availableMb =
+  intSubtract availableMb minAvailableMb
+
+resourceGuardMemoryReserveMet : Int -> Int -> Bool
+resourceGuardMemoryReserveMet minAvailableMb availableMb =
+  if minAvailableMb < 1 then
+    true
+  else
+    availableMb >= minAvailableMb
+
+resourceGuardMemoryLaunchReserveMet : Int -> Int -> Int -> Bool
+resourceGuardMemoryLaunchReserveMet minAvailableMb childReserveMb availableMb =
+  if childReserveMb < 1 then
+    true
+  else
+    availableMb >= resourceGuardMemoryLaunchRequiredMb minAvailableMb childReserveMb
+
+resourceGuardMemoryReserveBlockMessage : Int -> Int -> Str
+resourceGuardMemoryReserveBlockMessage minAvailableMb availableMb =
+  textConcat [
+    "manager resource guard blocked child launch: memory reserve unmet: availableMb=",
+    encode availableMb,
+    ":requiredMb=",
+    encode minAvailableMb
+  ]
+
+resourceGuardChildMemoryReserveBlockMessage : Int -> Int -> Int -> Str
+resourceGuardChildMemoryReserveBlockMessage minAvailableMb childReserveMb availableMb =
+  textConcat [
+    "manager resource guard blocked child launch: memory child reserve unmet: availableMb=",
+    encode availableMb,
+    ":requiredMb=",
+    encode minAvailableMb,
+    ":childReserveMb=",
+    encode childReserveMb,
+    ":launchRequiredMb=",
+    encode (resourceGuardMemoryLaunchRequiredMb minAvailableMb childReserveMb),
+    ":launchHeadroomMb=",
+    encode (resourceGuardMemoryHeadroomMb minAvailableMb availableMb)
+  ]
+
+resourceGuardProjectedChildMemoryReserveBlockMessage : Int -> Int -> Int -> Int -> Str
+resourceGuardProjectedChildMemoryReserveBlockMessage minAvailableMb childReserveMb projectedActiveChildren availableMb =
+  textConcat [
+    "manager resource guard blocked child launch: memory projected child reserve unmet: availableMb=",
+    encode availableMb,
+    ":requiredMb=",
+    encode minAvailableMb,
+    ":childReserveMb=",
+    encode childReserveMb,
+    ":projectedActiveChildren=",
+    encode (resourceGuardProjectedChildCount projectedActiveChildren),
+    ":launchRequiredMb=",
+    encode (resourceGuardMemoryProjectedLaunchRequiredMb minAvailableMb childReserveMb projectedActiveChildren),
+    ":launchHeadroomMb=",
+    encode (resourceGuardMemoryHeadroomMb minAvailableMb availableMb)
+  ]
+
+resourceGuardExternalAgentMemoryReserveBlockMessage : Int -> Int -> Int -> Int -> Int -> Int -> Str
+resourceGuardExternalAgentMemoryReserveBlockMessage minAvailableMb childReserveMb projectedActiveChildren externalAgentReserveMb externalAgentCount availableMb =
+  textConcat [
+    "manager resource guard blocked child launch: memory external agent reserve unmet: availableMb=",
+    encode availableMb,
+    ":requiredMb=",
+    encode minAvailableMb,
+    ":childReserveMb=",
+    encode childReserveMb,
+    ":projectedActiveChildren=",
+    encode (resourceGuardProjectedChildCount projectedActiveChildren),
+    ":externalAgentReserveMb=",
+    encode externalAgentReserveMb,
+    ":externalAgentCount=",
+    encode externalAgentCount,
+    ":externalAgentReservedMb=",
+    encode (resourceGuardExternalAgentReserveMb externalAgentReserveMb externalAgentCount),
+    ":launchRequiredMb=",
+    encode (resourceGuardMemoryProjectedLaunchRequiredWithExternalMb minAvailableMb childReserveMb projectedActiveChildren externalAgentReserveMb externalAgentCount),
+    ":launchHeadroomMb=",
+    encode (resourceGuardMemoryHeadroomMb minAvailableMb availableMb)
+  ]
+
+resourceGuardExternalAgentMemoryStatsReserveBlockMessage : Int -> Int -> Int -> Int -> Int -> Int -> Int -> Str
+resourceGuardExternalAgentMemoryStatsReserveBlockMessage minAvailableMb childReserveMb projectedActiveChildren externalAgentReserveMb externalAgentCount externalAgentRssMb availableMb =
+  textConcat [
+    "manager resource guard blocked child launch: memory external agent reserve unmet: availableMb=",
+    encode availableMb,
+    ":requiredMb=",
+    encode minAvailableMb,
+    ":childReserveMb=",
+    encode childReserveMb,
+    ":projectedActiveChildren=",
+    encode (resourceGuardProjectedChildCount projectedActiveChildren),
+    ":externalAgentReserveMb=",
+    encode externalAgentReserveMb,
+    ":externalAgentCount=",
+    encode externalAgentCount,
+    ":externalAgentRssMb=",
+    encode externalAgentRssMb,
+    ":externalAgentReservedMb=",
+    encode (resourceGuardExternalAgentReservedMemoryMb externalAgentReserveMb externalAgentCount externalAgentRssMb),
+    ":launchRequiredMb=",
+    encode (resourceGuardMemoryProjectedLaunchRequiredWithExternalStatsMb minAvailableMb childReserveMb projectedActiveChildren externalAgentReserveMb externalAgentCount externalAgentRssMb),
+    ":launchHeadroomMb=",
+    encode (resourceGuardMemoryHeadroomMb minAvailableMb availableMb)
+  ]
+
+resourceGuardMemoryLaunchErrorFromAvailable : Int -> Int -> Int -> Str
+resourceGuardMemoryLaunchErrorFromAvailable minAvailableMb childReserveMb availableMb =
+  if minAvailableMb > 0 && availableMb < minAvailableMb then
+    resourceGuardMemoryReserveBlockMessage minAvailableMb availableMb
+  else if childReserveMb > 0 && availableMb < resourceGuardMemoryLaunchRequiredMb minAvailableMb childReserveMb then
+    resourceGuardChildMemoryReserveBlockMessage minAvailableMb childReserveMb availableMb
+  else
+    ""
+
+resourceGuardMemoryProjectedLaunchReserveMet : Int -> Int -> Int -> Int -> Bool
+resourceGuardMemoryProjectedLaunchReserveMet minAvailableMb childReserveMb projectedActiveChildren availableMb =
+  if childReserveMb < 1 then
+    true
+  else
+    availableMb >= resourceGuardMemoryProjectedLaunchRequiredMb minAvailableMb childReserveMb projectedActiveChildren
+
+resourceGuardMemoryProjectedLaunchErrorFromAvailable : Int -> Int -> Int -> Int -> Str
+resourceGuardMemoryProjectedLaunchErrorFromAvailable minAvailableMb childReserveMb projectedActiveChildren availableMb =
+  if minAvailableMb > 0 && availableMb < minAvailableMb then
+    resourceGuardMemoryReserveBlockMessage minAvailableMb availableMb
+  else if childReserveMb > 0 && availableMb < resourceGuardMemoryProjectedLaunchRequiredMb minAvailableMb childReserveMb projectedActiveChildren then
+    resourceGuardProjectedChildMemoryReserveBlockMessage minAvailableMb childReserveMb projectedActiveChildren availableMb
+  else
+    ""
+
+resourceGuardMemoryProjectedLaunchErrorWithExternalFromAvailable : Int -> Int -> Int -> Int -> Int -> Int -> Str
+resourceGuardMemoryProjectedLaunchErrorWithExternalFromAvailable minAvailableMb childReserveMb projectedActiveChildren externalAgentReserveMb externalAgentCount availableMb =
+  if minAvailableMb > 0 && availableMb < minAvailableMb then
+    resourceGuardMemoryReserveBlockMessage minAvailableMb availableMb
+  else if childReserveMb > 0 && availableMb < resourceGuardMemoryProjectedLaunchRequiredMb minAvailableMb childReserveMb projectedActiveChildren then
+    resourceGuardProjectedChildMemoryReserveBlockMessage minAvailableMb childReserveMb projectedActiveChildren availableMb
+  else if externalAgentReserveMb > 0 && availableMb < resourceGuardMemoryProjectedLaunchRequiredWithExternalMb minAvailableMb childReserveMb projectedActiveChildren externalAgentReserveMb externalAgentCount then
+    resourceGuardExternalAgentMemoryReserveBlockMessage minAvailableMb childReserveMb projectedActiveChildren externalAgentReserveMb externalAgentCount availableMb
+  else
+    ""
+
+resourceGuardMemoryProjectedLaunchErrorWithExternalStatsFromAvailable : Int -> Int -> Int -> Int -> Int -> Int -> Int -> Str
+resourceGuardMemoryProjectedLaunchErrorWithExternalStatsFromAvailable minAvailableMb childReserveMb projectedActiveChildren externalAgentReserveMb externalAgentCount externalAgentRssMb availableMb =
+  if minAvailableMb > 0 && availableMb < minAvailableMb then
+    resourceGuardMemoryReserveBlockMessage minAvailableMb availableMb
+  else if childReserveMb > 0 && availableMb < resourceGuardMemoryProjectedLaunchRequiredMb minAvailableMb childReserveMb projectedActiveChildren then
+    resourceGuardProjectedChildMemoryReserveBlockMessage minAvailableMb childReserveMb projectedActiveChildren availableMb
+  else if externalAgentReserveMb > 0 && availableMb < resourceGuardMemoryProjectedLaunchRequiredWithExternalStatsMb minAvailableMb childReserveMb projectedActiveChildren externalAgentReserveMb externalAgentCount externalAgentRssMb then
+    resourceGuardExternalAgentMemoryStatsReserveBlockMessage minAvailableMb childReserveMb projectedActiveChildren externalAgentReserveMb externalAgentCount externalAgentRssMb availableMb
+  else
+    ""
+
+resourceGuardAdmissionReason : Int -> Int -> Int -> Int -> Int -> Int -> Int -> Str
+resourceGuardAdmissionReason minAvailableMb childReserveMb projectedActiveChildren externalAgentReserveMb externalAgentCount externalAgentRssMb availableMb =
+  if minAvailableMb > 0 && availableMb < minAvailableMb then
+    "host-memory-reserve"
+  else if childReserveMb > 0 && availableMb < resourceGuardMemoryProjectedLaunchRequiredMb minAvailableMb childReserveMb projectedActiveChildren then
+    "projected-child-memory-reserve"
+  else if externalAgentReserveMb > 0 && availableMb < resourceGuardMemoryProjectedLaunchRequiredWithExternalStatsMb minAvailableMb childReserveMb projectedActiveChildren externalAgentReserveMb externalAgentCount externalAgentRssMb then
+    "external-agent-memory-reserve"
+  else
+    "admitted"
+
+resourceGuardAdmissionRecommendedAction : Str -> Str
+resourceGuardAdmissionRecommendedAction reason =
+  if reason == "admitted" then
+    "launch-managed-job"
+  else if reason == "host-memory-reserve" then
+    "wait-for-memory-or-stop-only-managed-jobs-by-metadata"
+  else if reason == "projected-child-memory-reserve" then
+    "lower-concurrency-or-child-memory-budget"
+  else if reason == "external-agent-memory-reserve" then
+    "wait-for-external-agent-pressure-or-lower-concurrency"
+  else
+    "reduce-memory-pressure-without-killing-unrelated-processes"
+
+resourceGuardMemoryAdmissionDecisionWithExternalStats : Int -> Int -> Int -> Int -> Int -> Int -> Int -> ResourceGuardAdmissionDecision
+resourceGuardMemoryAdmissionDecisionWithExternalStats minAvailableMb childReserveMb projectedActiveChildren externalAgentReserveMb externalAgentCount externalAgentRssMb availableMb = {
+  let projectedCount = resourceGuardProjectedChildCount projectedActiveChildren;
+  let requiredMb = resourceGuardMemoryProjectedLaunchRequiredWithExternalStatsMb minAvailableMb childReserveMb projectedCount externalAgentReserveMb externalAgentCount externalAgentRssMb;
+  let blockMessage = resourceGuardMemoryProjectedLaunchErrorWithExternalStatsFromAvailable minAvailableMb childReserveMb projectedCount externalAgentReserveMb externalAgentCount externalAgentRssMb availableMb;
+  let reason =
+    if blockMessage == "" then
+      "admitted"
+    else
+      resourceGuardAdmissionReason minAvailableMb childReserveMb projectedCount externalAgentReserveMb externalAgentCount externalAgentRssMb availableMb;
+  ResourceGuardAdmissionDecision {
+    admitted = blockMessage == "",
+    status = if blockMessage == "" then "admitted" else "blocked",
+    reason = reason,
+    availableMb = availableMb,
+    requiredMb = requiredMb,
+    headroomMb = resourceGuardMemoryHeadroomMb minAvailableMb availableMb,
+    childReserveMb = childReserveMb,
+    projectedActiveChildren = projectedCount,
+    externalAgentReserveMb = externalAgentReserveMb,
+    externalAgentCount = externalAgentCount,
+    externalAgentRssMb = externalAgentRssMb,
+    externalAgentReservedMb = resourceGuardExternalAgentReservedMemoryMb externalAgentReserveMb externalAgentCount externalAgentRssMb,
+    blockingMessage = blockMessage,
+    recommendedAction = resourceGuardAdmissionRecommendedAction reason
+  }
+}

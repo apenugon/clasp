@@ -1,0 +1,140 @@
+module Compiler.Emit.Native.Expr
+
+import Compiler.Emit.Native.Core
+import Compiler.Emit.Native.ExprText
+import Compiler.Lower
+
+emitNativeExprs : [LowerExprText] -> [Str]
+emitNativeExprs exprs = {
+  let mut rendered = emptyRenderedTexts;
+  for expr in exprs {
+    rendered = appendNativeRenderedText rendered (emitNativeExpr expr);
+    rendered
+  };
+  rendered
+}
+
+emitNativeRecordFields : [LowerRecordFieldText] -> [Str]
+emitNativeRecordFields fields = {
+  let mut rendered = emptyRenderedTexts;
+  for field in fields {
+    rendered = appendNativeRenderedText rendered (emitNativeRecordField field);
+    rendered
+  };
+  rendered
+}
+
+emitNativeRecordField : LowerRecordFieldText -> Str
+emitNativeRecordField field = match field {
+  LowerRecordFieldText name value ->
+    nativeRecordFieldText name (emitNativeExpr value)
+}
+
+emitNativeMatchBranch : LowerMatchBranchText -> Str
+emitNativeMatchBranch branch = match branch {
+  LowerMatchBranchText constructorName binders body ->
+    nativeMatchBranchText constructorName binders (emitNativeExpr body)
+}
+
+emitNativeMatchBranches : [LowerMatchBranchText] -> [Str]
+emitNativeMatchBranches branches = {
+  let mut rendered = emptyRenderedTexts;
+  for branch in branches {
+    rendered = appendNativeRenderedText rendered (emitNativeMatchBranch branch);
+    rendered
+  };
+  rendered
+}
+
+emitNativeExpr : LowerExprText -> Str
+emitNativeExpr expr = match expr {
+  LowerName name ->
+    nativeExprNameText name,
+  LowerLiteral value ->
+    nativeExprStringText value,
+  LowerInt value ->
+    nativeExprIntText value,
+  LowerBool value ->
+    nativeExprBoolText value,
+  LowerArray values ->
+    nativeExprListText (emitNativeExprs values),
+  LowerListAppend left right ->
+    nativeExprBinaryIntrinsicText "list.append" (emitNativeExpr left) (emitNativeExpr right),
+  LowerListPrepend value values ->
+    nativeExprBinaryIntrinsicText "list.prepend" (emitNativeExpr value) (emitNativeExpr values),
+  LowerListReverse values ->
+    nativeExprUnaryIntrinsicText "list.reverse" (emitNativeExpr values),
+  LowerLength value ->
+    nativeExprUnaryIntrinsicText "length" (emitNativeExpr value),
+  LowerListMap callee values ->
+    nativeExprCalleeIntrinsicText "list.map" callee (emitNativeExpr values),
+  LowerListFilter callee values ->
+    nativeExprCalleeIntrinsicText "list.filter" callee (emitNativeExpr values),
+  LowerListFind callee values ->
+    nativeExprCalleeIntrinsicText "list.find" callee (emitNativeExpr values),
+  LowerListAny callee values ->
+    nativeExprCalleeIntrinsicText "list.any" callee (emitNativeExpr values),
+  LowerListAll callee values ->
+    nativeExprCalleeIntrinsicText "list.all" callee (emitNativeExpr values),
+  LowerListFold callee initial values ->
+    nativeExprFoldIntrinsicText callee (emitNativeExpr initial) (emitNativeExpr values),
+  LowerViewAppend left right ->
+    nativeExprBinaryIntrinsicText "view.append" (emitNativeExpr left) (emitNativeExpr right),
+  LowerEncode value ->
+    nativeExprUnaryIntrinsicText "encode" (emitNativeExpr value),
+  LowerDecode targetType value ->
+    nativeExprDecodeIntrinsicText "decode" targetType (emitNativeExpr value),
+  LowerTryDecode targetType value ->
+    nativeExprDecodeIntrinsicText "tryDecode" targetType (emitNativeExpr value),
+  LowerIf condition thenBranch elseBranch ->
+    nativeExprIfText (emitNativeExpr condition) (emitNativeExpr thenBranch) (emitNativeExpr elseBranch),
+  LowerEqual left right ->
+    nativeExprCompareText "eq" (emitNativeExpr left) (emitNativeExpr right),
+  LowerNotEqual left right ->
+    nativeExprCompareText "ne" (emitNativeExpr left) (emitNativeExpr right),
+  LowerLessThan left right ->
+    nativeExprCompareText "lt" (emitNativeExpr left) (emitNativeExpr right),
+  LowerLessThanOrEqual left right ->
+    nativeExprCompareText "le" (emitNativeExpr left) (emitNativeExpr right),
+  LowerGreaterThan left right ->
+    nativeExprCompareText "gt" (emitNativeExpr left) (emitNativeExpr right),
+  LowerGreaterThanOrEqual left right ->
+    nativeExprCompareText "ge" (emitNativeExpr left) (emitNativeExpr right),
+  LowerInvoke callee args ->
+    nativeExprCallText callee (emitNativeExprs args),
+  LowerConstructor constructorName args ->
+    nativeExprCallText constructorName (emitNativeExprs args),
+  LowerMatch subject branches ->
+    nativeExprMatchText (emitNativeExpr subject) (emitNativeMatchBranches branches),
+  LowerRecord recordName fields ->
+    nativeExprRecordText recordName (emitNativeRecordFields fields),
+  LowerFieldAccess recordName subject fieldName ->
+    nativeExprFieldAccessText recordName (emitNativeExpr subject) fieldName,
+  LowerLet binder value body ->
+    nativeExprLetText "immutable" binder (emitNativeExpr value) (emitNativeExpr body),
+  LowerMutableLet binder value body ->
+    nativeExprLetText "mutable" binder (emitNativeExpr value) (emitNativeExpr body),
+  LowerAssign binder value body ->
+    nativeExprAssignText binder (emitNativeExpr value) (emitNativeExpr body),
+  LowerFor binder iterable loopBody body ->
+    nativeExprForText binder (emitNativeExpr iterable) (emitNativeExpr loopBody) (emitNativeExpr body),
+  LowerReturn value ->
+    nativeExprReturnText (emitNativeExpr value)
+}
+
+emitNativeDecl : LowerDeclText -> Str
+emitNativeDecl decl = match decl {
+  LowerConst name body ->
+    nativeConstDeclText name (emitNativeExpr body),
+  LowerFn name params body ->
+    nativeFnDeclText name params (emitNativeExpr body)
+}
+
+collectLowerDeclNames : [LowerDeclText] -> [Str]
+collectLowerDeclNames decls = {
+  let mut names = emptyRenderedTexts;
+  for decl in decls {
+    names = append names [nativeDeclName decl];
+    names
+  };
+  names

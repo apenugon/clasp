@@ -2,6 +2,8 @@ module Compiler.Emit.NativeMetadata
 
 import Compiler.Ast
 import Compiler.Checker
+import Compiler.Checker.TypeOps
+import Compiler.Checker.Types
 import Compiler.Emit.NativeDecls
 import Compiler.Emit.NativeJson
 import Compiler.Emit.NativeSurface

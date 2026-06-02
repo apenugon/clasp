@@ -1,0 +1,288 @@
+module Main
+
+foreign swarmObjectiveCreateRaw : Str -> Str -> Str -> Int -> Int -> Result Str = "swarmObjectiveCreateJson"
+foreign swarmTaskCreateRaw : Str -> Str -> Str -> Str -> [Str] -> Int -> Int -> Result Str = "swarmTaskCreateJson"
+foreign swarmPolicySetWithFilesystemAccessRaw : Str -> Str -> Str -> [Str] -> [Str] -> [Str] -> [Str] -> [Str] -> Str -> [Str] -> Result Str = "swarmPolicySetWithFilesystemAccessJson"
+foreign swarmLeaseRaw : Str -> Str -> Str -> Result Str = "swarmLeaseJson"
+foreign swarmToolRunWithLimitsRaw : Str -> Str -> Str -> Str -> Int -> Int -> [Str] -> Result Str = "swarmToolRunWithLimitsJson"
+foreign swarmTailRaw : Str -> Str -> Int -> Result Str = "swarmTailJson"
+foreign envVarRaw : Str -> Result Str = "envVar"
+
+record SwarmRoot = { path : Str }
+record ObjectiveHandle = { root : SwarmRoot, objectiveId : Str }
+record TaskHandle = { root : SwarmRoot, taskId : Str, actor : Str }
+record SwarmObjective = { objectiveId : Str }
+record SwarmTask = { taskId : Str, status : Str }
+record SwarmTaskUpdate = { task : SwarmTask }
+
+record SwarmPolicy = {
+  taskId : Str,
+  mergegateName : Str,
+  requiredApprovals : [Str],
+  allowedProcesses : [Str],
+  allowedWorkspaceRoots : [Str],
+  allowedReadonlyRoots : [Str]
+}
+
+record SwarmRun = {
+  exitCode : Int,
+  status : Str
+}
+
+record SwarmEvent = {
+  kind : Str
+}
+
+record FilesystemKernelPolicyReport = {
+  taskId : Str,
+  allowedProcesses : [Str],
+  allowedWorkspaceRoots : [Str],
+  allowedReadonlyRoots : [Str],
+  kernelOutsideWriteBlocked : Bool,
+  kernelOutsideWritePrevented : Bool,
+  kernelInsideWritePassed : Bool,
+  kernelInsideWriteCreated : Bool,
+  dynamicOutsideWriteBlocked : Bool,
+  dynamicOutsideWritePrevented : Bool,
+  dynamicInsideWritePassed : Bool,
+  dynamicInsideWriteCreated : Bool,
+  filesystemMediationStarted : Bool,
+  eventKinds : [Str]
+}
+
+swarmRoot : Str -> SwarmRoot
+swarmRoot path = SwarmRoot { path = path }
+
+objectiveHandle : SwarmRoot -> Str -> ObjectiveHandle
+objectiveHandle root objectiveId = ObjectiveHandle { root = root, objectiveId = objectiveId }
+
+taskHandle : SwarmRoot -> Str -> Str -> TaskHandle
+taskHandle root taskId actor = TaskHandle { root = root, taskId = taskId, actor = actor }
+
+objectiveResult : Result Str -> Result SwarmObjective
+objectiveResult value = match value {
+  Ok raw -> Ok (decode SwarmObjective raw),
+  Err message -> Err message
+}
+
+taskResult : Result Str -> Result SwarmTask
+taskResult value = match value {
+  Ok raw -> Ok (decode SwarmTask raw),
+  Err message -> Err message
+}
+
+taskUpdateResult : Result Str -> Result SwarmTaskUpdate
+taskUpdateResult value = match value {
+  Ok raw -> Ok (decode SwarmTaskUpdate raw),
+  Err message -> Err message
+}
+
+policyResult : Result Str -> Result SwarmPolicy
+policyResult value = match value {
+  Ok raw -> Ok (decode SwarmPolicy raw),
+  Err message -> Err message
+}
+
+runResult : Result Str -> Result SwarmRun
+runResult value = match value {
+  Ok raw -> Ok (decode SwarmRun raw),
+  Err message -> Err message
+}
+
+eventListResult : Result Str -> Result [SwarmEvent]
+eventListResult value = match value {
+  Ok raw -> Ok (decode [SwarmEvent] raw),
+  Err message -> Err message
+}
+
+objectiveCreate : SwarmRoot -> Str -> Str -> Int -> Int -> Result SwarmObjective
+objectiveCreate root objectiveId detail maxTasks maxRuns =
+  objectiveResult (swarmObjectiveCreateRaw root.path objectiveId detail maxTasks maxRuns)
+
+taskCreate : ObjectiveHandle -> Str -> Str -> [Str] -> Int -> Int -> Result SwarmTask
+taskCreate handle taskId detail dependencies maxRuns leaseTimeoutMs =
+  taskResult (swarmTaskCreateRaw handle.root.path handle.objectiveId taskId detail dependencies maxRuns leaseTimeoutMs)
+
+policySet : TaskHandle -> Result SwarmPolicy
+policySet handle =
+  policyResult (swarmPolicySetWithFilesystemAccessRaw handle.root.path handle.taskId "filesystem-kernel-policy" [] [] ["direct-syscall-outside-client", "direct-syscall-inside-client", "dynamic-syscall-outside-client", "dynamic-syscall-inside-client"] [workspaceRoot] readonlyRoots "ambient" [])
+
+lease : TaskHandle -> Result SwarmTaskUpdate
+lease handle =
+  taskUpdateResult (swarmLeaseRaw handle.root.path handle.taskId handle.actor)
+
+toolRunOutside : TaskHandle -> Result SwarmRun
+toolRunOutside handle =
+  runResult (swarmToolRunWithLimitsRaw handle.root.path handle.taskId handle.actor workspaceRoot 5000 256 [directSyscallOutsideClientPath])
+
+toolRunInside : TaskHandle -> Result SwarmRun
+toolRunInside handle =
+  runResult (swarmToolRunWithLimitsRaw handle.root.path handle.taskId handle.actor workspaceRoot 5000 256 [directSyscallInsideClientPath])
+
+toolRunDynamicOutside : TaskHandle -> Result SwarmRun
+toolRunDynamicOutside handle =
+  runResult (swarmToolRunWithLimitsRaw handle.root.path handle.taskId handle.actor workspaceRoot 5000 256 [dynamicSyscallOutsideClientPath])
+
+toolRunDynamicInside : TaskHandle -> Result SwarmRun
+toolRunDynamicInside handle =
+  runResult (swarmToolRunWithLimitsRaw handle.root.path handle.taskId handle.actor workspaceRoot 5000 256 [dynamicSyscallInsideClientPath])
+
+tail : TaskHandle -> Result [SwarmEvent]
+tail handle =
+  eventListResult (swarmTailRaw handle.root.path handle.taskId 12)
+
+stateRootPath : Str
+stateRootPath =
+  if textJoin "" argv == "" then
+    "swarm-filesystem-kernel-policy-state"
+  else
+    pathJoin argv
+
+workspaceRoot : Str
+workspaceRoot = pathJoin [stateRootPath, "workspace"]
+
+outsideWorkspaceRoot : Str
+outsideWorkspaceRoot = pathJoin [stateRootPath, "outside-workspace"]
+
+directSyscallOutsideClientPath : Str
+directSyscallOutsideClientPath = pathJoin [workspaceRoot, "direct-syscall-outside-client"]
+
+directSyscallInsideClientPath : Str
+directSyscallInsideClientPath = pathJoin [workspaceRoot, "direct-syscall-inside-client"]
+
+dynamicSyscallOutsideClientPath : Str
+dynamicSyscallOutsideClientPath = pathJoin [workspaceRoot, "dynamic-syscall-outside-client"]
+
+dynamicSyscallInsideClientPath : Str
+dynamicSyscallInsideClientPath = pathJoin [workspaceRoot, "dynamic-syscall-inside-client"]
+
+directSyscallOutsideTargetPath : Str
+directSyscallOutsideTargetPath = pathJoin [outsideWorkspaceRoot, "direct-syscall-outside-target.txt"]
+
+directSyscallInsideTargetPath : Str
+directSyscallInsideTargetPath = pathJoin [workspaceRoot, "direct-syscall-inside-target.txt"]
+
+dynamicSyscallOutsideTargetPath : Str
+dynamicSyscallOutsideTargetPath = pathJoin [outsideWorkspaceRoot, "dynamic-syscall-outside-target.txt"]
+
+dynamicSyscallInsideTargetPath : Str
+dynamicSyscallInsideTargetPath = pathJoin [workspaceRoot, "dynamic-syscall-inside-target.txt"]
+
+readonlyRoots : [Str]
+readonlyRoots = match envVarRaw "CLASP_TEST_FILESYSTEM_READONLY_ROOTS_JSON" {
+  Ok raw -> if raw == "" then [] else decode [Str] raw,
+  Err message -> []
+}
+
+root : SwarmRoot
+root = swarmRoot stateRootPath
+
+objectiveId : Str
+objectiveId = "filesystem-kernel-policy-objective"
+
+taskId : Str
+taskId = "filesystem-kernel-policy-task"
+
+actorName : Str
+actorName = "filesystem-kernel-policy-harness"
+
+objective : ObjectiveHandle
+objective = objectiveHandle root objectiveId
+
+task : TaskHandle
+task = taskHandle root taskId actorName
+
+runFailed : Result SwarmRun -> Bool
+runFailed result = match result {
+  Ok run -> run.status == "failed",
+  Err message -> true
+}
+
+runPassed : Result SwarmRun -> Bool
+runPassed result = match result {
+  Ok run -> run.status == "passed",
+  Err message -> false
+}
+
+eventKind : SwarmEvent -> Str
+eventKind event = event.kind
+
+eventsContainKind : [SwarmEvent] -> Str -> Bool
+eventsContainKind events kind = {
+  let mut found = false;
+  for event in events {
+    if found then
+      found
+    else {
+      found = event.kind == kind;
+      found
+    }
+  };
+  found
+}
+
+errorText : Str -> Str
+errorText message = textConcat ["error:", message]
+
+main : Str
+main =
+  match mkdirAll stateRootPath {
+    Ok stateRootValue ->
+      match mkdirAll workspaceRoot {
+        Ok workspaceValue ->
+          match mkdirAll outsideWorkspaceRoot {
+            Ok outsideWorkspaceValue ->
+              match objectiveCreate root objectiveId "Exercise kernel-backed filesystem mediation for direct syscalls." 1 4 {
+                Ok objectiveValue ->
+                  match taskCreate objective taskId "Run static and dynamic direct-syscall filesystem clients through kernel mediation." [] 4 60000 {
+                    Ok taskValue ->
+                      match policySet task {
+                        Ok policyValue ->
+                          match lease task {
+                            Ok leaseValue ->
+                              let outsideResult = toolRunOutside task in
+                              let insideResult = toolRunInside task in
+                              let dynamicOutsideResult = toolRunDynamicOutside task in
+                              let dynamicInsideResult = toolRunDynamicInside task in
+                              match tail task {
+                                Ok events ->
+                                  encode (FilesystemKernelPolicyReport {
+                                    taskId = policyValue.taskId,
+                                    allowedProcesses = policyValue.allowedProcesses,
+                                    allowedWorkspaceRoots = policyValue.allowedWorkspaceRoots,
+                                    allowedReadonlyRoots = policyValue.allowedReadonlyRoots,
+                                    kernelOutsideWriteBlocked = runFailed outsideResult,
+                                    kernelOutsideWritePrevented = fileExists directSyscallOutsideTargetPath == false,
+                                    kernelInsideWritePassed = runPassed insideResult,
+                                    kernelInsideWriteCreated = fileExists directSyscallInsideTargetPath,
+                                    dynamicOutsideWriteBlocked = runFailed dynamicOutsideResult,
+                                    dynamicOutsideWritePrevented = fileExists dynamicSyscallOutsideTargetPath == false,
+                                    dynamicInsideWritePassed = runPassed dynamicInsideResult,
+                                    dynamicInsideWriteCreated = fileExists dynamicSyscallInsideTargetPath,
+                                    filesystemMediationStarted = eventsContainKind events "filesystem_mediation_started",
+                                    eventKinds = map eventKind events
+                                  }),
+                                Err message ->
+                                  errorText message
+                              },
+                            Err message ->
+                              errorText message
+                          },
+                        Err message ->
+                          errorText message
+                      },
+                    Err message ->
+                      errorText message
+                  },
+                Err message ->
+                  errorText message
+              },
+            Err message ->
+              errorText message
+          },
+        Err message ->
+          errorText message
+      },
+    Err message ->
+      errorText message
+  }

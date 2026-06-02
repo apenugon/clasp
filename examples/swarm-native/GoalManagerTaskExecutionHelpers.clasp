@@ -1,9 +1,11 @@
 module GoalManagerTaskExecutionHelpers
 
+import AgentErgonomics
 import GoalManagerMonitoredLoop
 import GoalManagerChildLoopMonitor
 import GoalManagerBootstrapTasks
 import GoalManagerTaskWorkspaceRuntime
+import GoalManagerResourceHealth
 import GoalManagerBenchmarkCommand
 import GoalManagerTaskReportIO
 import GoalManagerWatch
@@ -108,7 +110,12 @@ requeueTaskForManagerRetry taskId failureSummary =
 
 approveCompletedPlannedTask : PlannerTaskSpec -> Str
 approveCompletedPlannedTask spec =
-  match approveAndMerge (taskHandleFor spec.taskId) "merge-ready" "trunk" emptyTexts mailboxLimit {
+  match approveAndMerge
+    (taskHandleFor spec.taskId)
+    plannedTaskApprovalName
+    plannedTaskMergegateName
+    plannedTaskRequiredVerifiers
+    mailboxLimit {
     Err message ->
       textConcat ["task review failed: ", spec.taskId, ": ", message],
     Ok reviewValue ->
@@ -315,6 +322,7 @@ childLoopMonitorSpec spec =
     childLoopAwaitTimeoutMs
     (readChildLoopManagerRetries spec.taskId)
     childLoopMaxManagerRetries
+    managerChildMemoryReserveMb
     (childLoopCommandArgs spec)
 
 nonZeroAttemptOr : Int -> Int -> Int
@@ -486,6 +494,249 @@ recordPlannedTaskFailure spec report = {
     }
 }
 
+resourceBlockedPlannedTaskReport : PlannerTaskSpec -> Str -> VerifierReport
+resourceBlockedPlannedTaskReport spec message =
+  syntheticFailureReport
+    "task launch blocked by resource guard"
+    (textJoin "\n"
+      [
+        textConcat ["task=", spec.taskId],
+        textConcat ["role=", plannerTaskRoleLabel spec],
+        message,
+        managerResourceHealthSummary,
+        resourceBlockRecoveryGuidance message
+      ])
+
+taskHasExternalResourceBlocker : Str -> Bool
+taskHasExternalResourceBlocker taskId =
+  if length (readRetryRecoveryRecords taskId) == 0 then
+    false
+  else {
+    let latest = latestRetryRecoveryRecord taskId in
+    latest.retryableStatus == "external-resource-blocker"
+  }
+
+taskHasAutonomousLaunchGateBlocker : Str -> Bool
+taskHasAutonomousLaunchGateBlocker taskId =
+  if length (readRetryRecoveryRecords taskId) == 0 then
+    false
+  else {
+    let latest = latestRetryRecoveryRecord taskId in
+    latest.retryableStatus == "autonomous-launch-gate-blocker"
+  }
+
+taskIdsHaveExternalResourceBlocker : [Str] -> Bool
+taskIdsHaveExternalResourceBlocker taskIds = {
+  let mut found = false;
+  for taskId in taskIds {
+    if found then
+      found
+    else {
+      found = taskHasExternalResourceBlocker taskId;
+      found
+    }
+  };
+  found
+}
+
+taskIdsHaveAutonomousLaunchGateBlocker : [Str] -> Bool
+taskIdsHaveAutonomousLaunchGateBlocker taskIds = {
+  let mut found = false;
+  for taskId in taskIds {
+    if found then
+      found
+    else {
+      found = taskHasAutonomousLaunchGateBlocker taskId;
+      found
+    }
+  };
+  found
+}
+
+taskIdsHaveManagerReplanBlocker : [Str] -> Bool
+taskIdsHaveManagerReplanBlocker taskIds =
+  if taskIdsHaveExternalResourceBlocker taskIds then
+    true
+  else
+    taskIdsHaveAutonomousLaunchGateBlocker taskIds
+
+plannerTaskSpecSearchText : PlannerTaskSpec -> Str
+plannerTaskSpecSearchText spec =
+  textJoin "\n" [
+    spec.taskId,
+    spec.role,
+    spec.detail,
+    spec.taskPrompt,
+    textJoin "\n" spec.coordinationFocus
+  ]
+
+plannerTaskSpecHasAutonomousLaunchGateRepairMarker : PlannerTaskSpec -> Bool
+plannerTaskSpecHasAutonomousLaunchGateRepairMarker spec = {
+  let text = plannerTaskSpecSearchText spec in
+  if textIncludes text "retryRecordRecoveryTask=standalone-swarm-autonomous-launch-gate-repair" then
+    true
+  else if textIncludes text "retryRecordRecoveryKind=autonomous-launch-gate" then
+    true
+  else if textIncludes text "retryRecordLatest=phase=autonomous-launch-gate" then
+    true
+  else if textIncludes text "manager-replan-blocker=autonomous-launch-gate" then
+    true
+  else if textIncludes text "autonomous-launch-gate-blocker" then
+    true
+  else
+    textIncludes text "capability-gap=autonomous_launch_gate:"
+}
+
+plannerTaskSpecIsAutonomousLaunchGateRepair : PlannerTaskSpec -> Bool
+plannerTaskSpecIsAutonomousLaunchGateRepair spec =
+  if spec.taskId == agentPlannerTaskIdStandaloneSwarmReadiness then
+    plannerTaskSpecHasAutonomousLaunchGateRepairMarker spec
+  else
+    false
+
+autonomousLaunchGateAllowsRepairTaskForActiveChildren : PlannerTaskSpec -> Int -> Bool
+autonomousLaunchGateAllowsRepairTaskForActiveChildren spec projectedActiveChildren =
+  if plannerTaskSpecIsAutonomousLaunchGateRepair spec then
+    managerAutonomousLaunchGateRepairMaySpawnForActiveChildren projectedActiveChildren
+  else
+    false
+
+autonomousLaunchGateBlocksTaskForActiveChildren : PlannerTaskSpec -> Int -> Bool
+autonomousLaunchGateBlocksTaskForActiveChildren spec projectedActiveChildren = {
+  let gate = managerAutonomousLaunchGateForActiveChildren projectedActiveChildren in
+  if gate.maySpawn then
+    false
+  else
+    autonomousLaunchGateAllowsRepairTaskForActiveChildren spec projectedActiveChildren == false
+}
+
+resourceRecoveryWaveLimit : Int
+resourceRecoveryWaveLimit =
+  addManagerCounters maxWaves resourceRecoveryExtraWaves
+
+resourceRecoveryReplanAvailable : Int -> [Str] -> Bool
+resourceRecoveryReplanAvailable wave failedTaskIds =
+  if resourceRecoveryExtraWaves < 1 then
+    false
+  else if taskIdsHaveManagerReplanBlocker failedTaskIds == false then
+    false
+  else
+    wave < resourceRecoveryWaveLimit
+
+resourceBlockedRecoveryRecord : PlannerTaskSpec -> Str -> RetryRecoveryRecord
+resourceBlockedRecoveryRecord spec message =
+  RetryRecoveryRecord {
+    schema = retryRecoveryRecordSchema,
+    attempt = readChildLoopManagerRetries spec.taskId,
+    taskId = spec.taskId,
+    phase = "resource-guard",
+    retryable = false,
+    retryableStatus = "external-resource-blocker",
+    cause = "resource guard blocked child launch",
+    reportPaths = [taskFeedbackPath spec.taskId],
+    command = childLoopCommandArgs spec,
+    runStatus = "blocked",
+    exitCode = 0,
+    stdoutPath = taskProcessStdoutPath spec.taskId,
+    stderrPath = taskProcessStderrPath spec.taskId,
+    heartbeatPath = taskProcessHeartbeatPath spec.taskId,
+    evidence = [
+      message,
+      managerResourceHealthSummary,
+      resourceBlockRecoveryKind message,
+      resourceBlockRecoveryTaskId message,
+      resourceBlockRecoveryGuidance message
+    ],
+    createdAtMs = timeUnixMs
+  }
+
+recordResourceBlockedPlannedTask : PlannerTaskSpec -> Str -> Str
+recordResourceBlockedPlannedTask spec message =
+  match lease (taskHandleFor spec.taskId) {
+    Err leaseMessage ->
+      textConcat ["task resource block lease failed: ", spec.taskId, ": ", leaseMessage, "; original block: ", message],
+    Ok leaseValue ->
+      let recoveryRecordError = appendRetryRecoveryRecord (resourceBlockedRecoveryRecord spec message) in
+      if recoveryRecordError != "" then
+        textConcat ["task resource block recovery record failed: ", spec.taskId, ": ", recoveryRecordError]
+      else
+        recordPlannedTaskFailure spec (resourceBlockedPlannedTaskReport spec message)
+  }
+
+autonomousLaunchGateBlockMessageForActiveChildren : Int -> Str
+autonomousLaunchGateBlockMessageForActiveChildren projectedActiveChildren =
+  let gate = managerAutonomousLaunchGateForActiveChildren projectedActiveChildren in
+  textJoin "\n" [
+    "autonomous launch gate blocked child launch",
+    textConcat ["autonomous-launch-gate-mode:", gate.mode],
+    textConcat ["autonomous-launch-gate-ready:", managerResourceBoolText gate.ready],
+    textConcat ["autonomous-launch-gate-may-spawn:", managerResourceBoolText gate.maySpawn],
+    textConcat ["autonomous-launch-gate-may-spawn-repair:", managerResourceBoolText (managerAutonomousLaunchGateRepairMaySpawnForActiveChildren projectedActiveChildren)],
+    textConcat ["autonomous-launch-gate-recommendation:", gate.recommendation],
+    textConcat ["autonomous-launch-gate-repair-recommendation:", managerAutonomousLaunchGateRepairRecommendationForActiveChildren projectedActiveChildren],
+    textConcat ["capability-gap=autonomous_launch_gate:", gate.recommendation],
+    "Autonomous launch gate JSON:",
+    encode gate,
+    "End autonomous launch gate JSON.",
+    managerResourceHealthSummary
+  ]
+
+autonomousGateBlockedPlannedTaskReport : PlannerTaskSpec -> Str -> VerifierReport
+autonomousGateBlockedPlannedTaskReport spec message =
+  syntheticFailureReport
+    "task launch blocked by autonomous launch gate"
+    (textJoin "\n"
+      [
+        textConcat ["task=", spec.taskId],
+        textConcat ["role=", plannerTaskRoleLabel spec],
+        message
+      ])
+
+autonomousGateBlockedRecoveryRecord : PlannerTaskSpec -> Str -> RetryRecoveryRecord
+autonomousGateBlockedRecoveryRecord spec message =
+  RetryRecoveryRecord {
+    schema = retryRecoveryRecordSchema,
+    attempt = readChildLoopManagerRetries spec.taskId,
+    taskId = spec.taskId,
+    phase = "autonomous-launch-gate",
+    retryable = false,
+    retryableStatus = "autonomous-launch-gate-blocker",
+    cause = "autonomous launch gate blocked child launch",
+    reportPaths = [taskFeedbackPath spec.taskId],
+    command = childLoopCommandArgs spec,
+    runStatus = "blocked",
+    exitCode = 0,
+    stdoutPath = taskProcessStdoutPath spec.taskId,
+    stderrPath = taskProcessStderrPath spec.taskId,
+    heartbeatPath = taskProcessHeartbeatPath spec.taskId,
+    evidence = [
+      message,
+      "manager-replan-blocker=autonomous-launch-gate",
+      managerResourceHealthSummary
+    ],
+    createdAtMs = timeUnixMs
+  }
+
+recordAutonomousGateBlockedPlannedTask : PlannerTaskSpec -> Str -> Str
+recordAutonomousGateBlockedPlannedTask spec message =
+  match lease (taskHandleFor spec.taskId) {
+    Err leaseMessage ->
+      textConcat ["task autonomous launch gate lease failed: ", spec.taskId, ": ", leaseMessage, "; original block: ", message],
+    Ok leaseValue ->
+      let traceError =
+        appendManagerTrace
+          (textConcat [
+            "child-loop-launch:",
+            spec.taskId,
+            ":status=blocked-autonomous-launch-gate"
+          ]) in
+      let recoveryRecordError = appendRetryRecoveryRecord (autonomousGateBlockedRecoveryRecord spec message) in
+      if recoveryRecordError != "" then
+        textConcat ["task autonomous launch gate recovery record failed: ", spec.taskId, ": ", recoveryRecordError]
+      else
+        recordPlannedTaskFailure spec (autonomousGateBlockedPlannedTaskReport spec message)
+  }
+
 retryChildLoopMissingReport : PlannerTaskSpec -> VerifierReport -> Str
 retryChildLoopMissingReport spec report =
   if childLoopManagerRetryAvailable spec.taskId == false then
@@ -540,7 +791,7 @@ retryChildLoopMissingReport spec report =
             if resetError != "" then
               textConcat ["task child loop retry reset failed: ", spec.taskId, ": ", resetError]
             else
-              ensureTaskWorkspace spec.taskId
+              ensureTaskWorkspaceOrCleanup spec.taskId
           } in
         if relaunchError != "" then
           textConcat ["task child loop retry workspace setup failed: ", spec.taskId, ": ", relaunchError]
@@ -603,57 +854,85 @@ retryChildLoopMissingLaunchHeartbeat wave report spec failureReport =
   }
 
 launchReadyTask : Int -> PlannerReport -> PlannerTaskSpec -> Str
-launchReadyTask wave report spec = {
-  let promptError = writeTaskPromptFile wave report spec in
-  if promptError != "" then
-    textConcat ["task prompt write failed: ", spec.taskId, ": ", promptError]
+launchReadyTask wave report spec =
+  launchReadyTaskForActiveChildren wave report spec 1
+
+launchReadyTaskForActiveChildren : Int -> PlannerReport -> PlannerTaskSpec -> Int -> Str
+launchReadyTaskForActiveChildren wave report spec projectedActiveChildren = {
+  let resourceError = managerChildLaunchResourceErrorForActiveChildren projectedActiveChildren in
+  if resourceError != "" then
+    recordResourceBlockedPlannedTask spec resourceError
   else {
-    let workspaceError = ensureTaskWorkspace spec.taskId in
-    if workspaceError != "" then
-      textConcat ["task workspace setup failed: ", spec.taskId, ": ", workspaceError]
-    else
-      match lease (taskHandleFor spec.taskId) {
-        Err message ->
-          recordPlannedTaskFailure spec (syntheticFailureReport "task lease failed" message),
-        Ok leaseValue ->
-          let launchRecordError = recordTaskLaunchRun spec in
-          if launchRecordError != "" then
-            recordPlannedTaskFailure spec (syntheticFailureReport "task launch run failed" launchRecordError)
-          else
-              match launchChildLoop spec {
-                Err message ->
-                  recordPlannedTaskFailure spec (syntheticFailureReport "task child loop failed to start" message),
-                Ok launched ->
-                  ""
-              }
+    if autonomousLaunchGateBlocksTaskForActiveChildren spec projectedActiveChildren then
+      recordAutonomousGateBlockedPlannedTask spec (autonomousLaunchGateBlockMessageForActiveChildren projectedActiveChildren)
+    else {
+      let promptError = writeTaskPromptFile wave report spec in
+      if promptError != "" then
+        textConcat ["task prompt write failed: ", spec.taskId, ": ", promptError]
+      else {
+        let workspaceError = ensureTaskWorkspaceOrCleanup spec.taskId in
+        if workspaceError != "" then
+          textConcat ["task workspace setup failed: ", spec.taskId, ": ", workspaceError]
+        else
+          match lease (taskHandleFor spec.taskId) {
+            Err message ->
+              recordPlannedTaskFailure spec (syntheticFailureReport "task lease failed" message),
+            Ok leaseValue ->
+              let launchRecordError = recordTaskLaunchRun spec in
+              if launchRecordError != "" then
+                recordPlannedTaskFailure spec (syntheticFailureReport "task launch run failed" launchRecordError)
+              else
+                  match launchChildLoopForActiveChildren spec projectedActiveChildren {
+                    Err message ->
+                      recordPlannedTaskFailure spec (syntheticFailureReport "task child loop failed to start" message),
+                    Ok launched ->
+                      ""
+                  }
+          }
       }
+    }
   }
 }
 
 launchChildLoop : PlannerTaskSpec -> Result WatchedProcess
-launchChildLoop spec = {
-  let outcome = monitoredLoopSpawn (childLoopMonitorSpec spec) in
-  let traceError =
-    appendManagerTrace
-      (textConcat [
-        "child-loop-launch:",
-        spec.taskId,
-        ":status=",
-        outcome.status,
-        ":retry-exhausted=",
-        encode outcome.retryExhausted
-      ]) in
-  if outcome.status == "running" then
-    Ok outcome.process
-  else if outcome.status == "completed-pass" then
-    Ok outcome.process
-  else if outcome.status == "completed-fail" then
-    Ok outcome.process
-  else if outcome.status == "retry-exhausted" then
-    if outcome.process.pid == 0 then
-      watchedProcessError outcome.message
-    else
-      Ok outcome.process
-  else
-    watchedProcessError outcome.message
+launchChildLoop spec =
+  launchChildLoopForActiveChildren spec 1
+
+launchChildLoopForActiveChildren : PlannerTaskSpec -> Int -> Result WatchedProcess
+launchChildLoopForActiveChildren spec projectedActiveChildren = {
+  let resourceError = managerChildLaunchResourceErrorForActiveChildren projectedActiveChildren in
+  if resourceError != "" then
+    watchedProcessError resourceError
+  else {
+    if autonomousLaunchGateBlocksTaskForActiveChildren spec projectedActiveChildren then
+      watchedProcessError (autonomousLaunchGateBlockMessageForActiveChildren projectedActiveChildren)
+    else {
+      let outcome = monitoredLoopSpawn (childLoopMonitorSpec spec) in
+      let traceError =
+        appendManagerTrace
+          (textConcat [
+            "child-loop-launch:",
+            spec.taskId,
+            ":status=",
+            outcome.status,
+            ":retry-exhausted=",
+            encode outcome.retryExhausted
+          ]) in
+      if outcome.status == "running" then
+        Ok outcome.process
+      else if outcome.status == "completed-pass" then
+        Ok outcome.process
+      else if outcome.status == "completed-fail" then
+        Ok outcome.process
+      else if outcome.status == "retry-exhausted" then
+        if outcome.process.pid == 0 then
+          watchedProcessError outcome.message
+        else
+          Ok outcome.process
+      else if outcome.status == "output-limit" then
+        watchedProcessError "output-limit"
+      else
+        watchedProcessError outcome.message
+    }
+  }
 }

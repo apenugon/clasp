@@ -579,27 +579,81 @@ main = "ok"
 EOF
 
 mkdir -p "$cli_project_dir"
-cat >"$cli_project_path" <<EOF
+cat >"$cli_project_path" <<'EOF'
 module Main
 
+firstTextOrEmpty : [Str] -> Str
+firstTextOrEmpty values = {
+  let mut first = "";
+  let mut found = false;
+  for value in values {
+    if found then
+      found
+    else {
+      first = value;
+      found = true;
+      found
+    }
+  };
+  first
+}
+
+tailTextList : [Str] -> [Str]
+tailTextList values = {
+  let mut rest = [];
+  let mut found = false;
+  for value in values {
+    if found then {
+      rest = append rest [value];
+      rest
+    } else {
+      found = true;
+      rest
+    }
+  };
+  rest
+}
+
+outputPath : Str
+outputPath = firstTextOrEmpty argv
+
 argsText : Str
-argsText = textJoin "," argv
+argsText = textJoin "," (tailTextList argv)
 
 main : Str
-main = match writeFile "$(printf '%s' "$cli_output_path")" argsText {
+main = match writeFile outputPath argsText {
   Ok written -> argsText,
   Err message -> message
 }
 EOF
 
 mkdir -p "$imported_cli_project_dir/Shared"
-cat >"$imported_cli_project_path" <<EOF
+cat >"$imported_cli_project_path" <<'EOF'
 module Main
 import Shared.User
 import Shared.Render
 
+firstTextOrEmpty : [Str] -> Str
+firstTextOrEmpty values = {
+  let mut first = "";
+  let mut found = false;
+  for value in values {
+    if found then
+      found
+    else {
+      first = value;
+      found = true;
+      found
+    }
+  };
+  first
+}
+
+outputPath : Str
+outputPath = firstTextOrEmpty argv
+
 main : Str
-main = match writeFile "$(printf '%s' "$imported_cli_output_path")" (renderUser primaryUser) {
+main = match writeFile outputPath (renderUser primaryUser) {
   Ok written -> renderUser primaryUser,
   Err message -> message
 }
@@ -1189,7 +1243,7 @@ stop_server
 
 env RUSTC=/definitely-missing-rustc "$claspc_bin" compile "$cli_project_path" -o "$cli_binary"
 [[ -x "$cli_binary" ]]
-"$cli_binary" alpha beta | grep -F 'alpha,beta' >/dev/null
+"$cli_binary" "$cli_output_path" alpha beta | grep -F 'alpha,beta' >/dev/null
 grep -F 'alpha,beta' "$cli_output_path" >/dev/null
 
 write_atomic_dir="$test_root/write-atomic"
@@ -1199,23 +1253,42 @@ write_atomic_binary="$test_root/write-atomic-app"
 mkdir -p "$write_atomic_dir"
 printf 'preserved\n' >"$write_atomic_target"
 chmod 500 "$write_atomic_dir"
-cat >"$write_atomic_project" <<EOF
+cat >"$write_atomic_project" <<'EOF'
 module Main
 
+firstTextOrEmpty : [Str] -> Str
+firstTextOrEmpty values = {
+  let mut first = "";
+  let mut found = false;
+  for value in values {
+    if found then
+      found
+    else {
+      first = value;
+      found = true;
+      found
+    }
+  };
+  first
+}
+
+targetPath : Str
+targetPath = firstTextOrEmpty argv
+
 main : Str
-main = match writeFile "$(printf '%s' "$write_atomic_target")" "replacement" {
+main = match writeFile targetPath "replacement" {
   Ok written -> "unexpected-success",
   Err message -> "write-failed"
 }
 EOF
 env RUSTC=/definitely-missing-rustc "$claspc_bin" compile "$write_atomic_project" -o "$write_atomic_binary"
-"$write_atomic_binary" | grep -F 'write-failed' >/dev/null
+"$write_atomic_binary" "$write_atomic_target" | grep -F 'write-failed' >/dev/null
 chmod 700 "$write_atomic_dir"
 grep -Fx 'preserved' "$write_atomic_target" >/dev/null
 
 env RUSTC=/definitely-missing-rustc "$claspc_bin" compile "$imported_cli_project_path" -o "$imported_cli_binary"
 [[ -x "$imported_cli_binary" ]]
-"$imported_cli_binary" | grep -F 'Ada:planner' >/dev/null
+"$imported_cli_binary" "$imported_cli_output_path" | grep -F 'Ada:planner' >/dev/null
 grep -F 'Ada:planner' "$imported_cli_output_path" >/dev/null
 if [[ "$native_claspc_exhaustive" != "0" ]]; then
   CLASP_NATIVE_BUNDLE_JOBS=1 CLASP_NATIVE_IMAGE_SECTION_JOBS=1 "$claspc_bin" native-image "$imported_cli_project_path" -o "$imported_cli_serial_image"
@@ -1382,7 +1455,7 @@ cat >"$feedback_loop_recovery_state_root/state.json" <<JSON
 {"attempt":2,"phase":"builder-running","verdict":"pending","completed":false,"builderRuns":2,"verifierRuns":1,"healthy":true,"needsAttention":false,"attentionReason":"","final":false}
 JSON
 cat >"$feedback_loop_recovery_builder_heartbeat" <<JSON
-{"pid":999999,"running":true,"completed":false,"exitCode":0,"stdoutPath":"$feedback_loop_recovery_builder_stdout","stderrPath":"$feedback_loop_recovery_builder_stderr","heartbeatPath":"$feedback_loop_recovery_builder_heartbeat","updatedAtMs":0}
+{"pid":999999,"running":true,"completed":false,"exitCode":0,"status":"running","timedOut":false,"error":"","outputLimitBytes":4194304,"stdoutTruncated":false,"stderrTruncated":false,"stdoutPath":"$feedback_loop_recovery_builder_stdout","stderrPath":"$feedback_loop_recovery_builder_stderr","heartbeatPath":"$feedback_loop_recovery_builder_heartbeat","updatedAtMs":0}
 JSON
 feedback_loop_recovery_output="$(
   CLASP_LOOP_CODEX_BIN_JSON="\"$feedback_loop_codex_bin\"" \
@@ -2300,72 +2373,74 @@ printf '%s\n' "$swarm_timed_run_output" | grep -F '"mergeVerdict":"fail"' >/dev/
 printf '%s\n' "$swarm_timed_run_output" | grep -F '"status":"timed_out"' >/dev/null
 printf '%s\n' "$swarm_timed_run_output" | grep -F '"timedOut":true' >/dev/null
 
-env RUSTC=/definitely-missing-rustc "$claspc_bin" compile "$project_root/examples/swarm-native/Main.clasp" -o "$swarm_native_binary"
-[[ -x "$swarm_native_binary" ]]
-swarm_native_output="$(CLASP_SWARM_CWD="$project_root" CLASP_SWARM_ACTOR=manager "$swarm_native_binary" "$swarm_native_state_root")"
-printf '%s\n' "$swarm_native_output" | grep -F '"objective":"appbench"' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"planningTask":"plan"' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"repairTask":"repair-2"' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"deadlineAtMs":4102444800000' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"deadlineAtMs":4102444200000' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"deadlineAtMs":4102444500000' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"planningStep":{"lease":{"database":"' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"managerAfterRepair":{"objectiveId":"appbench","status":"ready","action":"run-verifier"' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"verificationPlan":{"name":"focused-native","commands":[{"verifierName":"native-smoke"' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"verifierName":"native-regression","command":{"cwd":' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"requiredVerifierNames":["native-smoke","native-regression"]' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"verificationPlanResult":{"plan":{"name":"focused-native"' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"steps":[{"run":{"actor":"manager","command":["bash","-lc","printf verifier-ok"]' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"run":{"actor":"manager","command":["bash","-lc","printf regression-ok"]' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"passed":true,"failedVerifiers":[]' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"mailboxSummary":{"historyCount":10,"tailCount":10,"approvalCount":0,"runCount":3,"artifactCount":6' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"managerAfterVerifier":{"objectiveId":"appbench","status":"ready","action":"request-approval"' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"reviewStep":{"approval":{"actor":"manager","approvalId":1' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"managerAfterApproval":{"objectiveId":"appbench","status":"ready","action":"decide-mergegate"' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"mergeDecision":{"taskId":"repair-2","mergegateName":"trunk","verdict":"pass"}' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"kind":"approval_granted","taskId":"repair-2"' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"projectedStatus":"completed"' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"completedTaskIds":["plan","repair-2"]' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"managerAfter":{"objectiveId":"appbench","status":"completed","action":"objective-complete"' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"failedTool":{"objective":"failure-tool","task":"tool-fails"' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"exitCode":7,"name":"bash","role":"tool"' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"taskStatus":{"attempts":1,"taskId":"tool-fails","status":"failed"' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"taskId":"tool-fails","kind":"stdout"' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"managerAfter":{"objectiveId":"failure-tool","status":"blocked","action":"inspect-task"' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"failedVerifier":{"objective":"failure-verifier","task":"verifier-fails","verifier":"native-smoke-fail"' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"exitCode":3,"name":"native-smoke-fail","role":"verifier"' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"mergeDecision":{"taskId":"verifier-fails","mergegateName":"trunk","verdict":"fail"}' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"suggestedCommand":["claspc","swarm","verifier","run","<state-root>","verifier-fails","native-smoke-fail","--","<command...>"]' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"managerAfterReview":{"objectiveId":"failure-verifier","status":"needs-attention","action":"rerun-verifier"' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"failedVerificationPlan":{"objective":"failure-plan","task":"verification-plan-fails","plan":{"name":"focused-native-failure"' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"requiredVerifierNames":["native-plan-pass","native-plan-fail"]' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"run":{"actor":"manager","command":["bash","-lc","printf plan-pass-ok"]' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"run":{"actor":"manager","command":["bash","-lc","printf plan-fail-out; printf plan-fail-err >&2; exit 4"]' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"passed":false,"failedVerifiers":["native-plan-fail"]' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"mailboxSummary":{"historyCount":10,"tailCount":10,"approvalCount":0,"runCount":3,"artifactCount":6,"latestRunStatus":"failed","latestRunName":"native-plan-fail"' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"managerAfterPlan":{"objectiveId":"failure-plan","status":"needs-attention","action":"rerun-verifier"' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"mergeDecision":{"taskId":"verification-plan-fails","mergegateName":"trunk","verdict":"fail"}' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"timedOutTool":{"objective":"timeout-tool","task":"tool-times-out"' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"run":{"actor":"manager","command":["bash","-lc","printf timeout-tool-out; printf timeout-tool-err >&2; sleep 1"]' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"exitCode":124,"name":"bash","role":"tool"' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"taskStatus":{"attempts":1,"taskId":"tool-times-out","status":"failed"' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"managerAfter":{"objectiveId":"timeout-tool","status":"blocked","action":"inspect-task"' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"taskId":"tool-times-out","timedOut":true' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"timedOutVerificationPlan":{"objective":"timeout-plan","task":"verification-plan-times-out","verifier":"native-plan-timeout"' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"plan":{"name":"focused-native-timeout"' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"requiredVerifierNames":["native-plan-timeout"]' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"run":{"actor":"manager","command":["bash","-lc","printf timeout-verifier-out; printf timeout-verifier-err >&2; sleep 1"]' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"exitCode":124,"name":"native-plan-timeout","role":"verifier"' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"passed":false,"failedVerifiers":["native-plan-timeout"]' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"latestRunStatus":"timed_out","latestRunName":"native-plan-timeout","latestVerifierStatus":"timed_out","latestVerifier":"native-plan-timeout"' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"managerAfterPlan":{"objectiveId":"timeout-plan","status":"needs-attention","action":"rerun-verifier"' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"mergeDecision":{"taskId":"verification-plan-times-out","mergegateName":"trunk","verdict":"fail"}' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"typedInspection":{"passedTaskId":"repair-2","passedTaskStatus":"completed","passedVerifier":"native-regression","passedVerifierStatus":"passed","passedMailboxVerifierStatus":"passed","passedPlanRequiredVerifiers":["native-smoke","native-regression"],"passedPlanPassed":true,"passedPlanFailedVerifiers":[],"passedPlanArtifactCount":6' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"failedToolRunStatus":"failed","failedToolMailboxRunStatus":"failed"' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"failedPlanRequiredVerifiers":["native-plan-pass","native-plan-fail"],"failedPlanPassed":false,"failedPlanFailedVerifiers":["native-plan-fail"]' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"failedPlanLatestVerifier":"native-plan-fail","failedPlanLatestVerifierStatus":"failed","failedPlanMergeVerdict":"fail"' >/dev/null
-printf '%s\n' "$swarm_native_output" | grep -F '"mergeReadyAction":"decide-mergegate","mergeReadyTaskId":"repair-2","mergeReadyRequiredApprovals":["merge-ready"],"mergeReadyRequiredVerifiers":["native-smoke","native-regression"],"mergeReadyVerdict":"missing"' >/dev/null
-assert_native_swarm_verification_trace "compiled-native" "$swarm_native_output"
+if [[ "$native_claspc_exhaustive" != "0" ]]; then
+  env RUSTC=/definitely-missing-rustc "$claspc_bin" compile "$project_root/examples/swarm-native/Main.clasp" -o "$swarm_native_binary"
+  [[ -x "$swarm_native_binary" ]]
+  swarm_native_output="$(CLASP_SWARM_CWD="$project_root" CLASP_SWARM_ACTOR=manager "$swarm_native_binary" "$swarm_native_state_root")"
+  printf '%s\n' "$swarm_native_output" | grep -F '"objective":"appbench"' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"planningTask":"plan"' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"repairTask":"repair-2"' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"deadlineAtMs":4102444800000' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"deadlineAtMs":4102444200000' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"deadlineAtMs":4102444500000' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"planningStep":{"lease":{"database":"' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"managerAfterRepair":{"objectiveId":"appbench","status":"ready","action":"run-verifier"' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"verificationPlan":{"name":"focused-native","commands":[{"verifierName":"native-smoke"' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"verifierName":"native-regression","command":{"cwd":' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"requiredVerifierNames":["native-smoke","native-regression"]' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"verificationPlanResult":{"plan":{"name":"focused-native"' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"steps":[{"run":{"actor":"manager","command":["bash","-lc","printf verifier-ok"]' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"run":{"actor":"manager","command":["bash","-lc","printf regression-ok"]' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"passed":true,"failedVerifiers":[]' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"mailboxSummary":{"historyCount":10,"tailCount":10,"approvalCount":0,"runCount":3,"artifactCount":6' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"managerAfterVerifier":{"objectiveId":"appbench","status":"ready","action":"request-approval"' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"reviewStep":{"approval":{"actor":"manager","approvalId":1' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"managerAfterApproval":{"objectiveId":"appbench","status":"ready","action":"decide-mergegate"' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"mergeDecision":{"taskId":"repair-2","mergegateName":"trunk","verdict":"pass"}' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"kind":"approval_granted","taskId":"repair-2"' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"projectedStatus":"completed"' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"completedTaskIds":["plan","repair-2"]' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"managerAfter":{"objectiveId":"appbench","status":"completed","action":"objective-complete"' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"failedTool":{"objective":"failure-tool","task":"tool-fails"' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"exitCode":7,"name":"bash","role":"tool"' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"taskStatus":{"attempts":1,"taskId":"tool-fails","status":"failed"' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"taskId":"tool-fails","kind":"stdout"' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"managerAfter":{"objectiveId":"failure-tool","status":"blocked","action":"inspect-task"' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"failedVerifier":{"objective":"failure-verifier","task":"verifier-fails","verifier":"native-smoke-fail"' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"exitCode":3,"name":"native-smoke-fail","role":"verifier"' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"mergeDecision":{"taskId":"verifier-fails","mergegateName":"trunk","verdict":"fail"}' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"suggestedCommand":["claspc","swarm","verifier","run","<state-root>","verifier-fails","native-smoke-fail","--","<command...>"]' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"managerAfterReview":{"objectiveId":"failure-verifier","status":"needs-attention","action":"rerun-verifier"' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"failedVerificationPlan":{"objective":"failure-plan","task":"verification-plan-fails","plan":{"name":"focused-native-failure"' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"requiredVerifierNames":["native-plan-pass","native-plan-fail"]' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"run":{"actor":"manager","command":["bash","-lc","printf plan-pass-ok"]' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"run":{"actor":"manager","command":["bash","-lc","printf plan-fail-out; printf plan-fail-err >&2; exit 4"]' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"passed":false,"failedVerifiers":["native-plan-fail"]' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"mailboxSummary":{"historyCount":10,"tailCount":10,"approvalCount":0,"runCount":3,"artifactCount":6,"latestRunStatus":"failed","latestRunName":"native-plan-fail"' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"managerAfterPlan":{"objectiveId":"failure-plan","status":"needs-attention","action":"rerun-verifier"' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"mergeDecision":{"taskId":"verification-plan-fails","mergegateName":"trunk","verdict":"fail"}' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"timedOutTool":{"objective":"timeout-tool","task":"tool-times-out"' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"run":{"actor":"manager","command":["bash","-lc","printf timeout-tool-out; printf timeout-tool-err >&2; sleep 1"]' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"exitCode":124,"name":"bash","role":"tool"' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"taskStatus":{"attempts":1,"taskId":"tool-times-out","status":"failed"' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"managerAfter":{"objectiveId":"timeout-tool","status":"blocked","action":"inspect-task"' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"taskId":"tool-times-out","timedOut":true' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"timedOutVerificationPlan":{"objective":"timeout-plan","task":"verification-plan-times-out","verifier":"native-plan-timeout"' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"plan":{"name":"focused-native-timeout"' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"requiredVerifierNames":["native-plan-timeout"]' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"run":{"actor":"manager","command":["bash","-lc","printf timeout-verifier-out; printf timeout-verifier-err >&2; sleep 1"]' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"exitCode":124,"name":"native-plan-timeout","role":"verifier"' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"passed":false,"failedVerifiers":["native-plan-timeout"]' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"latestRunStatus":"timed_out","latestRunName":"native-plan-timeout","latestVerifierStatus":"timed_out","latestVerifier":"native-plan-timeout"' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"managerAfterPlan":{"objectiveId":"timeout-plan","status":"needs-attention","action":"rerun-verifier"' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"mergeDecision":{"taskId":"verification-plan-times-out","mergegateName":"trunk","verdict":"fail"}' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"typedInspection":{"passedTaskId":"repair-2","passedTaskStatus":"completed","passedVerifier":"native-regression","passedVerifierStatus":"passed","passedMailboxVerifierStatus":"passed","passedPlanRequiredVerifiers":["native-smoke","native-regression"],"passedPlanPassed":true,"passedPlanFailedVerifiers":[],"passedPlanArtifactCount":6' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"failedToolRunStatus":"failed","failedToolMailboxRunStatus":"failed"' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"failedPlanRequiredVerifiers":["native-plan-pass","native-plan-fail"],"failedPlanPassed":false,"failedPlanFailedVerifiers":["native-plan-fail"]' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"failedPlanLatestVerifier":"native-plan-fail","failedPlanLatestVerifierStatus":"failed","failedPlanMergeVerdict":"fail"' >/dev/null
+  printf '%s\n' "$swarm_native_output" | grep -F '"mergeReadyAction":"decide-mergegate","mergeReadyTaskId":"repair-2","mergeReadyRequiredApprovals":["merge-ready"],"mergeReadyRequiredVerifiers":["native-smoke","native-regression"],"mergeReadyVerdict":"missing"' >/dev/null
+  assert_native_swarm_verification_trace "compiled-native" "$swarm_native_output"
+fi
 
 swarm_feedback_loop_state_root_abs="$test_root_abs/swarm-feedback-loop-state"
 swarm_feedback_loop_workspace_root_abs="$test_root_abs/swarm-feedback-loop-workspace"
@@ -2437,30 +2512,32 @@ swarm_feedback_loop_builder_artifacts_output="$("$claspc_bin" --json swarm artif
 printf '%s\n' "$swarm_feedback_loop_builder_artifacts_output" | grep -F '"kind":"stdout"' >/dev/null
 printf '%s\n' "$swarm_feedback_loop_builder_artifacts_output" | grep -F '"kind":"stderr"' >/dev/null
 
-env RUSTC=/definitely-missing-rustc "$claspc_bin" compile "$project_root/examples/swarm-native/FeedbackLoop.clasp" -o "$swarm_feedback_loop_binary"
-[[ -x "$swarm_feedback_loop_binary" ]]
-swarm_feedback_loop_native_output="$(
-  CLASP_LOOP_CODEX_BIN_JSON="\"$test_root_abs/codex\"" \
-  CLASP_LOOP_TASK_FILE_JSON="\"$test_root_abs/feedback-loop-task.md\"" \
-  CLASP_LOOP_WORKSPACE_JSON="\"$swarm_feedback_loop_native_workspace_root_abs\"" \
-  CLASP_LOOP_MAX_ATTEMPTS_JSON='2' \
-  "$swarm_feedback_loop_binary" "$swarm_feedback_loop_native_state_root_abs"
-)"
-printf '%s\n' "$swarm_feedback_loop_native_output" | grep -F '"objectiveId":"autonomous-confidence"' >/dev/null
-printf '%s\n' "$swarm_feedback_loop_native_output" | grep -F '"attempt":2' >/dev/null
-printf '%s\n' "$swarm_feedback_loop_native_output" | grep -F '"verdict":"pass"' >/dev/null
-printf '%s\n' "$swarm_feedback_loop_native_output" | grep -F '"objectiveProjectedStatus":"completed"' >/dev/null
-printf '%s\n' "$swarm_feedback_loop_native_output" | grep -F '"approvalCount":1' >/dev/null
-printf '%s\n' "$swarm_feedback_loop_native_output" | grep -F '"mergeGateSatisfied":true' >/dev/null
-printf '%s\n' "$swarm_feedback_loop_native_output" | grep -F '"retryDecision":{"attempt":2,"maxAttempts":2,"shouldRetry":false,"nextAttempt":2,"terminal":true' >/dev/null
-grep -Fx 'fixed-after-feedback' "$swarm_feedback_loop_native_workspace_abs" >/dev/null
-CLASP_LOOP_COMMAND=status "$swarm_feedback_loop_binary" "$swarm_feedback_loop_native_state_root_abs" >"$swarm_feedback_loop_status_output_abs.native"
-grep -F '"attempt":2' "$swarm_feedback_loop_status_output_abs.native" >/dev/null
-grep -F '"phase":"completed"' "$swarm_feedback_loop_status_output_abs.native" >/dev/null
-grep -F '"verdict":"pass"' "$swarm_feedback_loop_status_output_abs.native" >/dev/null
-grep -F '"approvalCount":1' "$swarm_feedback_loop_status_output_abs.native" >/dev/null
-grep -F '"mergeGateSatisfied":true' "$swarm_feedback_loop_status_output_abs.native" >/dev/null
-grep -F '"terminalOutcome":{"attempt":2,"phase":"completed","verdict":"pass","completed":true,"final":true,"builderTaskId":"builder-2","verifierTaskId":"verifier-2"' "$swarm_feedback_loop_status_output_abs.native" >/dev/null
+if [[ "$native_claspc_exhaustive" != "0" ]]; then
+  env RUSTC=/definitely-missing-rustc "$claspc_bin" compile "$project_root/examples/swarm-native/FeedbackLoop.clasp" -o "$swarm_feedback_loop_binary"
+  [[ -x "$swarm_feedback_loop_binary" ]]
+  swarm_feedback_loop_native_output="$(
+    CLASP_LOOP_CODEX_BIN_JSON="\"$test_root_abs/codex\"" \
+    CLASP_LOOP_TASK_FILE_JSON="\"$test_root_abs/feedback-loop-task.md\"" \
+    CLASP_LOOP_WORKSPACE_JSON="\"$swarm_feedback_loop_native_workspace_root_abs\"" \
+    CLASP_LOOP_MAX_ATTEMPTS_JSON='2' \
+    "$swarm_feedback_loop_binary" "$swarm_feedback_loop_native_state_root_abs"
+  )"
+  printf '%s\n' "$swarm_feedback_loop_native_output" | grep -F '"objectiveId":"autonomous-confidence"' >/dev/null
+  printf '%s\n' "$swarm_feedback_loop_native_output" | grep -F '"attempt":2' >/dev/null
+  printf '%s\n' "$swarm_feedback_loop_native_output" | grep -F '"verdict":"pass"' >/dev/null
+  printf '%s\n' "$swarm_feedback_loop_native_output" | grep -F '"objectiveProjectedStatus":"completed"' >/dev/null
+  printf '%s\n' "$swarm_feedback_loop_native_output" | grep -F '"approvalCount":1' >/dev/null
+  printf '%s\n' "$swarm_feedback_loop_native_output" | grep -F '"mergeGateSatisfied":true' >/dev/null
+  printf '%s\n' "$swarm_feedback_loop_native_output" | grep -F '"retryDecision":{"attempt":2,"maxAttempts":2,"shouldRetry":false,"nextAttempt":2,"terminal":true' >/dev/null
+  grep -Fx 'fixed-after-feedback' "$swarm_feedback_loop_native_workspace_abs" >/dev/null
+  CLASP_LOOP_COMMAND=status "$swarm_feedback_loop_binary" "$swarm_feedback_loop_native_state_root_abs" >"$swarm_feedback_loop_status_output_abs.native"
+  grep -F '"attempt":2' "$swarm_feedback_loop_status_output_abs.native" >/dev/null
+  grep -F '"phase":"completed"' "$swarm_feedback_loop_status_output_abs.native" >/dev/null
+  grep -F '"verdict":"pass"' "$swarm_feedback_loop_status_output_abs.native" >/dev/null
+  grep -F '"approvalCount":1' "$swarm_feedback_loop_status_output_abs.native" >/dev/null
+  grep -F '"mergeGateSatisfied":true' "$swarm_feedback_loop_status_output_abs.native" >/dev/null
+  grep -F '"terminalOutcome":{"attempt":2,"phase":"completed","verdict":"pass","completed":true,"final":true,"builderTaskId":"builder-2","verifierTaskId":"verifier-2"' "$swarm_feedback_loop_status_output_abs.native" >/dev/null
+fi
 
 goal_manager_state_root_abs="$test_root_abs/swarm-goal-manager-state"
 goal_manager_workspace_root_abs="$test_root_abs/swarm-goal-manager-workspace"

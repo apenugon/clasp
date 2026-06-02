@@ -50,6 +50,28 @@ dependency_poll_seconds="${CLASP_SWARM_DEPENDENCY_POLL_SECONDS:-20}"
 infra_retry_delay_seconds="${CLASP_SWARM_INFRA_RETRY_DELAY_SECONDS:-5}"
 batch_filter="${CLASP_SWARM_BATCH:-}"
 owns_runtime_state=0
+manage_child_subprocesses="${CLASP_SWARM_MANAGE_CHILD_SUBPROCESSES:-1}"
+child_memory_mb="${CLASP_SWARM_CHILD_MEMORY_MB:-${CLASP_SWARM_LANE_MEMORY_MB:-8192}}"
+child_min_available_memory_mb="${CLASP_SWARM_CHILD_MIN_AVAILABLE_MEMORY_MB:-${CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB:-45056}}"
+child_min_available_disk_mb="${CLASP_SWARM_CHILD_MIN_AVAILABLE_DISK_MB:-${CLASP_SWARM_MIN_AVAILABLE_DISK_MB:-16384}}"
+child_min_disk_headroom_mb="${CLASP_SWARM_CHILD_MIN_DISK_HEADROOM_MB:-${CLASP_SWARM_MIN_DISK_HEADROOM_MB:-${CLASP_GENERATED_STATE_MIN_HEADROOM_MB:-1024}}}"
+child_jobs_root="$runtime_root/child-jobs"
+active_child_job_dir=""
+
+validate_non_negative_integer_config() {
+  local name="$1"
+  local value="$2"
+
+  if ! [[ "$value" =~ ^[0-9]+$ ]]; then
+    printf '%s must be a non-negative integer; got %s\n' "$name" "$value" >&2
+    exit 2
+  fi
+}
+
+validate_non_negative_integer_config "CLASP_SWARM_CHILD_MEMORY_MB" "$child_memory_mb"
+validate_non_negative_integer_config "CLASP_SWARM_CHILD_MIN_AVAILABLE_MEMORY_MB" "$child_min_available_memory_mb"
+validate_non_negative_integer_config "CLASP_SWARM_CHILD_MIN_AVAILABLE_DISK_MB" "$child_min_available_disk_mb"
+validate_non_negative_integer_config "CLASP_SWARM_CHILD_MIN_DISK_HEADROOM_MB" "$child_min_disk_headroom_mb"
 
 mkdir -p \
   "$runtime_root" \
@@ -58,10 +80,16 @@ mkdir -p \
   "$completed_root" \
   "$blocked_root" \
   "$logs_root" \
+  "$child_jobs_root" \
   "$global_completed_root" \
   "$(dirname "$merge_lock_file")"
 
 cleanup() {
+  if [[ -n "${active_child_job_dir:-}" && -d "$active_child_job_dir" ]]; then
+    "$project_root/scripts/stop-managed-job.sh" \
+      --jobs-root "$(dirname "$active_child_job_dir")" \
+      "$(basename "$active_child_job_dir")" >/dev/null 2>&1 || true
+  fi
   if [[ "$owns_runtime_state" == "1" ]]; then
     rm -f "$current_task_file" "$pid_file"
     release_lock "$lock_file"
@@ -69,6 +97,7 @@ cleanup() {
 }
 
 trap cleanup EXIT
+trap 'cleanup; exit 143' TERM INT
 
 run_with_timeout() {
   local timeout_seconds="$1"
@@ -92,7 +121,140 @@ run_lane_subprocess() {
   local timeout_seconds="$1"
   shift
 
-  run_with_timeout "$timeout_seconds" "$@"
+  if lane_child_subprocess_management_enabled; then
+    run_lane_managed_subprocess "$timeout_seconds" "$@"
+  else
+    run_with_timeout "$timeout_seconds" "$@"
+  fi
+}
+
+lane_child_subprocess_management_enabled() {
+  case "$manage_child_subprocesses" in
+    0|false|FALSE|False|no|NO|No|off|OFF|Off|never|NEVER|Never)
+      return 1
+      ;;
+  esac
+
+  return 0
+}
+
+lane_subprocess_name() {
+  local command_path="${1:-subprocess}"
+  local script_path="${2:-}"
+
+  if [[ "$(basename "$command_path")" == "bash" && -n "$script_path" ]]; then
+    basename "$script_path" .sh
+  else
+    basename "$command_path"
+  fi
+}
+
+lane_safe_job_name() {
+  printf '%s' "$1" | sed 's/[^A-Za-z0-9._-]/-/g'
+}
+
+run_lane_managed_subprocess() {
+  local timeout_seconds="$1"
+  shift
+  local subprocess_name=""
+  local safe_name=""
+  local job_id=""
+  local job_dir=""
+  local status=""
+  local exit_status=""
+  local stopped_for_parent=0
+  local managed_args=()
+  local managed_command=()
+
+  subprocess_name="$(lane_subprocess_name "$@")"
+  safe_name="$(lane_safe_job_name "$subprocess_name")"
+  job_id="${safe_name}-$(date +%Y%m%d%H%M%S%N)-$$-$RANDOM"
+
+  managed_args=(
+    "$project_root/scripts/run-managed-job.sh"
+    --jobs-root "$child_jobs_root"
+    --job-id "$job_id"
+  )
+  if (( child_memory_mb > 0 )); then
+    managed_args+=(--memory-mb "$child_memory_mb")
+  fi
+  if (( child_min_available_memory_mb > 0 )); then
+    managed_args+=(--min-available-memory-mb "$child_min_available_memory_mb")
+  fi
+  if (( child_min_available_disk_mb > 0 )); then
+    managed_args+=(--min-available-disk-mb "$child_min_available_disk_mb" --disk-reserve-path "$project_root")
+  fi
+  if (( child_min_disk_headroom_mb > 0 )); then
+    managed_args+=(--min-disk-headroom-mb "$child_min_disk_headroom_mb" --disk-reserve-path "$project_root")
+  fi
+
+  if [[ -z "$timeout_seconds" || "$timeout_seconds" == "0" ]]; then
+    managed_command=(bash -c 'exec 9>&-; exec "$@"' _ "$@")
+  elif command -v timeout >/dev/null 2>&1; then
+    managed_command=(bash -c 'exec 9>&-; exec timeout --signal=TERM --kill-after=30s "${1}s" "${@:2}"' _ "$timeout_seconds" "$@")
+  else
+    managed_command=(bash -c 'exec 9>&-; exec "$@"' _ "$@")
+  fi
+
+  if ! job_dir="$("${managed_args[@]}" -- "${managed_command[@]}")"; then
+    return "$?"
+  fi
+
+  active_child_job_dir="$job_dir"
+  while true; do
+    status="$(clasp_swarm_managed_job_status "$job_dir")"
+    if clasp_swarm_managed_job_status_is_terminal "$status" || [[ -f "$job_dir/exit-status" ]]; then
+      break
+    fi
+
+    if [[ -n "${CLASP_MANAGED_JOB_STOP_REQUEST:-}" && -f "$CLASP_MANAGED_JOB_STOP_REQUEST" ]]; then
+      stopped_for_parent=1
+      "$project_root/scripts/stop-managed-job.sh" \
+        --jobs-root "$child_jobs_root" \
+        "$(basename "$job_dir")" >/dev/null 2>&1 || true
+    fi
+
+    sleep 1
+  done
+  active_child_job_dir=""
+
+  status="$(clasp_swarm_managed_job_status "$job_dir")"
+  exit_status="$(clasp_swarm_managed_job_exit_status "$job_dir")"
+
+  if [[ -s "$job_dir/stdout.log" ]]; then
+    cat "$job_dir/stdout.log"
+  fi
+  if [[ -s "$job_dir/stderr.log" ]]; then
+    cat "$job_dir/stderr.log" >&2
+  fi
+
+  if [[ "$status" == "completed" && "${exit_status:-0}" == "0" ]]; then
+    return 0
+  fi
+
+  printf 'lane subprocess %s managed job failed: status=%s exit_status=%s job=%s\n' \
+    "$subprocess_name" "${status:-unknown}" "${exit_status:-unknown}" "$job_dir" >&2
+  clasp_swarm_print_managed_job_terminal_report "subprocess=$subprocess_name" "$job_dir"
+
+  if (( stopped_for_parent )); then
+    return 143
+  fi
+  if [[ "$exit_status" =~ ^[0-9]+$ ]]; then
+    return "$((exit_status % 256))"
+  fi
+  case "$status" in
+    memory-exceeded)
+      return 137
+      ;;
+    disk-exceeded)
+      return 125
+      ;;
+    memory-enforcer-unavailable|admission-lock-unavailable)
+      return 125
+      ;;
+  esac
+
+  return 1
 }
 
 lock_dir_for() {

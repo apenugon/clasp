@@ -1,0 +1,1155 @@
+module LocalSourceEdit
+
+foreign localSourceEditWorkspaceReadFileRaw : Str -> Str -> Result Str = "workspaceReadFile"
+foreign localSourceEditWorkspaceWriteFileRaw : Str -> Str -> Str -> Result Str = "workspaceWriteFile"
+foreign localSourceEditWorkspaceMkdirAllRaw : Str -> Str -> Result Str = "workspaceMkdirAll"
+foreign localSourceEditWorkspaceReplaceTextRaw : Str -> Str -> Str -> Str -> Int -> Int -> Result Int = "workspaceReplaceText"
+
+record SourceEditPatch = {
+  target : Str,
+  findText : Str,
+  replaceText : Str
+}
+
+type SourceEditPatchParseResult = ParsedSourceEditPatch SourceEditPatch | MissingSourceEditPatch Str
+
+localSourceEditEmptyTexts : [Str]
+localSourceEditEmptyTexts = []
+
+localSourceEditEmptyPatches : [SourceEditPatch]
+localSourceEditEmptyPatches = []
+
+standaloneSwarmSourceEditExampleTargets : [Str]
+standaloneSwarmSourceEditExampleTargets =
+  ["src/StandaloneSwarmReadiness.clasp", "src/StandaloneSwarmVerifier.clasp"]
+
+sourceEditPlanHeading : Str
+sourceEditPlanHeading = "Source edit plan:"
+
+sourceEditPatchesHeading : Str
+sourceEditPatchesHeading = "Source edit patches:"
+
+sourceEditPatchTargetSeparator : Str
+sourceEditPatchTargetSeparator = " :: "
+
+sourceEditPatchReplacementSeparator : Str
+sourceEditPatchReplacementSeparator = " => "
+
+standaloneSwarmSourceEditPlanTargets : [Str]
+standaloneSwarmSourceEditPlanTargets =
+  [
+    "src/StandaloneSwarmReadiness.clasp",
+    "src/StandaloneSwarmVerifier.clasp",
+    "examples/swarm-native/StandaloneSwarmHarness.clasp",
+    "examples/swarm-native/StandaloneSwarmRouting.clasp",
+    "scripts/standalone-swarm-readiness.sh",
+    "scripts/standalone-swarm-verify.sh",
+    "docs/standalone-swarm-readiness.md",
+    "runtime/standalone_swarm_probe.rs"
+  ]
+
+standaloneSwarmSourceEditPatches : [SourceEditPatch]
+standaloneSwarmSourceEditPatches =
+  [
+    SourceEditPatch {
+      target = "src/StandaloneSwarmReadiness.clasp",
+      findText = "readinessStatus = \"open\"",
+      replaceText = "readinessStatus = \"standalone-swarm-fixed-after-feedback\""
+    },
+    SourceEditPatch {
+      target = "src/StandaloneSwarmVerifier.clasp",
+      findText = "verifierStatus = \"open\"",
+      replaceText = "verifierStatus = \"standalone-swarm-fixed-after-feedback\""
+    },
+    SourceEditPatch {
+      target = "examples/swarm-native/StandaloneSwarmHarness.clasp",
+      findText = "harnessStatus = \"open\"",
+      replaceText = "harnessStatus = \"standalone-swarm-fixed-after-feedback\""
+    },
+    SourceEditPatch {
+      target = "examples/swarm-native/StandaloneSwarmRouting.clasp",
+      findText = "routingStatus = \"open\"",
+      replaceText = "routingStatus = \"standalone-swarm-fixed-after-feedback\""
+    },
+    SourceEditPatch {
+      target = "scripts/standalone-swarm-readiness.sh",
+      findText = "echo \"standalone-swarm=open\"",
+      replaceText = "echo \"standalone-swarm=standalone-swarm-fixed-after-feedback\""
+    },
+    SourceEditPatch {
+      target = "scripts/standalone-swarm-verify.sh",
+      findText = "echo \"standalone-swarm-verifier=open\"",
+      replaceText = "echo \"standalone-swarm-verifier=standalone-swarm-fixed-after-feedback\""
+    },
+    SourceEditPatch {
+      target = "docs/standalone-swarm-readiness.md",
+      findText = "standalone-swarm-status: open",
+      replaceText = "standalone-swarm-status: standalone-swarm-fixed-after-feedback"
+    },
+    SourceEditPatch {
+      target = "runtime/standalone_swarm_probe.rs",
+      findText = "const STANDALONE_SWARM_STATUS: &str = \"open\";",
+      replaceText = "const STANDALONE_SWARM_STATUS: &str = \"standalone-swarm-fixed-after-feedback\";"
+    }
+  ]
+
+standaloneSwarmMissingSourceEditPlanMessage : Str
+standaloneSwarmMissingSourceEditPlanMessage = "local-agent-error:missing source edit plan"
+
+standaloneSwarmDirectSourceEditManifestPath : Str
+standaloneSwarmDirectSourceEditManifestPath = "notes/direct-source-edit-manifest.json"
+
+localSourceEditTextIncludes : Str -> Str -> Bool
+localSourceEditTextIncludes value needle = length (textSplit value needle) > 1
+
+localSourceEditWorkspaceReadTextOr : Str -> Str -> Str -> Str
+localSourceEditWorkspaceReadTextOr root relative fallback =
+  match localSourceEditWorkspaceReadFileRaw root relative {
+    Ok raw -> raw,
+    Err message -> fallback
+  }
+
+localSourceEditWorkspaceWriteTextOrMessage : Str -> Str -> Str -> Str
+localSourceEditWorkspaceWriteTextOrMessage root relative value =
+  match localSourceEditWorkspaceWriteFileRaw root relative value {
+    Ok written -> "",
+    Err message -> textConcat ["write-error:", relative, ":", message]
+  }
+
+localSourceEditWorkspaceEnsureDirOrMessage : Str -> Str -> Str
+localSourceEditWorkspaceEnsureDirOrMessage root relative =
+  match localSourceEditWorkspaceMkdirAllRaw root relative {
+    Ok created -> "",
+    Err message -> textConcat ["mkdir-error:", relative, ":", message]
+  }
+
+localSourceEditWorkspaceReplaceTextOrMessage : Str -> Str -> Str -> Str -> Str
+localSourceEditWorkspaceReplaceTextOrMessage root relative findText replaceText =
+  match localSourceEditWorkspaceReplaceTextRaw root relative findText replaceText 64 262144 {
+    Ok count -> "",
+    Err message -> textConcat ["replace-error:", relative, ":", message]
+  }
+
+firstLine : Str -> Str
+firstLine value = {
+  for line in textSplit value "\n" {
+    return line
+  };
+  ""
+}
+
+remainingLines : Str -> Str
+remainingLines value = {
+  let mut seenFirst = false;
+  let mut result = "";
+  for line in textSplit value "\n" {
+    if seenFirst then {
+      result = textConcat [result, line];
+      result
+    } else {
+      seenFirst = true;
+      result
+    }
+  };
+  result
+}
+
+replaceTextAll : Str -> Str -> Str -> Str
+replaceTextAll value needle replacement = textJoin replacement (textSplit value needle)
+
+textListContains : [Str] -> Str -> Bool
+textListContains values needle = {
+  let mut found = false;
+  for value in values {
+    if value == needle then {
+      found = true;
+      found
+    } else
+      found
+  };
+  found
+}
+
+sourceEditTargetPromptLine : Str -> Str
+sourceEditTargetPromptLine target =
+  textConcat ["- ", target]
+
+sourceEditTargetPromptLines : [Str] -> [Str]
+sourceEditTargetPromptLines targets = {
+  let mut lines = localSourceEditEmptyTexts;
+  for target in targets {
+    lines = append lines [sourceEditTargetPromptLine target];
+    lines
+  };
+  lines
+}
+
+sourceEditPatchPromptLine : SourceEditPatch -> Str
+sourceEditPatchPromptLine patch =
+  textConcat
+    [
+      "- ",
+      patch.target,
+      sourceEditPatchTargetSeparator,
+      patch.findText,
+      sourceEditPatchReplacementSeparator,
+      patch.replaceText
+    ]
+
+sourceEditPatchPromptLines : [SourceEditPatch] -> [Str]
+sourceEditPatchPromptLines patches = {
+  let mut lines = localSourceEditEmptyTexts;
+  for patch in patches {
+    lines = append lines [sourceEditPatchPromptLine patch];
+    lines
+  };
+  lines
+}
+
+sourceEditPromptSection : [Str] -> [SourceEditPatch] -> Str
+sourceEditPromptSection targets patches =
+  textJoin
+    "\n"
+    (append
+      (append [sourceEditPlanHeading] (sourceEditTargetPromptLines targets))
+      (append [sourceEditPatchesHeading] (sourceEditPatchPromptLines patches)))
+
+standaloneSwarmSourceEditPromptSection : Str
+standaloneSwarmSourceEditPromptSection =
+  sourceEditPromptSection standaloneSwarmSourceEditPlanTargets standaloneSwarmSourceEditPatches
+
+sourceEditPlanTargetsFromPrompt : Str -> [Str]
+sourceEditPlanTargetsFromPrompt prompt = {
+  let mut inPlan = false;
+  let mut targets = localSourceEditEmptyTexts;
+  for rawLine in textSplit prompt "\n" {
+    if localSourceEditTextIncludes rawLine sourceEditPlanHeading then {
+      inPlan = true;
+      targets
+    } else if inPlan then
+      match textPrefix rawLine "- " {
+        Ok target -> {
+          targets = append targets [target];
+          targets
+        },
+        Err miss -> {
+          if rawLine == "" then
+            targets
+          else {
+            inPlan = false;
+            targets
+          }
+        }
+      }
+    else
+      targets
+  };
+  targets
+}
+
+sourceEditPatchLineFromPromptLine : Str -> SourceEditPatchParseResult
+sourceEditPatchLineFromPromptLine rawLine =
+  match textPrefix rawLine "- " {
+    Ok patchLine -> match textSplitFirst patchLine sourceEditPatchTargetSeparator {
+      Ok targetPayload -> {
+        let target = firstLine targetPayload in
+        let operation = remainingLines targetPayload in
+        match textSplitFirst operation sourceEditPatchReplacementSeparator {
+          Ok replacementPayload ->
+            ParsedSourceEditPatch
+              (SourceEditPatch {
+                target = target,
+                findText = firstLine replacementPayload,
+                replaceText = remainingLines replacementPayload
+              }),
+          Err missingReplacement -> MissingSourceEditPatch rawLine
+        }
+      },
+      Err missingTarget -> MissingSourceEditPatch rawLine
+    },
+    Err missingBullet -> MissingSourceEditPatch rawLine
+  }
+
+sourceEditPatchesFromPrompt : Str -> [SourceEditPatch]
+sourceEditPatchesFromPrompt prompt = {
+  let mut inPlan = false;
+  let mut patches = localSourceEditEmptyPatches;
+  for rawLine in textSplit prompt "\n" {
+    if localSourceEditTextIncludes rawLine sourceEditPatchesHeading then {
+      inPlan = true;
+      patches
+    } else if inPlan then
+      match sourceEditPatchLineFromPromptLine rawLine {
+        ParsedSourceEditPatch patch -> {
+          patches = append patches [patch];
+          patches
+        },
+        MissingSourceEditPatch miss -> {
+          if rawLine == "" then
+            patches
+          else {
+            inPlan = false;
+            patches
+          }
+        }
+      }
+    else
+      patches
+  };
+  patches
+}
+
+sourceEditTargetIsAbsolute : Str -> Bool
+sourceEditTargetIsAbsolute target =
+  match textPrefix target "/" {
+    Ok rest -> true,
+    Err miss -> false
+  }
+
+sourceEditTargetHasAllowedRoot : Str -> Bool
+sourceEditTargetHasAllowedRoot target =
+  match textPrefix target "src/" {
+    Ok rest -> true,
+    Err miss -> match textPrefix target "examples/" {
+      Ok examplesRest -> true,
+      Err examplesMiss -> match textPrefix target "scripts/" {
+        Ok scriptsRest -> true,
+        Err scriptsMiss -> match textPrefix target "docs/" {
+          Ok docsRest -> true,
+          Err docsMiss -> match textPrefix target "runtime/" {
+            Ok runtimeRest -> true,
+            Err runtimeMiss -> match textPrefix target "agents/" {
+              Ok agentsRest -> true,
+              Err agentsMiss -> match textPrefix target "benchmarks/" {
+                Ok benchmarksRest -> true,
+                Err benchmarksMiss -> false
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+sourceEditTargetHasKnownExtension : Str -> Bool
+sourceEditTargetHasKnownExtension target =
+  if localSourceEditTextIncludes target ".clasp" then
+    true
+  else if localSourceEditTextIncludes target ".sh" then
+    true
+  else if localSourceEditTextIncludes target ".md" then
+    true
+  else if localSourceEditTextIncludes target ".rs" then
+    true
+  else if localSourceEditTextIncludes target ".mjs" then
+    true
+  else if localSourceEditTextIncludes target ".js" then
+    true
+  else if localSourceEditTextIncludes target ".ts" then
+    true
+  else if localSourceEditTextIncludes target ".json" then
+    true
+  else if localSourceEditTextIncludes target ".toml" then
+    true
+  else if localSourceEditTextIncludes target ".yaml" then
+    true
+  else
+    localSourceEditTextIncludes target ".yml"
+
+sourceEditTargetIsGeneratedPath : Str -> Bool
+sourceEditTargetIsGeneratedPath target =
+  if localSourceEditTextIncludes target ".git" then
+    true
+  else if localSourceEditTextIncludes target ".clasp-loops" then
+    true
+  else if localSourceEditTextIncludes target ".clasp-swarm" then
+    true
+  else if localSourceEditTextIncludes target ".clasp-agents" then
+    true
+  else if localSourceEditTextIncludes target ".clasp-verify" then
+    true
+  else if localSourceEditTextIncludes target "node_modules/" then
+    true
+  else if localSourceEditTextIncludes target "target/" then
+    true
+  else if localSourceEditTextIncludes target "dist/" then
+    true
+  else
+    localSourceEditTextIncludes target "result/"
+
+sourceEditTargetIsClasp : Str -> Bool
+sourceEditTargetIsClasp target = localSourceEditTextIncludes target ".clasp"
+
+sourceEditPlanTargetAllowed : Str -> Bool
+sourceEditPlanTargetAllowed target =
+  if target == "" then
+    false
+  else if sourceEditTargetIsAbsolute target then
+    false
+  else if localSourceEditTextIncludes target ".." then
+    false
+  else if localSourceEditTextIncludes target " " then
+    false
+  else if sourceEditTargetIsGeneratedPath target then
+    false
+  else if sourceEditTargetHasAllowedRoot target then
+    sourceEditTargetHasKnownExtension target
+  else
+    false
+
+sourceEditPlanTargetsAllowed : [Str] -> Bool
+sourceEditPlanTargetsAllowed targets = {
+  let mut ok = true;
+  for target in targets {
+    if sourceEditPlanTargetAllowed target then
+      ok
+    else {
+      ok = false;
+      ok
+    }
+  };
+  ok
+}
+
+sourceEditPatchAllowed : SourceEditPatch -> [Str] -> Bool
+sourceEditPatchAllowed patch targets =
+  if sourceEditPlanTargetAllowed patch.target then
+    if textListContains targets patch.target then
+      if patch.findText != "" then
+        patch.replaceText != ""
+      else
+        false
+    else
+      false
+  else
+    false
+
+sourceEditPatchesAllowed : [Str] -> [SourceEditPatch] -> Bool
+sourceEditPatchesAllowed targets patches = {
+  let mut ok = true;
+  for patch in patches {
+    if sourceEditPatchAllowed patch targets then
+      ok
+    else {
+      ok = false;
+      ok
+    }
+  };
+  ok
+}
+
+sourceEditTargetHasPatch : Str -> [SourceEditPatch] -> Bool
+sourceEditTargetHasPatch target patches = {
+  let mut found = false;
+  for patch in patches {
+    if patch.target == target then {
+      found = true;
+      found
+    } else
+      found
+  };
+  found
+}
+
+sourceEditTargetsHavePatches : [Str] -> [SourceEditPatch] -> Bool
+sourceEditTargetsHavePatches targets patches = {
+  let mut ok = true;
+  for target in targets {
+    if sourceEditTargetHasPatch target patches then
+      ok
+    else {
+      ok = false;
+      ok
+    }
+  };
+  ok
+}
+
+promptHasSourceEditPlan : Str -> Bool
+promptHasSourceEditPlan prompt = {
+  let targets = sourceEditPlanTargetsFromPrompt prompt in
+  let patches = sourceEditPatchesFromPrompt prompt in
+  if length targets > 1 then
+    if length patches > 1 then
+      if sourceEditPlanTargetsAllowed targets then
+        if sourceEditPatchesAllowed targets patches then
+          sourceEditTargetsHavePatches targets patches
+        else
+          false
+      else
+        false
+    else
+      false
+  else
+    false
+}
+
+promptHasRepoScaleSourceEditPlan : Str -> Bool
+promptHasRepoScaleSourceEditPlan prompt = {
+  let targets = sourceEditPlanTargetsFromPrompt prompt in
+  if promptHasSourceEditPlan prompt then
+    sourceEditTargetsAreRepoScale targets
+  else
+    false
+}
+
+sourceEditModuleNameForTarget : Str -> Str
+sourceEditModuleNameForTarget target =
+  if localSourceEditTextIncludes target "StandaloneSwarmVerifier" then
+    "StandaloneSwarmVerifier"
+  else if localSourceEditTextIncludes target "StandaloneSwarmReadiness" then
+    "StandaloneSwarmReadiness"
+  else
+    "PlannedSourceEdit"
+
+standaloneSwarmSourceEditText : Str -> Str -> Str -> Str -> Str
+standaloneSwarmSourceEditText target existing patched content =
+  if sourceEditTargetIsClasp target then
+    textJoin "\n" [
+      patched,
+      "",
+      "",
+      "plannedSourceFile : Str",
+      textConcat ["plannedSourceFile = \"", target, "\""],
+      "",
+      "plannedStatus : Str",
+      textConcat ["plannedStatus = \"", content, "\""],
+      "",
+      "sourceEditEvidence : Str",
+      "sourceEditEvidence = \"local-agent-plan-driven-source-edit\"",
+      "",
+      "patchEditMode : Str",
+      "patchEditMode = \"targeted-replace\"",
+      "",
+      "previousSourceSeen : Str",
+      textConcat [
+        "previousSourceSeen = \"",
+        if localSourceEditTextIncludes existing "module " then "yes" else "no",
+        "\""
+      ],
+      ""
+    ]
+  else
+    patched
+
+sourceEditPatchesMatchTarget : Str -> Str -> [SourceEditPatch] -> Bool
+sourceEditPatchesMatchTarget target existing patches = {
+  let mut current = existing;
+  let mut foundPatch = false;
+  let mut failed = false;
+  for patch in patches {
+    if patch.target == target then {
+      foundPatch = true;
+      if localSourceEditTextIncludes current patch.findText then {
+        current = replaceTextAll current patch.findText patch.replaceText;
+        current
+      } else {
+        failed = true;
+        current
+      }
+    } else
+      current
+  };
+  if foundPatch then failed == false else false
+}
+
+applySourceEditPatchesToTarget : Str -> Str -> [SourceEditPatch] -> Str
+applySourceEditPatchesToTarget target existing patches = {
+  let mut current = existing;
+  for patch in patches {
+    if patch.target == target then {
+      current = replaceTextAll current patch.findText patch.replaceText;
+      current
+    } else
+      current
+  };
+  current
+}
+
+sourceEditProofTargetLines : [Str] -> [Str]
+sourceEditProofTargetLines targets = {
+  let mut lines = localSourceEditEmptyTexts;
+  for target in targets {
+    lines = append lines [
+      textConcat ["sourceFile=", target],
+      textConcat ["sourcePreviousSeen=", target],
+      textConcat ["targetPatchMode=", target, ":targeted-replace"]
+    ];
+    lines
+  };
+  lines
+}
+
+sourceEditTargetIsSrc : Str -> Bool
+sourceEditTargetIsSrc target =
+  match textPrefix target "src/" {
+    Ok rest -> true,
+    Err miss -> false
+  }
+
+sourceEditTargetHasPrefix : Str -> Str -> Bool
+sourceEditTargetHasPrefix target prefix =
+  match textPrefix target prefix {
+    Ok rest -> true,
+    Err miss -> false
+  }
+
+sourceEditTargetsIncludePrefix : [Str] -> Str -> Bool
+sourceEditTargetsIncludePrefix targets prefix = {
+  let mut found = false;
+  for target in targets {
+    if found then
+      found
+    else if sourceEditTargetHasPrefix target prefix then {
+      found = true;
+      found
+    } else
+      found
+  };
+  found
+}
+
+sourceEditTargetsIncludeNonSrc : [Str] -> Bool
+sourceEditTargetsIncludeNonSrc targets = {
+  let mut found = false;
+  for target in targets {
+    if found then
+      found
+    else if sourceEditTargetIsSrc target then
+      found
+    else {
+      found = true;
+      found
+    }
+  };
+  found
+}
+
+sourceEditTargetsAreRepoScale : [Str] -> Bool
+sourceEditTargetsAreRepoScale targets =
+  if length targets >= 8 then
+    if sourceEditTargetsIncludePrefix targets "src/" then
+      if sourceEditTargetsIncludePrefix targets "examples/" then
+        if sourceEditTargetsIncludePrefix targets "scripts/" then
+          if sourceEditTargetsIncludePrefix targets "docs/" then
+            sourceEditTargetsIncludePrefix targets "runtime/"
+          else
+            false
+        else
+          false
+      else
+        false
+    else
+      false
+  else
+    false
+
+sourceEditProofPatchLines : [SourceEditPatch] -> [Str]
+sourceEditProofPatchLines patches = {
+  let mut lines = localSourceEditEmptyTexts;
+  for patch in patches {
+    lines = append lines [
+      textConcat ["patchFile=", patch.target],
+      textConcat ["patchFindFingerprint=", textFingerprint64Hex patch.findText],
+      textConcat ["patchReplacementFingerprint=", textFingerprint64Hex patch.replaceText]
+    ];
+    lines
+  };
+  lines
+}
+
+sourceEditProofResultLines : Str -> [Str] -> [Str]
+sourceEditProofResultLines workspaceRoot targets = {
+  let mut lines = localSourceEditEmptyTexts;
+  for target in targets {
+    lines = append lines [
+      textConcat ["targetPostcheck=", target, ":present"],
+      textConcat ["targetResultFingerprint=", target, ":", textFingerprint64Hex (localSourceEditWorkspaceReadTextOr workspaceRoot target "")]
+    ];
+    lines
+  };
+  lines
+}
+
+sourceEditManifestFileEntryJson : Str -> Str -> Str
+sourceEditManifestFileEntryJson workspaceRoot target =
+  textConcat [
+    "{\"path\":",
+    encode target,
+    ",\"fingerprint64Hex\":",
+    encode (textFingerprint64Hex (localSourceEditWorkspaceReadTextOr workspaceRoot target "")),
+    "}"
+  ]
+
+sourceEditManifestFileEntryJsons : Str -> [Str] -> [Str]
+sourceEditManifestFileEntryJsons workspaceRoot targets = {
+  let mut entries = localSourceEditEmptyTexts;
+  for target in targets {
+    entries = append entries [sourceEditManifestFileEntryJson workspaceRoot target];
+    entries
+  };
+  entries
+}
+
+standaloneSwarmDirectSourceEditManifestJson : Str -> [Str] -> Str
+standaloneSwarmDirectSourceEditManifestJson workspaceRoot targets =
+  textConcat [
+    "{\"schemaVersion\":1,\"kind\":\"standalone-swarm-direct-source-edit-manifest\",\"fingerprintAlgorithm\":\"textFingerprint64Hex\",\"requiredSurfaceCount\":",
+    encode (length targets),
+    ",\"files\":[",
+    textJoin "," (sourceEditManifestFileEntryJsons workspaceRoot targets),
+    "]}\n"
+  ]
+
+standaloneSwarmDirectSourceEditProofTextWithPostcheck : Str -> Str -> [Str] -> [SourceEditPatch] -> Str
+standaloneSwarmDirectSourceEditProofTextWithPostcheck workspaceRoot content targets patches = {
+  let mut lines = [
+    "kind=clasp-local-agent-direct-source-edit",
+    "route=standalone-swarm",
+    textConcat ["status=", content],
+    "planDriven=true",
+    "multiFile=true",
+    "patchDriven=true",
+    textConcat ["multiSurface=", if sourceEditTargetsIncludeNonSrc targets then "true" else "false"],
+    textConcat ["repoScale=", if sourceEditTargetsAreRepoScale targets then "true" else "false"],
+    "repoScaleRequiredRoots=src,examples,scripts,docs,runtime",
+    "atomicPreflight=true",
+    "postWriteFingerprintCheck=true",
+    textConcat ["workspaceFingerprintManifest=", standaloneSwarmDirectSourceEditManifestPath],
+    "workspaceFingerprintAlgorithm=textFingerprint64Hex",
+    "workspaceConfinedWrite=true",
+    "workspaceApi=workspaceReadFile/workspaceReplaceText/workspaceWriteFile/workspaceMkdirAll",
+    "sourceEditPrimitive=workspaceReplaceText",
+    "operation=targeted-replace",
+    textConcat ["targetCount=", encode (length targets)],
+    textConcat ["patchCount=", encode (length patches)]
+  ];
+  for line in sourceEditProofTargetLines targets {
+    lines = append lines [line];
+    lines
+  };
+  for line in sourceEditProofResultLines workspaceRoot targets {
+    lines = append lines [line];
+    lines
+  };
+  for line in sourceEditProofPatchLines patches {
+    lines = append lines [line];
+    lines
+  };
+  lines = append lines [
+    "verification=bash scripts/test-local-agent-capability-closure.sh",
+    ""
+  ];
+  textJoin "\n" lines
+}
+
+sourceEditTargetPatchable : Str -> Str -> [SourceEditPatch] -> Bool
+sourceEditTargetPatchable workspaceRoot target patches = {
+  let existingSource = localSourceEditWorkspaceReadTextOr workspaceRoot target "" in
+  sourceEditPatchesMatchTarget target existingSource patches
+}
+
+sourceEditTargetsPatchable : Str -> [Str] -> [SourceEditPatch] -> Bool
+sourceEditTargetsPatchable workspaceRoot targets patches = {
+  let mut ok = true;
+  for target in targets {
+    if ok then {
+      if sourceEditTargetPatchable workspaceRoot target patches then
+        ok
+      else {
+        ok = false;
+        ok
+      }
+    } else
+      ok
+  };
+  ok
+}
+
+firstUnpatchableSourceEditTarget : Str -> [Str] -> [SourceEditPatch] -> Str
+firstUnpatchableSourceEditTarget workspaceRoot targets patches = {
+  let mut found = "";
+  for target in targets {
+    if found != "" then
+      found
+    else if sourceEditTargetPatchable workspaceRoot target patches then
+      found
+    else {
+      found = target;
+      found
+    }
+  };
+  found
+}
+
+replaceSourceEditPatchesForTarget : Str -> Str -> [SourceEditPatch] -> Str
+replaceSourceEditPatchesForTarget workspaceRoot target patches = {
+  let mut error = "";
+  for patch in patches {
+    if error != "" then
+      error
+    else if patch.target == target then {
+      let patchError = localSourceEditWorkspaceReplaceTextOrMessage workspaceRoot target patch.findText patch.replaceText in
+      if patchError != "" then {
+        error = patchError;
+        error
+      } else
+        error
+    } else
+      error
+  };
+  error
+}
+
+addSourceEditEvidenceForTarget : Str -> Str -> Str -> Str -> Str -> Str
+addSourceEditEvidenceForTarget workspaceRoot target existingSource patchedSource content =
+  if sourceEditTargetIsClasp target then
+    localSourceEditWorkspaceReplaceTextOrMessage workspaceRoot target patchedSource (standaloneSwarmSourceEditText target existingSource patchedSource content)
+  else
+    ""
+
+writeSourceEditTargetsUnchecked : Str -> [Str] -> [SourceEditPatch] -> Str -> Str
+writeSourceEditTargetsUnchecked workspaceRoot targets patches content = {
+  let mut error = "";
+  for target in targets {
+    if error != "" then
+      error
+    else {
+      let sourceDirError = localSourceEditWorkspaceEnsureDirOrMessage workspaceRoot (pathDirname target) in
+      if sourceDirError != "" then {
+        error = sourceDirError;
+        error
+      } else {
+        let existingSource = localSourceEditWorkspaceReadTextOr workspaceRoot target "" in
+        if sourceEditPatchesMatchTarget target existingSource patches then {
+          let patchError = replaceSourceEditPatchesForTarget workspaceRoot target patches in
+          if patchError != "" then {
+            error = patchError;
+            error
+          } else {
+            let patchedSource = localSourceEditWorkspaceReadTextOr workspaceRoot target "" in
+            let evidenceError = addSourceEditEvidenceForTarget workspaceRoot target existingSource patchedSource content in
+            if evidenceError != "" then {
+              error = evidenceError;
+              error
+            } else
+              error
+          }
+        } else {
+          error = textConcat ["local-agent-error:source patch did not match:", target];
+          error
+        }
+      }
+    }
+  };
+  error
+}
+
+writeSourceEditTargets : Str -> [Str] -> [SourceEditPatch] -> Str -> Str
+writeSourceEditTargets workspaceRoot targets patches content =
+  if sourceEditTargetsPatchable workspaceRoot targets patches then
+    writeSourceEditTargetsUnchecked workspaceRoot targets patches content
+  else
+    textConcat ["local-agent-error:source patch preflight failed:", firstUnpatchableSourceEditTarget workspaceRoot targets patches]
+
+writeStandaloneSwarmDirectSourceEdit : Str -> Str -> Str -> Str -> Str
+writeStandaloneSwarmDirectSourceEdit workspaceRoot route content prompt =
+  if route != "standalone-swarm" then
+    ""
+  else if promptHasSourceEditPlan prompt == false then
+    ""
+  else {
+    let targets = sourceEditPlanTargetsFromPrompt prompt in
+    let patches = sourceEditPatchesFromPrompt prompt in
+    let srcError = localSourceEditWorkspaceEnsureDirOrMessage workspaceRoot "src" in
+    if srcError != "" then
+      srcError
+    else {
+      let notesError = localSourceEditWorkspaceEnsureDirOrMessage workspaceRoot "notes" in
+      if notesError != "" then
+        notesError
+      else {
+        let sourceError = writeSourceEditTargets workspaceRoot targets patches content in
+        if sourceError != "" then
+          sourceError
+        else
+          {
+            let manifestError =
+              localSourceEditWorkspaceWriteTextOrMessage
+                workspaceRoot
+                standaloneSwarmDirectSourceEditManifestPath
+                (standaloneSwarmDirectSourceEditManifestJson workspaceRoot targets) in
+            if manifestError != "" then
+              manifestError
+            else
+              localSourceEditWorkspaceWriteTextOrMessage workspaceRoot "notes/direct-source-edit.txt" (standaloneSwarmDirectSourceEditProofTextWithPostcheck workspaceRoot content targets patches)
+          }
+      }
+    }
+  }
+
+sourceEditTargetProofPresent : Str -> Str -> Bool
+sourceEditTargetProofPresent proof target =
+  if localSourceEditTextIncludes proof (textConcat ["sourceFile=", target]) then
+    if localSourceEditTextIncludes proof (textConcat ["sourcePreviousSeen=", target]) then
+      localSourceEditTextIncludes proof (textConcat ["targetPatchMode=", target, ":targeted-replace"])
+    else
+      false
+  else
+    false
+
+sourceEditTargetPostcheckProofPresent : Str -> Str -> Str -> Bool
+sourceEditTargetPostcheckProofPresent workspaceRoot proof target = {
+  let source = localSourceEditWorkspaceReadTextOr workspaceRoot target "" in
+  if localSourceEditTextIncludes proof (textConcat ["targetPostcheck=", target, ":present"]) then
+    localSourceEditTextIncludes proof (textConcat ["targetResultFingerprint=", target, ":", textFingerprint64Hex source])
+  else
+    false
+}
+
+sourceEditTargetsPresent : Str -> Str -> [Str] -> Bool
+sourceEditTargetsPresent workspaceRoot proof targets = {
+  let mut ok = true;
+  for target in targets {
+    if ok then {
+      let source = localSourceEditWorkspaceReadTextOr workspaceRoot target "" in
+      if source != "" then
+        if sourceEditTargetProofPresent proof target then
+          if sourceEditTargetPostcheckProofPresent workspaceRoot proof target then
+            ok
+          else {
+            ok = false;
+            ok
+          }
+        else {
+          ok = false;
+          ok
+        }
+      else {
+        ok = false;
+        ok
+      }
+    } else
+      ok
+  };
+  ok
+}
+
+sourceEditPatchSourcePresent : Str -> SourceEditPatch -> Bool
+sourceEditPatchSourcePresent workspaceRoot patch = {
+  let source = localSourceEditWorkspaceReadTextOr workspaceRoot patch.target "" in
+  localSourceEditTextIncludes source patch.replaceText
+}
+
+sourceEditPatchesPresent : Str -> [SourceEditPatch] -> Bool
+sourceEditPatchesPresent workspaceRoot patches = {
+  let mut ok = true;
+  for patch in patches {
+    if ok then {
+      if sourceEditPatchSourcePresent workspaceRoot patch then
+        ok
+      else {
+        ok = false;
+        ok
+      }
+    } else
+      ok
+  };
+  ok
+}
+
+sourceEditPatchProofPresent : Str -> SourceEditPatch -> Bool
+sourceEditPatchProofPresent proof patch =
+  if localSourceEditTextIncludes proof (textConcat ["patchFile=", patch.target]) then
+    if localSourceEditTextIncludes proof (textConcat ["patchFindFingerprint=", textFingerprint64Hex patch.findText]) then
+      localSourceEditTextIncludes proof (textConcat ["patchReplacementFingerprint=", textFingerprint64Hex patch.replaceText])
+    else
+      false
+  else
+    false
+
+sourceEditPatchProofsPresent : Str -> [SourceEditPatch] -> Bool
+sourceEditPatchProofsPresent proof patches = {
+  let mut ok = true;
+  for patch in patches {
+    if ok then {
+      if sourceEditPatchProofPresent proof patch then
+        ok
+      else {
+        ok = false;
+        ok
+      }
+    } else
+      ok
+  };
+  ok
+}
+
+sourceEditAppendIssue : [Str] -> Bool -> Str -> [Str]
+sourceEditAppendIssue issues ok message =
+  if ok then issues else append issues [message]
+
+sourceEditManifestTargetPresent : Str -> Str -> Str -> Bool
+sourceEditManifestTargetPresent workspaceRoot manifest target = {
+  let source = localSourceEditWorkspaceReadTextOr workspaceRoot target "" in
+  if localSourceEditTextIncludes manifest (textConcat ["\"path\":", encode target]) then
+    localSourceEditTextIncludes manifest (textConcat ["\"fingerprint64Hex\":", encode (textFingerprint64Hex source)])
+  else
+    false
+}
+
+sourceEditManifestTargetsPresent : Str -> [Str] -> Bool
+sourceEditManifestTargetsPresent workspaceRoot targets = {
+  let manifest = localSourceEditWorkspaceReadTextOr workspaceRoot standaloneSwarmDirectSourceEditManifestPath "" in
+  let mut ok = true;
+  for target in targets {
+    if ok then {
+      if sourceEditManifestTargetPresent workspaceRoot manifest target then
+        ok
+      else {
+        ok = false;
+        ok
+      }
+    } else
+      ok
+  };
+  ok
+}
+
+standaloneSwarmDirectSourceEditProofMetadataPresent : Str -> Int -> Int -> Bool
+standaloneSwarmDirectSourceEditProofMetadataPresent proof targetCount patchCount =
+  if localSourceEditTextIncludes proof "clasp-local-agent-direct-source-edit" then
+    if localSourceEditTextIncludes proof "multiFile=true" then
+      if localSourceEditTextIncludes proof "multiSurface=true" then
+        if localSourceEditTextIncludes proof "repoScale=true" then
+          if localSourceEditTextIncludes proof "repoScaleRequiredRoots=src,examples,scripts,docs,runtime" then
+            if localSourceEditTextIncludes proof "planDriven=true" then
+              if localSourceEditTextIncludes proof "patchDriven=true" then
+                if localSourceEditTextIncludes proof "atomicPreflight=true" then
+                  if localSourceEditTextIncludes proof "postWriteFingerprintCheck=true" then
+                    if localSourceEditTextIncludes proof (textConcat ["workspaceFingerprintManifest=", standaloneSwarmDirectSourceEditManifestPath]) then
+                      if localSourceEditTextIncludes proof "workspaceFingerprintAlgorithm=textFingerprint64Hex" then
+                        if localSourceEditTextIncludes proof "workspaceConfinedWrite=true" then
+                          if localSourceEditTextIncludes proof "workspaceApi=workspaceReadFile/workspaceReplaceText/workspaceWriteFile/workspaceMkdirAll" then
+                            if localSourceEditTextIncludes proof "sourceEditPrimitive=workspaceReplaceText" then
+                              if localSourceEditTextIncludes proof "operation=targeted-replace" then
+                                if localSourceEditTextIncludes proof (textConcat ["targetCount=", encode targetCount]) then
+                                  localSourceEditTextIncludes proof (textConcat ["patchCount=", encode patchCount])
+                                else
+                                  false
+                              else
+                                false
+                            else
+                              false
+                          else
+                            false
+                        else
+                          false
+                      else
+                        false
+                    else
+                      false
+                  else
+                    false
+                else
+                  false
+              else
+                false
+            else
+              false
+          else
+            false
+        else
+          false
+      else
+        false
+    else
+      false
+  else
+    false
+
+standaloneSwarmDirectSourceEditPresent : Str -> Str -> Str -> Bool
+standaloneSwarmDirectSourceEditPresent workspaceRoot route prompt =
+  if route != "standalone-swarm" then
+    true
+  else if promptHasSourceEditPlan prompt == false then
+    true
+  else {
+    let targets = sourceEditPlanTargetsFromPrompt prompt in
+    let patches = sourceEditPatchesFromPrompt prompt in
+    let proof = localSourceEditWorkspaceReadTextOr workspaceRoot "notes/direct-source-edit.txt" "" in
+    if length targets > 1 then
+      if sourceEditTargetsPresent workspaceRoot proof targets then
+        if sourceEditPatchesPresent workspaceRoot patches then
+          if sourceEditPatchProofsPresent proof patches then
+            if sourceEditManifestTargetsPresent workspaceRoot targets then
+              standaloneSwarmDirectSourceEditProofMetadataPresent proof (length targets) (length patches)
+            else
+              false
+          else
+            false
+        else
+          false
+      else
+        false
+    else
+      false
+  }
+
+standaloneSwarmDirectSourceEditIssueTexts : Str -> Str -> Str -> [Str]
+standaloneSwarmDirectSourceEditIssueTexts workspaceRoot route prompt =
+  if route != "standalone-swarm" then
+    localSourceEditEmptyTexts
+  else if promptHasSourceEditPlan prompt == false then
+    localSourceEditEmptyTexts
+  else {
+    let targets = sourceEditPlanTargetsFromPrompt prompt in
+    let patches = sourceEditPatchesFromPrompt prompt in
+    let proof = localSourceEditWorkspaceReadTextOr workspaceRoot "notes/direct-source-edit.txt" "" in
+    let mut issues = localSourceEditEmptyTexts;
+    issues = sourceEditAppendIssue issues (proof != "") "standalone-source-edit:proof-file-missing";
+    issues = sourceEditAppendIssue issues (length targets > 1) "standalone-source-edit:missing-multi-target-plan";
+    issues = sourceEditAppendIssue issues (sourceEditTargetsPresent workspaceRoot proof targets) "standalone-source-edit:target-postcheck-or-proof-missing";
+    issues = sourceEditAppendIssue issues (sourceEditPatchesPresent workspaceRoot patches) "standalone-source-edit:planned-patch-replacement-missing";
+    issues = sourceEditAppendIssue issues (sourceEditPatchProofsPresent proof patches) "standalone-source-edit:patch-proof-fingerprints-missing";
+    issues = sourceEditAppendIssue issues (sourceEditManifestTargetsPresent workspaceRoot targets) "standalone-source-edit:manifest-target-fingerprints-missing";
+    issues =
+      sourceEditAppendIssue
+        issues
+        (standaloneSwarmDirectSourceEditProofMetadataPresent proof (length targets) (length patches))
+        "standalone-source-edit:proof-metadata-missing";
+    issues
+  }
+
+standaloneSwarmDirectSourceEditRepairHintForIssue : Str -> Str
+standaloneSwarmDirectSourceEditRepairHintForIssue issue =
+  if issue == "standalone-source-edit:proof-file-missing" then
+    "standalone-source-edit-repair:write-direct-source-edit-proof"
+  else if issue == "standalone-source-edit:missing-multi-target-plan" then
+    "standalone-source-edit-repair:restore-multi-target-source-edit-plan"
+  else if issue == "standalone-source-edit:target-postcheck-or-proof-missing" then
+    "standalone-source-edit-repair:rerun-target-postchecks-and-proof-lines"
+  else if issue == "standalone-source-edit:planned-patch-replacement-missing" then
+    "standalone-source-edit-repair:apply-planned-patch-replacements"
+  else if issue == "standalone-source-edit:patch-proof-fingerprints-missing" then
+    "standalone-source-edit-repair:restore-patch-fingerprint-proof-lines"
+  else if issue == "standalone-source-edit:manifest-target-fingerprints-missing" then
+    "standalone-source-edit-repair:regenerate-direct-source-edit-manifest"
+  else if issue == "standalone-source-edit:proof-metadata-missing" then
+    "standalone-source-edit-repair:restore-direct-source-edit-proof-metadata"
+  else
+    "standalone-source-edit-repair:inspect-direct-source-edit-proof"
+
+sourceEditRepairHintsForIssues : [Str] -> [Str]
+sourceEditRepairHintsForIssues issues = {
+  let mut hints = localSourceEditEmptyTexts;
+  for issue in issues {
+    hints = append hints [standaloneSwarmDirectSourceEditRepairHintForIssue issue];
+    hints
+  };
+  hints
+}
+
+standaloneSwarmDirectSourceEditRepairHints : Str -> Str -> Str -> [Str]
+standaloneSwarmDirectSourceEditRepairHints workspaceRoot route prompt =
+  sourceEditRepairHintsForIssues (standaloneSwarmDirectSourceEditIssueTexts workspaceRoot route prompt)

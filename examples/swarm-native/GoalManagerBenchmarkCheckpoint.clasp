@@ -9,9 +9,16 @@ import Swarm
 benchmarkCheckpointError : Str -> Result BenchmarkCheckpoint
 benchmarkCheckpointError message = Err message
 
+benchmarkCheckpointFromRaw : Str -> Result BenchmarkCheckpoint
+benchmarkCheckpointFromRaw raw =
+  match tryDecode BenchmarkCheckpoint raw {
+    Ok checkpoint -> Ok checkpoint,
+    Err message -> benchmarkCheckpointError (textConcat ["benchmark checkpoint decode failed: ", message])
+  }
+
 readBenchmarkCheckpointPath : Str -> Result BenchmarkCheckpoint
 readBenchmarkCheckpointPath path = match readFile path {
-  Ok raw -> Ok (decode BenchmarkCheckpoint raw),
+  Ok raw -> benchmarkCheckpointFromRaw raw,
   Err message -> benchmarkCheckpointError message
 }
 

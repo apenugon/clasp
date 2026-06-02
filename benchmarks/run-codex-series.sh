@@ -9,7 +9,7 @@ fi
 task_id="$1"
 count="$2"
 note_prefix="$3"
-model="${4:-gpt-5.4}"
+model="${4:-gpt-5.5}"
 mode="${5:-${CLASP_BENCHMARK_MODE:-raw-repo}}"
 workflow_assistance="${CLASP_BENCHMARK_WORKFLOW_ASSISTANCE:-unspecified}"
 workflow_assistance_slug="$(printf '%s' "$workflow_assistance" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9._-]+/-/g; s/^-+//; s/-+$//; s/-+/-/g')"
@@ -57,7 +57,7 @@ for (const entry of sample.runOrder) {
 
   for current_task_id in "${task_ids[@]}"; do
     workspace="$project_root/benchmarks/workspaces/${current_task_id}-${note}"
-    agent_command="CODEX_MODEL=$model CODEX_REASONING_EFFORT=high bash \"$project_root/benchmarks/run-codex-harness.sh\" \"\$CLASP_BENCHMARK_PROMPT_FILE\" \"\$CLASP_BENCHMARK_WORKSPACE\""
+    agent_command="CODEX_MODEL=$model CODEX_REASONING_EFFORT=${CODEX_REASONING_EFFORT:-xhigh} bash \"$project_root/benchmarks/run-codex-harness.sh\" \"\$CLASP_BENCHMARK_PROMPT_FILE\" \"\$CLASP_BENCHMARK_WORKSPACE\""
 
     nix develop "$project_root" --command node "$project_root/benchmarks/run-benchmark.mjs" run \
       "$current_task_id" \

@@ -1,11 +1,75 @@
 module Main
 
-import Swarm
-
+foreign swarmObjectiveCreateWithDeadlineRaw : Str -> Str -> Str -> Int -> Int -> Int -> Result Str = "swarmObjectiveCreateWithDeadlineJson"
+foreign swarmTaskCreateWithDeadlineRaw : Str -> Str -> Str -> Str -> [Str] -> Int -> Int -> Int -> Result Str = "swarmTaskCreateWithDeadlineJson"
+foreign swarmLeaseRaw : Str -> Str -> Str -> Result Str = "swarmLeaseJson"
+foreign swarmHeartbeatRaw : Str -> Str -> Str -> Result Str = "swarmHeartbeatJson"
+foreign swarmStatusRaw : Str -> Str -> Result Str = "swarmStatusJson"
 foreign spawnCommandRaw : Str -> Str -> Str -> Str -> Int -> [Str] -> Result Str = "spawnCommandJson"
+foreign spawnCommandWithLimitsRaw : Str -> Str -> Str -> Str -> Int -> Int -> [Str] -> Result Str = "spawnCommandWithLimitsJson"
 foreign watchCommandRaw : Str -> Str -> Str -> Str -> Int -> [Str] -> Result Str = "watchCommandJson"
+foreign watchCommandWithLimitsRaw : Str -> Str -> Str -> Str -> Int -> Int -> [Str] -> Result Str = "watchCommandWithLimitsJson"
 foreign reconcileWatchedProcessRaw : Str -> Result Str = "reconcileWatchedProcessJson"
 foreign awaitWatchedProcessTimeoutRaw : Str -> Int -> Int -> Result Str = "awaitWatchedProcessTimeoutJson"
+
+harnessWatchMemoryLimitMb : Int
+harnessWatchMemoryLimitMb = 8192
+
+record SwarmRoot = { path : Str }
+record ObjectiveHandle = { root : SwarmRoot, objectiveId : Str }
+record TaskHandle = { root : SwarmRoot, taskId : Str, actor : Str }
+
+record SwarmObjective = {
+  createdAtMs : Int,
+  deadlineAtMs : Int,
+  objectiveId : Str,
+  detail : Str,
+  maxRuns : Int,
+  maxTasks : Int,
+  projectedStatus : Str,
+  status : Str,
+  taskCount : Int,
+  runCount : Int,
+  updatedAtMs : Int
+}
+
+record SwarmTask = {
+  attempts : Int,
+  taskId : Str,
+  status : Str,
+  objectiveId : Str,
+  detail : Str,
+  dependencies : [Str],
+  ready : Bool,
+  blockedBy : [Str],
+  createdAtMs : Int,
+  deadlineAtMs : Int,
+  heartbeatSeen : Bool,
+  lastError : Str,
+  lastHeartbeatAtMs : Int,
+  leaseActor : Str,
+  leaseExpired : Bool,
+  leaseTimeoutMs : Int,
+  maxRuns : Int,
+  priority : Int,
+  objectiveDeadlineAtMs : Int,
+  updatedAtMs : Int
+}
+
+record SwarmEvent = {
+  actor : Str,
+  atMs : Int,
+  detail : Str,
+  kind : Str,
+  taskId : Str
+}
+
+record SwarmTaskUpdate = {
+  database : Str,
+  event : SwarmEvent,
+  root : Str,
+  task : SwarmTask
+}
 
 record WatchedProcess = {
   pid : Int,
@@ -17,6 +81,62 @@ record WatchedProcess = {
   heartbeatPath : Str,
   updatedAtMs : Int
 }
+
+noDeadlineAtMs : Int
+noDeadlineAtMs = 0
+
+swarmRoot : Str -> SwarmRoot
+swarmRoot path = SwarmRoot { path = path }
+
+objectiveHandle : SwarmRoot -> Str -> ObjectiveHandle
+objectiveHandle root objectiveId = ObjectiveHandle { root = root, objectiveId = objectiveId }
+
+taskHandle : SwarmRoot -> Str -> Str -> TaskHandle
+taskHandle root taskId actor = TaskHandle { root = root, taskId = taskId, actor = actor }
+
+objectiveResultError : Str -> Result SwarmObjective
+objectiveResultError message = Err message
+
+taskResultError : Str -> Result SwarmTask
+taskResultError message = Err message
+
+taskUpdateResultError : Str -> Result SwarmTaskUpdate
+taskUpdateResultError message = Err message
+
+objectiveResult : Result Str -> Result SwarmObjective
+objectiveResult value = match value {
+  Ok raw -> Ok (decode SwarmObjective raw),
+  Err message -> objectiveResultError message
+}
+
+taskResult : Result Str -> Result SwarmTask
+taskResult value = match value {
+  Ok raw -> Ok (decode SwarmTask raw),
+  Err message -> taskResultError message
+}
+
+taskUpdateResult : Result Str -> Result SwarmTaskUpdate
+taskUpdateResult value = match value {
+  Ok raw -> Ok (decode SwarmTaskUpdate raw),
+  Err message -> taskUpdateResultError message
+}
+
+objectiveCreate : SwarmRoot -> Str -> Str -> Int -> Int -> Result SwarmObjective
+objectiveCreate root objectiveId detail maxTasks maxRuns =
+  objectiveResult (swarmObjectiveCreateWithDeadlineRaw root.path objectiveId detail maxTasks maxRuns noDeadlineAtMs)
+
+taskCreate : ObjectiveHandle -> Str -> Str -> [Str] -> Int -> Int -> Result SwarmTask
+taskCreate handle taskId detail dependencies maxRuns leaseTimeoutMs =
+  taskResult (swarmTaskCreateWithDeadlineRaw handle.root.path handle.objectiveId taskId detail dependencies maxRuns noDeadlineAtMs leaseTimeoutMs)
+
+lease : TaskHandle -> Result SwarmTaskUpdate
+lease handle = taskUpdateResult (swarmLeaseRaw handle.root.path handle.taskId handle.actor)
+
+heartbeat : TaskHandle -> Result SwarmTaskUpdate
+heartbeat handle = taskUpdateResult (swarmHeartbeatRaw handle.root.path handle.taskId handle.actor)
+
+status : TaskHandle -> Result SwarmTask
+status handle = taskResult (swarmStatusRaw handle.root.path handle.taskId)
 
 stateRoot : Str
 stateRoot =
@@ -111,13 +231,14 @@ taskHeartbeatSeen =
 spawnRunning : Result WatchedProcess
 spawnRunning =
   watchedProcessResult
-    (spawnCommandRaw
+    (spawnCommandWithLimitsRaw
       "."
       (watchStdoutPath "lease")
       (watchStderrPath "lease")
       (watchHeartbeatPath "lease")
       10
-      ["bash", "-c", "sleep 0.25"])
+      harnessWatchMemoryLimitMb
+      ["bash", "-c", "sleep 1.5"])
 
 awaitTimeoutStatus : Str
 awaitTimeoutStatus =
@@ -133,15 +254,23 @@ reconcileStatus =
     Err message -> textConcat ["error:", message]
   }
 
+leaseCompleteStatus : Str
+leaseCompleteStatus =
+  match awaitWatchedProcessTimeoutRaw (watchHeartbeatPath "lease") 10 3000 {
+    Ok raw -> watchedStatus (decode WatchedProcess raw),
+    Err message -> message
+  }
+
 watchPassStatus : Str
 watchPassStatus =
   match watchedProcessResult
-    (watchCommandRaw
+    (watchCommandWithLimitsRaw
       "."
       (watchStdoutPath "watch-pass")
       (watchStderrPath "watch-pass")
       (watchHeartbeatPath "watch-pass")
       10
+      harnessWatchMemoryLimitMb
       ["bash", "-c", "exit 0"]) {
     Ok process -> watchedStatus process,
     Err message -> textConcat ["error:", message]
@@ -161,6 +290,7 @@ runHarness = {
           statusLine "lease-spawn" (watchedStatus process),
           statusLine "lease-await" awaitTimeoutStatus,
           statusLine "lease-reconcile" reconcileStatus,
+          statusLine "lease-complete" leaseCompleteStatus,
           boolLine "lease-heartbeat-seen" taskHeartbeatSeen,
           statusLine "watch-pass" watchPassStatus
         ]

@@ -1,0 +1,33 @@
+module StandaloneSwarmRouting
+
+routingStatus : Str
+routingStatus = "open"
+
+standaloneSwarmRoutingSignals : [Str]
+standaloneSwarmRoutingSignals = [
+  "standalone-swarm",
+  "backendConfigRepair=agent-backend",
+  "plannerBackendConfigRepair=agent-backend",
+  "self-improving swarm",
+  "without Codex-specific control flow"
+]
+
+standaloneSwarmRouteForEvidence : Str -> Str
+standaloneSwarmRouteForEvidence evidence =
+  if length (textSplit evidence "backendConfigRepair=agent-backend") > 1 then
+    "standalone-swarm"
+  else if length (textSplit evidence "plannerBackendConfigRepair=agent-backend") > 1 then
+    "standalone-swarm"
+  else if length (textSplit evidence "standalone-swarm") > 1 then
+    "standalone-swarm"
+  else
+    "generic"
+
+standaloneSwarmRoutingProbeText : Str
+standaloneSwarmRoutingProbeText =
+  textJoin "\n" [
+    textConcat ["routingStatus=", routingStatus],
+    textConcat ["signals=", textJoin " | " standaloneSwarmRoutingSignals],
+    textConcat ["backendRepairRoute=", standaloneSwarmRouteForEvidence "backendConfigRepair=agent-backend"],
+    textConcat ["plannerRepairRoute=", standaloneSwarmRouteForEvidence "plannerBackendConfigRepair=agent-backend"]
+  ]

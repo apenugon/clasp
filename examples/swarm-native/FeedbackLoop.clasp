@@ -1,5 +1,6 @@
 module Main
 
+import AgentBackend
 import Swarm
 import AttemptLoop
 
@@ -22,6 +23,9 @@ record VerifierReport = {
 
 record StatusView = {
   state : AttemptStatus,
+  agentBackend : AgentBackendSummary,
+  agentBackendPolicy : AgentBackendPolicySummary,
+  agentBackendCapability : AgentBackendCapabilitySummary,
   objectiveProjectedStatus : Str,
   taskCount : Int,
   allTaskIds : [Str],
@@ -76,6 +80,51 @@ readEnvInt name fallback = match envVar name {
   Err message -> fallback
 }
 
+readEnvBool : Str -> Bool -> Bool
+readEnvBool name fallback = match envVar name {
+  Ok raw -> if raw == "" then fallback else decode Bool raw,
+  Err message -> fallback
+}
+
+envPresent : Str -> Bool
+envPresent name = match envVar name {
+  Ok raw -> raw != "",
+  Err message -> false
+}
+
+nonEmptyText : Str -> Bool
+nonEmptyText value = value != ""
+
+truthyText : Str -> Bool
+truthyText value =
+  if value == "1" then
+    true
+  else if value == "true" then
+    true
+  else if value == "yes" then
+    true
+  else
+    value == "on"
+
+allowUnmanagedAgentRuntime : Bool
+allowUnmanagedAgentRuntime = match envVar "CLASP_ALLOW_UNMANAGED_AGENT_RUNTIME" {
+  Ok raw ->
+    if raw == "dangerous" then
+      truthyText (readEnvText "CLASP_UNMANAGED_AGENT_RUNTIME_DANGER_ACCEPTED" "false")
+    else if truthyText raw then
+      envPresent "CLASP_TEST_CODEX_MODE"
+    else
+      false,
+  Err message -> false
+}
+
+managedAgentRuntimeReady : Bool
+managedAgentRuntimeReady =
+  if envPresent "CLASP_MANAGED_JOB_ID" then
+    true
+  else
+    allowUnmanagedAgentRuntime
+
 taskFile : Str
 taskFile = readEnvText "CLASP_LOOP_TASK_FILE_JSON" "agents/tasks/0012-autonomous-swarm-confidence.md"
 
@@ -115,6 +164,15 @@ agentSandbox = readEnvText "CLASP_LOOP_AGENT_SANDBOX_JSON" codexSandbox
 agentCommandTemplate : [Str]
 agentCommandTemplate = readEnvTextList "CLASP_LOOP_AGENT_COMMAND_JSON" emptyTexts
 
+agentCapabilityProfileName : Str
+agentCapabilityProfileName = readEnvText "CLASP_LOOP_AGENT_CAPABILITY_PROFILE_JSON" ""
+
+requireStandaloneAgentBackend : Bool
+requireStandaloneAgentBackend =
+  readEnvBool
+    "CLASP_LOOP_REQUIRE_STANDALONE_AGENT_BACKEND_JSON"
+    (readEnvBool "CLASP_REQUIRE_STANDALONE_AGENT_BACKEND_JSON" false)
+
 maxAttempts : Int
 maxAttempts = readEnvInt "CLASP_LOOP_MAX_ATTEMPTS_JSON" 20
 
@@ -135,6 +193,26 @@ builderMemoryLimitMb = readEnvInt "CLASP_LOOP_BUILDER_MEMORY_MB_JSON" agentMemor
 
 verifierMemoryLimitMb : Int
 verifierMemoryLimitMb = readEnvInt "CLASP_LOOP_VERIFIER_MEMORY_MB_JSON" agentMemoryLimitMb
+
+affectedVerificationPlanInlineJson : Str
+affectedVerificationPlanInlineJson = readEnvText "CLASP_LOOP_AFFECTED_VERIFICATION_PLAN_JSON" ""
+
+affectedVerificationPlanPath : Str
+affectedVerificationPlanPath = readEnvText "CLASP_LOOP_AFFECTED_VERIFICATION_PLAN_PATH_JSON" ""
+
+affectedVerificationPlanJson : Str
+affectedVerificationPlanJson =
+  affectedVerificationPlanInlineJson
+
+affectedVerificationLaunchPolicyInlineJson : Str
+affectedVerificationLaunchPolicyInlineJson = readEnvText "CLASP_LOOP_AFFECTED_VERIFICATION_LAUNCH_POLICY_JSON" ""
+
+affectedVerificationLaunchPolicyPath : Str
+affectedVerificationLaunchPolicyPath = readEnvText "CLASP_LOOP_AFFECTED_VERIFICATION_LAUNCH_POLICY_PATH_JSON" ""
+
+affectedVerificationLaunchPolicyJson : Str
+affectedVerificationLaunchPolicyJson =
+  affectedVerificationLaunchPolicyInlineJson
 
 actorName : Str
 actorName = match envVar "CLASP_SWARM_ACTOR" {
@@ -296,6 +374,13 @@ taskFileContentSection = match readFile taskFile {
 promptBoolText : Bool -> Str
 promptBoolText value = if value then "true" else "false"
 
+promptPolicyListText : [Str] -> Str
+promptPolicyListText values =
+  if length values == 0 then
+    "none"
+  else
+    textJoin " | " values
+
 memorySearchPromptLine : SwarmMemorySearchResult -> Str
 memorySearchPromptLine item =
   textConcat [
@@ -411,7 +496,25 @@ renderContextPackPrompt pack =
       " manager-task-status=",
       pack.managerAction.taskStatus
     ],
+    textConcat [
+      "spawn policy: parent=",
+      pack.task.parentTaskId,
+      " depth=",
+      encode pack.task.spawnDepth,
+      "/",
+      encode pack.task.maxSpawnDepth,
+      " children=",
+      encode pack.task.childTaskCount,
+      "/",
+      encode pack.task.maxChildTasks,
+      " remaining-child-budget=",
+      encode pack.task.remainingChildTaskBudget
+    ],
+    promptListSection "child task ids:" pack.task.childTaskIds,
     textConcat ["ready tasks: ", textJoin ", " pack.readyTaskIds],
+    promptListSection "dependency task ids:" pack.dependencyTaskIds,
+    promptListSection "dependency task statuses:" pack.dependencyTaskStatuses,
+    promptListSection "dependency task ready:" (map promptBoolText pack.dependencyTaskReady),
     textConcat [
       "mailbox: runs=",
       encode pack.mailboxSummary.runCount,
@@ -465,6 +568,152 @@ verifierContextSection : Int -> Str
 verifierContextSection attempt =
   taskContextPromptSection (verifierHandle attempt) contextPackQuery contextPackLimit
 
+promptJsonBlockOrEmpty : Str -> Str -> Str -> Str
+promptJsonBlockOrEmpty header footer raw =
+  if raw == "" then
+    ""
+  else
+    textJoin "\n" [header, raw, footer]
+
+promptPathBlockOrEmpty : Str -> Str -> Str -> Str
+promptPathBlockOrEmpty header footer path =
+  if path == "" then
+    ""
+  else
+    textJoin "\n" [header, path, footer]
+
+affectedVerificationPlanPromptBlock : Str
+affectedVerificationPlanPromptBlock =
+  promptJsonBlockOrEmpty
+    "Affected verification plan JSON:"
+    "End affected verification plan JSON."
+    affectedVerificationPlanJson
+
+affectedVerificationPlanPathPromptBlock : Str
+affectedVerificationPlanPathPromptBlock =
+  promptPathBlockOrEmpty
+    "Affected verification plan path:"
+    "End affected verification plan path."
+    affectedVerificationPlanPath
+
+affectedVerificationLaunchPolicyPromptBlock : Str
+affectedVerificationLaunchPolicyPromptBlock =
+  promptJsonBlockOrEmpty
+    "Affected verification launch policy JSON:"
+    "End affected verification launch policy JSON."
+    affectedVerificationLaunchPolicyJson
+
+affectedVerificationLaunchPolicyPathPromptBlock : Str
+affectedVerificationLaunchPolicyPathPromptBlock =
+  promptPathBlockOrEmpty
+    "Affected verification launch policy path:"
+    "End affected verification launch policy path."
+    affectedVerificationLaunchPolicyPath
+
+affectedVerificationVerifierPromptSection : Str
+affectedVerificationVerifierPromptSection =
+  textJoin
+    "\n"
+    (filter nonEmptyText [
+      affectedVerificationPlanPromptBlock,
+      affectedVerificationPlanPathPromptBlock,
+      affectedVerificationLaunchPolicyPromptBlock,
+      affectedVerificationLaunchPolicyPathPromptBlock
+    ])
+
+loopAgentBackendPolicyPromptSection : Str
+loopAgentBackendPolicyPromptSection =
+  textJoin "\n" [
+    "Agent backend policy repair:",
+    textConcat [
+      "policyName=",
+      loopAgentBackendPolicySummary.policyName,
+      " backendKind=",
+      loopAgentBackendPolicySummary.backendKind,
+      " promptTransport=",
+      loopAgentBackendPolicySummary.promptTransport,
+      " policyValid=",
+      if loopAgentBackendPolicySummary.valid then "true" else "false",
+      " policyMessage=",
+      loopAgentBackendPolicySummary.validationMessage
+    ],
+    textConcat [
+      "policyBlockingGaps=",
+      promptPolicyListText loopAgentBackendPolicySummary.blockingGaps
+    ],
+    textConcat [
+      "policyMessages=",
+      promptPolicyListText loopAgentBackendPolicySummary.validationMessages
+    ],
+    textConcat [
+      "policyRequiredClosure=",
+      promptPolicyListText loopAgentBackendPolicySummary.requiredClosure
+    ],
+    textConcat [
+      "policyMissingPlaceholders=",
+      promptPolicyListText loopAgentBackendPolicySummary.missingPlaceholders
+    ],
+    textConcat [
+      "policyRecommendedTemplate=",
+      promptPolicyListText loopAgentBackendPolicySummary.recommendedTemplate
+    ]
+  ]
+
+loopAgentBackendCapabilityPromptSection : Str
+loopAgentBackendCapabilityPromptSection =
+  textJoin "\n" [
+    "Agent backend capability repair:",
+    textConcat [
+      "capabilityProfile=",
+      loopAgentBackendCapabilitySummary.profileName,
+      " backendKind=",
+      loopAgentBackendCapabilitySummary.backendKind,
+      " promptTransport=",
+      loopAgentBackendCapabilitySummary.promptTransport,
+      " standaloneReady=",
+      if loopAgentBackendCapabilitySummary.standaloneReady then "true" else "false",
+      " roleCoverage=",
+      promptPolicyListText loopAgentBackendCapabilitySummary.roleCoverage
+    ],
+    textConcat [
+      "capabilitySupports=planner:",
+      if loopAgentBackendCapabilitySummary.supportsPlannerRole then "true" else "false",
+      " builder:",
+      if loopAgentBackendCapabilitySummary.supportsBuilderRole then "true" else "false",
+      " verifier:",
+      if loopAgentBackendCapabilitySummary.supportsVerifierRole then "true" else "false",
+      " workspaceEdits:",
+      if loopAgentBackendCapabilitySummary.supportsWorkspaceEdits then "true" else "false",
+      " childTaskPlanning:",
+      if loopAgentBackendCapabilitySummary.supportsChildTaskPlanning then "true" else "false",
+      " structuredReports:",
+      if loopAgentBackendCapabilitySummary.supportsStructuredReports then "true" else "false",
+      " externalModel:",
+      if loopAgentBackendCapabilitySummary.requiresExternalModel then "true" else "false"
+    ],
+    textConcat [
+      "capabilityMessages=",
+      promptPolicyListText loopAgentBackendCapabilitySummary.validationMessages
+    ],
+    textConcat [
+      "capabilityBlockingGaps=",
+      promptPolicyListText loopAgentBackendCapabilitySummary.blockingGaps
+    ],
+    textConcat [
+      "capabilityRequiredClosure=",
+      promptPolicyListText loopAgentBackendCapabilitySummary.requiredClosure
+    ]
+  ]
+
+loopAgentBackendConfigRepairReport : Str -> Str
+loopAgentBackendConfigRepairReport backendError =
+  textJoin "\n" [
+    textConcat ["config-error:", backendError],
+    "backendConfigRepair=agent-backend",
+    loopAgentBackendPolicyPromptSection,
+    loopAgentBackendCapabilityPromptSection
+  ]
+
 builderPrompt : Int -> Str
 builderPrompt attempt = textJoin "\n" [
   "You are the builder subagent for the Clasp repository.",
@@ -478,6 +727,8 @@ builderPrompt attempt = textJoin "\n" [
   "Prefer closing at least one whole failing capability category this attempt, not just one complaint line.",
   builderPolicySection,
   builderFeedbackSection,
+  loopAgentBackendPolicyPromptSection,
+  loopAgentBackendCapabilityPromptSection,
   builderContextSection attempt,
   "Return JSON matching the provided output schema.",
   "Include the required feedback object in your final JSON.",
@@ -492,6 +743,9 @@ verifierPrompt attempt = textJoin "\n" [
   taskFileContentSection,
   "Evaluate the whole repository against the autonomous swarm confidence goal and required capability categories.",
   verifierPolicySection,
+  loopAgentBackendPolicyPromptSection,
+  loopAgentBackendCapabilityPromptSection,
+  affectedVerificationVerifierPromptSection,
   verifierContextSection attempt,
   textConcat ["Attempt: ", encode attempt]
 ]
@@ -515,7 +769,14 @@ syntheticFailureReport summary detail =
 
 readVerifierReportPath : Str -> VerifierReport
 readVerifierReportPath path = match readFile path {
-  Ok raw -> decode VerifierReport raw,
+  Ok raw ->
+    match tryDecode VerifierReport raw {
+      Ok report -> report,
+      Err message ->
+        syntheticFailureReport
+          (textConcat ["invalid verifier report: ", message])
+          message
+    },
   Err message ->
     syntheticFailureReport
       (textConcat ["missing verifier report: ", message])
@@ -620,6 +881,32 @@ statusFeedbackSummary =
   else
     ""
 
+loopAgentBackend : AgentBackendSpec
+loopAgentBackend =
+  agentBackendSpec agentBin agentModel agentReasoning agentSandbox workspaceRoot agentCommandTemplate
+
+loopAgentBackendValidationMessage : Str
+loopAgentBackendValidationMessage =
+  if requireStandaloneAgentBackend then
+    agentBackendPolicyValidationMessage agentBackendStandalonePolicy loopAgentBackend
+  else
+    agentBackendValidationMessage loopAgentBackend
+
+loopAgentBackendPolicySummary : AgentBackendPolicySummary
+loopAgentBackendPolicySummary =
+  if requireStandaloneAgentBackend then
+    agentBackendStandalonePolicySummary loopAgentBackend
+  else
+    agentBackendPolicySummary "default" agentBackendDefaultPolicy loopAgentBackend
+
+loopAgentBackendCapabilityProfile : AgentBackendCapabilityProfile
+loopAgentBackendCapabilityProfile =
+  agentBackendCapabilityProfileForBackend agentCapabilityProfileName loopAgentBackend
+
+loopAgentBackendCapabilitySummary : AgentBackendCapabilitySummary
+loopAgentBackendCapabilitySummary =
+  agentBackendStandaloneCapabilitySummary loopAgentBackendCapabilityProfile loopAgentBackend
+
 statusView : AttemptStatus -> StatusView
 statusView state =
   match objectives swarmStateRoot {
@@ -636,6 +923,9 @@ statusView state =
           let projectedStatusValue = fold objectiveProjectedStatusFrom "missing" objectiveValues in
           StatusView {
             state = state,
+            agentBackend = agentBackendSummary loopAgentBackend,
+            agentBackendPolicy = loopAgentBackendPolicySummary,
+            agentBackendCapability = loopAgentBackendCapabilitySummary,
             objectiveProjectedStatus = projectedStatusValue,
             taskCount = length scopedTasks,
             allTaskIds = map taskIdOf scopedTasks,
@@ -661,6 +951,9 @@ statusView state =
           let mergeDecisionDetailValue = statusMergeDecisionDetail state in
           StatusView {
             state = state,
+            agentBackend = agentBackendSummary loopAgentBackend,
+            agentBackendPolicy = loopAgentBackendPolicySummary,
+            agentBackendCapability = loopAgentBackendCapabilitySummary,
             objectiveProjectedStatus = textConcat ["task-error:", message],
             taskCount = 0,
             allTaskIds = emptyTexts,
@@ -680,6 +973,9 @@ statusView state =
       let mergeDecisionDetailValue = statusMergeDecisionDetail state in
       StatusView {
         state = state,
+        agentBackend = agentBackendSummary loopAgentBackend,
+        agentBackendPolicy = loopAgentBackendPolicySummary,
+        agentBackendCapability = loopAgentBackendCapabilitySummary,
         objectiveProjectedStatus = textConcat ["objective-error:", message],
         taskCount = 0,
         allTaskIds = emptyTexts,
@@ -699,63 +995,30 @@ statusOutput : Str
 statusOutput = encode (statusView readLoopState)
 
 codexReasoningConfig : Str
-codexReasoningConfig = textConcat ["model_reasoning_effort=\"", agentReasoning, "\""]
+codexReasoningConfig = agentBackendReasoningConfig loopAgentBackend
 
 templateReplace : Str -> Str -> Str -> Str
-templateReplace value needle replacement = textJoin replacement (textSplit value needle)
+templateReplace value needle replacement = agentBackendTemplateReplace value needle replacement
 
 renderAgentCommandArg : Str -> Str -> Str -> Str -> Str -> Str -> Str
 renderAgentCommandArg role schemaPath reportPath promptPath prompt value = {
-  let rendered0 = templateReplace value "{role}" role in
-  let rendered1 = templateReplace rendered0 "{schema_path}" schemaPath in
-  let rendered2 = templateReplace rendered1 "{report_path}" reportPath in
-  let rendered3 = templateReplace rendered2 "{prompt_path}" promptPath in
-  let rendered4 = templateReplace rendered3 "{prompt}" prompt in
-  let rendered5 = templateReplace rendered4 "{workspace_root}" workspaceRoot in
-  let rendered6 = templateReplace rendered5 "{agent_bin}" agentBin in
-  let rendered7 = templateReplace rendered6 "{model}" agentModel in
-  let rendered8 = templateReplace rendered7 "{reasoning}" agentReasoning in
-  templateReplace rendered8 "{sandbox}" agentSandbox
+  let request = agentCommandRequest role schemaPath reportPath promptPath prompt in
+  agentBackendRenderArg loopAgentBackend request value
 }
 
 renderAgentCommand : Str -> Str -> Str -> Str -> Str -> [Str]
 renderAgentCommand role schemaPath reportPath promptPath prompt = {
-  let mut rendered = emptyTexts;
-  for arg in agentCommandTemplate {
-    rendered = append rendered [renderAgentCommandArg role schemaPath reportPath promptPath prompt arg];
-    rendered
-  };
-  rendered
+  let request = agentCommandRequest role schemaPath reportPath promptPath prompt in
+  agentBackendRenderTemplate loopAgentBackend request
 }
 
 codexCommandDefault : Str -> Str -> Str -> [Str]
-codexCommandDefault schemaPath reportPath prompt = [
-  agentBin,
-  "exec",
-  "--json",
-  "--cd",
-  workspaceRoot,
-  "-m",
-  agentModel,
-  "-c",
-  codexReasoningConfig,
-  "--skip-git-repo-check",
-  "--sandbox",
-  agentSandbox,
-  "--ephemeral",
-  "--output-schema",
-  schemaPath,
-  "-o",
-  reportPath,
-  prompt
-]
+codexCommandDefault schemaPath reportPath prompt =
+  agentBackendCodexCommand loopAgentBackend (agentCommandRequest "agent" schemaPath reportPath "" prompt)
 
 agentCommand : Str -> Str -> Str -> Str -> Str -> [Str]
 agentCommand role schemaPath reportPath promptPath prompt =
-  if length agentCommandTemplate > 0 then
-    renderAgentCommand role schemaPath reportPath promptPath prompt
-  else
-    codexCommandDefault schemaPath reportPath prompt
+  agentBackendCommand loopAgentBackend (agentCommandRequest role schemaPath reportPath promptPath prompt)
 
 codexCommand : Str -> Str -> Str -> [Str]
 codexCommand schemaPath reportPath prompt = agentCommand "agent" schemaPath reportPath "" prompt
@@ -798,16 +1061,23 @@ ensureLoopReady =
     "config-error:missing-task-file"
   else if workspaceRoot == "" then
     "config-error:missing-workspace-root"
+  else if managedAgentRuntimeReady == false then
+    "config-error:managed-job-required"
   else {
-    let rootError = attemptEnsureRoot loopSpec in
-    if rootError != "" then
-      rootError
-    else
+    let backendError = loopAgentBackendValidationMessage in
+    if backendError != "" then
+      loopAgentBackendConfigRepairReport backendError
+    else {
+      let rootError = attemptEnsureRoot loopSpec in
+      if rootError != "" then
+        rootError
+      else
         match mkdirAll workspaceRoot {
           Ok workspaceCreated ->
             ensurePolicies,
           Err message ->
             textConcat ["workspace-root-error:", message]
+        }
     }
 }
 

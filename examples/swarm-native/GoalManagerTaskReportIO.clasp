@@ -22,7 +22,14 @@ syntheticFailureReport summary detail =
 
 readVerifierReportPath : Str -> VerifierReport
 readVerifierReportPath path = match readFile path {
-  Ok raw -> decode VerifierReport raw,
+  Ok raw ->
+    match tryDecode VerifierReport raw {
+      Ok report -> report,
+      Err message ->
+        syntheticFailureReport
+          (textConcat ["invalid verifier report: ", message])
+          message
+    },
   Err message ->
     syntheticFailureReport
       (textConcat ["missing verifier report: ", message])
@@ -34,7 +41,7 @@ builderFeedbackError message = Err message
 
 readBuilderReportPath : Str -> Result BuilderReport
 readBuilderReportPath path = match readFile path {
-  Ok raw -> Ok (decode BuilderReport raw),
+  Ok raw -> tryDecode BuilderReport raw,
   Err message -> builderFeedbackError message
 }
 

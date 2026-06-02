@@ -1,0 +1,88 @@
+module Main
+
+import LocalRouting
+
+appendRoutingFailure : Str -> Str -> Str
+appendRoutingFailure failures failure =
+  if failure == "" then
+    failures
+  else if failures == "" then
+    failure
+  else
+    textConcat [failures, "\n", failure]
+
+checkRoute : Str -> Str -> Str -> Str
+checkRoute name prompt expected = {
+  let actual = localRouteTaskKindForPrompt prompt in
+  if actual == expected then
+    ""
+  else
+    textConcat [name, ": expected ", expected, " got ", actual]
+}
+
+checkPressureKind : Str -> Str -> Str -> Str
+checkPressureKind name prompt expected = {
+  let actual = localRouteResourcePressureKindForPrompt prompt in
+  if actual == expected then
+    ""
+  else
+    textConcat [name, ": expected ", expected, " got ", actual]
+}
+
+main : Str
+main = {
+  let mut failures = "";
+  failures = appendRoutingFailure failures (checkRoute "generic" "Task file content:\nTidy a small doc typo." "generic");
+  failures = appendRoutingFailure failures (checkRoute "verify-affected" "Task file content:\nUse verify-affected for this compiler slice." "iteration-speed");
+  failures = appendRoutingFailure failures (checkRoute "compiler-context" "Task file content:\nsrc/Compiler/Checker.clasp needs a bounded iteration-time fix." "iteration-speed");
+  failures = appendRoutingFailure failures (checkRoute "semantic-context" "semantic index edit files:\nexamples/swarm-native/Swarm.clasp\nTask file content:\nUse context evidence." "semantic-context");
+  failures = appendRoutingFailure failures (checkRoute "standalone-keyword" "Task file content:\nImprove standalone-swarm readiness." "standalone-swarm");
+  failures = appendRoutingFailure failures (checkRoute "ai-agent-swarm-goal" "Task file content:\nMake Clasp the best language for AI agents to code and create agent swarms." "standalone-swarm");
+  failures = appendRoutingFailure failures (checkRoute "ai-agent-swarm-over-compiler-context" "Task file content:\nMake Clasp the best language for AI agents to code and create agent swarms across src/Compiler/Checker.clasp." "standalone-swarm");
+  failures = appendRoutingFailure failures (checkRoute "self-improving-swarm-over-compiler-context" "Task file content:\nMake a self-improving swarm that can improve Clasp itself across src/Compiler/Checker.clasp." "standalone-swarm");
+  failures = appendRoutingFailure failures (checkRoute "clasp-native-swarm" "Task file content:\nPlan a Clasp-native swarm loop without Codex-specific control flow." "standalone-swarm");
+  failures = appendRoutingFailure failures (checkRoute "without-codex-swarm" "Task file content:\nGet the swarm ready to run without Codex while improving clasp itself." "standalone-swarm");
+  failures = appendRoutingFailure failures (checkRoute "implemented-in-clasp-swarms" "Task file content:\nCheck whether swarms can be implemented in clasp well and completely." "standalone-swarm");
+  failures = appendRoutingFailure failures (checkRoute "loop-backend-config-repair" "config-error:agent-backend-template-missing-prompt-input\nbackendConfigRepair=agent-backend\nAgent backend policy repair:\npolicyMessages=agent-backend-template-missing-prompt-input" "standalone-swarm");
+  failures = appendRoutingFailure failures (checkRoute "planner-backend-config-repair" "plannerBackendConfigError=agent-backend-policy-requires-prompt-path\nplannerBackendConfigRepair=agent-backend\nPlanner agent backend policy repair:\npolicyMessages=agent-backend-policy-requires-prompt-path" "standalone-swarm");
+  failures = appendRoutingFailure failures (checkRoute "capability-audit-json" "Task file content:\n{\"kind\":\"clasp-swarm-capability-audit\",\"overall_status\":\"partial\",\"capability_statuses\":[],\"blocking_gaps\":[\"verify-all\"]}" "capability-audit");
+  failures = appendRoutingFailure failures (checkRoute "planner-resource-pressure" "Planner resource health:\ndisk: path=. availableMb=16172 requiredMb=16384 headroomMb=-212 requiredHeadroomMb=1024 reserveMet=false headroomMet=false\nlaunch: guardEnabled=true status=blocked" "resource-pressure");
+  failures = appendRoutingFailure failures (checkPressureKind "planner-disk-resource-pressure-kind" "Planner resource health:\ndisk: path=. availableMb=16172 requiredMb=16384 headroomMb=-212 requiredHeadroomMb=1024 reserveMet=false headroomMet=false\nlaunch: guardEnabled=true status=blocked" "resource-disk-pressure");
+  failures = appendRoutingFailure failures (checkRoute "planner-memory-resource-pressure" "Planner resource health:\nmemory: available_memory_mb=58308 required_available_memory_mb=66509 externalAgentRssMb=4045 externalAgentReservedMb=13261 reserveMet=false\nlaunch: guardEnabled=true status=blocked reason=memory-exceeded" "resource-pressure");
+  failures = appendRoutingFailure failures (checkPressureKind "planner-memory-resource-pressure-kind" "Planner resource health:\nmemory: available_memory_mb=58308 required_available_memory_mb=66509 externalAgentRssMb=4045 externalAgentReservedMb=13261 reserveMet=false\nlaunch: guardEnabled=true status=blocked reason=memory-exceeded" "resource-memory-pressure");
+  failures = appendRoutingFailure failures (checkRoute "planner-oom-kill-resource-pressure" "Retry recovery evidence:\nchild loop crashed exit-status=137 stderr=Killed signal=SIGKILL reason=oom-kill" "resource-pressure");
+  failures = appendRoutingFailure failures (checkPressureKind "planner-oom-kill-resource-pressure-kind" "Retry recovery evidence:\nchild loop crashed exit-status=137 stderr=Killed signal=SIGKILL reason=oom-kill" "resource-memory-pressure");
+  failures = appendRoutingFailure failures (checkRoute "planner-memory-admission-host-route" "Planner resource health:\nmemory-admission: status=blocked reason=host-memory-reserve availableMb=32000 requiredMb=45056 headroomMb=-13056 projectedActiveChildren=1 externalAgentReservedMb=0 action=wait-for-memory-or-stop-only-managed-jobs-by-metadata\nlaunch: guardEnabled=true status=blocked" "resource-pressure");
+  failures = appendRoutingFailure failures (checkPressureKind "planner-memory-admission-host-kind" "Planner resource health:\nmemory-admission: status=blocked reason=host-memory-reserve availableMb=32000 requiredMb=45056 headroomMb=-13056 projectedActiveChildren=1 externalAgentReservedMb=0 action=wait-for-memory-or-stop-only-managed-jobs-by-metadata\nlaunch: guardEnabled=true status=blocked" "resource-memory-pressure");
+  failures = appendRoutingFailure failures (checkPressureKind "planner-memory-admission-projected-kind" "Planner resource health:\nmemory-admission: status=blocked reason=projected-child-memory-reserve availableMb=49152 requiredMb=53248 headroomMb=4096 projectedActiveChildren=2 externalAgentReservedMb=0 action=lower-concurrency-or-child-memory-budget" "resource-memory-pressure");
+  failures = appendRoutingFailure failures (checkPressureKind "planner-memory-admission-external-kind" "Planner resource health:\nmemory-admission: status=blocked reason=external-agent-memory-reserve availableMb=53248 requiredMb=57344 headroomMb=8192 projectedActiveChildren=1 externalAgentReservedMb=4096 action=wait-for-external-agent-pressure-or-lower-concurrency" "resource-memory-pressure");
+  failures = appendRoutingFailure failures (checkRoute "planner-memory-concurrency-reduced-route" "Planner resource health:\nmemory-concurrency-admission: status=reduced reason=configured-concurrency-exceeds-memory-capacity configuredMaxChildren=4 admittedChildCapacity=1 effectiveMaxChildren=1 action=lower-concurrency-to-admitted-child-capacity" "resource-pressure");
+  failures = appendRoutingFailure failures (checkPressureKind "planner-memory-concurrency-reduced-kind" "Planner resource health:\nmemory-concurrency-admission: status=reduced reason=configured-concurrency-exceeds-memory-capacity configuredMaxChildren=4 admittedChildCapacity=1 effectiveMaxChildren=1 action=lower-concurrency-to-admitted-child-capacity" "resource-memory-pressure");
+  failures = appendRoutingFailure failures (checkRoute "affected-direct-compiler-state-access" "Planner context pack:\ncapability-evidence=affected_verification_plan:affected-launch-mode=direct-compiler-state-access\ncapability-evidence=affected_verification_plan:affected-launch-ready=false\ncapability-gap=affected_verification_plan:affected verifier plan touches compiler/cache state before launch" "affected-verification");
+  failures = appendRoutingFailure failures (checkRoute "focused-verification-managed-required" "Planner context pack:\ncapability-evidence=focused_verification_plan:focused-verification-plan-command:bash scripts/test-selfhost.sh\ncapability-evidence=focused_verification_plan:focused-verification-plan-safe-direct:false\ncapability-gap=focused_verification_plan:focused verification plan requires managed launch" "affected-verification");
+  failures = appendRoutingFailure failures (checkRoute "focused-verification-policy-managed-required" "Planner context pack:\ncapability-evidence=focused_verification_plan:focused-verification-launch-mode=managed-required\ncapability-evidence=focused_verification_plan:focused-verification-launch-ready=false\ncapability-evidence=focused_verification_plan:focused-verification-launch-policy-mode:managed-required\ncapability-gap=focused_verification_plan:focused verification plan requires managed launch" "affected-verification");
+  failures = appendRoutingFailure failures (checkRoute "focused-verification-launch-policy-gap" "Planner context pack:\ncapability-evidence=focused_verification_launch_policy:focused-verification-launch-policy-mode:managed-required\ncapability-gap=focused_verification_launch_policy:focused verification launch policy requires managed launch" "affected-verification");
+  failures = appendRoutingFailure failures (checkRoute "focused-verification-policy-invalid-plan" "Planner context pack:\ncapability-evidence=focused_verification_plan:focused-verification-launch-mode=invalid-plan\ncapability-evidence=focused_verification_plan:focused-verification-launch-policy-recommendation:focused-verification-launch:repair-plan-section\ncapability-closure=focused_verification_plan:Repair the Focused verification plan section before launching verifier commands." "affected-verification");
+  failures = appendRoutingFailure failures (checkRoute "focused-verification-policy-json-managed-required" "Focused verification launch policy JSON:\n{\"valid\":true,\"ready\":false,\"mode\":\"managed-required\",\"command\":\"bash scripts/verify-all.sh\",\"resourceClass\":\"heavy\",\"oomRisk\":\"high\",\"managedRequired\":true,\"safeDirect\":false,\"recommendation\":\"focused-verification-launch:managed-required\",\"verificationPlanRecommendation\":\"run managed\"}\nEnd focused verification launch policy JSON." "affected-verification");
+  failures = appendRoutingFailure failures (checkRoute "focused-verification-policy-json-invalid-plan" "Focused verification launch policy JSON:\n{\"valid\":false,\"ready\":false,\"mode\":\"invalid-plan\",\"recommendation\":\"focused-verification-launch:repair-plan-json\",\"verificationPlanRecommendation\":\"focused-verification-plan:repair-plan-section\"}\nEnd focused verification launch policy JSON." "affected-verification");
+  failures = appendRoutingFailure failures (checkRoute "focused-verification-safe-direct" "Planner context pack:\ncapability-evidence=focused_verification_plan:focused-verification-plan-command:bash scripts/test-agent-ergonomics-helpers.sh static\ncapability-evidence=focused_verification_plan:focused-verification-plan-safe-direct:true\ncapability-evidence=focused_verification_plan:focused-verification-plan-managed-required:false" "generic");
+  failures = appendRoutingFailure failures (checkRoute "focused-verification-policy-direct-safe" "Planner context pack:\ncapability-evidence=focused_verification_plan:focused-verification-launch-mode=direct-safe\ncapability-evidence=focused_verification_plan:focused-verification-launch-ready=true\ncapability-evidence=focused_verification_plan:focused-verification-launch-policy-mode:direct-safe\ncapability-evidence=focused_verification_plan:focused-verification-launch-policy-recommendation:focused-verification-launch:direct-safe" "generic");
+  failures = appendRoutingFailure failures (checkRoute "focused-verification-policy-json-direct-safe" "Focused verification launch policy JSON:\n{\"valid\":true,\"ready\":true,\"mode\":\"direct-safe\",\"command\":\"bash scripts/test-agent-ergonomics-helpers.sh static\",\"resourceClass\":\"static\",\"oomRisk\":\"low\",\"managedRequired\":false,\"safeDirect\":true,\"recommendation\":\"focused-verification-launch:direct-safe\",\"verificationPlanRecommendation\":\"static\"}\nEnd focused verification launch policy JSON." "generic");
+  failures = appendRoutingFailure failures (checkRoute "autonomous-launch-gate-json-blocked" "Autonomous launch gate JSON:\n{\"valid\":false,\"ready\":false,\"mode\":\"blocked-dirty-worktree\",\"maySpawn\":false,\"mayMutateCompiler\":false,\"requestedChildAgents\":1,\"admittedChildCapacity\":1,\"recommendation\":\"autonomous-launch:checkpoint-current-worktree\",\"blockingGaps\":[\"dirty worktree must be checkpointed\"],\"requiredClosure\":[\"autonomous-launch:checkpoint-current-worktree\"],\"evidence\":[\"autonomous-launch-ready=false\"]}\nEnd autonomous launch gate JSON." "standalone-swarm");
+  failures = appendRoutingFailure failures (checkRoute "autonomous-launch-gate-capability-gap" "Planner context pack:\ncapability-gap=autonomous_launch_gate:dirty worktree must be checkpointed before autonomous launch\nautonomous-launch-gate-mode:blocked-dirty-worktree" "standalone-swarm");
+  failures = appendRoutingFailure failures (checkRoute "autonomous-launch-gate-retry-record" "Prior swarm mailbox/recovery context:\nretryRecordLatest=phase=autonomous-launch-gate:attempt=0:status=autonomous-launch-gate-blocker:cause=autonomous launch gate blocked child launch\nretryRecordRecoveryTask=standalone-swarm-autonomous-launch-gate-repair\nretryRecordRecoveryKind=autonomous-launch-gate\nretryRecordEvidence=manager-replan-blocker=autonomous-launch-gate" "standalone-swarm");
+  failures = appendRoutingFailure failures (checkRoute "autonomous-launch-gate-json-ready" "Autonomous launch gate JSON:\n{\"valid\":true,\"ready\":true,\"mode\":\"ready-managed-tiny-loop\",\"maySpawn\":true,\"mayMutateCompiler\":false,\"requestedChildAgents\":1,\"admittedChildCapacity\":1,\"recommendation\":\"autonomous-launch:ready-managed-bounded-loop\",\"blockingGaps\":[],\"requiredClosure\":[],\"evidence\":[\"autonomous-launch-ready=true\"]}\nEnd autonomous launch gate JSON." "generic");
+  failures = appendRoutingFailure failures (checkRoute "affected-managed-launch-policy-json" "Planner context pack:\naffectedVerificationLaunchPolicy={\"ready\":false,\"mode\":\"heavy-managed\",\"recommendation\":\"affected-verification-launch:managed-heavy-memory-disk\"}" "affected-verification");
+  failures = appendRoutingFailure failures (checkRoute "affected-ready-direct-free" "Planner context pack:\naffectedVerificationLaunchPolicy={\"ready\":true,\"mode\":\"direct-compiler-state-free\",\"recommendation\":\"affected-verification-launch:direct-compiler-state-free\"}" "generic");
+  failures = appendRoutingFailure failures (checkRoute "resource-memory-pressure-task-id" "Retry recovery evidence:\nresource-memory-pressure-recovery\nresource-pressure-kind=memory" "resource-pressure");
+  failures = appendRoutingFailure failures (checkPressureKind "resource-memory-pressure-task-id-kind" "Retry recovery evidence:\nresource-memory-pressure-recovery\nresource-pressure-kind=memory" "resource-memory-pressure");
+  failures = appendRoutingFailure failures (checkRoute "resource-pressure-task" "Task file content:\nUse the generated-state cleanup path for resource-pressure-recovery." "resource-pressure");
+  failures = appendRoutingFailure failures (checkPressureKind "resource-pressure-task-kind" "Task file content:\nUse the generated-state cleanup path for resource-pressure-recovery." "resource-disk-pressure");
+  failures = appendRoutingFailure failures (checkRoute "resource-disk-pressure-kind-evidence" "Retry recovery evidence:\nresource-pressure-kind=disk\nresource-pressure-recovery" "resource-pressure");
+  failures = appendRoutingFailure failures (checkPressureKind "resource-disk-pressure-kind-evidence-kind" "Retry recovery evidence:\nresource-pressure-kind=disk\nresource-pressure-recovery" "resource-disk-pressure");
+  failures = appendRoutingFailure failures (checkRoute "resource-pressure-clasp-helper" "Task file content:\nRun GeneratedStateCleanupPlan with CLASP_GENERATED_STATE_APPLY_JSON=true only when safe." "resource-pressure");
+  if failures == "" then
+    "local-routing-ok"
+  else
+    failures
+}

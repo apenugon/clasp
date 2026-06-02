@@ -19,6 +19,7 @@ const SIGTERM: c_int = 15;
 const SIGKILL: c_int = 9;
 const DEFAULT_SWARM_OUTPUT_LIMIT_BYTES: u64 = 4 * 1024 * 1024;
 const DEFAULT_SWARM_ARTIFACT_READ_LIMIT_BYTES: u64 = 64 * 1024;
+const DESTRUCTIVE_ACTION_APPROVAL: &str = "destructive-action";
 
 #[cfg(unix)]
 extern "C" {
@@ -32,6 +33,8 @@ const CLONE_NEWUSER: c_int = 0x10000000;
 const CLONE_NEWNET: c_int = 0x40000000;
 #[cfg(target_os = "linux")]
 const RLIMIT_AS: c_int = 9;
+#[cfg(target_os = "linux")]
+const RLIMIT_CORE: c_int = 4;
 
 #[cfg(target_os = "linux")]
 #[repr(C)]
@@ -132,6 +135,11 @@ struct SwarmTaskSpecRecord {
     objective_id: String,
     detail: String,
     max_runs: i64,
+    priority: i64,
+    parent_task_id: String,
+    spawn_depth: i64,
+    max_spawn_depth: i64,
+    max_child_tasks: i64,
     deadline_at_ms: i64,
     lease_timeout_ms: i64,
     created_at_ms: i64,
@@ -145,7 +153,9 @@ struct SwarmMergePolicyRecord {
     required_verifiers_json: String,
     allowed_processes_json: String,
     allowed_workspace_roots_json: String,
+    allowed_readonly_roots_json: String,
     network_access: String,
+    allowed_network_destinations_json: String,
     created_at_ms: i64,
     updated_at_ms: i64,
 }
@@ -225,9 +235,14 @@ enum SwarmCommand {
         detail: String,
         dependencies: Vec<String>,
         max_runs: i64,
+        priority: i64,
+        parent_task_id: String,
+        max_spawn_depth: i64,
+        max_child_tasks: i64,
         deadline_at_ms: i64,
         lease_timeout_ms: i64,
     },
+    TaskReprioritize { root: PathBuf, task_id: String, actor: String, priority: i64 },
     Ready { root: PathBuf, objective_id: Option<String> },
     Approve { root: PathBuf, task_id: String, actor: String, approval_name: String, detail: Option<String> },
     Approvals { root: PathBuf, task_id: Option<String> },
@@ -239,7 +254,9 @@ enum SwarmCommand {
         required_verifiers: Vec<String>,
         allowed_processes: Vec<String>,
         allowed_workspace_roots: Vec<String>,
+        allowed_readonly_roots: Vec<String>,
         network_access: String,
+        allowed_network_destinations: Vec<String>,
     },
     ManagerNext { root: PathBuf, objective_id: String },
     ToolRun {
@@ -272,7 +289,7 @@ enum SwarmCommand {
 
 fn swarm_usage(program: &str) -> ! {
     eprintln!(
-        "usage: {program} [--json] swarm <start|bootstrap|lease|release|heartbeat|complete|fail|retry|stop|resume|status|history|tasks|summary|tail|runs|artifacts|artifact read|artifact search|artifact write|memory put|memory query|memory search|objective create|objective status|objectives|task create|ready|approve|approvals|policy set|manager next|tool|verifier run|mergegate decide> ..."
+        "usage: {program} [--json] swarm <start|bootstrap|lease|release|heartbeat|complete|fail|retry|stop|resume|status|history|tasks|summary|tail|runs|artifacts|artifact read|artifact search|artifact write|memory put|memory query|memory search|objective create|objective status|objectives|task create|task reprioritize|ready|approve|approvals|policy set|manager next|tool|verifier run|mergegate decide> ..."
     );
     std::process::exit(2);
 }
@@ -907,13 +924,13 @@ fn parse_swarm_command(args: &[String]) -> Result<Option<(bool, SwarmCommand)>, 
         }
         "task" => {
             let Some(action) = rest.first().map(|value| value.as_str()) else {
-                return Err("usage: claspc swarm task create ...".to_owned());
+                return Err("usage: claspc swarm task <create|reprioritize> ...".to_owned());
             };
             match action {
                 "create" => {
                     if rest.len() < 4 {
                         return Err(
-                            "usage: claspc swarm task create <state-root> <objective-id> <task-id> [--detail TEXT] [--depends-on TASK]... [--max-runs N] [--deadline-ms EPOCH_MS] [--lease-timeout-ms N]"
+                            "usage: claspc swarm task create <state-root> <objective-id> <task-id> [--detail TEXT] [--depends-on TASK]... [--max-runs N] [--priority N] [--parent-task TASK] [--max-spawn-depth N] [--max-child-tasks N] [--deadline-ms EPOCH_MS] [--lease-timeout-ms N]"
                                 .to_owned(),
                         );
                     }
@@ -923,6 +940,10 @@ fn parse_swarm_command(args: &[String]) -> Result<Option<(bool, SwarmCommand)>, 
                     let mut detail = format!("Task {task_id}");
                     let mut dependencies = Vec::new();
                     let mut max_runs = 0i64;
+                    let mut priority = 0i64;
+                    let mut parent_task_id = String::new();
+                    let mut max_spawn_depth = 0i64;
+                    let mut max_child_tasks = 0i64;
                     let mut deadline_at_ms = 0i64;
                     let mut lease_timeout_ms = DEFAULT_LEASE_TIMEOUT_MS;
                     let mut index = 4usize;
@@ -949,6 +970,40 @@ fn parse_swarm_command(args: &[String]) -> Result<Option<(bool, SwarmCommand)>, 
                                 max_runs = value
                                     .parse::<i64>()
                                     .map_err(|_| format!("invalid --max-runs value `{value}`"))?;
+                                index += 2;
+                            }
+                            "--priority" => {
+                                let Some(value) = rest.get(index + 1) else {
+                                    return Err("missing value after --priority".to_owned());
+                                };
+                                priority = value
+                                    .parse::<i64>()
+                                    .map_err(|_| format!("invalid --priority value `{value}`"))?;
+                                index += 2;
+                            }
+                            "--parent-task" => {
+                                let Some(value) = rest.get(index + 1) else {
+                                    return Err("missing value after --parent-task".to_owned());
+                                };
+                                parent_task_id = value.clone();
+                                index += 2;
+                            }
+                            "--max-spawn-depth" => {
+                                let Some(value) = rest.get(index + 1) else {
+                                    return Err("missing value after --max-spawn-depth".to_owned());
+                                };
+                                max_spawn_depth = value
+                                    .parse::<i64>()
+                                    .map_err(|_| format!("invalid --max-spawn-depth value `{value}`"))?;
+                                index += 2;
+                            }
+                            "--max-child-tasks" => {
+                                let Some(value) = rest.get(index + 1) else {
+                                    return Err("missing value after --max-child-tasks".to_owned());
+                                };
+                                max_child_tasks = value
+                                    .parse::<i64>()
+                                    .map_err(|_| format!("invalid --max-child-tasks value `{value}`"))?;
                                 index += 2;
                             }
                             "--deadline-ms" => {
@@ -979,8 +1034,29 @@ fn parse_swarm_command(args: &[String]) -> Result<Option<(bool, SwarmCommand)>, 
                         detail,
                         dependencies,
                         max_runs,
+                        priority,
+                        parent_task_id,
+                        max_spawn_depth,
+                        max_child_tasks,
                         deadline_at_ms,
                         lease_timeout_ms,
+                    }
+                }
+                "reprioritize" => {
+                    if rest.len() != 4 {
+                        return Err(
+                            "usage: claspc swarm task reprioritize <state-root> <task-id> <priority>"
+                                .to_owned(),
+                        );
+                    }
+                    let priority = rest[3]
+                        .parse::<i64>()
+                        .map_err(|_| format!("invalid priority value `{}`", rest[3]))?;
+                    SwarmCommand::TaskReprioritize {
+                        root: parse_root_arg(&rest[1]),
+                        task_id: rest[2].clone(),
+                        actor: default_actor(),
+                        priority,
                     }
                 }
                 other => return Err(format!("unknown swarm task command `{other}`")),
@@ -1017,13 +1093,13 @@ fn parse_swarm_command(args: &[String]) -> Result<Option<(bool, SwarmCommand)>, 
         "policy" => {
             if rest.first().map(|value| value.as_str()) != Some("set") {
                 return Err(
-                    "usage: claspc swarm policy set <state-root> <task-id> <mergegate-name> [--require-approval NAME]... [--require-verifier NAME]... [--allow-process NAME]... [--allow-workspace DIR]... [--deny-network]"
+                    "usage: claspc swarm policy set <state-root> <task-id> <mergegate-name> [--require-approval NAME]... [--require-verifier NAME]... [--allow-process NAME]... [--allow-workspace DIR]... [--allow-readonly-root DIR]... [--deny-network | --allow-network-destination HOST[:PORT]]..."
                         .to_owned(),
                 );
             }
             if rest.len() < 4 {
                 return Err(
-                    "usage: claspc swarm policy set <state-root> <task-id> <mergegate-name> [--require-approval NAME]... [--require-verifier NAME]... [--allow-process NAME]... [--allow-workspace DIR]... [--deny-network]"
+                    "usage: claspc swarm policy set <state-root> <task-id> <mergegate-name> [--require-approval NAME]... [--require-verifier NAME]... [--allow-process NAME]... [--allow-workspace DIR]... [--allow-readonly-root DIR]... [--deny-network | --allow-network-destination HOST[:PORT]]..."
                         .to_owned(),
                 );
             }
@@ -1034,7 +1110,9 @@ fn parse_swarm_command(args: &[String]) -> Result<Option<(bool, SwarmCommand)>, 
             let mut required_verifiers = Vec::new();
             let mut allowed_processes = Vec::new();
             let mut allowed_workspace_roots = Vec::new();
+            let mut allowed_readonly_roots = Vec::new();
             let mut network_access = "ambient".to_owned();
+            let mut allowed_network_destinations = Vec::new();
             let mut index = 4usize;
             while index < rest.len() {
                 match rest[index].as_str() {
@@ -1066,9 +1144,30 @@ fn parse_swarm_command(args: &[String]) -> Result<Option<(bool, SwarmCommand)>, 
                         allowed_workspace_roots.push(value.clone());
                         index += 2;
                     }
+                    "--allow-readonly-root" | "--allow-read-only-root" => {
+                        let Some(value) = rest.get(index + 1) else {
+                            return Err("missing value after --allow-readonly-root".to_owned());
+                        };
+                        allowed_readonly_roots.push(value.clone());
+                        index += 2;
+                    }
                     "--deny-network" => {
+                        if !allowed_network_destinations.is_empty() {
+                            return Err("--deny-network cannot be combined with --allow-network-destination".to_owned());
+                        }
                         network_access = "denied".to_owned();
                         index += 1;
+                    }
+                    "--allow-network-destination" | "--allow-network-host" => {
+                        if network_access == "denied" {
+                            return Err("--allow-network-destination cannot be combined with --deny-network".to_owned());
+                        }
+                        let Some(value) = rest.get(index + 1) else {
+                            return Err("missing value after --allow-network-destination".to_owned());
+                        };
+                        network_access = "allowlisted".to_owned();
+                        allowed_network_destinations.push(value.clone());
+                        index += 2;
                     }
                     other => return Err(format!("unknown option `{other}`")),
                 }
@@ -1081,7 +1180,9 @@ fn parse_swarm_command(args: &[String]) -> Result<Option<(bool, SwarmCommand)>, 
                 required_verifiers,
                 allowed_processes,
                 allowed_workspace_roots,
+                allowed_readonly_roots,
                 network_access,
+                allowed_network_destinations,
             }
         }
         "manager" => {
@@ -1289,6 +1390,11 @@ fn open_swarm_connection(root: &Path) -> Result<(SwarmRuntimePaths, Connection),
               objective_id TEXT NOT NULL,
               detail TEXT NOT NULL,
               max_runs INTEGER NOT NULL,
+              priority INTEGER NOT NULL DEFAULT 0,
+              parent_task_id TEXT NOT NULL DEFAULT '',
+              spawn_depth INTEGER NOT NULL DEFAULT 0,
+              max_spawn_depth INTEGER NOT NULL DEFAULT 0,
+              max_child_tasks INTEGER NOT NULL DEFAULT 0,
               deadline_at_ms INTEGER NOT NULL,
               lease_timeout_ms INTEGER NOT NULL,
               created_at_ms INTEGER NOT NULL,
@@ -1308,13 +1414,45 @@ fn open_swarm_connection(root: &Path) -> Result<(SwarmRuntimePaths, Connection),
               required_verifiers_json TEXT NOT NULL DEFAULT '[]',
               allowed_processes_json TEXT NOT NULL DEFAULT '[]',
               allowed_workspace_roots_json TEXT NOT NULL DEFAULT '[]',
+              allowed_readonly_roots_json TEXT NOT NULL DEFAULT '[]',
               network_access TEXT NOT NULL DEFAULT 'ambient',
+              allowed_network_destinations_json TEXT NOT NULL DEFAULT '[]',
               created_at_ms INTEGER NOT NULL,
               updated_at_ms INTEGER NOT NULL
             );
             ",
         )
         .map_err(|err| format!("failed to initialize swarm database: {err}"))?;
+    ensure_table_column(
+        &connection,
+        "swarm_task_specs",
+        "priority",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    ensure_table_column(
+        &connection,
+        "swarm_task_specs",
+        "parent_task_id",
+        "TEXT NOT NULL DEFAULT ''",
+    )?;
+    ensure_table_column(
+        &connection,
+        "swarm_task_specs",
+        "spawn_depth",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    ensure_table_column(
+        &connection,
+        "swarm_task_specs",
+        "max_spawn_depth",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    ensure_table_column(
+        &connection,
+        "swarm_task_specs",
+        "max_child_tasks",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
     ensure_table_column(
         &connection,
         "swarm_runs",
@@ -1336,8 +1474,20 @@ fn open_swarm_connection(root: &Path) -> Result<(SwarmRuntimePaths, Connection),
     ensure_table_column(
         &connection,
         "swarm_merge_policies",
+        "allowed_readonly_roots_json",
+        "TEXT NOT NULL DEFAULT '[]'",
+    )?;
+    ensure_table_column(
+        &connection,
+        "swarm_merge_policies",
         "network_access",
         "TEXT NOT NULL DEFAULT 'ambient'",
+    )?;
+    ensure_table_column(
+        &connection,
+        "swarm_merge_policies",
+        "allowed_network_destinations_json",
+        "TEXT NOT NULL DEFAULT '[]'",
     )?;
     Ok((paths, connection))
 }
@@ -1571,7 +1721,7 @@ fn load_task_spec(connection: &Connection, task_id: &str) -> Result<Option<Swarm
     connection
         .query_row(
             "
-            SELECT task_id, objective_id, detail, max_runs, deadline_at_ms, lease_timeout_ms, created_at_ms, updated_at_ms
+            SELECT task_id, objective_id, detail, max_runs, priority, parent_task_id, spawn_depth, max_spawn_depth, max_child_tasks, deadline_at_ms, lease_timeout_ms, created_at_ms, updated_at_ms
             FROM swarm_task_specs
             WHERE task_id = ?1
             ",
@@ -1582,10 +1732,15 @@ fn load_task_spec(connection: &Connection, task_id: &str) -> Result<Option<Swarm
                     objective_id: row.get(1)?,
                     detail: row.get(2)?,
                     max_runs: row.get(3)?,
-                    deadline_at_ms: row.get(4)?,
-                    lease_timeout_ms: row.get(5)?,
-                    created_at_ms: row.get(6)?,
-                    updated_at_ms: row.get(7)?,
+                    priority: row.get(4)?,
+                    parent_task_id: row.get(5)?,
+                    spawn_depth: row.get(6)?,
+                    max_spawn_depth: row.get(7)?,
+                    max_child_tasks: row.get(8)?,
+                    deadline_at_ms: row.get(9)?,
+                    lease_timeout_ms: row.get(10)?,
+                    created_at_ms: row.get(11)?,
+                    updated_at_ms: row.get(12)?,
                 })
             },
         )
@@ -1597,7 +1752,7 @@ fn load_merge_policy(connection: &Connection, task_id: &str) -> Result<Option<Sw
     connection
         .query_row(
             "
-            SELECT task_id, mergegate_name, required_approvals_json, required_verifiers_json, allowed_processes_json, allowed_workspace_roots_json, network_access, created_at_ms, updated_at_ms
+            SELECT task_id, mergegate_name, required_approvals_json, required_verifiers_json, allowed_processes_json, allowed_workspace_roots_json, allowed_readonly_roots_json, network_access, allowed_network_destinations_json, created_at_ms, updated_at_ms
             FROM swarm_merge_policies
             WHERE task_id = ?1
             ",
@@ -1610,9 +1765,11 @@ fn load_merge_policy(connection: &Connection, task_id: &str) -> Result<Option<Sw
                     required_verifiers_json: row.get(3)?,
                     allowed_processes_json: row.get(4)?,
                     allowed_workspace_roots_json: row.get(5)?,
-                    network_access: row.get(6)?,
-                    created_at_ms: row.get(7)?,
-                    updated_at_ms: row.get(8)?,
+                    allowed_readonly_roots_json: row.get(6)?,
+                    network_access: row.get(7)?,
+                    allowed_network_destinations_json: row.get(8)?,
+                    created_at_ms: row.get(9)?,
+                    updated_at_ms: row.get(10)?,
                 })
             },
         )
@@ -1628,7 +1785,9 @@ fn store_merge_policy(
     required_verifiers: &[String],
     allowed_processes: &[String],
     allowed_workspace_roots: &[String],
+    allowed_readonly_roots: &[String],
     network_access: &str,
+    allowed_network_destinations: &[String],
 ) -> Result<SwarmMergePolicyRecord, String> {
     if load_task_state(connection, task_id)?.is_none() {
         return Err(format!("unknown swarm task `{task_id}`"));
@@ -1646,20 +1805,37 @@ fn store_merge_policy(
     let normalized_workspace_roots = normalize_allowed_workspace_roots(allowed_workspace_roots)?;
     let allowed_workspace_roots_json =
         serde_json::to_string(&normalized_workspace_roots).map_err(|err| format!("failed to encode allowed workspace roots: {err}"))?;
+    let normalized_readonly_roots = normalize_allowed_readonly_roots(allowed_readonly_roots, &normalized_workspace_roots)?;
+    let allowed_readonly_roots_json =
+        serde_json::to_string(&normalized_readonly_roots).map_err(|err| format!("failed to encode allowed read-only roots: {err}"))?;
     let network_access = normalize_network_access(network_access)?;
+    let normalized_network_destinations = normalize_allowed_network_destinations(allowed_network_destinations)?;
+    if network_access == "ambient" && !normalized_network_destinations.is_empty() {
+        return Err("allowed network destinations require network access `allowlisted`".to_owned());
+    }
+    if network_access == "denied" && !normalized_network_destinations.is_empty() {
+        return Err("network access `denied` cannot also allow network destinations".to_owned());
+    }
+    if network_access == "allowlisted" && normalized_network_destinations.is_empty() {
+        return Err("network access `allowlisted` requires at least one allowed network destination".to_owned());
+    }
+    let allowed_network_destinations_json = serde_json::to_string(&normalized_network_destinations)
+        .map_err(|err| format!("failed to encode allowed network destinations: {err}"))?;
     connection
         .execute(
             "
             INSERT INTO swarm_merge_policies (
-              task_id, mergegate_name, required_approvals_json, required_verifiers_json, allowed_processes_json, allowed_workspace_roots_json, network_access, created_at_ms, updated_at_ms
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+              task_id, mergegate_name, required_approvals_json, required_verifiers_json, allowed_processes_json, allowed_workspace_roots_json, allowed_readonly_roots_json, network_access, allowed_network_destinations_json, created_at_ms, updated_at_ms
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
             ON CONFLICT(task_id) DO UPDATE SET
               mergegate_name = excluded.mergegate_name,
               required_approvals_json = excluded.required_approvals_json,
               required_verifiers_json = excluded.required_verifiers_json,
               allowed_processes_json = excluded.allowed_processes_json,
               allowed_workspace_roots_json = excluded.allowed_workspace_roots_json,
+              allowed_readonly_roots_json = excluded.allowed_readonly_roots_json,
               network_access = excluded.network_access,
+              allowed_network_destinations_json = excluded.allowed_network_destinations_json,
               updated_at_ms = excluded.updated_at_ms
             ",
             params![
@@ -1669,7 +1845,9 @@ fn store_merge_policy(
                 required_verifiers_json,
                 allowed_processes_json,
                 allowed_workspace_roots_json,
+                allowed_readonly_roots_json,
                 network_access,
+                allowed_network_destinations_json,
                 created_at_ms,
                 updated_at_ms
             ],
@@ -1682,7 +1860,9 @@ fn store_merge_policy(
         required_verifiers_json,
         allowed_processes_json,
         allowed_workspace_roots_json,
+        allowed_readonly_roots_json,
         network_access,
+        allowed_network_destinations_json,
         created_at_ms,
         updated_at_ms,
     })
@@ -1717,6 +1897,37 @@ fn objective_task_count(connection: &Connection, objective_id: &str) -> Result<i
             |row| row.get(0),
         )
         .map_err(|err| format!("failed to count swarm tasks for objective `{objective_id}`: {err}"))
+}
+
+fn task_child_count(connection: &Connection, parent_task_id: &str) -> Result<i64, String> {
+    connection
+        .query_row(
+            "SELECT COUNT(*) FROM swarm_task_specs WHERE parent_task_id = ?1",
+            params![parent_task_id],
+            |row| row.get(0),
+        )
+        .map_err(|err| format!("failed to count child swarm tasks for parent `{parent_task_id}`: {err}"))
+}
+
+fn task_child_ids(connection: &Connection, parent_task_id: &str) -> Result<Vec<String>, String> {
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT task_id
+            FROM swarm_task_specs
+            WHERE parent_task_id = ?1
+            ORDER BY created_at_ms ASC, task_id ASC
+            ",
+        )
+        .map_err(|err| format!("failed to prepare child swarm task query for parent `{parent_task_id}`: {err}"))?;
+    let rows = statement
+        .query_map(params![parent_task_id], |row| row.get::<_, String>(0))
+        .map_err(|err| format!("failed to query child swarm tasks for parent `{parent_task_id}`: {err}"))?;
+    let mut values = Vec::new();
+    for row in rows {
+        values.push(row.map_err(|err| format!("failed to read child swarm task row for parent `{parent_task_id}`: {err}"))?);
+    }
+    Ok(values)
 }
 
 fn objective_run_count(connection: &Connection, objective_id: &str) -> Result<i64, String> {
@@ -1790,6 +2001,10 @@ fn insert_task_spec(
     detail: &str,
     dependencies: &[String],
     max_runs: i64,
+    priority: i64,
+    parent_task_id: &str,
+    max_spawn_depth: i64,
+    max_child_tasks: i64,
     deadline_at_ms: i64,
     lease_timeout_ms: i64,
 ) -> Result<SwarmTaskSpecRecord, String> {
@@ -1802,6 +2017,48 @@ fn insert_task_spec(
     if objective.max_tasks > 0 && objective_task_count(connection, objective_id)? >= objective.max_tasks {
         return Err(format!("objective `{objective_id}` exhausted its max task budget"));
     }
+    let max_child_tasks = if max_child_tasks < 0 { 0 } else { max_child_tasks };
+    let (parent_task_id, spawn_depth, max_spawn_depth) = if parent_task_id.is_empty() {
+        let max_spawn_depth = if max_spawn_depth < 0 { 0 } else { max_spawn_depth };
+        (String::new(), 0, max_spawn_depth)
+    } else {
+        if parent_task_id == task_id {
+            return Err(format!("swarm task `{task_id}` cannot be its own parent"));
+        }
+        let Some(parent_spec) = load_task_spec(connection, parent_task_id)? else {
+            return Err(format!("unknown parent swarm task `{parent_task_id}`"));
+        };
+        if parent_spec.objective_id != objective_id {
+            return Err(format!(
+                "parent swarm task `{parent_task_id}` belongs to objective `{}`, not `{objective_id}`",
+                parent_spec.objective_id
+            ));
+        }
+        if parent_spec.max_spawn_depth > 0 && parent_spec.spawn_depth >= parent_spec.max_spawn_depth {
+            return Err(format!(
+                "parent swarm task `{parent_task_id}` exhausted its spawn depth budget {}",
+                parent_spec.max_spawn_depth
+            ));
+        }
+        if parent_spec.max_child_tasks > 0 && task_child_count(connection, parent_task_id)? >= parent_spec.max_child_tasks {
+            return Err(format!(
+                "parent swarm task `{parent_task_id}` exhausted its child task budget {}",
+                parent_spec.max_child_tasks
+            ));
+        }
+        let child_depth = parent_spec.spawn_depth + 1;
+        let effective_max_depth = if max_spawn_depth > 0 {
+            max_spawn_depth
+        } else {
+            parent_spec.max_spawn_depth
+        };
+        if effective_max_depth > 0 && child_depth > effective_max_depth {
+            return Err(format!(
+                "swarm task `{task_id}` spawn depth {child_depth} exceeds max spawn depth {effective_max_depth}"
+            ));
+        }
+        (parent_task_id.to_owned(), child_depth, effective_max_depth)
+    };
     let created_at_ms = now_ms();
     let lease_timeout_ms = if lease_timeout_ms <= 0 {
         DEFAULT_LEASE_TIMEOUT_MS
@@ -1815,10 +2072,23 @@ fn insert_task_spec(
         .execute(
             "
             INSERT INTO swarm_task_specs (
-              task_id, objective_id, detail, max_runs, deadline_at_ms, lease_timeout_ms, created_at_ms, updated_at_ms
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)
+              task_id, objective_id, detail, max_runs, priority, parent_task_id, spawn_depth, max_spawn_depth, max_child_tasks, deadline_at_ms, lease_timeout_ms, created_at_ms, updated_at_ms
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12)
             ",
-            params![task_id, objective_id, detail, max_runs, deadline_at_ms, lease_timeout_ms, created_at_ms],
+            params![
+                task_id,
+                objective_id,
+                detail,
+                max_runs,
+                priority,
+                parent_task_id,
+                spawn_depth,
+                max_spawn_depth,
+                max_child_tasks,
+                deadline_at_ms,
+                lease_timeout_ms,
+                created_at_ms
+            ],
         )
         .map_err(|err| format!("failed to create swarm task spec `{task_id}`: {err}"))?;
     for dependency in dependencies {
@@ -1845,6 +2115,11 @@ fn insert_task_spec(
             "objectiveId": objective_id,
             "dependencies": dependencies,
             "maxRuns": max_runs,
+            "priority": priority,
+            "parentTaskId": parent_task_id,
+            "spawnDepth": spawn_depth,
+            "maxSpawnDepth": max_spawn_depth,
+            "maxChildTasks": max_child_tasks,
             "deadlineAtMs": deadline_at_ms,
             "leaseTimeoutMs": lease_timeout_ms
         }),
@@ -1854,6 +2129,11 @@ fn insert_task_spec(
         objective_id: objective_id.to_owned(),
         detail: detail.to_owned(),
         max_runs,
+        priority,
+        parent_task_id,
+        spawn_depth,
+        max_spawn_depth,
+        max_child_tasks,
         deadline_at_ms,
         lease_timeout_ms,
         created_at_ms,
@@ -2230,6 +2510,14 @@ fn task_record_json(connection: &Connection, task: &SwarmTaskState) -> Result<Va
     let at_ms = now_ms();
     let (ready, lease_expired, blocked, spec, objective) = task_ready_state(connection, task, at_ms)?;
     let merge_policy = merge_policy_status_json(connection, &task.task_id)?;
+    let child_task_ids = task_child_ids(connection, &task.task_id)?;
+    let child_task_count = child_task_ids.len() as i64;
+    let max_child_tasks = spec.as_ref().map(|value| value.max_child_tasks).unwrap_or(0);
+    let remaining_child_task_budget = if max_child_tasks > 0 {
+        max_child_tasks.saturating_sub(child_task_count)
+    } else {
+        0
+    };
     Ok(json!({
         "taskId": task.task_id,
         "status": task.status,
@@ -2243,6 +2531,14 @@ fn task_record_json(connection: &Connection, task: &SwarmTaskState) -> Result<Va
         "objectiveId": spec.as_ref().map(|value| value.objective_id.clone()),
         "detail": spec.as_ref().map(|value| value.detail.clone()).unwrap_or_default(),
         "maxRuns": spec.as_ref().map(|value| value.max_runs).unwrap_or(0),
+        "priority": spec.as_ref().map(|value| value.priority).unwrap_or(0),
+        "parentTaskId": spec.as_ref().map(|value| value.parent_task_id.clone()).unwrap_or_default(),
+        "spawnDepth": spec.as_ref().map(|value| value.spawn_depth).unwrap_or(0),
+        "maxSpawnDepth": spec.as_ref().map(|value| value.max_spawn_depth).unwrap_or(0),
+        "maxChildTasks": max_child_tasks,
+        "childTaskIds": child_task_ids,
+        "childTaskCount": child_task_count,
+        "remainingChildTaskBudget": remaining_child_task_budget,
         "deadlineAtMs": spec.as_ref().map(|value| value.deadline_at_ms).unwrap_or(0),
         "leaseTimeoutMs": spec.as_ref().map(|value| value.lease_timeout_ms).unwrap_or(DEFAULT_LEASE_TIMEOUT_MS),
         "dependencies": task_dependency_ids(connection, &task.task_id)?,
@@ -2447,9 +2743,11 @@ fn tasks_json(connection: &Connection) -> Result<Value, String> {
     let mut statement = connection
         .prepare(
             "
-            SELECT task_id, status, lease_actor, last_heartbeat_at_ms, heartbeat_seen, attempts, last_error, created_at_ms, updated_at_ms
-            FROM swarm_tasks
-            ORDER BY created_at_ms ASC, task_id ASC
+            SELECT tasks.task_id, tasks.status, tasks.lease_actor, tasks.last_heartbeat_at_ms, tasks.heartbeat_seen,
+                   tasks.attempts, tasks.last_error, tasks.created_at_ms, tasks.updated_at_ms
+            FROM swarm_tasks AS tasks
+            LEFT JOIN swarm_task_specs AS specs ON specs.task_id = tasks.task_id
+            ORDER BY COALESCE(specs.priority, 0) DESC, tasks.created_at_ms ASC, tasks.task_id ASC
             ",
         )
         .map_err(|err| format!("failed to prepare swarm tasks query: {err}"))?;
@@ -2864,18 +3162,241 @@ fn normalize_allowed_workspace_roots(roots: &[String]) -> Result<Vec<String>, St
     Ok(normalized)
 }
 
+fn canonical_readonly_root_text(root: &str) -> Result<String, String> {
+    if root.trim().is_empty() {
+        return Err("allowed read-only root must be a non-empty path".to_owned());
+    }
+    let root_path = Path::new(root);
+    let canonical = fs::canonicalize(root_path)
+        .map_err(|err| format!("failed to resolve allowed read-only root `{}`: {err}", root_path.display()))?;
+    if !canonical.is_dir() {
+        return Err(format!(
+            "allowed read-only root `{}` is not a directory",
+            canonical.display()
+        ));
+    }
+    if canonical == Path::new("/") {
+        return Err("allowed read-only root must not be /".to_owned());
+    }
+    Ok(canonical.to_string_lossy().into_owned())
+}
+
+fn path_text_has_root_prefix(value: &str, root: &str) -> bool {
+    value == root || value.starts_with(&format!("{root}/"))
+}
+
+fn normalize_allowed_readonly_roots(roots: &[String], writable_roots: &[String]) -> Result<Vec<String>, String> {
+    let mut normalized = Vec::new();
+    for root in roots {
+        let canonical = canonical_readonly_root_text(root)?;
+        if writable_roots
+            .iter()
+            .any(|writable| path_text_has_root_prefix(writable, &canonical) || path_text_has_root_prefix(&canonical, writable))
+        {
+            return Err(format!(
+                "allowed read-only root `{canonical}` must not overlap allowed workspace roots"
+            ));
+        }
+        if !normalized.iter().any(|existing| existing == &canonical) {
+            normalized.push(canonical);
+        }
+    }
+    Ok(normalized)
+}
+
 fn normalize_network_access(value: &str) -> Result<String, String> {
     match value {
         "" | "ambient" => Ok("ambient".to_owned()),
         "denied" => Ok("denied".to_owned()),
+        "allowlisted" => Ok("allowlisted".to_owned()),
         other => Err(format!(
-            "invalid network access `{other}`; expected `ambient` or `denied`"
+            "invalid network access `{other}`; expected `ambient`, `denied`, or `allowlisted`"
         )),
     }
 }
 
+fn swarm_task_capabilities_json(
+    required_approvals: &[String],
+    required_verifiers: &[String],
+    allowed_processes: &[String],
+    allowed_workspace_roots: &[String],
+    allowed_readonly_roots: &[String],
+    network_access: &str,
+    allowed_network_destinations: &[String],
+) -> Value {
+    json!({
+        "processes": allowed_processes,
+        "filesystemRoots": allowed_workspace_roots,
+        "readonlyFilesystemRoots": allowed_readonly_roots,
+        "networkAccess": network_access,
+        "networkDestinations": allowed_network_destinations,
+        "approvals": required_approvals,
+        "verifiers": required_verifiers,
+    })
+}
+
 fn network_access_denied(value: &str) -> bool {
     value == "denied"
+}
+
+fn network_access_allowlisted(value: &str) -> bool {
+    value == "allowlisted"
+}
+
+fn validate_network_mediator_command(name: &str, command: Vec<String>) -> Result<Vec<String>, String> {
+    if command.is_empty() {
+        return Err(format!("{name} must decode to a non-empty command list"));
+    }
+    if command.iter().any(|part| part.is_empty()) {
+        return Err(format!("{name} must not contain empty command arguments"));
+    }
+    Ok(command)
+}
+
+fn configured_network_mediator_command() -> Result<Option<Vec<String>>, String> {
+    match env::var("CLASP_SWARM_NETWORK_MEDIATOR_JSON") {
+        Ok(raw) => {
+            if raw.trim().is_empty() {
+                return Ok(None);
+            }
+            let command = serde_json::from_str::<Vec<String>>(&raw)
+                .map_err(|err| format!("failed to decode CLASP_SWARM_NETWORK_MEDIATOR_JSON: {err}"))?;
+            return validate_network_mediator_command("CLASP_SWARM_NETWORK_MEDIATOR_JSON", command).map(Some);
+        }
+        Err(env::VarError::NotPresent) => {}
+        Err(err) => return Err(format!("failed to read CLASP_SWARM_NETWORK_MEDIATOR_JSON: {err}")),
+    }
+
+    match env::var("CLASP_SWARM_NETWORK_MEDIATOR") {
+        Ok(raw) => {
+            if raw.trim().is_empty() {
+                Ok(None)
+            } else {
+                validate_network_mediator_command("CLASP_SWARM_NETWORK_MEDIATOR", vec![raw]).map(Some)
+            }
+        }
+        Err(env::VarError::NotPresent) => Ok(None),
+        Err(err) => Err(format!("failed to read CLASP_SWARM_NETWORK_MEDIATOR: {err}")),
+    }
+}
+
+fn validate_filesystem_mediator_command(name: &str, command: Vec<String>) -> Result<Vec<String>, String> {
+    if command.is_empty() {
+        return Err(format!("{name} must decode to a non-empty command list"));
+    }
+    if command.iter().any(|part| part.is_empty()) {
+        return Err(format!("{name} must not contain empty command arguments"));
+    }
+    Ok(command)
+}
+
+fn configured_filesystem_mediator_command() -> Result<Option<Vec<String>>, String> {
+    match env::var("CLASP_SWARM_FILESYSTEM_MEDIATOR_JSON") {
+        Ok(raw) => {
+            if raw.trim().is_empty() {
+                return Ok(None);
+            }
+            let command = serde_json::from_str::<Vec<String>>(&raw)
+                .map_err(|err| format!("failed to decode CLASP_SWARM_FILESYSTEM_MEDIATOR_JSON: {err}"))?;
+            return validate_filesystem_mediator_command("CLASP_SWARM_FILESYSTEM_MEDIATOR_JSON", command).map(Some);
+        }
+        Err(env::VarError::NotPresent) => {}
+        Err(err) => return Err(format!("failed to read CLASP_SWARM_FILESYSTEM_MEDIATOR_JSON: {err}")),
+    }
+
+    match env::var("CLASP_SWARM_FILESYSTEM_MEDIATOR") {
+        Ok(raw) => {
+            if raw.trim().is_empty() {
+                Ok(None)
+            } else {
+                validate_filesystem_mediator_command("CLASP_SWARM_FILESYSTEM_MEDIATOR", vec![raw]).map(Some)
+            }
+        }
+        Err(env::VarError::NotPresent) => Ok(None),
+        Err(err) => Err(format!("failed to read CLASP_SWARM_FILESYSTEM_MEDIATOR: {err}")),
+    }
+}
+
+fn mediated_filesystem_command(
+    cwd: &Path,
+    command: &[String],
+    allowed_workspace_roots: &[String],
+    allowed_readonly_roots: &[String],
+) -> Result<Option<(Vec<String>, Vec<String>, String, String, String)>, String> {
+    if allowed_workspace_roots.is_empty() {
+        return Ok(None);
+    }
+    let Some(mediator_prefix) = configured_filesystem_mediator_command()? else {
+        return Ok(None);
+    };
+    let roots_json = serde_json::to_string(allowed_workspace_roots)
+        .map_err(|err| format!("failed to encode allowed workspace roots for filesystem mediator: {err}"))?;
+    let readonly_roots_json = serde_json::to_string(allowed_readonly_roots)
+        .map_err(|err| format!("failed to encode allowed read-only roots for filesystem mediator: {err}"))?;
+    let command_json = serde_json::to_string(command)
+        .map_err(|err| format!("failed to encode swarm command for filesystem mediator: {err}"))?;
+    let mut mediated = mediator_prefix.clone();
+    mediated.push("--workspace-roots-json".to_owned());
+    mediated.push(roots_json.clone());
+    mediated.push("--readonly-roots-json".to_owned());
+    mediated.push(readonly_roots_json.clone());
+    mediated.push("--cwd".to_owned());
+    mediated.push(cwd.display().to_string());
+    mediated.push("--command-json".to_owned());
+    mediated.push(command_json.clone());
+    mediated.push("--".to_owned());
+    mediated.extend(command.iter().cloned());
+    Ok(Some((mediated, mediator_prefix, roots_json, readonly_roots_json, command_json)))
+}
+
+fn mediated_network_command(
+    cwd: &Path,
+    command: &[String],
+    allowed_network_destinations: &[String],
+) -> Result<Option<(Vec<String>, Vec<String>, String, String)>, String> {
+    let Some(mediator_prefix) = configured_network_mediator_command()? else {
+        return Ok(None);
+    };
+    let destinations_json = serde_json::to_string(allowed_network_destinations)
+        .map_err(|err| format!("failed to encode allowed network destinations for mediator: {err}"))?;
+    let command_json = serde_json::to_string(command)
+        .map_err(|err| format!("failed to encode swarm command for network mediator: {err}"))?;
+    let mut mediated = mediator_prefix.clone();
+    mediated.push("--network-access".to_owned());
+    mediated.push("allowlisted".to_owned());
+    mediated.push("--destinations-json".to_owned());
+    mediated.push(destinations_json.clone());
+    mediated.push("--cwd".to_owned());
+    mediated.push(cwd.display().to_string());
+    mediated.push("--command-json".to_owned());
+    mediated.push(command_json.clone());
+    mediated.push("--".to_owned());
+    mediated.extend(command.iter().cloned());
+    Ok(Some((mediated, mediator_prefix, destinations_json, command_json)))
+}
+
+fn normalize_network_destination(value: &str) -> Result<String, String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err("allowed network destination must be non-empty".to_owned());
+    }
+    if trimmed.contains(char::is_whitespace) {
+        return Err(format!(
+            "allowed network destination `{trimmed}` must not contain whitespace"
+        ));
+    }
+    Ok(trimmed.to_owned())
+}
+
+fn normalize_allowed_network_destinations(destinations: &[String]) -> Result<Vec<String>, String> {
+    let mut normalized = Vec::new();
+    for destination in destinations {
+        let value = normalize_network_destination(destination)?;
+        if !normalized.iter().any(|existing| existing == &value) {
+            normalized.push(value);
+        }
+    }
+    Ok(normalized)
 }
 
 fn granted_approval_names(connection: &Connection, task_id: &str) -> Result<Vec<String>, String> {
@@ -2931,6 +3452,18 @@ fn merge_policy_status_json(connection: &Connection, task_id: &str) -> Result<Op
     let required_verifiers = decode_string_list(&policy.required_verifiers_json);
     let allowed_processes = decode_string_list(&policy.allowed_processes_json);
     let allowed_workspace_roots = decode_string_list(&policy.allowed_workspace_roots_json);
+    let allowed_readonly_roots = decode_string_list(&policy.allowed_readonly_roots_json);
+    let allowed_network_destinations = decode_string_list(&policy.allowed_network_destinations_json);
+    let network_access = normalize_network_access(&policy.network_access)?;
+    let capabilities = swarm_task_capabilities_json(
+        &required_approvals,
+        &required_verifiers,
+        &allowed_processes,
+        &allowed_workspace_roots,
+        &allowed_readonly_roots,
+        &network_access,
+        &allowed_network_destinations,
+    );
     let granted_approvals = granted_approval_names(connection, task_id)?;
     let missing_approvals = required_approvals
         .iter()
@@ -2987,7 +3520,10 @@ fn merge_policy_status_json(connection: &Connection, task_id: &str) -> Result<Op
         "failedVerifiers": failed_verifiers,
         "allowedProcesses": allowed_processes,
         "allowedWorkspaceRoots": allowed_workspace_roots,
-        "networkAccess": normalize_network_access(&policy.network_access)?,
+        "allowedReadonlyRoots": allowed_readonly_roots,
+        "networkAccess": network_access,
+        "allowedNetworkDestinations": allowed_network_destinations,
+        "capabilities": capabilities,
         "mergegate": mergegate_payload.unwrap_or_else(|| json!({
             "mergegateName": policy.mergegate_name,
             "verdict": "missing",
@@ -3447,12 +3983,12 @@ fn objective_status_json(connection: &Connection, objective_id: &str) -> Result<
     let mut statement = connection
         .prepare(
             "
-            SELECT task_id, status, lease_actor, last_heartbeat_at_ms, heartbeat_seen, attempts, last_error, created_at_ms, updated_at_ms
-            FROM swarm_tasks
-            WHERE task_id IN (
-              SELECT task_id FROM swarm_task_specs WHERE objective_id = ?1
-            )
-            ORDER BY created_at_ms ASC, task_id ASC
+            SELECT tasks.task_id, tasks.status, tasks.lease_actor, tasks.last_heartbeat_at_ms, tasks.heartbeat_seen,
+                   tasks.attempts, tasks.last_error, tasks.created_at_ms, tasks.updated_at_ms
+            FROM swarm_tasks AS tasks
+            INNER JOIN swarm_task_specs AS specs ON specs.task_id = tasks.task_id
+            WHERE specs.objective_id = ?1
+            ORDER BY specs.priority DESC, tasks.created_at_ms ASC, tasks.task_id ASC
             ",
         )
         .map_err(|err| format!("failed to prepare swarm objective task query: {err}"))?;
@@ -3493,7 +4029,7 @@ fn objective_tasks(connection: &Connection, objective_id: &str) -> Result<Vec<Sw
             FROM swarm_tasks AS tasks
             INNER JOIN swarm_task_specs AS specs ON specs.task_id = tasks.task_id
             WHERE specs.objective_id = ?1
-            ORDER BY tasks.created_at_ms ASC, tasks.task_id ASC
+            ORDER BY specs.priority DESC, tasks.created_at_ms ASC, tasks.task_id ASC
             ",
         )
         .map_err(|err| format!("failed to prepare swarm objective task listing: {err}"))?;
@@ -3554,6 +4090,7 @@ fn manager_action_with_details(connection: &Connection, mut value: Value) -> Res
     let at_ms = now_ms();
 
     let mut task_status = String::new();
+    let mut task_priority = 0i64;
     let mut blocked_by = string_list(map.get("blockedBy"));
     let mut blocker_task_ids = Vec::new();
     if !task_id.is_empty() {
@@ -3564,6 +4101,9 @@ fn manager_action_with_details(connection: &Connection, mut value: Value) -> Res
                     task_ready_state(connection, &task, at_ms)?;
                 blocked_by = blocked;
             }
+        }
+        if let Some(spec) = load_task_spec(connection, &task_id)? {
+            task_priority = spec.priority;
         }
         blocker_task_ids = unfinished_dependency_ids(connection, &task_id)?;
     }
@@ -3635,6 +4175,7 @@ fn manager_action_with_details(connection: &Connection, mut value: Value) -> Res
         map.insert("taskId".to_owned(), Value::String(task_id));
     }
     map.insert("taskStatus".to_owned(), Value::String(task_status));
+    map.insert("taskPriority".to_owned(), json!(task_priority));
     map.insert("blockedBy".to_owned(), string_values(blocked_by));
     map.insert("blockerTaskIds".to_owned(), string_values(blocker_task_ids));
     map.insert("requiredApprovals".to_owned(), string_values(required_approvals));
@@ -3947,12 +4488,12 @@ fn ready_json(connection: &Connection, objective_id: Option<&str>) -> Result<Val
         let mut statement = connection
             .prepare(
                 "
-                SELECT task_id, status, lease_actor, last_heartbeat_at_ms, heartbeat_seen, attempts, last_error, created_at_ms, updated_at_ms
-                FROM swarm_tasks
-                WHERE task_id IN (
-                  SELECT task_id FROM swarm_task_specs WHERE objective_id = ?1
-                )
-                ORDER BY created_at_ms ASC, task_id ASC
+                SELECT tasks.task_id, tasks.status, tasks.lease_actor, tasks.last_heartbeat_at_ms, tasks.heartbeat_seen,
+                       tasks.attempts, tasks.last_error, tasks.created_at_ms, tasks.updated_at_ms
+                FROM swarm_tasks AS tasks
+                INNER JOIN swarm_task_specs AS specs ON specs.task_id = tasks.task_id
+                WHERE specs.objective_id = ?1
+                ORDER BY specs.priority DESC, tasks.created_at_ms ASC, tasks.task_id ASC
                 ",
             )
             .map_err(|err| format!("failed to prepare swarm ready query: {err}"))?;
@@ -4421,6 +4962,147 @@ fn memory_limit_bytes(memory_limit_mb: Option<i64>) -> Result<Option<u64>, Strin
         .ok_or_else(|| format!("--memory-mb value `{memory_limit_mb}` is too large"))
 }
 
+fn swarm_command_memory_scope_preference() -> String {
+    env::var("CLASP_SWARM_COMMAND_MEMORY_SCOPE")
+        .unwrap_or_else(|_| "auto".to_owned())
+        .trim()
+        .to_owned()
+}
+
+fn memory_scope_preference_disabled(preference: &str) -> bool {
+    matches!(
+        preference,
+        "0"
+            | "false"
+            | "FALSE"
+            | "False"
+            | "no"
+            | "NO"
+            | "No"
+            | "off"
+            | "OFF"
+            | "Off"
+            | "never"
+            | "NEVER"
+            | "Never"
+    )
+}
+
+fn memory_scope_preference_required(preference: &str) -> bool {
+    matches!(
+        preference,
+        "1"
+            | "true"
+            | "TRUE"
+            | "True"
+            | "yes"
+            | "YES"
+            | "Yes"
+            | "on"
+            | "ON"
+            | "On"
+            | "required"
+            | "require"
+            | "always"
+    )
+}
+
+#[cfg(target_os = "linux")]
+fn user_systemd_scope_available() -> bool {
+    let systemctl_status = ProcessCommand::new("systemctl")
+        .args(["--user", "is-active", "--quiet", "default.target"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    if !systemctl_status.map(|status| status.success()).unwrap_or(false) {
+        return false;
+    }
+
+    ProcessCommand::new("systemd-run")
+        .arg("--version")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn user_systemd_scope_available() -> bool {
+    false
+}
+
+fn should_use_systemd_memory_scope(
+    memory_limit_mb: Option<i64>,
+    network_denied: bool,
+) -> Result<bool, String> {
+    if !matches!(memory_limit_mb, Some(limit) if limit > 0) {
+        return Ok(false);
+    }
+
+    let preference = swarm_command_memory_scope_preference();
+    if memory_scope_preference_disabled(preference.as_str()) {
+        return Ok(false);
+    }
+
+    if network_denied {
+        if memory_scope_preference_required(preference.as_str()) {
+            return Err("swarm command cgroup memory scope cannot be combined with --deny-network on this runtime path".to_owned());
+        }
+        return Ok(false);
+    }
+
+    if user_systemd_scope_available() {
+        return Ok(true);
+    }
+
+    if memory_scope_preference_required(preference.as_str()) {
+        return Err("swarm command cgroup memory scope was required but user systemd-run scope is unavailable".to_owned());
+    }
+
+    Ok(false)
+}
+
+fn systemd_scoped_memory_process(command: &[String], memory_limit_mb: i64) -> Result<ProcessCommand, String> {
+    if command.is_empty() {
+        return Err("swarm command cannot be empty".to_owned());
+    }
+    if memory_limit_mb <= 0 {
+        return Err("swarm command cgroup memory scope requires a positive memory limit".to_owned());
+    }
+    let memory_high_mb = (memory_limit_mb * 98 / 100).max(1);
+    let memory_limit_kb = memory_limit_mb
+        .checked_mul(1024)
+        .ok_or_else(|| format!("--memory-mb value `{memory_limit_mb}` is too large"))?;
+    let mut process = ProcessCommand::new("systemd-run");
+    process
+        .arg("--user")
+        .arg("--scope")
+        .arg("--quiet")
+        .arg("--collect")
+        .arg("-p")
+        .arg("MemoryAccounting=yes")
+        .arg("-p")
+        .arg(format!("MemoryHigh={memory_high_mb}M"))
+        .arg("-p")
+        .arg(format!("MemoryMax={memory_limit_mb}M"))
+        .arg("--")
+        .arg("bash")
+        .arg("-c")
+        .arg(
+            "limit_kb=\"$1\"; shift; ulimit -c 0 >/dev/null 2>&1 || true; \
+             if [ \"$limit_kb\" -gt 0 ]; then ulimit -v \"$limit_kb\" || exit 125; fi; \
+             exec \"$@\"",
+        )
+        .arg("clasp-swarm-memory-scope")
+        .arg(memory_limit_kb.to_string())
+        .arg(&command[0])
+        .args(&command[1..]);
+    Ok(process)
+}
+
 #[cfg(target_os = "linux")]
 fn apply_virtual_memory_limit(limit_bytes: u64) -> io::Result<()> {
     let limit = RLimit {
@@ -4434,6 +5116,26 @@ fn apply_virtual_memory_limit(limit_bytes: u64) -> io::Result<()> {
             Ok(())
         }
     }
+}
+
+#[cfg(target_os = "linux")]
+fn disable_core_dumps() -> io::Result<()> {
+    let limit = RLimit {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
+    unsafe {
+        if setrlimit(RLIMIT_CORE, &limit) < 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn disable_core_dumps() -> io::Result<()> {
+    Ok(())
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -4473,6 +5175,7 @@ fn configure_command_process(
     #[cfg(unix)]
     unsafe {
         command.pre_exec(move || {
+            disable_core_dumps()?;
             if killable_group && setsid() < 0 {
                 Err(std::io::Error::last_os_error())
             } else {
@@ -4668,14 +5371,21 @@ fn run_command_with_timeout_to_artifacts(
     fs::write(stderr_path, [])
         .map_err(|err| format!("failed to initialize swarm stderr artifact `{}`: {err}", stderr_path.display()))?;
 
-    let mut process = ProcessCommand::new(&command[0]);
+    let use_systemd_memory_scope = should_use_systemd_memory_scope(memory_limit_mb, network_denied)?;
+    let mut process = if use_systemd_memory_scope {
+        systemd_scoped_memory_process(command, memory_limit_mb.unwrap_or(0))?
+    } else {
+        let mut process = ProcessCommand::new(&command[0]);
+        process.args(&command[1..]);
+        process
+    };
     process
-        .args(&command[1..])
         .current_dir(cwd)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    configure_command_process(&mut process, true, memory_limit_mb, network_denied)?;
+    let virtual_memory_limit = if use_systemd_memory_scope { None } else { memory_limit_mb };
+    configure_command_process(&mut process, true, virtual_memory_limit, network_denied)?;
 
     let mut child = process
         .spawn()
@@ -4797,14 +5507,21 @@ fn run_command_to_artifacts(
     memory_limit_mb: Option<i64>,
     network_denied: bool,
 ) -> Result<NativeCommandOutcome, String> {
-    let mut process = ProcessCommand::new(&command[0]);
+    let use_systemd_memory_scope = should_use_systemd_memory_scope(memory_limit_mb, network_denied)?;
+    let mut process = if use_systemd_memory_scope {
+        systemd_scoped_memory_process(command, memory_limit_mb.unwrap_or(0))?
+    } else {
+        let mut process = ProcessCommand::new(&command[0]);
+        process.args(&command[1..]);
+        process
+    };
     process
-        .args(&command[1..])
         .current_dir(cwd)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    configure_command_process(&mut process, true, memory_limit_mb, network_denied)?;
+    let virtual_memory_limit = if use_systemd_memory_scope { None } else { memory_limit_mb };
+    configure_command_process(&mut process, true, virtual_memory_limit, network_denied)?;
 
     let mut child = process
         .spawn()
@@ -4910,6 +5627,411 @@ fn process_allowed_by_policy(allowed_processes: &[String], command: &[String]) -
         .any(|allowed| allowed == executable || allowed == &process_name)
 }
 
+fn string_list_contains(values: &[String], needle: &str) -> bool {
+    values.iter().any(|value| value == needle)
+}
+
+fn shell_command_argument(command: &[String]) -> Option<&str> {
+    command
+        .windows(2)
+        .find(|pair| pair[0].starts_with('-') && pair[0].contains('c'))
+        .map(|pair| pair[1].as_str())
+}
+
+fn shell_script_requires_destructive_approval(script: &str) -> bool {
+    let script = format!(" {script} ");
+    script.contains(" rm ")
+        || script.contains(" rm\t")
+        || script.contains("\nrm ")
+        || script.contains(";rm ")
+        || script.contains("; rm ")
+        || script.contains(" rmdir ")
+        || script.contains(" unlink ")
+        || script.contains(" git clean")
+        || script.contains(" git reset --hard")
+}
+
+fn command_requires_destructive_approval(command: &[String]) -> bool {
+    let process_name = command_process_name(command);
+    match process_name.as_str() {
+        "rm" | "rmdir" | "unlink" => true,
+        "git" => {
+            let has_clean = command.iter().skip(1).any(|arg| arg == "clean");
+            let has_reset = command.iter().skip(1).any(|arg| arg == "reset");
+            let has_hard = command.iter().skip(1).any(|arg| arg == "--hard" || arg.starts_with("--hard="));
+            has_clean || (has_reset && has_hard)
+        }
+        "bash" | "sh" | "zsh" => shell_command_argument(command)
+            .map(shell_script_requires_destructive_approval)
+            .unwrap_or(false),
+        _ => false,
+    }
+}
+
+fn shell_script_segments(script: &str) -> Vec<String> {
+    let mut segments = Vec::new();
+    let mut current = String::new();
+    let mut quote: Option<char> = None;
+    let mut escaped = false;
+    let mut chars = script.chars().peekable();
+
+    fn push_segment(segments: &mut Vec<String>, current: &mut String) {
+        let value = current.trim();
+        if !value.is_empty() {
+            segments.push(value.to_owned());
+        }
+        current.clear();
+    }
+
+    while let Some(ch) = chars.next() {
+        if escaped {
+            current.push(ch);
+            escaped = false;
+            continue;
+        }
+
+        if ch == '\\' {
+            current.push(ch);
+            escaped = true;
+            continue;
+        }
+
+        match quote {
+            Some(active_quote) => {
+                if ch == active_quote {
+                    quote = None;
+                }
+                current.push(ch);
+            }
+            None => {
+                if ch == '\'' || ch == '"' {
+                    quote = Some(ch);
+                    current.push(ch);
+                } else if ch == ';' || ch == '\n' {
+                    push_segment(&mut segments, &mut current);
+                } else if ch == '&' && chars.peek() == Some(&'&') {
+                    let _ = chars.next();
+                    push_segment(&mut segments, &mut current);
+                } else if ch == '|' {
+                    if chars.peek() == Some(&'|') {
+                        let _ = chars.next();
+                    }
+                    push_segment(&mut segments, &mut current);
+                } else {
+                    current.push(ch);
+                }
+            }
+        }
+    }
+
+    push_segment(&mut segments, &mut current);
+    segments
+}
+
+fn tokenize_shell_segment(segment: &str) -> Result<Vec<String>, String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut quote: Option<char> = None;
+    let mut escaped = false;
+
+    fn push_token(tokens: &mut Vec<String>, current: &mut String) {
+        if !current.is_empty() {
+            tokens.push(current.clone());
+        }
+        current.clear();
+    }
+
+    for ch in segment.chars() {
+        if escaped {
+            current.push(ch);
+            escaped = false;
+            continue;
+        }
+
+        match quote {
+            Some('\'') => {
+                if ch == '\'' {
+                    quote = None;
+                } else {
+                    current.push(ch);
+                }
+            }
+            Some('"') => {
+                if ch == '"' {
+                    quote = None;
+                } else if ch == '\\' {
+                    escaped = true;
+                } else {
+                    current.push(ch);
+                }
+            }
+            Some(_) => unreachable!("unsupported shell quote state"),
+            None => {
+                if ch.is_whitespace() {
+                    push_token(&mut tokens, &mut current);
+                } else if ch == '\'' || ch == '"' {
+                    quote = Some(ch);
+                } else if ch == '\\' {
+                    escaped = true;
+                } else {
+                    current.push(ch);
+                }
+            }
+        }
+    }
+
+    if let Some(active_quote) = quote {
+        return Err(format!("unclosed shell quote `{active_quote}`"));
+    }
+    if escaped {
+        current.push('\\');
+    }
+    push_token(&mut tokens, &mut current);
+    Ok(tokens)
+}
+
+fn is_shell_env_assignment_token(token: &str) -> bool {
+    let Some(equals_index) = token.find('=') else {
+        return false;
+    };
+    if equals_index == 0 {
+        return false;
+    }
+    let mut chars = token[..equals_index].chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !(first == '_' || first.is_ascii_alphabetic()) {
+        return false;
+    }
+    chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+}
+
+fn shell_command_tokens(tokens: &[String]) -> Vec<String> {
+    let mut index = 0;
+    while tokens
+        .get(index)
+        .map(|token| is_shell_env_assignment_token(token))
+        .unwrap_or(false)
+    {
+        index += 1;
+    }
+
+    if tokens.get(index).map(String::as_str) == Some("command") {
+        index += 1;
+    } else if tokens.get(index).map(String::as_str) == Some("env") {
+        index += 1;
+        while tokens
+            .get(index)
+            .map(|token| is_shell_env_assignment_token(token))
+            .unwrap_or(false)
+        {
+            index += 1;
+        }
+    }
+
+    tokens[index..].to_vec()
+}
+
+fn shell_token_has_dynamic_filesystem_expansion(token: &str) -> bool {
+    token.contains('$')
+        || token.contains('`')
+        || token.starts_with('~')
+        || token.contains("<(")
+        || token.contains(">(")
+}
+
+fn destructive_shell_command_dynamic_operand(command: &[String]) -> Option<String> {
+    command
+        .iter()
+        .skip(1)
+        .find(|token| shell_token_has_dynamic_filesystem_expansion(token))
+        .cloned()
+}
+
+fn shell_script_destructive_filesystem_targets(cwd: &Path, script: &str) -> Result<Vec<PathBuf>, String> {
+    let mut targets = Vec::new();
+
+    for segment in shell_script_segments(script) {
+        let tokens = tokenize_shell_segment(&segment)?;
+        let command = shell_command_tokens(&tokens);
+        if command.is_empty() || !command_requires_destructive_approval(&command) {
+            continue;
+        }
+        if let Some(dynamic_operand) = destructive_shell_command_dynamic_operand(&command) {
+            return Err(format!(
+                "destructive shell command `{}` contains dynamic filesystem operand `{dynamic_operand}`",
+                command_process_name(&command)
+            ));
+        }
+
+        let command_targets = destructive_filesystem_targets(cwd, &command)?;
+        if command_targets.is_empty() {
+            return Err(format!(
+                "destructive shell command `{}` has no statically mediable filesystem target",
+                command_process_name(&command)
+            ));
+        }
+        targets.extend(command_targets);
+    }
+
+    Ok(targets)
+}
+
+fn command_path_argument(base: &Path, value: &str) -> PathBuf {
+    let path = Path::new(value);
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        base.join(path)
+    }
+}
+
+fn command_path_operands(args: &[String]) -> Vec<String> {
+    let mut operands = Vec::new();
+    let mut after_separator = false;
+
+    for arg in args {
+        if !after_separator && arg == "--" {
+            after_separator = true;
+            continue;
+        }
+        if !after_separator && arg.starts_with('-') && arg != "-" {
+            continue;
+        }
+        operands.push(arg.clone());
+    }
+
+    operands
+}
+
+fn git_effective_cwd_and_subcommand(cwd: &Path, command: &[String]) -> (PathBuf, Option<usize>) {
+    let mut effective_cwd = cwd.to_path_buf();
+    let mut index = 1;
+
+    while index < command.len() {
+        let arg = &command[index];
+        if arg == "-C" {
+            if let Some(path) = command.get(index + 1) {
+                effective_cwd = command_path_argument(&effective_cwd, path);
+                index += 2;
+                continue;
+            }
+            return (effective_cwd, None);
+        }
+        if let Some(path) = arg.strip_prefix("-C") {
+            if !path.is_empty() {
+                effective_cwd = command_path_argument(&effective_cwd, path);
+                index += 1;
+                continue;
+            }
+        }
+        if arg.starts_with('-') {
+            index += 1;
+            continue;
+        }
+        return (effective_cwd, Some(index));
+    }
+
+    (effective_cwd, None)
+}
+
+fn destructive_filesystem_targets(cwd: &Path, command: &[String]) -> Result<Vec<PathBuf>, String> {
+    let process_name = command_process_name(command);
+    let targets = match process_name.as_str() {
+        "rm" | "rmdir" | "unlink" => command_path_operands(&command[1..])
+            .into_iter()
+            .map(|path| command_path_argument(cwd, &path))
+            .collect(),
+        "git" => {
+            let (effective_cwd, Some(subcommand_index)) = git_effective_cwd_and_subcommand(cwd, command) else {
+                return Ok(Vec::new());
+            };
+            match command[subcommand_index].as_str() {
+                "clean" => {
+                    let pathspecs = command_path_operands(&command[(subcommand_index + 1)..]);
+                    if pathspecs.is_empty() {
+                        vec![effective_cwd]
+                    } else {
+                        pathspecs
+                            .into_iter()
+                            .map(|path| command_path_argument(&effective_cwd, &path))
+                            .collect()
+                    }
+                }
+                "reset" if command.iter().skip(subcommand_index + 1).any(|arg| arg == "--hard" || arg.starts_with("--hard=")) => {
+                    vec![effective_cwd]
+                }
+                _ => Vec::new(),
+            }
+        }
+        "bash" | "sh" | "zsh" => match shell_command_argument(command) {
+            Some(script) => return shell_script_destructive_filesystem_targets(cwd, script),
+            None => Vec::new(),
+        },
+        _ => Vec::new(),
+    };
+    Ok(targets)
+}
+
+fn normalize_lexical_path(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::Prefix(prefix) => normalized.push(Path::new(prefix.as_os_str())),
+            std::path::Component::RootDir => normalized.push(Path::new(component.as_os_str())),
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                normalized.pop();
+            }
+            std::path::Component::Normal(value) => normalized.push(value),
+        }
+    }
+    normalized
+}
+
+fn canonical_or_existing_parent_path(path: &Path) -> Result<PathBuf, String> {
+    if let Ok(canonical) = fs::canonicalize(path) {
+        return Ok(canonical);
+    }
+
+    let mut probe = path.to_path_buf();
+    let mut suffix = Vec::new();
+    loop {
+        if let Ok(mut canonical_parent) = fs::canonicalize(&probe) {
+            for component in suffix.iter().rev() {
+                canonical_parent.push(Path::new(component));
+            }
+            return Ok(normalize_lexical_path(&canonical_parent));
+        }
+        let Some(file_name) = probe.file_name().map(|value| value.to_os_string()) else {
+            return Err(format!(
+                "failed to resolve filesystem target `{}`: no existing parent directory",
+                path.display()
+            ));
+        };
+        suffix.push(file_name);
+        if !probe.pop() {
+            return Err(format!(
+                "failed to resolve filesystem target `{}`: no existing parent directory",
+                path.display()
+            ));
+        }
+    }
+}
+
+fn filesystem_target_allowed_by_policy(allowed_workspace_roots: &[String], target: &Path) -> Result<(bool, String), String> {
+    let canonical_target = canonical_or_existing_parent_path(target)?;
+    let target_text = canonical_target.to_string_lossy().into_owned();
+    if allowed_workspace_roots.is_empty() {
+        return Ok((true, target_text));
+    }
+    let allowed = allowed_workspace_roots
+        .iter()
+        .any(|root| canonical_target.starts_with(Path::new(root)));
+    Ok((allowed, target_text))
+}
+
 fn enforce_process_policy(
     connection: &mut Connection,
     task_id: &str,
@@ -4943,6 +6065,52 @@ fn enforce_process_policy(
     );
     Err(format!(
         "swarm task `{task_id}` cannot run {role} `{name}`: process `{process_name}` is not allowed by task policy"
+    ))
+}
+
+fn enforce_destructive_action_approval_policy(
+    connection: &mut Connection,
+    task_id: &str,
+    actor: &str,
+    role: &str,
+    name: &str,
+    command: &[String],
+) -> Result<(), String> {
+    let Some(policy) = load_merge_policy(connection, task_id)? else {
+        return Ok(());
+    };
+    let required_approvals = decode_string_list(&policy.required_approvals_json);
+    if !string_list_contains(&required_approvals, DESTRUCTIVE_ACTION_APPROVAL)
+        || !command_requires_destructive_approval(command)
+    {
+        return Ok(());
+    }
+    let granted_approvals = granted_approval_names(connection, task_id)?;
+    if string_list_contains(&granted_approvals, DESTRUCTIVE_ACTION_APPROVAL) {
+        return Ok(());
+    }
+    let process_name = command_process_name(command);
+    let _ = record_swarm_event(
+        connection,
+        "destructive_action_approval_required",
+        task_id,
+        actor,
+        &format!(
+            "Denied {role} `{name}` destructive command `{process_name}` until approval `{DESTRUCTIVE_ACTION_APPROVAL}` is granted."
+        ),
+        json!({
+            "role": role,
+            "name": name,
+            "command": command,
+            "processName": process_name,
+            "requiredApproval": DESTRUCTIVE_ACTION_APPROVAL,
+            "requiredApprovals": required_approvals,
+            "grantedApprovals": granted_approvals,
+            "mergegateName": policy.mergegate_name,
+        }),
+    );
+    Err(format!(
+        "swarm task `{task_id}` cannot run {role} `{name}`: destructive action approval `{DESTRUCTIVE_ACTION_APPROVAL}` is required"
     ))
 }
 
@@ -4998,11 +6166,101 @@ fn enforce_workspace_policy(
     ))
 }
 
-fn network_access_for_task(connection: &Connection, task_id: &str) -> Result<String, String> {
-    let Some(policy) = load_merge_policy(connection, task_id)? else {
-        return Ok("ambient".to_owned());
+fn enforce_destructive_filesystem_scope_policy(
+    connection: &mut Connection,
+    task_id: &str,
+    actor: &str,
+    role: &str,
+    name: &str,
+    cwd: &Path,
+    command: &[String],
+) -> Result<(), String> {
+    let targets = match destructive_filesystem_targets(cwd, command) {
+        Ok(targets) => targets,
+        Err(reason) => {
+            let Some(policy) = load_merge_policy(connection, task_id)? else {
+                return Err(reason);
+            };
+            let allowed_workspace_roots = decode_string_list(&policy.allowed_workspace_roots_json);
+            let _ = record_swarm_event(
+                connection,
+                "filesystem_permission_denied",
+                task_id,
+                actor,
+                &format!("Denied {role} `{name}` because destructive filesystem targets could not be statically mediated: {reason}."),
+                json!({
+                    "role": role,
+                    "name": name,
+                    "cwd": cwd.display().to_string(),
+                    "command": command,
+                    "reason": reason.clone(),
+                    "allowedWorkspaceRoots": allowed_workspace_roots,
+                    "mergegateName": policy.mergegate_name,
+                }),
+            );
+            return Err(format!(
+                "swarm task `{task_id}` cannot run {role} `{name}`: destructive filesystem target could not be mediated: {reason}"
+            ));
+        }
     };
-    normalize_network_access(&policy.network_access)
+    if targets.is_empty() {
+        return Ok(());
+    }
+    let Some(policy) = load_merge_policy(connection, task_id)? else {
+        return Ok(());
+    };
+    let allowed_workspace_roots = decode_string_list(&policy.allowed_workspace_roots_json);
+    for target in targets {
+        let (allowed, canonical_target) = filesystem_target_allowed_by_policy(&allowed_workspace_roots, &target)?;
+        if allowed {
+            continue;
+        }
+        let _ = record_swarm_event(
+            connection,
+            "filesystem_permission_denied",
+            task_id,
+            actor,
+            &format!("Denied {role} `{name}` destructive filesystem target `{canonical_target}` by task policy."),
+            json!({
+                "role": role,
+                "name": name,
+                "cwd": cwd.display().to_string(),
+                "command": command,
+                "target": target.display().to_string(),
+                "canonicalTarget": canonical_target.clone(),
+                "allowedWorkspaceRoots": allowed_workspace_roots,
+                "mergegateName": policy.mergegate_name,
+            }),
+        );
+        return Err(format!(
+            "swarm task `{task_id}` cannot run {role} `{name}`: destructive filesystem target `{canonical_target}` is outside allowed workspace roots"
+        ));
+    }
+    Ok(())
+}
+
+fn network_access_for_task(connection: &Connection, task_id: &str) -> Result<(String, Vec<String>), String> {
+    let Some(policy) = load_merge_policy(connection, task_id)? else {
+        return Ok(("ambient".to_owned(), Vec::new()));
+    };
+    Ok((
+        normalize_network_access(&policy.network_access)?,
+        decode_string_list(&policy.allowed_network_destinations_json),
+    ))
+}
+
+fn allowed_workspace_roots_for_task(connection: &Connection, task_id: &str) -> Result<Vec<String>, String> {
+    let Some(policy) = load_merge_policy(connection, task_id)? else {
+        return Ok(Vec::new());
+    };
+    Ok(decode_string_list(&policy.allowed_workspace_roots_json))
+}
+
+fn allowed_readonly_roots_for_task(connection: &Connection, task_id: &str) -> Result<Vec<String>, String> {
+    let Some(policy) = load_merge_policy(connection, task_id)? else {
+        return Ok(Vec::new());
+    };
+    Ok(decode_string_list(&policy.allowed_readonly_roots_json))
 }
 
 fn run_native_command(
@@ -5042,7 +6300,86 @@ fn run_native_command(
 
     enforce_process_policy(connection, task_id, actor, role, name, command)?;
     enforce_workspace_policy(connection, task_id, actor, role, name, cwd)?;
-    let network_access = network_access_for_task(connection, task_id)?;
+    enforce_destructive_action_approval_policy(connection, task_id, actor, role, name, command)?;
+    enforce_destructive_filesystem_scope_policy(connection, task_id, actor, role, name, cwd, command)?;
+    let allowed_workspace_roots = allowed_workspace_roots_for_task(connection, task_id)?;
+    let allowed_readonly_roots = allowed_readonly_roots_for_task(connection, task_id)?;
+    let (network_access, allowed_network_destinations) = network_access_for_task(connection, task_id)?;
+    let mut command_to_execute = command.to_vec();
+    let mut filesystem_mediated = false;
+    let mut filesystem_mediator_command = Vec::new();
+    if let Some((mediated_command, mediator_command, roots_json, readonly_roots_json, command_json)) =
+        mediated_filesystem_command(cwd, command, &allowed_workspace_roots, &allowed_readonly_roots)?
+    {
+        filesystem_mediated = true;
+        filesystem_mediator_command = mediator_command;
+        command_to_execute = mediated_command;
+        let _ = record_swarm_event(
+            connection,
+            "filesystem_mediation_started",
+            task_id,
+            actor,
+            &format!("Mediating {role} `{name}` filesystem writes with allowed workspace roots."),
+            json!({
+                "role": role,
+                "name": name,
+                "allowedWorkspaceRoots": allowed_workspace_roots.clone(),
+                "allowedReadonlyRoots": allowed_readonly_roots.clone(),
+                "filesystemMediatorCommand": filesystem_mediator_command.clone(),
+                "workspaceRootsJson": roots_json,
+                "readonlyRootsJson": readonly_roots_json,
+                "commandJson": command_json,
+            }),
+        );
+    }
+    let mut network_mediated = false;
+    let mut network_mediator_command = Vec::new();
+    if network_access_allowlisted(&network_access) {
+        match mediated_network_command(cwd, &command_to_execute, &allowed_network_destinations)? {
+            Some((mediated_command, mediator_command, destinations_json, command_json)) => {
+                network_mediated = true;
+                network_mediator_command = mediator_command;
+                command_to_execute = mediated_command;
+                let _ = record_swarm_event(
+                    connection,
+                    "network_mediation_started",
+                    task_id,
+                    actor,
+                    &format!("Mediating {role} `{name}` with allowlisted network destinations."),
+                    json!({
+                        "role": role,
+                        "name": name,
+                        "allowedNetworkDestinations": allowed_network_destinations.clone(),
+                        "networkMediatorCommand": network_mediator_command.clone(),
+                        "destinationsJson": destinations_json,
+                        "commandJson": command_json,
+                    }),
+                );
+            }
+            None => {
+                let mergegate_name = load_merge_policy(connection, task_id)?
+                    .map(|policy| policy.mergegate_name)
+                    .unwrap_or_default();
+                let _ = record_swarm_event(
+                    connection,
+                    "network_permission_denied",
+                    task_id,
+                    actor,
+                    &format!("Denied {role} `{name}` because allowlisted network destinations are not mediated by this runtime yet."),
+                    json!({
+                        "role": role,
+                        "name": name,
+                        "allowedNetworkDestinations": allowed_network_destinations.clone(),
+                        "mergegateName": mergegate_name,
+                        "reason": "network-allowlist-mediation-unavailable"
+                    }),
+                );
+                return Err(format!(
+                    "swarm task `{task_id}` cannot run {role} `{name}`: allowlisted network destinations are not enforced by this runtime yet"
+                ));
+            }
+        }
+    }
     let network_denied = network_access_denied(&network_access);
 
     let memory_limit_mb_value = memory_limit_mb.unwrap_or(0);
@@ -5063,6 +6400,12 @@ fn run_native_command(
             "timeoutMs": timeout_ms.unwrap_or(0),
             "memoryLimitMb": memory_limit_mb_value,
             "networkAccess": network_access.clone(),
+            "allowedNetworkDestinations": allowed_network_destinations.clone(),
+            "allowedReadonlyRoots": allowed_readonly_roots.clone(),
+            "networkMediated": network_mediated,
+            "networkMediatorCommand": network_mediator_command.clone(),
+            "filesystemMediated": filesystem_mediated,
+            "filesystemMediatorCommand": filesystem_mediator_command.clone(),
             "outputLimitBytes": DEFAULT_SWARM_OUTPUT_LIMIT_BYTES
         }),
     )?;
@@ -5070,9 +6413,9 @@ fn run_native_command(
     let stdout_path = next_artifact_path(paths, task_id, run_id, "stdout");
     let stderr_path = next_artifact_path(paths, task_id, run_id, "stderr");
     let outcome = if let Some(timeout_ms) = timeout_ms {
-        run_command_with_timeout_to_artifacts(cwd, command, &stdout_path, &stderr_path, timeout_ms, memory_limit_mb, network_denied)?
+        run_command_with_timeout_to_artifacts(cwd, &command_to_execute, &stdout_path, &stderr_path, timeout_ms, memory_limit_mb, network_denied)?
     } else {
-        run_command_to_artifacts(cwd, command, &stdout_path, &stderr_path, memory_limit_mb, network_denied)?
+        run_command_to_artifacts(cwd, &command_to_execute, &stdout_path, &stderr_path, memory_limit_mb, network_denied)?
     };
     let ended_at_ms = now_ms();
     let artifact_metadata = json!({
@@ -5083,6 +6426,12 @@ fn run_native_command(
         "timeoutMs": timeout_ms.unwrap_or(0),
         "memoryLimitMb": memory_limit_mb_value,
         "networkAccess": network_access.clone(),
+        "allowedNetworkDestinations": allowed_network_destinations.clone(),
+        "allowedReadonlyRoots": allowed_readonly_roots.clone(),
+        "networkMediated": network_mediated,
+        "networkMediatorCommand": network_mediator_command.clone(),
+        "filesystemMediated": filesystem_mediated,
+        "filesystemMediatorCommand": filesystem_mediator_command.clone(),
         "outputLimitBytes": DEFAULT_SWARM_OUTPUT_LIMIT_BYTES,
         "stdoutReaderFinished": outcome.stdout_reader_finished,
         "stderrReaderFinished": outcome.stderr_reader_finished,
@@ -5125,6 +6474,12 @@ fn run_native_command(
             "timeoutMs": timeout_ms.unwrap_or(0),
             "memoryLimitMb": memory_limit_mb_value,
             "networkAccess": network_access.clone(),
+            "allowedNetworkDestinations": allowed_network_destinations.clone(),
+            "allowedReadonlyRoots": allowed_readonly_roots.clone(),
+            "networkMediated": network_mediated,
+            "networkMediatorCommand": network_mediator_command.clone(),
+            "filesystemMediated": filesystem_mediated,
+            "filesystemMediatorCommand": filesystem_mediator_command.clone(),
             "outputLimitBytes": DEFAULT_SWARM_OUTPUT_LIMIT_BYTES,
             "stdoutReaderFinished": outcome.stdout_reader_finished,
             "stderrReaderFinished": outcome.stderr_reader_finished,
@@ -5289,6 +6644,9 @@ fn format_task_text(value: &Value) -> String {
     }
     if let Some(attempts) = i64_field(value, "attempts") {
         lines.push(format!("  attempts: {attempts}"));
+    }
+    if let Some(priority) = i64_field(value, "priority") {
+        lines.push(format!("  priority: {priority}"));
     }
     if let Some(ready) = bool_field(value, "ready") {
         lines.push(format!("  ready: {ready}"));
@@ -5771,6 +7129,37 @@ fn execute_task_create(
     detail: &str,
     dependencies: &[String],
     max_runs: i64,
+    priority: i64,
+    deadline_at_ms: i64,
+    lease_timeout_ms: i64,
+) -> Result<Value, String> {
+    execute_task_create_with_spawn_policy(
+        root,
+        objective_id,
+        task_id,
+        detail,
+        dependencies,
+        max_runs,
+        priority,
+        "",
+        0,
+        0,
+        deadline_at_ms,
+        lease_timeout_ms,
+    )
+}
+
+fn execute_task_create_with_spawn_policy(
+    root: &Path,
+    objective_id: &str,
+    task_id: &str,
+    detail: &str,
+    dependencies: &[String],
+    max_runs: i64,
+    priority: i64,
+    parent_task_id: &str,
+    max_spawn_depth: i64,
+    max_child_tasks: i64,
     deadline_at_ms: i64,
     lease_timeout_ms: i64,
 ) -> Result<Value, String> {
@@ -5782,6 +7171,10 @@ fn execute_task_create(
         detail,
         dependencies,
         max_runs,
+        priority,
+        parent_task_id,
+        max_spawn_depth,
+        max_child_tasks,
         deadline_at_ms,
         lease_timeout_ms,
     ) {
@@ -5803,10 +7196,71 @@ fn handle_task_create(
     detail: &str,
     dependencies: &[String],
     max_runs: i64,
+    priority: i64,
     deadline_at_ms: i64,
     lease_timeout_ms: i64,
 ) -> ExitCode {
-    match execute_task_create(root, objective_id, task_id, detail, dependencies, max_runs, deadline_at_ms, lease_timeout_ms) {
+    match execute_task_create(root, objective_id, task_id, detail, dependencies, max_runs, priority, deadline_at_ms, lease_timeout_ms) {
+        Ok(value) => {
+            print_output(&value, json_mode);
+            ExitCode::SUCCESS
+        }
+        Err(message) => fail(&message, json_mode),
+    }
+}
+
+fn execute_task_reprioritize(
+    root: &Path,
+    task_id: &str,
+    actor: &str,
+    priority: i64,
+) -> Result<Value, String> {
+    let (_paths, mut connection) = open_swarm_connection(root)?;
+    require_manager_actor(&connection, task_id, actor, "reprioritize")?;
+    let Some(existing) = load_task_spec(&connection, task_id)? else {
+        return Err(format!("unknown swarm task spec `{task_id}`"));
+    };
+    let updated_at_ms = now_ms();
+    connection
+        .execute(
+            "
+            UPDATE swarm_task_specs
+            SET priority = ?2,
+                updated_at_ms = ?3
+            WHERE task_id = ?1
+            ",
+            params![task_id, priority, updated_at_ms],
+        )
+        .map_err(|err| format!("failed to reprioritize swarm task `{task_id}`: {err}"))?;
+    let detail = format!(
+        "Reprioritized task `{task_id}` from {} to {priority}.",
+        existing.priority
+    );
+    let _ = record_swarm_event(
+        &mut connection,
+        "task_reprioritized",
+        task_id,
+        actor,
+        &detail,
+        json!({
+            "previousPriority": existing.priority,
+            "priority": priority,
+        }),
+    )?;
+    let Some(task) = load_task_state(&connection, task_id)? else {
+        return Err(format!("unknown swarm task `{task_id}`"));
+    };
+    task_record_json(&connection, &task)
+}
+
+fn handle_task_reprioritize(
+    json_mode: bool,
+    root: &Path,
+    task_id: &str,
+    actor: &str,
+    priority: i64,
+) -> ExitCode {
+    match execute_task_reprioritize(root, task_id, actor, priority) {
         Ok(value) => {
             print_output(&value, json_mode);
             ExitCode::SUCCESS
@@ -5840,7 +7294,7 @@ fn execute_policy_set_with_process_access(
     required_verifiers: &[String],
     allowed_processes: &[String],
 ) -> Result<Value, String> {
-    execute_policy_set_with_access(
+    execute_policy_set_with_filesystem_access(
         root,
         task_id,
         mergegate_name,
@@ -5848,7 +7302,9 @@ fn execute_policy_set_with_process_access(
         required_verifiers,
         allowed_processes,
         &[],
+        &[],
         "ambient",
+        &[],
     )
 }
 
@@ -5861,6 +7317,33 @@ fn execute_policy_set_with_access(
     allowed_processes: &[String],
     allowed_workspace_roots: &[String],
     network_access: &str,
+    allowed_network_destinations: &[String],
+) -> Result<Value, String> {
+    execute_policy_set_with_filesystem_access(
+        root,
+        task_id,
+        mergegate_name,
+        required_approvals,
+        required_verifiers,
+        allowed_processes,
+        allowed_workspace_roots,
+        &[],
+        network_access,
+        allowed_network_destinations,
+    )
+}
+
+fn execute_policy_set_with_filesystem_access(
+    root: &Path,
+    task_id: &str,
+    mergegate_name: &str,
+    required_approvals: &[String],
+    required_verifiers: &[String],
+    allowed_processes: &[String],
+    allowed_workspace_roots: &[String],
+    allowed_readonly_roots: &[String],
+    network_access: &str,
+    allowed_network_destinations: &[String],
 ) -> Result<Value, String> {
     let (_paths, mut connection) = open_swarm_connection(root)?;
     let policy = store_merge_policy(
@@ -5871,10 +7354,26 @@ fn execute_policy_set_with_access(
         required_verifiers,
         allowed_processes,
         allowed_workspace_roots,
+        allowed_readonly_roots,
         network_access,
+        allowed_network_destinations,
     )?;
     let normalized_workspace_roots = decode_string_list(&policy.allowed_workspace_roots_json);
+    let normalized_readonly_roots = decode_string_list(&policy.allowed_readonly_roots_json);
+    let required_approvals = decode_string_list(&policy.required_approvals_json);
+    let required_verifiers = decode_string_list(&policy.required_verifiers_json);
+    let allowed_processes = decode_string_list(&policy.allowed_processes_json);
     let network_access = normalize_network_access(&policy.network_access)?;
+    let allowed_network_destinations = decode_string_list(&policy.allowed_network_destinations_json);
+    let capabilities = swarm_task_capabilities_json(
+        &required_approvals,
+        &required_verifiers,
+        &allowed_processes,
+        &normalized_workspace_roots,
+        &normalized_readonly_roots,
+        &network_access,
+        &allowed_network_destinations,
+    );
     let _ = record_swarm_event(
         &mut connection,
         "merge_policy_set",
@@ -5887,17 +7386,23 @@ fn execute_policy_set_with_access(
             "requiredVerifiers": required_verifiers,
             "allowedProcesses": allowed_processes,
             "allowedWorkspaceRoots": normalized_workspace_roots,
+            "allowedReadonlyRoots": normalized_readonly_roots,
             "networkAccess": network_access.clone(),
+            "allowedNetworkDestinations": allowed_network_destinations.clone(),
+            "capabilities": capabilities.clone(),
         }),
     );
     Ok(json!({
         "taskId": policy.task_id,
         "mergegateName": policy.mergegate_name,
-        "requiredApprovals": decode_string_list(&policy.required_approvals_json),
-        "requiredVerifiers": decode_string_list(&policy.required_verifiers_json),
-        "allowedProcesses": decode_string_list(&policy.allowed_processes_json),
-        "allowedWorkspaceRoots": decode_string_list(&policy.allowed_workspace_roots_json),
-        "networkAccess": normalize_network_access(&policy.network_access)?,
+        "requiredApprovals": required_approvals,
+        "requiredVerifiers": required_verifiers,
+        "allowedProcesses": allowed_processes,
+        "allowedWorkspaceRoots": normalized_workspace_roots,
+        "allowedReadonlyRoots": normalized_readonly_roots,
+        "networkAccess": network_access,
+        "allowedNetworkDestinations": allowed_network_destinations,
+        "capabilities": capabilities,
         "createdAtMs": policy.created_at_ms,
         "updatedAtMs": policy.updated_at_ms,
     }))
@@ -6173,11 +7678,32 @@ fn execute_command(command: SwarmCommand) -> Result<(ExitCode, Value), String> {
             detail,
             dependencies,
             max_runs,
+            priority,
+            parent_task_id,
+            max_spawn_depth,
+            max_child_tasks,
             deadline_at_ms,
             lease_timeout_ms,
         } => Ok((
             ExitCode::SUCCESS,
-            execute_task_create(&root, &objective_id, &task_id, &detail, &dependencies, max_runs, deadline_at_ms, lease_timeout_ms)?,
+            execute_task_create_with_spawn_policy(
+                &root,
+                &objective_id,
+                &task_id,
+                &detail,
+                &dependencies,
+                max_runs,
+                priority,
+                &parent_task_id,
+                max_spawn_depth,
+                max_child_tasks,
+                deadline_at_ms,
+                lease_timeout_ms,
+            )?,
+        )),
+        SwarmCommand::TaskReprioritize { root, task_id, actor, priority } => Ok((
+            ExitCode::SUCCESS,
+            execute_task_reprioritize(&root, &task_id, &actor, priority)?,
         )),
         SwarmCommand::PolicySet {
             root,
@@ -6187,10 +7713,12 @@ fn execute_command(command: SwarmCommand) -> Result<(ExitCode, Value), String> {
             required_verifiers,
             allowed_processes,
             allowed_workspace_roots,
+            allowed_readonly_roots,
             network_access,
+            allowed_network_destinations,
         } => Ok((
             ExitCode::SUCCESS,
-            execute_policy_set_with_access(
+            execute_policy_set_with_filesystem_access(
                 &root,
                 &task_id,
                 &mergegate_name,
@@ -6198,7 +7726,9 @@ fn execute_command(command: SwarmCommand) -> Result<(ExitCode, Value), String> {
                 &required_verifiers,
                 &allowed_processes,
                 &allowed_workspace_roots,
+                &allowed_readonly_roots,
                 &network_access,
+                &allowed_network_destinations,
             )?,
         )),
         SwarmCommand::MemoryPut { root, objective_id, task_id, actor, key, value } => Ok((
@@ -6437,6 +7967,30 @@ pub fn builtin_swarm_task_create_with_deadline(
     deadline_at_ms: i64,
     lease_timeout_ms: i64,
 ) -> Result<String, String> {
+    builtin_swarm_task_create_with_deadline_and_priority(
+        root,
+        objective_id,
+        task_id,
+        detail,
+        dependencies,
+        max_runs,
+        deadline_at_ms,
+        0,
+        lease_timeout_ms,
+    )
+}
+
+pub fn builtin_swarm_task_create_with_deadline_and_priority(
+    root: &str,
+    objective_id: &str,
+    task_id: &str,
+    detail: &str,
+    dependencies: &[String],
+    max_runs: i64,
+    deadline_at_ms: i64,
+    priority: i64,
+    lease_timeout_ms: i64,
+) -> Result<String, String> {
     render_builtin_json(execute_task_create(
         Path::new(root),
         objective_id,
@@ -6444,9 +7998,78 @@ pub fn builtin_swarm_task_create_with_deadline(
         detail,
         dependencies,
         max_runs,
+        priority,
         deadline_at_ms,
         lease_timeout_ms,
     )?)
+}
+
+pub fn builtin_swarm_task_create_child_with_deadline_and_priority(
+    root: &str,
+    objective_id: &str,
+    parent_task_id: &str,
+    task_id: &str,
+    detail: &str,
+    dependencies: &[String],
+    max_runs: i64,
+    deadline_at_ms: i64,
+    priority: i64,
+    max_spawn_depth: i64,
+    lease_timeout_ms: i64,
+) -> Result<String, String> {
+    builtin_swarm_task_create_child_with_policy(
+        root,
+        objective_id,
+        parent_task_id,
+        task_id,
+        detail,
+        dependencies,
+        max_runs,
+        deadline_at_ms,
+        priority,
+        max_spawn_depth,
+        0,
+        lease_timeout_ms,
+    )
+}
+
+pub fn builtin_swarm_task_create_child_with_policy(
+    root: &str,
+    objective_id: &str,
+    parent_task_id: &str,
+    task_id: &str,
+    detail: &str,
+    dependencies: &[String],
+    max_runs: i64,
+    deadline_at_ms: i64,
+    priority: i64,
+    max_spawn_depth: i64,
+    max_child_tasks: i64,
+    lease_timeout_ms: i64,
+) -> Result<String, String> {
+    render_builtin_json(execute_task_create_with_spawn_policy(
+        Path::new(root),
+        objective_id,
+        task_id,
+        detail,
+        dependencies,
+        max_runs,
+        priority,
+        parent_task_id,
+        max_spawn_depth,
+        max_child_tasks,
+        deadline_at_ms,
+        lease_timeout_ms,
+    )?)
+}
+
+pub fn builtin_swarm_task_reprioritize(
+    root: &str,
+    task_id: &str,
+    actor: &str,
+    priority: i64,
+) -> Result<String, String> {
+    render_builtin_json(execute_task_reprioritize(Path::new(root), task_id, actor, priority)?)
 }
 
 pub fn builtin_swarm_policy_set(
@@ -6501,6 +8124,7 @@ pub fn builtin_swarm_policy_set_with_access(
         allowed_processes,
         allowed_workspace_roots,
         "ambient",
+        &[],
     )?)
 }
 
@@ -6523,6 +8147,57 @@ pub fn builtin_swarm_policy_set_with_capabilities(
         allowed_processes,
         allowed_workspace_roots,
         network_access,
+        &[],
+    )?)
+}
+
+pub fn builtin_swarm_policy_set_with_network_access(
+    root: &str,
+    task_id: &str,
+    mergegate_name: &str,
+    required_approvals: &[String],
+    required_verifiers: &[String],
+    allowed_processes: &[String],
+    allowed_workspace_roots: &[String],
+    network_access: &str,
+    allowed_network_destinations: &[String],
+) -> Result<String, String> {
+    render_builtin_json(execute_policy_set_with_access(
+        Path::new(root),
+        task_id,
+        mergegate_name,
+        required_approvals,
+        required_verifiers,
+        allowed_processes,
+        allowed_workspace_roots,
+        network_access,
+        allowed_network_destinations,
+    )?)
+}
+
+pub fn builtin_swarm_policy_set_with_filesystem_access(
+    root: &str,
+    task_id: &str,
+    mergegate_name: &str,
+    required_approvals: &[String],
+    required_verifiers: &[String],
+    allowed_processes: &[String],
+    allowed_workspace_roots: &[String],
+    allowed_readonly_roots: &[String],
+    network_access: &str,
+    allowed_network_destinations: &[String],
+) -> Result<String, String> {
+    render_builtin_json(execute_policy_set_with_filesystem_access(
+        Path::new(root),
+        task_id,
+        mergegate_name,
+        required_approvals,
+        required_verifiers,
+        allowed_processes,
+        allowed_workspace_roots,
+        allowed_readonly_roots,
+        network_access,
+        allowed_network_destinations,
     )?)
 }
 
@@ -6804,7 +8479,7 @@ pub fn maybe_run_swarm(args: &[String]) -> Option<ExitCode> {
 mod tests {
     use super::{
         maybe_run_swarm, render_swarm_text, run_swarm_json_command, runtime_paths,
-        DEFAULT_SWARM_OUTPUT_LIMIT_BYTES,
+        DEFAULT_SWARM_OUTPUT_LIMIT_BYTES, DESTRUCTIVE_ACTION_APPROVAL,
     };
     use std::process::ExitCode;
     use rusqlite::Connection;
@@ -6820,6 +8495,41 @@ mod tests {
             .expect("system time before unix epoch")
             .as_nanos();
         std::env::temp_dir().join(format!("clasp-swarm-{name}-{}-{stamp}", std::process::id()))
+    }
+
+    #[test]
+    fn memory_scope_preference_parsing_covers_safe_defaults() {
+        assert!(super::memory_scope_preference_disabled("never"));
+        assert!(super::memory_scope_preference_disabled("0"));
+        assert!(super::memory_scope_preference_required("required"));
+        assert!(super::memory_scope_preference_required("always"));
+        assert!(!super::memory_scope_preference_disabled("auto"));
+        assert!(!super::memory_scope_preference_required("auto"));
+    }
+
+    #[test]
+    fn systemd_scoped_memory_process_preserves_cgroup_and_ulimit_contract() {
+        let process = super::systemd_scoped_memory_process(
+            &[
+                "bash".to_owned(),
+                "-lc".to_owned(),
+                "ulimit -v".to_owned(),
+            ],
+            512,
+        )
+        .expect("build scoped memory process");
+        let args: Vec<String> = process
+            .get_args()
+            .map(|arg| arg.to_string_lossy().to_string())
+            .collect();
+
+        assert_eq!(process.get_program().to_string_lossy(), "systemd-run");
+        assert!(args.iter().any(|arg| arg == "MemoryAccounting=yes"));
+        assert!(args.iter().any(|arg| arg == "MemoryHigh=501M"));
+        assert!(args.iter().any(|arg| arg == "MemoryMax=512M"));
+        assert!(args.iter().any(|arg| arg == "524288"));
+        assert!(args.iter().any(|arg| arg == "clasp-swarm-memory-scope"));
+        assert!(args.iter().any(|arg| arg == "ulimit -v"));
     }
 
     #[test]
@@ -7001,6 +8711,11 @@ mod tests {
         assert_eq!(policy_code, 0);
         let policy_json: Value = serde_json::from_str(&policy_json_text).expect("decode policy json");
         assert_eq!(policy_json.get("allowedProcesses"), Some(&json!(["bash"])));
+        assert_eq!(policy_json.pointer("/capabilities/processes"), Some(&json!(["bash"])));
+        assert_eq!(
+            policy_json.pointer("/capabilities/verifiers"),
+            Some(&json!(["native-smoke"]))
+        );
 
         let denied_args = vec![
             "claspc".to_owned(),
@@ -7062,13 +8777,20 @@ mod tests {
         let root = unique_root("workspace-policy");
         let allowed_workspace = root.join("allowed-workspace");
         let allowed_child = allowed_workspace.join("child");
+        let readonly_workspace = root.join("readonly-deps");
         let denied_workspace = root.join("denied-workspace");
         fs::create_dir_all(&allowed_child).expect("create allowed workspace");
+        fs::create_dir_all(&readonly_workspace).expect("create read-only dependency workspace");
         fs::create_dir_all(&denied_workspace).expect("create denied workspace");
         let root_text = root.to_string_lossy().to_string();
         let allowed_text = allowed_workspace.to_string_lossy().to_string();
         let canonical_allowed_text = fs::canonicalize(&allowed_workspace)
             .expect("canonical allowed workspace")
+            .to_string_lossy()
+            .to_string();
+        let readonly_text = readonly_workspace.to_string_lossy().to_string();
+        let canonical_readonly_text = fs::canonicalize(&readonly_workspace)
+            .expect("canonical read-only workspace")
             .to_string_lossy()
             .to_string();
         let allowed_child_text = allowed_child.to_string_lossy().to_string();
@@ -7106,12 +8828,29 @@ mod tests {
             "bash".to_owned(),
             "--allow-workspace".to_owned(),
             allowed_text.clone(),
+            "--allow-readonly-root".to_owned(),
+            readonly_text.clone(),
         ])
         .expect("set workspace policy");
         assert_eq!(policy_code, 0);
         let policy_json: Value = serde_json::from_str(&policy_json_text).expect("decode policy json");
         assert_eq!(policy_json.get("allowedProcesses"), Some(&json!(["bash"])));
-        assert_eq!(policy_json.get("allowedWorkspaceRoots"), Some(&json!([canonical_allowed_text])));
+        assert_eq!(
+            policy_json.get("allowedWorkspaceRoots"),
+            Some(&json!([canonical_allowed_text.clone()]))
+        );
+        assert_eq!(
+            policy_json.get("allowedReadonlyRoots"),
+            Some(&json!([canonical_readonly_text.clone()]))
+        );
+        assert_eq!(
+            policy_json.pointer("/capabilities/filesystemRoots"),
+            Some(&json!([canonical_allowed_text]))
+        );
+        assert_eq!(
+            policy_json.pointer("/capabilities/readonlyFilesystemRoots"),
+            Some(&json!([canonical_readonly_text]))
+        );
 
         let denied_args = vec![
             "claspc".to_owned(),
@@ -7244,6 +8983,306 @@ mod tests {
     }
 
     #[test]
+    fn swarm_policy_network_allowlist_is_first_class_and_fail_closed() {
+        let root = unique_root("network-allowlist-policy");
+        let root_text = root.to_string_lossy().to_string();
+        assert_eq!(
+            maybe_run_swarm(&vec![
+                "claspc".to_owned(),
+                "swarm".to_owned(),
+                "bootstrap".to_owned(),
+                root_text.clone(),
+                "repair".to_owned()
+            ]),
+            Some(ExitCode::SUCCESS)
+        );
+        assert_eq!(
+            maybe_run_swarm(&vec![
+                "claspc".to_owned(),
+                "swarm".to_owned(),
+                "lease".to_owned(),
+                root_text.clone(),
+                "repair".to_owned()
+            ]),
+            Some(ExitCode::SUCCESS)
+        );
+
+        let invalid_policy = run_swarm_json_command(&vec![
+            "policy".to_owned(),
+            "set".to_owned(),
+            root_text.clone(),
+            "repair".to_owned(),
+            "trunk".to_owned(),
+            "--deny-network".to_owned(),
+            "--allow-network-destination".to_owned(),
+            "api.openai.com:443".to_owned(),
+        ]);
+        assert!(invalid_policy.is_err());
+
+        let (policy_code, policy_json_text) = run_swarm_json_command(&vec![
+            "policy".to_owned(),
+            "set".to_owned(),
+            root_text.clone(),
+            "repair".to_owned(),
+            "trunk".to_owned(),
+            "--require-verifier".to_owned(),
+            "native-smoke".to_owned(),
+            "--allow-process".to_owned(),
+            "bash".to_owned(),
+            "--allow-network-destination".to_owned(),
+            "api.openai.com:443".to_owned(),
+            "--allow-network-destination".to_owned(),
+            "api.openai.com:443".to_owned(),
+        ])
+        .expect("set network allowlist policy");
+        assert_eq!(policy_code, 0);
+        let policy_json: Value = serde_json::from_str(&policy_json_text).expect("decode policy json");
+        assert_eq!(policy_json.get("networkAccess"), Some(&json!("allowlisted")));
+        assert_eq!(
+            policy_json.get("allowedNetworkDestinations"),
+            Some(&json!(["api.openai.com:443"]))
+        );
+        assert_eq!(
+            policy_json.pointer("/capabilities/networkDestinations"),
+            Some(&json!(["api.openai.com:443"]))
+        );
+        assert_eq!(
+            policy_json.pointer("/capabilities/networkAccess"),
+            Some(&json!("allowlisted"))
+        );
+
+        let verifier_args = vec![
+            "claspc".to_owned(),
+            "swarm".to_owned(),
+            "verifier".to_owned(),
+            "run".to_owned(),
+            root_text.clone(),
+            "repair".to_owned(),
+            "native-smoke".to_owned(),
+            "--".to_owned(),
+            "bash".to_owned(),
+            "-lc".to_owned(),
+            "printf should-not-run".to_owned(),
+        ];
+        assert_eq!(maybe_run_swarm(&verifier_args), Some(ExitCode::from(1)));
+
+        let connection = Connection::open(runtime_paths(&root).db_path).expect("open sqlite db");
+        let run_count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM swarm_runs WHERE task_id = 'repair'", [], |row| row.get(0))
+            .expect("count runs");
+        assert_eq!(run_count, 0);
+        let denied_events: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM swarm_events WHERE task_id = 'repair' AND kind = 'network_permission_denied'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count denied events");
+        assert_eq!(denied_events, 1);
+        let stored_destinations_json: String = connection
+            .query_row(
+                "SELECT allowed_network_destinations_json FROM swarm_merge_policies WHERE task_id = 'repair'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("load allowed network destinations");
+        assert_eq!(stored_destinations_json, "[\"api.openai.com:443\"]");
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn swarm_policy_destructive_action_requires_approval() {
+        let root = unique_root("destructive-approval-policy");
+        let allowed_workspace = root.join("allowed-workspace");
+        let outside_workspace = root.join("outside-workspace");
+        fs::create_dir_all(&allowed_workspace).expect("create allowed workspace");
+        fs::create_dir_all(&outside_workspace).expect("create outside workspace");
+        let target = allowed_workspace.join("destructive-target.txt");
+        let outside_target = outside_workspace.join("destructive-target.txt");
+        fs::write(&target, b"keep").expect("write destructive target");
+        fs::write(&outside_target, b"keep").expect("write outside destructive target");
+        let root_text = root.to_string_lossy().to_string();
+        let allowed_text = allowed_workspace.to_string_lossy().to_string();
+        let canonical_allowed_text = fs::canonicalize(&allowed_workspace)
+            .expect("canonical allowed workspace")
+            .to_string_lossy()
+            .to_string();
+
+        assert_eq!(
+            maybe_run_swarm(&vec![
+                "claspc".to_owned(),
+                "swarm".to_owned(),
+                "bootstrap".to_owned(),
+                root_text.clone(),
+                "repair".to_owned()
+            ]),
+            Some(ExitCode::SUCCESS)
+        );
+        assert_eq!(
+            maybe_run_swarm(&vec![
+                "claspc".to_owned(),
+                "swarm".to_owned(),
+                "lease".to_owned(),
+                root_text.clone(),
+                "repair".to_owned()
+            ]),
+            Some(ExitCode::SUCCESS)
+        );
+
+        let (policy_code, policy_json_text) = run_swarm_json_command(&vec![
+            "policy".to_owned(),
+            "set".to_owned(),
+            root_text.clone(),
+            "repair".to_owned(),
+            "trunk".to_owned(),
+            "--require-approval".to_owned(),
+            DESTRUCTIVE_ACTION_APPROVAL.to_owned(),
+            "--allow-process".to_owned(),
+            "rm".to_owned(),
+            "--allow-process".to_owned(),
+            "bash".to_owned(),
+            "--allow-workspace".to_owned(),
+            allowed_text.clone(),
+        ])
+        .expect("set destructive approval policy");
+        assert_eq!(policy_code, 0);
+        let policy_json: Value = serde_json::from_str(&policy_json_text).expect("decode policy json");
+        assert_eq!(
+            policy_json.pointer("/capabilities/approvals"),
+            Some(&json!([DESTRUCTIVE_ACTION_APPROVAL]))
+        );
+        assert_eq!(
+            policy_json.pointer("/capabilities/filesystemRoots"),
+            Some(&json!([canonical_allowed_text.clone()]))
+        );
+
+        let denied_args = vec![
+            "claspc".to_owned(),
+            "swarm".to_owned(),
+            "verifier".to_owned(),
+            "run".to_owned(),
+            root_text.clone(),
+            "repair".to_owned(),
+            "destructive-smoke".to_owned(),
+            "--cwd".to_owned(),
+            allowed_text.clone(),
+            "--".to_owned(),
+            "rm".to_owned(),
+            "-f".to_owned(),
+            "destructive-target.txt".to_owned(),
+        ];
+        assert_eq!(maybe_run_swarm(&denied_args), Some(ExitCode::from(1)));
+        assert!(target.exists(), "destructive target should survive until approval");
+
+        let approve_args = vec![
+            "claspc".to_owned(),
+            "swarm".to_owned(),
+            "approve".to_owned(),
+            root_text.clone(),
+            "repair".to_owned(),
+            DESTRUCTIVE_ACTION_APPROVAL.to_owned(),
+        ];
+        assert_eq!(maybe_run_swarm(&approve_args), Some(ExitCode::SUCCESS));
+
+        let outside_args = vec![
+            "claspc".to_owned(),
+            "swarm".to_owned(),
+            "verifier".to_owned(),
+            "run".to_owned(),
+            root_text.clone(),
+            "repair".to_owned(),
+            "destructive-outside-smoke".to_owned(),
+            "--cwd".to_owned(),
+            allowed_text.clone(),
+            "--".to_owned(),
+            "rm".to_owned(),
+            "-f".to_owned(),
+            outside_target.to_string_lossy().to_string(),
+        ];
+        assert_eq!(maybe_run_swarm(&outside_args), Some(ExitCode::from(1)));
+        assert!(outside_target.exists(), "outside destructive target should survive policy denial");
+
+        let shell_outside_args = vec![
+            "claspc".to_owned(),
+            "swarm".to_owned(),
+            "verifier".to_owned(),
+            "run".to_owned(),
+            root_text.clone(),
+            "repair".to_owned(),
+            "destructive-shell-outside-smoke".to_owned(),
+            "--cwd".to_owned(),
+            allowed_text.clone(),
+            "--".to_owned(),
+            "bash".to_owned(),
+            "-lc".to_owned(),
+            format!("rm -f {}", outside_target.display()),
+        ];
+        assert_eq!(maybe_run_swarm(&shell_outside_args), Some(ExitCode::from(1)));
+        assert!(outside_target.exists(), "outside destructive shell target should survive policy denial");
+
+        let shell_dynamic_args = vec![
+            "claspc".to_owned(),
+            "swarm".to_owned(),
+            "verifier".to_owned(),
+            "run".to_owned(),
+            root_text.clone(),
+            "repair".to_owned(),
+            "destructive-shell-dynamic-smoke".to_owned(),
+            "--cwd".to_owned(),
+            allowed_text.clone(),
+            "--".to_owned(),
+            "bash".to_owned(),
+            "-lc".to_owned(),
+            "rm -f \"$PWD/../outside-workspace/destructive-target.txt\"".to_owned(),
+        ];
+        assert_eq!(maybe_run_swarm(&shell_dynamic_args), Some(ExitCode::from(1)));
+        assert!(outside_target.exists(), "dynamic destructive shell target should fail closed before spawn");
+
+        let allowed_args = vec![
+            "claspc".to_owned(),
+            "swarm".to_owned(),
+            "verifier".to_owned(),
+            "run".to_owned(),
+            root_text.clone(),
+            "repair".to_owned(),
+            "destructive-smoke".to_owned(),
+            "--cwd".to_owned(),
+            allowed_text,
+            "--".to_owned(),
+            "rm".to_owned(),
+            "-f".to_owned(),
+            "destructive-target.txt".to_owned(),
+        ];
+        assert_eq!(maybe_run_swarm(&allowed_args), Some(ExitCode::SUCCESS));
+        assert!(!target.exists(), "approved destructive command should run");
+
+        let connection = Connection::open(runtime_paths(&root).db_path).expect("open sqlite db");
+        let run_count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM swarm_runs WHERE task_id = 'repair'", [], |row| row.get(0))
+            .expect("count runs");
+        assert_eq!(run_count, 1);
+        let denied_events: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM swarm_events WHERE task_id = 'repair' AND kind = 'destructive_action_approval_required'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count destructive approval events");
+        assert_eq!(denied_events, 1);
+        let filesystem_denied_events: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM swarm_events WHERE task_id = 'repair' AND kind = 'filesystem_permission_denied'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count filesystem denied events");
+        assert_eq!(filesystem_denied_events, 3);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn timed_verifier_kills_pipe_holding_descendant_and_finishes_run() {
         let root = unique_root("timeout-descendant");
         let root_text = root.to_string_lossy().to_string();
@@ -7268,6 +9307,8 @@ mod tests {
             "pipe-timeout".to_owned(),
             "--timeout-ms".to_owned(),
             "200".to_owned(),
+            "--memory-mb".to_owned(),
+            "512".to_owned(),
             "--".to_owned(),
             "bash".to_owned(),
             "-lc".to_owned(),

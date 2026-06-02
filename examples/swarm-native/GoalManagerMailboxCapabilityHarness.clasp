@@ -1,0 +1,39 @@
+module Main
+
+import GoalManagerCapabilityMailbox
+
+capabilityDetails : [Str]
+capabilityDetails =
+  appendCapabilityMailboxStatusDetails
+    []
+    [
+      CapabilityMailboxStatus {
+        name = "local_verifier_gate",
+        status = "fail",
+        evidence = ["typed gate evidence reached mailbox"],
+        blocking_gaps = ["typed gate gap reached mailbox"],
+        required_closure = ["typed gate closure reached mailbox"]
+      },
+      CapabilityMailboxStatus {
+        name = "focused_verification_plan",
+        status = "partial",
+        evidence = [
+          "focused-verification-plan-safe-direct:false",
+          "focused-verification-launch-mode=managed-required",
+          "focused-verification-launch-policy-mode:managed-required",
+          "focused-verification-launch-policy-recommendation:focused-verification-launch:managed-required"
+        ],
+        blocking_gaps = ["focused verification plan requires managed launch"],
+        required_closure = ["run through scripts/run-managed-job.sh before verifier launch"]
+      },
+      CapabilityMailboxStatus {
+        name = "focused_verification_launch_policy",
+        status = "partial",
+        evidence = ["focused-verification-launch-policy-mode:managed-required"],
+        blocking_gaps = ["focused verification launch policy requires managed launch"],
+        required_closure = ["run through scripts/run-managed-job.sh before focused verifier launch"]
+      }
+    ]
+
+main : Str
+main = textJoin "\n" capabilityDetails

@@ -1,0 +1,153 @@
+module Compiler.SemanticArtifacts.Uses
+
+import Compiler.Ast
+import Compiler.Checker
+import Compiler.Checker.Types
+import Compiler.Json
+import Compiler.Project
+import Compiler.SemanticArtifacts.Base
+import Compiler.SemanticArtifacts.Names
+
+semanticDeclUseTargetNodeId : HostedModuleAst -> Str -> Str
+semanticDeclUseTargetNodeId modl target =
+  if semanticContainsText (semanticDeclNames modl) target then
+    textConcat ["decl:", target]
+  else if semanticContainsText (semanticForeignNames modl) target then
+    textConcat ["foreign:", target]
+  else if semanticContainsText (semanticRecordNames modl) target then
+    textConcat ["schema:", target]
+  else
+    ""
+
+semanticAppendDeclUseTarget : HostedModuleAst -> [Str] -> Str -> [Str]
+semanticAppendDeclUseTarget modl targetIds target = {
+  let targetId = semanticDeclUseTargetNodeId modl target;
+  if targetId == "" then targetIds else semanticAppendUniqueText targetIds targetId
+}
+
+semanticExprListUseTargetNodeIds : HostedModuleAst -> [HostedExprAst] -> [Str]
+semanticExprListUseTargetNodeIds modl values = {
+  let mut targetIds = emptyRenderedTexts;
+  for value in values {
+    targetIds = append targetIds (semanticExprUseTargetNodeIds modl value);
+    targetIds
+  };
+  targetIds
+}
+
+semanticRecordFieldUseTargetNodeIds : HostedModuleAst -> HostedRecordFieldExprAst -> [Str]
+semanticRecordFieldUseTargetNodeIds modl field =
+  semanticExprUseTargetNodeIds modl (recordExprFieldValue field)
+
+semanticRecordFieldsUseTargetNodeIds : HostedModuleAst -> [HostedRecordFieldExprAst] -> [Str]
+semanticRecordFieldsUseTargetNodeIds modl fields = {
+  let mut targetIds = emptyRenderedTexts;
+  for field in fields {
+    targetIds = append targetIds (semanticRecordFieldUseTargetNodeIds modl field);
+    targetIds
+  };
+  targetIds
+}
+
+semanticMatchBranchUseTargetNodeIds : HostedModuleAst -> HostedMatchBranchAst -> [Str]
+semanticMatchBranchUseTargetNodeIds modl branch =
+  semanticExprUseTargetNodeIds modl (branchBodyExpr branch)
+
+semanticMatchBranchesUseTargetNodeIds : HostedModuleAst -> [HostedMatchBranchAst] -> [Str]
+semanticMatchBranchesUseTargetNodeIds modl branches = {
+  let mut targetIds = emptyRenderedTexts;
+  for branch in branches {
+    targetIds = append targetIds (semanticMatchBranchUseTargetNodeIds modl branch);
+    targetIds
+  };
+  targetIds
+}
+
+semanticExprUseTargetNodeIds : HostedModuleAst -> HostedExprAst -> [Str]
+semanticExprUseTargetNodeIds modl expr = match expr {
+  HostedName name ->
+    semanticAppendDeclUseTarget modl emptyRenderedTexts name,
+  HostedString value ->
+    emptyRenderedTexts,
+  HostedInt value ->
+    emptyRenderedTexts,
+  HostedBool value ->
+    emptyRenderedTexts,
+  HostedList values ->
+    semanticExprListUseTargetNodeIds modl values,
+  HostedCall callee args -> {
+    let mut targetIds = semanticAppendDeclUseTarget modl emptyRenderedTexts callee;
+    targetIds = append targetIds (semanticExprListUseTargetNodeIds modl args);
+    targetIds
+  },
+  HostedConstructor constructorName args -> {
+    let mut targetIds = semanticAppendDeclUseTarget modl emptyRenderedTexts constructorName;
+    targetIds = append targetIds (semanticExprListUseTargetNodeIds modl args);
+    targetIds
+  },
+  HostedMatch subject branches -> {
+    let mut targetIds = semanticExprUseTargetNodeIds modl subject;
+    targetIds = append targetIds (semanticMatchBranchesUseTargetNodeIds modl branches);
+    targetIds
+  },
+  HostedRecord recordName fields -> {
+    let mut targetIds = semanticAppendDeclUseTarget modl emptyRenderedTexts recordName;
+    targetIds = append targetIds (semanticRecordFieldsUseTargetNodeIds modl fields);
+    targetIds
+  },
+  HostedFieldAccess subject fieldName ->
+    semanticExprUseTargetNodeIds modl subject,
+  HostedLet binder value body ->
+    append (semanticExprUseTargetNodeIds modl value) (semanticExprUseTargetNodeIds modl body),
+  HostedMutableLet binder value body ->
+    append (semanticExprUseTargetNodeIds modl value) (semanticExprUseTargetNodeIds modl body),
+  HostedAssign binder value body ->
+    append (semanticExprUseTargetNodeIds modl value) (semanticExprUseTargetNodeIds modl body),
+  HostedFor binder iterable loopBody body -> {
+    let mut targetIds = semanticExprUseTargetNodeIds modl iterable;
+    targetIds = append targetIds (semanticExprUseTargetNodeIds modl loopBody);
+    targetIds = append targetIds (semanticExprUseTargetNodeIds modl body);
+    targetIds
+  },
+  HostedReturn value ->
+    semanticExprUseTargetNodeIds modl value,
+  HostedIf condition thenBranch elseBranch -> {
+    let mut targetIds = semanticExprUseTargetNodeIds modl condition;
+    targetIds = append targetIds (semanticExprUseTargetNodeIds modl thenBranch);
+    targetIds = append targetIds (semanticExprUseTargetNodeIds modl elseBranch);
+    targetIds
+  },
+  HostedEqual left right ->
+    append (semanticExprUseTargetNodeIds modl left) (semanticExprUseTargetNodeIds modl right),
+  HostedNotEqual left right ->
+    append (semanticExprUseTargetNodeIds modl left) (semanticExprUseTargetNodeIds modl right),
+  HostedLessThan left right ->
+    append (semanticExprUseTargetNodeIds modl left) (semanticExprUseTargetNodeIds modl right),
+  HostedLessThanOrEqual left right ->
+    append (semanticExprUseTargetNodeIds modl left) (semanticExprUseTargetNodeIds modl right),
+  HostedGreaterThan left right ->
+    append (semanticExprUseTargetNodeIds modl left) (semanticExprUseTargetNodeIds modl right),
+  HostedGreaterThanOrEqual left right ->
+    append (semanticExprUseTargetNodeIds modl left) (semanticExprUseTargetNodeIds modl right)
+}
+
+semanticDeclUseTargetNodeIds : HostedModuleAst -> HostedDeclAst -> [Str]
+semanticDeclUseTargetNodeIds modl decl =
+  semanticExprUseTargetNodeIds modl (declBody decl)
+
+semanticDeclUseEdges : HostedModuleAst -> [Str]
+semanticDeclUseEdges modl = {
+  let mut edges = emptyRenderedTexts;
+  for decl in moduleDeclarations modl {
+    for targetId in semanticDeclUseTargetNodeIds modl decl {
+      if targetId != semanticDeclNodeId decl then {
+        edges = appendRenderedText edges (semanticJsonEdge (semanticDeclNodeId decl) targetId "uses");
+        edges
+      } else {
+        edges
+      }
+    };
+    edges
+  };
+  edges
+}

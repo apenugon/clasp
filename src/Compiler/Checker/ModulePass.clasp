@@ -1,0 +1,74 @@
+module Compiler.Checker.ModulePass
+
+import Compiler.Ast
+import Compiler.Checker.DeclFunction
+import Compiler.Checker.DeclInfer
+import Compiler.Checker.Types
+
+inferModulePassResult : [TypeBinding] -> Bool -> InferModulePassResult
+inferModulePassResult env progress = InferModulePassResult env progress
+
+inferModulePassEnv : InferModulePassResult -> [TypeBinding]
+inferModulePassEnv result = match result {
+  InferModulePassResult env progress ->
+    env
+}
+
+inferModulePassProgress : InferModulePassResult -> Bool
+inferModulePassProgress result = match result {
+  InferModulePassResult env progress ->
+    progress
+}
+
+runInferModulePass : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [HostedDeclAst] -> InferModulePassResult
+runInferModulePass typeDecls recordDecls env decls = {
+  let mut nextEnv = env;
+  let mut progress = false;
+  for decl in decls {
+    nextEnv = if declIsMetadataDeclaration decl then {
+      nextEnv
+    } else if hasAnnotationAst (declAnnotation decl) then {
+      nextEnv
+    } else {
+      match inferDecl typeDecls recordDecls nextEnv decl {
+        InferredDecl binding ->
+          match lookupTypeBinding nextEnv (declName decl) {
+            FoundType existingType ->
+              nextEnv,
+            MissingType missing ->
+              {
+                progress = true;
+                appendTypeBinding nextEnv binding
+              }
+          },
+        InferDeclError message ->
+          nextEnv
+      }
+    };
+    nextEnv
+  };
+  inferModulePassResult nextEnv progress
+}
+
+resolveInferModuleBindings : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [HostedDeclAst] -> [TypeBinding]
+resolveInferModuleBindings typeDecls recordDecls env decls = {
+  let pass = runInferModulePass typeDecls recordDecls env decls;
+  if inferModulePassProgress pass then resolveInferModuleBindings typeDecls recordDecls (inferModulePassEnv pass) decls else inferModulePassEnv pass
+}
+
+findInferModuleFailure : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [HostedDeclAst] -> Str
+findInferModuleFailure typeDecls recordDecls env decls = {
+  for decl in decls {
+    if declIsMetadataDeclaration decl then {
+      ""
+    } else {
+      match inferDecl typeDecls recordDecls env decl {
+        InferredDecl binding ->
+          "",
+        InferDeclError message ->
+          return textConcat ["In `", declName decl, "`: ", message]
+      }
+    }
+  };
+  ""
+}

@@ -28,7 +28,7 @@ const NATIVE_EXPORT_HOST_VERSION: &str = "export-host-v2";
 const DEFAULT_SHARED_CACHE_ROOT: &str = "/tmp/clasp-nix-cache";
 const DEFAULT_SHORT_HOST_ROOT: &str = "/tmp/clasp-native-export-host";
 const NATIVE_EXPORT_HOST_STACK_BYTES: usize = 64 * 1024 * 1024;
-const DEFAULT_NATIVE_EXPORT_HOST_IDLE_TIMEOUT_SECS: u64 = 30;
+const DEFAULT_NATIVE_EXPORT_HOST_IDLE_TIMEOUT_SECS: u64 = 5;
 const NATIVE_IMAGE_READ_RETRY_ATTEMPTS: usize = 10;
 const NATIVE_IMAGE_READ_RETRY_DELAY_MS: u64 = 25;
 
@@ -446,12 +446,23 @@ fn stable_fingerprint_text(text: &str) -> String {
     stable_fingerprint_bytes(text.as_bytes())
 }
 
+fn native_export_host_scope_key(image_path_text: &str) -> String {
+    if compiler_native_image_is_stateful(image_path_text)
+        && env::var("CLASP_NATIVE_EXPORT_HOST_COMPILER_CONTENT_SCOPE")
+            .map(|value| value != "0" && value != "false")
+            .unwrap_or(true)
+    {
+        return "compiler-content".to_owned();
+    }
+    stable_fingerprint_text(&native_export_host_dir().display().to_string())
+}
+
 fn native_export_host_socket_path(image_path_text: &str) -> Option<PathBuf> {
     let current_exe = env::current_exe().ok()?;
     let current_exe_bytes = fs::read(current_exe).ok()?;
     let image_bytes = fs::read(image_path_text).ok()?;
     let host_key = stable_fingerprint_bytes(&[current_exe_bytes, image_bytes].concat());
-    let cache_root_key = stable_fingerprint_text(&native_export_host_dir().display().to_string());
+    let cache_root_key = native_export_host_scope_key(image_path_text);
     let file_name = format!("{host_key}.sock");
     Some(short_native_export_host_dir(&cache_root_key).join(file_name))
 }
@@ -628,6 +639,7 @@ fn compiler_native_export_can_use_host(export_name: &str) -> bool {
             | "nativeImageProjectDeclNamesText"
             | "nativeImageProjectDeclModulePlanText"
             | "nativeImageProjectModuleDeclsText"
+            | "nativeImageProjectModuleNamedDeclsText"
             | "nativeImageProjectNamedDeclsText"
             | "checkCoreProjectText"
     )
@@ -2296,6 +2308,82 @@ mod tests {
         std::env::remove_var("XDG_CACHE_HOME");
         let _ = fs::remove_dir_all(cache_root);
         let _ = fs::remove_dir_all(image_root);
+    }
+
+    #[test]
+    fn compiler_native_export_host_socket_path_is_content_scoped_across_cache_roots() {
+        let _env_lock = super::TEST_ENV_LOCK.lock().expect("lock test env");
+        std::env::remove_var("CLASP_NATIVE_EXPORT_HOST_COMPILER_CONTENT_SCOPE");
+        let root = unique_test_root("compiler-content-host");
+        let cache_root_a = root.join("cache-a");
+        let cache_root_b = root.join("cache-b");
+        let image_root_a = root.join("image-a");
+        let image_root_b = root.join("image-b");
+        fs::create_dir_all(&cache_root_a).expect("create cache root a");
+        fs::create_dir_all(&cache_root_b).expect("create cache root b");
+        fs::create_dir_all(&image_root_a).expect("create image root a");
+        fs::create_dir_all(&image_root_b).expect("create image root b");
+
+        let image_path_a = image_root_a.join("embedded.compiler.native.image.json");
+        let image_path_b = image_root_b.join("embedded.compiler.native.image.json");
+        fs::write(&image_path_a, "{\"module\":\"Compiler\"}").expect("write image a");
+        fs::write(&image_path_b, "{\"module\":\"Compiler\"}").expect("write image b");
+
+        std::env::set_var("XDG_CACHE_HOME", &cache_root_a);
+        let socket_path_a =
+            super::native_export_host_socket_path(image_path_a.to_str().expect("utf8 image path a"))
+                .expect("socket path a");
+        std::env::set_var("XDG_CACHE_HOME", &cache_root_b);
+        let socket_path_b =
+            super::native_export_host_socket_path(image_path_b.to_str().expect("utf8 image path b"))
+                .expect("socket path b");
+
+        assert_eq!(socket_path_a, socket_path_b);
+        assert!(socket_path_a
+            .to_string_lossy()
+            .contains("/compiler-content/"));
+
+        std::env::remove_var("XDG_CACHE_HOME");
+        std::env::remove_var("CLASP_NATIVE_EXPORT_HOST_COMPILER_CONTENT_SCOPE");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn compiler_native_export_host_socket_path_can_use_cache_scope_when_requested() {
+        let _env_lock = super::TEST_ENV_LOCK.lock().expect("lock test env");
+        let root = unique_test_root("compiler-cache-scoped-host");
+        let cache_root_a = root.join("cache-a");
+        let cache_root_b = root.join("cache-b");
+        let image_root_a = root.join("image-a");
+        let image_root_b = root.join("image-b");
+        fs::create_dir_all(&cache_root_a).expect("create cache root a");
+        fs::create_dir_all(&cache_root_b).expect("create cache root b");
+        fs::create_dir_all(&image_root_a).expect("create image root a");
+        fs::create_dir_all(&image_root_b).expect("create image root b");
+
+        let image_path_a = image_root_a.join("embedded.compiler.native.image.json");
+        let image_path_b = image_root_b.join("embedded.compiler.native.image.json");
+        fs::write(&image_path_a, "{\"module\":\"Compiler\"}").expect("write image a");
+        fs::write(&image_path_b, "{\"module\":\"Compiler\"}").expect("write image b");
+
+        std::env::set_var("CLASP_NATIVE_EXPORT_HOST_COMPILER_CONTENT_SCOPE", "0");
+        std::env::set_var("XDG_CACHE_HOME", &cache_root_a);
+        let socket_path_a =
+            super::native_export_host_socket_path(image_path_a.to_str().expect("utf8 image path a"))
+                .expect("socket path a");
+        std::env::set_var("XDG_CACHE_HOME", &cache_root_b);
+        let socket_path_b =
+            super::native_export_host_socket_path(image_path_b.to_str().expect("utf8 image path b"))
+                .expect("socket path b");
+
+        assert_ne!(socket_path_a, socket_path_b);
+        assert!(!socket_path_a
+            .to_string_lossy()
+            .contains("/compiler-content/"));
+
+        std::env::remove_var("XDG_CACHE_HOME");
+        std::env::remove_var("CLASP_NATIVE_EXPORT_HOST_COMPILER_CONTENT_SCOPE");
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

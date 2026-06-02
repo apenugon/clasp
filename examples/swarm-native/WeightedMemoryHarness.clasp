@@ -1,0 +1,390 @@
+module Main
+
+record SwarmMemory = {
+  actor : Str,
+  createdAtMs : Int,
+  memoryId : Int,
+  objectiveId : Str,
+  taskId : Str,
+  key : Str,
+  value : Str,
+  updatedAtMs : Int
+}
+
+record SwarmWeightedEmbeddingDimension = {
+  name : Str,
+  weight : Int
+}
+
+record SwarmWeightedEmbedding = {
+  model : Str,
+  scale : Int,
+  dimensions : [SwarmWeightedEmbeddingDimension]
+}
+
+record SwarmWeightedEmbeddedMemoryValue = {
+  text : Str,
+  embedding : SwarmWeightedEmbedding
+}
+
+record SwarmWeightedEmbeddedMemory = {
+  memory : SwarmMemory,
+  text : Str,
+  embedding : SwarmWeightedEmbedding
+}
+
+record SwarmWeightedEmbeddedMemorySearchResult = {
+  memory : SwarmMemory,
+  text : Str,
+  score : Int,
+  matchedDimensions : [Str],
+  model : Str,
+  scale : Int
+}
+
+record WeightedMemoryHarnessReport = {
+  weightedMemoryCount : Int,
+  weightedDecodedCount : Int,
+  weightedSkippedInvalidCount : Int,
+  weightedEncodedHasDimensions : Bool,
+  weightedSearchTexts : [Str],
+  weightedSearchScores : [Int],
+  weightedTopMatchedDimensions : [Str],
+  weightedTopModel : Str,
+  weightedTopScale : Int
+}
+
+weightedEmbeddedMemoryResultError : Str -> Result SwarmWeightedEmbeddedMemory
+weightedEmbeddedMemoryResultError message = Err message
+
+swarmMemory : Int -> Str -> SwarmMemory
+swarmMemory memoryId value =
+  SwarmMemory {
+    actor = "weighted-agent",
+    createdAtMs = memoryId,
+    memoryId = memoryId,
+    objectiveId = "weighted-objective",
+    taskId = "",
+    key = "weighted-semantic-embedding",
+    value = value,
+    updatedAtMs = memoryId
+  }
+
+weightedEmbeddedMemoryFromMemory : SwarmMemory -> Result SwarmWeightedEmbeddedMemory
+weightedEmbeddedMemoryFromMemory memory =
+  match tryDecode SwarmWeightedEmbeddedMemoryValue memory.value {
+    Ok value ->
+      Ok (SwarmWeightedEmbeddedMemory {
+        memory = memory,
+        text = value.text,
+        embedding = value.embedding
+      }),
+    Err message ->
+      weightedEmbeddedMemoryResultError message
+  }
+
+weightedEmbeddedMemoriesFromMemory : [SwarmMemory] -> [SwarmWeightedEmbeddedMemory]
+weightedEmbeddedMemoriesFromMemory memories = {
+  let mut decoded = [];
+  for memory in memories {
+    match weightedEmbeddedMemoryFromMemory memory {
+      Ok embedded -> {
+        decoded = append decoded [embedded];
+        decoded
+      },
+      Err message ->
+        decoded
+    }
+  };
+  decoded
+}
+
+swarmWeightedEmbeddingDimension : Str -> Int -> SwarmWeightedEmbeddingDimension
+swarmWeightedEmbeddingDimension name weight =
+  SwarmWeightedEmbeddingDimension {
+    name = name,
+    weight = weight
+  }
+
+swarmWeightedEmbedding : Str -> Int -> [SwarmWeightedEmbeddingDimension] -> SwarmWeightedEmbedding
+swarmWeightedEmbedding model scale dimensions =
+  SwarmWeightedEmbedding {
+    model = model,
+    scale = scale,
+    dimensions = dimensions
+  }
+
+swarmWeightedEmbeddedMemoryValue : Str -> SwarmWeightedEmbedding -> SwarmWeightedEmbeddedMemoryValue
+swarmWeightedEmbeddedMemoryValue text embedding =
+  SwarmWeightedEmbeddedMemoryValue {
+    text = text,
+    embedding = embedding
+  }
+
+swarmWeightedEmbeddedMemoryText : Str -> SwarmWeightedEmbedding -> Str
+swarmWeightedEmbeddedMemoryText text embedding =
+  encode (swarmWeightedEmbeddedMemoryValue text embedding)
+
+swarmWeightedDimensionOverlapScore : SwarmWeightedEmbeddingDimension -> SwarmWeightedEmbeddingDimension -> Int
+swarmWeightedDimensionOverlapScore query candidate =
+  if query.name == candidate.name then
+    if query.weight < candidate.weight then query.weight else candidate.weight
+  else
+    0
+
+swarmWeightedDimensionBestScore : SwarmWeightedEmbeddingDimension -> [SwarmWeightedEmbeddingDimension] -> Int
+swarmWeightedDimensionBestScore query candidates = {
+  let mut best = 0;
+  for candidate in candidates {
+    let score = swarmWeightedDimensionOverlapScore query candidate;
+    if score > best then {
+      best = score;
+      best
+    } else
+      best
+  };
+  best
+}
+
+swarmWeightedEmbeddingMatchedDimensions : SwarmWeightedEmbedding -> SwarmWeightedEmbedding -> [Str]
+swarmWeightedEmbeddingMatchedDimensions query candidate = {
+  let mut matches = [];
+  if query.model == candidate.model then
+    if query.scale == candidate.scale then {
+      for dimension in query.dimensions {
+        if swarmWeightedDimensionBestScore dimension candidate.dimensions > 0 then {
+          matches = append matches [dimension.name];
+          matches
+        } else
+          matches
+      };
+      matches
+    } else
+      matches
+  else
+    matches
+}
+
+swarmWeightedEmbeddingScore : SwarmWeightedEmbedding -> SwarmWeightedEmbedding -> Int
+swarmWeightedEmbeddingScore query candidate = {
+  let mut score = 0;
+  if query.model == candidate.model then
+    if query.scale == candidate.scale then {
+      for dimension in query.dimensions {
+        score = intAdd score (swarmWeightedDimensionBestScore dimension candidate.dimensions);
+        score
+      };
+      score
+    } else
+      0
+  else
+    0
+}
+
+swarmWeightedEmbeddedMemorySearchResult : SwarmWeightedEmbedding -> SwarmWeightedEmbeddedMemory -> SwarmWeightedEmbeddedMemorySearchResult
+swarmWeightedEmbeddedMemorySearchResult query embedded =
+  SwarmWeightedEmbeddedMemorySearchResult {
+    memory = embedded.memory,
+    text = embedded.text,
+    score = swarmWeightedEmbeddingScore query embedded.embedding,
+    matchedDimensions = swarmWeightedEmbeddingMatchedDimensions query embedded.embedding,
+    model = embedded.embedding.model,
+    scale = embedded.embedding.scale
+  }
+
+swarmWeightedEmbeddedMemorySearchInsert : [SwarmWeightedEmbeddedMemorySearchResult] -> SwarmWeightedEmbeddedMemorySearchResult -> [SwarmWeightedEmbeddedMemorySearchResult]
+swarmWeightedEmbeddedMemorySearchInsert ranked candidate = {
+  let mut next = [];
+  let mut inserted = false;
+  for existing in ranked {
+    if inserted then {
+      next = append next [existing];
+      next
+    } else if candidate.score > existing.score then {
+      next = append next [candidate, existing];
+      inserted = true;
+      next
+    } else {
+      next = append next [existing];
+      next
+    }
+  };
+  if inserted then
+    next
+  else
+    append next [candidate]
+}
+
+swarmWeightedEmbeddedMemorySearchLimit : Int -> [SwarmWeightedEmbeddedMemorySearchResult] -> [SwarmWeightedEmbeddedMemorySearchResult]
+swarmWeightedEmbeddedMemorySearchLimit limit ranked = {
+  let mut kept = [];
+  for item in ranked {
+    if length kept < limit then {
+      kept = append kept [item];
+      kept
+    } else
+      kept
+  };
+  kept
+}
+
+swarmWeightedEmbeddedMemorySearch : SwarmWeightedEmbedding -> [SwarmWeightedEmbeddedMemory] -> Int -> [SwarmWeightedEmbeddedMemorySearchResult]
+swarmWeightedEmbeddedMemorySearch query candidates limit = {
+  let mut ranked = [];
+  for candidate in candidates {
+    let result = swarmWeightedEmbeddedMemorySearchResult query candidate;
+    if result.score > 0 then {
+      ranked = swarmWeightedEmbeddedMemorySearchLimit limit (swarmWeightedEmbeddedMemorySearchInsert ranked result);
+      ranked
+    } else
+      ranked
+  };
+  ranked
+}
+
+swarmWeightedEmbeddedMemorySearchFromMemory : SwarmWeightedEmbedding -> [SwarmMemory] -> Int -> [SwarmWeightedEmbeddedMemorySearchResult]
+swarmWeightedEmbeddedMemorySearchFromMemory query memories limit =
+  swarmWeightedEmbeddedMemorySearch query (weightedEmbeddedMemoriesFromMemory memories) limit
+
+weightedEmbeddedSearchText : SwarmWeightedEmbeddedMemorySearchResult -> Str
+weightedEmbeddedSearchText item = item.text
+
+weightedEmbeddedSearchScore : SwarmWeightedEmbeddedMemorySearchResult -> Int
+weightedEmbeddedSearchScore item = item.score
+
+firstWeightedSearchMatchedDimensions : [SwarmWeightedEmbeddedMemorySearchResult] -> [Str]
+firstWeightedSearchMatchedDimensions values = {
+  let mut matched = [];
+  let mut found = false;
+  for value in values {
+    if found then
+      found
+    else {
+      matched = value.matchedDimensions;
+      found = true;
+      found
+    }
+  };
+  matched
+}
+
+firstWeightedSearchModel : [SwarmWeightedEmbeddedMemorySearchResult] -> Str
+firstWeightedSearchModel values = {
+  let mut model = "";
+  let mut found = false;
+  for value in values {
+    if found then
+      found
+    else {
+      model = value.model;
+      found = true;
+      found
+    }
+  };
+  model
+}
+
+firstWeightedSearchScale : [SwarmWeightedEmbeddedMemorySearchResult] -> Int
+firstWeightedSearchScale values = {
+  let mut scale = 0;
+  let mut found = false;
+  for value in values {
+    if found then
+      found
+    else {
+      scale = value.scale;
+      found = true;
+      found
+    }
+  };
+  scale
+}
+
+weightedQueryEmbedding : SwarmWeightedEmbedding
+weightedQueryEmbedding =
+  swarmWeightedEmbedding
+    "fixed-point-semantic-v1"
+    1000
+    [
+      swarmWeightedEmbeddingDimension "compiler" 900,
+      swarmWeightedEmbeddingDimension "runtime" 700,
+      swarmWeightedEmbeddingDimension "verification" 500
+    ]
+
+weightedCompilerMemoryText : Str
+weightedCompilerMemoryText =
+  swarmWeightedEmbeddedMemoryText
+    "compiler runtime verifier dense lesson"
+    (swarmWeightedEmbedding
+      "fixed-point-semantic-v1"
+      1000
+      [
+        swarmWeightedEmbeddingDimension "compiler" 800,
+        swarmWeightedEmbeddingDimension "runtime" 700,
+        swarmWeightedEmbeddingDimension "verification" 100,
+        swarmWeightedEmbeddingDimension "swarm" 100
+      ])
+
+weightedRuntimeMemoryText : Str
+weightedRuntimeMemoryText =
+  swarmWeightedEmbeddedMemoryText
+    "runtime guard weighted lesson"
+    (swarmWeightedEmbedding
+      "fixed-point-semantic-v1"
+      1000
+      [
+        swarmWeightedEmbeddingDimension "runtime" 600,
+        swarmWeightedEmbeddingDimension "resource-guard" 500
+      ])
+
+weightedModelMismatchMemoryText : Str
+weightedModelMismatchMemoryText =
+  swarmWeightedEmbeddedMemoryText
+    "same dense weights from incompatible model"
+    (swarmWeightedEmbedding
+      "other-weighted-model"
+      1000
+      [
+        swarmWeightedEmbeddingDimension "compiler" 900,
+        swarmWeightedEmbeddingDimension "runtime" 700,
+        swarmWeightedEmbeddingDimension "verification" 500
+      ])
+
+weightedScaleMismatchMemoryText : Str
+weightedScaleMismatchMemoryText =
+  swarmWeightedEmbeddedMemoryText
+    "same dense weights from incompatible scale"
+    (swarmWeightedEmbedding
+      "fixed-point-semantic-v1"
+      100
+      [
+        swarmWeightedEmbeddingDimension "compiler" 90,
+        swarmWeightedEmbeddingDimension "runtime" 70,
+        swarmWeightedEmbeddingDimension "verification" 50
+      ])
+
+weightedMemories : [SwarmMemory]
+weightedMemories = [
+  swarmMemory 1 weightedCompilerMemoryText,
+  swarmMemory 2 weightedRuntimeMemoryText,
+  swarmMemory 3 weightedModelMismatchMemoryText,
+  swarmMemory 4 weightedScaleMismatchMemoryText,
+  swarmMemory 5 "not-json"
+]
+
+main : Str
+main = {
+  let decodedValues = weightedEmbeddedMemoriesFromMemory weightedMemories;
+  let searchValues = swarmWeightedEmbeddedMemorySearchFromMemory weightedQueryEmbedding weightedMemories 10;
+  encode (WeightedMemoryHarnessReport {
+    weightedMemoryCount = length weightedMemories,
+    weightedDecodedCount = length decodedValues,
+    weightedSkippedInvalidCount = intSubtract (length weightedMemories) (length decodedValues),
+    weightedEncodedHasDimensions = length (textSplit weightedCompilerMemoryText "\"dimensions\"") > 1,
+    weightedSearchTexts = map weightedEmbeddedSearchText searchValues,
+    weightedSearchScores = map weightedEmbeddedSearchScore searchValues,
+    weightedTopMatchedDimensions = firstWeightedSearchMatchedDimensions searchValues,
+    weightedTopModel = firstWeightedSearchModel searchValues,
+    weightedTopScale = firstWeightedSearchScale searchValues
+  })
+}

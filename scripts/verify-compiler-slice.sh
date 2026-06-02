@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ulimit -c 0 >/dev/null 2>&1 || true
+
 project_root="${CLASP_PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 timeout_secs="${CLASP_COMPILER_SLICE_TIMEOUT_SECS:-60}"
 check_only=0
@@ -166,6 +168,7 @@ switch (slice) {
     assert(output.queueCount === 1, `unexpected queueCount ${output.queueCount}`);
     assert(output.blockerCount === 0, `unexpected blockerCount ${output.blockerCount}`);
     assert(output.boxValue === "running", `unexpected boxValue ${output.boxValue}`);
+    assert(output.loopSummary === "alpha!,beta!", `unexpected loopSummary ${output.loopSummary}`);
     assert(output.summary === "repair:running:running:unblocked", `unexpected summary ${output.summary}`);
     break;
   default:

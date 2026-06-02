@@ -931,6 +931,16 @@ printf '%s\n' "\$*" >>"$tmp_bin/nix.log"
 EOF
 chmod +x "$tmp_bin/nix"
 
+: >"$tmp_bin/nix.log"
+PATH="$tmp_bin:$PATH" CLASP_ALLOW_BOOTSTRAP_RECOVERY=true bash "$project_root/benchmarks/run-codex-series.sh" lead-rejection 1 default-model-check
+default_model_command_log="$(cat "$tmp_bin/nix.log")"
+default_model_bundle="$project_root/benchmarks/bundles/default-model-check--codex--gpt-5.5--raw-repo--workflow-assistance-unspecified.json"
+synthetic_files+=("$default_model_bundle")
+grep -Fq -- '--model gpt-5.5' <<<"$default_model_command_log"
+grep -Fq -- 'CODEX_MODEL=gpt-5.5 CODEX_REASONING_EFFORT=xhigh' <<<"$default_model_command_log"
+test -f "$default_model_bundle"
+
+: >"$tmp_bin/nix.log"
 PATH="$tmp_bin:$PATH" CLASP_ALLOW_BOOTSTRAP_RECOVERY=true CLASP_BENCHMARK_WORKFLOW_ASSISTANCE=compiler-assisted bash "$project_root/benchmarks/run-codex-series.sh" lead-segment 2 remediation-a gpt-5.4
 command_log="$(cat "$tmp_bin/nix.log")"
 bundle_manifest="$project_root/benchmarks/bundles/remediation-a--codex--gpt-5.4--raw-repo--workflow-assistance-compiler-assisted.json"

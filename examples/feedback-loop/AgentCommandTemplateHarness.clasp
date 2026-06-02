@@ -1,0 +1,278 @@
+module AgentCommandTemplateHarness
+
+foreign runCommandTimeoutRaw : Str -> Int -> [Str] -> Result Str = "runCommandTimeoutJson"
+
+record TimedProcessResult = {
+  exitCode : Int,
+  stdout : Str,
+  stderr : Str,
+  timedOut : Bool,
+  error : Str
+}
+
+record LoopState = {
+  attempt : Int,
+  phase : Str,
+  verdict : Str,
+  completed : Bool,
+  builderRuns : Int,
+  verifierRuns : Int,
+  healthy : Bool,
+  needsAttention : Bool,
+  attentionReason : Str,
+  final : Bool
+}
+
+timedProcessResultError : Str -> Result TimedProcessResult
+timedProcessResultError message = Err message
+
+emptyTexts : [Str]
+emptyTexts = []
+
+stateRoot : Str
+stateRoot = if textJoin "" argv == "" then "agent-command-template-state" else pathJoin argv
+
+readEnvText : Str -> Str -> Str
+readEnvText name fallback = match envVar name {
+  Ok raw -> decode Str raw,
+  Err message -> fallback
+}
+
+readEnvInt : Str -> Int -> Int
+readEnvInt name fallback = match envVar name {
+  Ok raw -> decode Int raw,
+  Err message -> fallback
+}
+
+readEnvTextList : Str -> [Str] -> [Str]
+readEnvTextList name fallback = match envVar name {
+  Ok raw -> decode [Str] raw,
+  Err message -> fallback
+}
+
+taskFile : Str
+taskFile = readEnvText "CLASP_LOOP_TASK_FILE_JSON" "agents/tasks/0011-swarm-ready-full-goal.md"
+
+workspaceRoot : Str
+workspaceRoot = readEnvText "CLASP_LOOP_WORKSPACE_JSON" "."
+
+agentBin : Str
+agentBin = readEnvText "CLASP_LOOP_AGENT_BIN_JSON" "codex"
+
+agentModel : Str
+agentModel = readEnvText "CLASP_LOOP_AGENT_MODEL_JSON" "gpt-5.5"
+
+agentReasoning : Str
+agentReasoning = readEnvText "CLASP_LOOP_AGENT_REASONING_JSON" "xhigh"
+
+agentSandbox : Str
+agentSandbox = readEnvText "CLASP_LOOP_AGENT_SANDBOX_JSON" "danger-full-access"
+
+agentCommandTemplate : [Str]
+agentCommandTemplate = readEnvTextList "CLASP_LOOP_AGENT_COMMAND_JSON" emptyTexts
+
+commandTimeoutMs : Int
+commandTimeoutMs = readEnvInt "CLASP_LOOP_AGENT_COMMAND_TIMEOUT_MS_JSON" 10000
+
+commandName : Str
+commandName = match envVar "CLASP_LOOP_COMMAND" {
+  Ok raw -> raw,
+  Err message -> "run"
+}
+
+loopStatePath : Str
+loopStatePath = pathJoin [stateRoot, "state.json"]
+
+builderSchemaPath : Str
+builderSchemaPath = "agents/schemas/builder-report.schema.json"
+
+verifierSchemaPath : Str
+verifierSchemaPath = "agents/schemas/verifier-report.schema.json"
+
+builderReportPath : Str
+builderReportPath = pathJoin [stateRoot, "builder-1.json"]
+
+verifierReportPath : Str
+verifierReportPath = pathJoin [stateRoot, "verifier-1.json"]
+
+builderPromptPath : Str
+builderPromptPath = pathJoin [stateRoot, "builder-1.prompt.md"]
+
+verifierPromptPath : Str
+verifierPromptPath = pathJoin [stateRoot, "verifier-1.prompt.md"]
+
+templateReplace : Str -> Str -> Str -> Str
+templateReplace value needle replacement = textJoin replacement (textSplit value needle)
+
+renderAgentCommandArg : Str -> Str -> Str -> Str -> Str -> Str
+renderAgentCommandArg role schemaPath reportPath promptPath value = {
+  let rendered0 = templateReplace value "{role}" role in
+  let rendered1 = templateReplace rendered0 "{schema_path}" schemaPath in
+  let rendered2 = templateReplace rendered1 "{report_path}" reportPath in
+  let rendered3 = templateReplace rendered2 "{prompt_path}" promptPath in
+  let rendered4 = templateReplace rendered3 "{workspace_root}" workspaceRoot in
+  let rendered5 = templateReplace rendered4 "{agent_bin}" agentBin in
+  let rendered6 = templateReplace rendered5 "{model}" agentModel in
+  let rendered7 = templateReplace rendered6 "{reasoning}" agentReasoning in
+  templateReplace rendered7 "{sandbox}" agentSandbox
+}
+
+renderAgentCommand : Str -> Str -> Str -> Str -> [Str]
+renderAgentCommand role schemaPath reportPath promptPath = {
+  let mut rendered = emptyTexts;
+  for arg in agentCommandTemplate {
+    rendered = append rendered [renderAgentCommandArg role schemaPath reportPath promptPath arg];
+    rendered
+  };
+  rendered
+}
+
+processResult : Result Str -> Result TimedProcessResult
+processResult value = match value {
+  Ok raw -> Ok (decode TimedProcessResult raw),
+  Err message -> timedProcessResultError message
+}
+
+runCommand : [Str] -> TimedProcessResult
+runCommand command = match processResult (runCommandTimeoutRaw "." commandTimeoutMs command) {
+  Ok result -> result,
+  Err message ->
+    TimedProcessResult {
+      exitCode = 127,
+      stdout = "",
+      stderr = message,
+      timedOut = false,
+      error = message
+    }
+}
+
+taskFileContent : Str
+taskFileContent = match readFile taskFile {
+  Ok raw -> raw,
+  Err message -> ""
+}
+
+builderPrompt : Str
+builderPrompt =
+  textJoin "\n" [
+    "You are the builder subagent for the Clasp repository.",
+    "Task file content:",
+    taskFileContent,
+    "Return JSON matching the provided output schema."
+  ]
+
+verifierPrompt : Str
+verifierPrompt =
+  textJoin "\n" [
+    "You are the verifier subagent for the Clasp repository.",
+    "Task file content:",
+    taskFileContent,
+    "Return JSON matching the provided output schema."
+  ]
+
+passingState : LoopState
+passingState =
+  LoopState {
+    attempt = 1,
+    phase = "completed",
+    verdict = "pass",
+    completed = true,
+    builderRuns = 1,
+    verifierRuns = 1,
+    healthy = true,
+    needsAttention = false,
+    attentionReason = "",
+    final = true
+  }
+
+emptyState : LoopState
+emptyState =
+  LoopState {
+    attempt = 1,
+    phase = "needs-builder",
+    verdict = "pending",
+    completed = false,
+    builderRuns = 0,
+    verifierRuns = 0,
+    healthy = true,
+    needsAttention = false,
+    attentionReason = "",
+    final = false
+  }
+
+readLoopState : LoopState
+readLoopState = match readFile loopStatePath {
+  Ok raw -> decode LoopState raw,
+  Err message -> emptyState
+}
+
+writePrompt : Str -> Str -> Str
+writePrompt path text = match writeFile path text {
+  Ok written -> "",
+  Err message -> message
+}
+
+writeState : LoopState -> Str
+writeState state = match writeFile loopStatePath (encode state) {
+  Ok written -> "",
+  Err message -> message
+}
+
+runStep : Str -> Str -> Str -> Str -> Str
+runStep role schemaPath reportPath promptPath = {
+  let command = renderAgentCommand role schemaPath reportPath promptPath;
+  let result = runCommand command;
+  if result.exitCode == 0 then
+    ""
+  else
+    textJoin "\n" [
+      textConcat ["agent-command-template-step-failed:", role],
+      textConcat ["exit=", encode result.exitCode],
+      result.stderr,
+      result.error
+    ]
+}
+
+runHarness : Str
+runHarness =
+  if length agentCommandTemplate == 0 then
+    "config-error:missing-agent-command-template"
+  else
+    match mkdirAll stateRoot {
+      Err message ->
+        textConcat ["state-error:", message],
+      Ok created -> {
+        let builderPromptError = writePrompt builderPromptPath builderPrompt in
+        if builderPromptError != "" then
+          textConcat ["prompt-error:", builderPromptError]
+        else {
+          let builderError = runStep "builder" builderSchemaPath builderReportPath builderPromptPath in
+          if builderError != "" then
+            builderError
+          else {
+            let verifierPromptError = writePrompt verifierPromptPath verifierPrompt in
+            if verifierPromptError != "" then
+              textConcat ["prompt-error:", verifierPromptError]
+            else {
+              let verifierError = runStep "verifier" verifierSchemaPath verifierReportPath verifierPromptPath in
+              if verifierError != "" then
+                verifierError
+              else {
+                let stateError = writeState passingState in
+                if stateError != "" then
+                  textConcat ["state-error:", stateError]
+                else
+                  "pass:1"
+              }
+            }
+          }
+        }
+      }
+    }
+
+main : Str
+main =
+  if commandName == "status" then
+    encode readLoopState
+  else
+    runHarness

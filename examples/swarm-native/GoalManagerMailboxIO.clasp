@@ -1,5 +1,6 @@
 module GoalManagerMailboxIO
 
+import GoalManagerPlannerInputTypes
 import GoalManagerPrelude
 import GoalManagerConfig
 import GoalManagerTypes
@@ -8,9 +9,16 @@ import Swarm
 
 readMailboxMessagesPath : Str -> [SwarmMailboxMessage]
 readMailboxMessagesPath path = match readFile path {
-  Ok raw -> decode [SwarmMailboxMessage] raw,
+  Ok raw -> mailboxMessagesFromRaw raw,
   Err message -> emptySwarmMailboxMessages
 }
+
+mailboxMessagesFromRaw : Str -> [SwarmMailboxMessage]
+mailboxMessagesFromRaw raw =
+  match tryDecode [SwarmMailboxMessage] raw {
+    Ok messages -> messages,
+    Err message -> emptySwarmMailboxMessages
+  }
 
 writeMailboxMessages : [SwarmMailboxMessage] -> Str
 writeMailboxMessages messages = match writeFile mailboxPath (encode messages) {

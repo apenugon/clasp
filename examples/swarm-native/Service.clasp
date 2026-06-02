@@ -85,7 +85,11 @@ watchedProcessError message = Err message
 
 watchedProcessFromRaw : Result Str -> Result WatchedProcess
 watchedProcessFromRaw value = match value {
-  Ok raw -> Ok (decode WatchedProcess raw),
+  Ok raw ->
+    match tryDecode WatchedProcess raw {
+      Ok process -> Ok process,
+      Err message -> watchedProcessError (textConcat ["watched process decode failed: ", message])
+    },
   Err message -> watchedProcessError message
 }
 
@@ -94,7 +98,11 @@ reconcileWatchedProcess heartbeatPath = watchedProcessFromRaw (reconcileWatchedP
 
 serviceStatusFromRaw : Result Str -> Result ServiceStatus
 serviceStatusFromRaw value = match value {
-  Ok raw -> Ok (decode ServiceStatus raw),
+  Ok raw ->
+    match tryDecode ServiceStatus raw {
+      Ok status -> Ok status,
+      Err message -> serviceStatusError (textConcat ["service status decode failed: ", message])
+    },
   Err message -> serviceStatusError message
 }
 
@@ -103,7 +111,11 @@ serviceUpgradeError message = Err message
 
 serviceUpgradeFromRaw : Result Str -> Result ServiceUpgradeTransaction
 serviceUpgradeFromRaw value = match value {
-  Ok raw -> Ok (decode ServiceUpgradeTransaction raw),
+  Ok raw ->
+    match tryDecode ServiceUpgradeTransaction raw {
+      Ok transaction -> Ok transaction,
+      Err message -> serviceUpgradeError (textConcat ["service upgrade decode failed: ", message])
+    },
   Err message -> serviceUpgradeError message
 }
 

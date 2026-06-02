@@ -115,8 +115,13 @@ finalizeBenchmarkProcessResult : PlannerReport -> Int -> Int -> ProcessResult ->
 finalizeBenchmarkProcessResult report wave benchmarkRuns process =
   if process.exitCode != 0 then
     benchmarkCommandFailure report wave benchmarkRuns process.stderr
-  else {
-    let signal = decode BenchmarkSignal process.stdout in
+  else
+    match benchmarkSignalFromRaw process.stdout {
+    Err message ->
+      finalizeWithReport
+        (managerFailureState (plannerTaskIds report) wave benchmarkRuns)
+        (syntheticFailureReport "benchmark signal decode failed" message),
+    Ok signal -> {
     let trace2 = appendManagerTrace (textConcat ["benchmark-wave-", encode wave, ":decoded-signal"]) in
     if trace2 != "" then
       finalizeWithReport
@@ -132,6 +137,7 @@ finalizeBenchmarkProcessResult report wave benchmarkRuns process =
       else
         finalizeBenchmarkCheckpoint report wave benchmarkRuns checkpoint
     }
+  }
   }
 
 runBenchmarkCheckpoint : PlannerReport -> Int -> Int -> Str

@@ -1,7 +1,142 @@
 module Main
 
-import Swarm
-import SemanticSummaryIndex
+foreign swarmObjectiveCreateRaw : Str -> Str -> Str -> Int -> Int -> Result Str = "swarmObjectiveCreateJson"
+foreign swarmTaskCreateRaw : Str -> Str -> Str -> Str -> [Str] -> Int -> Int -> Result Str = "swarmTaskCreateJson"
+foreign swarmArtifactSearchRaw : Str -> Str -> Str -> Str -> Int -> Int -> Result Str = "swarmArtifactSearchJson"
+foreign swarmArtifactWriteRaw : Str -> Str -> Str -> Str -> Str -> Result Str = "swarmArtifactWriteJson"
+
+record SwarmRoot = { path : Str }
+record ObjectiveHandle = { root : SwarmRoot, objectiveId : Str }
+record TaskHandle = { root : SwarmRoot, taskId : Str, actor : Str }
+
+record SwarmObjective = {
+  createdAtMs : Int,
+  deadlineAtMs : Int,
+  objectiveId : Str,
+  detail : Str,
+  maxRuns : Int,
+  maxTasks : Int,
+  projectedStatus : Str,
+  status : Str,
+  taskCount : Int,
+  runCount : Int,
+  updatedAtMs : Int
+}
+
+record SwarmTask = {
+  attempts : Int,
+  taskId : Str,
+  status : Str,
+  objectiveId : Str,
+  detail : Str,
+  dependencies : [Str],
+  ready : Bool,
+  blockedBy : [Str],
+  createdAtMs : Int,
+  deadlineAtMs : Int,
+  heartbeatSeen : Bool,
+  lastError : Str,
+  lastHeartbeatAtMs : Int,
+  leaseActor : Str,
+  leaseExpired : Bool,
+  leaseTimeoutMs : Int,
+  maxRuns : Int,
+  priority : Int,
+  objectiveDeadlineAtMs : Int,
+  updatedAtMs : Int
+}
+
+record SwarmArtifact = {
+  artifactId : Int,
+  createdAtMs : Int,
+  taskId : Str,
+  kind : Str,
+  path : Str
+}
+
+record SwarmArtifactContent = {
+  artifactId : Int,
+  createdAtMs : Int,
+  taskId : Str,
+  kind : Str,
+  path : Str,
+  maxBytes : Int,
+  bytesRead : Int,
+  totalBytes : Int,
+  truncated : Bool,
+  lossyUtf8 : Bool,
+  text : Str
+}
+
+record SwarmArtifactSearchResult = {
+  artifact : SwarmArtifact,
+  score : Int,
+  matchedText : Str,
+  excerpt : SwarmArtifactContent
+}
+
+record SwarmSemanticIndexEntry = {
+  id : Str,
+  kind : Str,
+  editFiles : [Str],
+  artifactRefs : [Str],
+  surfaceIds : [Str],
+  queryText : Str
+}
+
+record SwarmSemanticIndex = {
+  entries : [SwarmSemanticIndexEntry]
+}
+
+record SwarmSemanticIndexArtifact = {
+  semanticIndex : SwarmSemanticIndex
+}
+
+record SwarmContextPack = {
+  semanticArtifactMatches : [SwarmArtifactSearchResult],
+  semanticIndexEntryIds : [Str],
+  semanticIndexEditFiles : [Str],
+  semanticIndexArtifactRefs : [Str],
+  semanticIndexSurfaceIds : [Str],
+  semanticIndexQueryTexts : [Str]
+}
+
+record SwarmSemanticSummaryModule = {
+  module : Str,
+  moduleId : Str,
+  sourceId : Str,
+  role : Str,
+  file : Str,
+  sourceFingerprint : Str,
+  imports : [Str],
+  declaredSurfaces : [Str],
+  affectedSurfaces : [Str],
+  affectedRoutes : [Str],
+  affectedSchemas : [Str],
+  affectedForeignBoundaries : [Str]
+}
+
+record SwarmSemanticSummaryDefinition = {
+  id : Str,
+  kind : Str,
+  name : Str,
+  module : Str,
+  file : Str,
+  typeSummary : Str
+}
+
+record SwarmSemanticSummary = {
+  format : Str,
+  status : Str,
+  input : Str,
+  modules : [SwarmSemanticSummaryModule],
+  definitions : [SwarmSemanticSummaryDefinition]
+}
+
+record SemanticSummaryTextSearch = {
+  wanted : Str,
+  found : Bool
+}
 
 record SemanticSummaryIndexHarnessReport = {
   summaryFormat : Str,
@@ -20,6 +155,307 @@ record SemanticSummaryIndexHarnessReport = {
   contextSemanticIndexSurfaceIds : [Str],
   contextSemanticIndexQueryTexts : [Str]
 }
+
+emptyTexts : [Str]
+emptyTexts = []
+
+emptySwarmSemanticIndexEntries : [SwarmSemanticIndexEntry]
+emptySwarmSemanticIndexEntries = []
+
+contextPackSemanticIndexReadBytes : Int
+contextPackSemanticIndexReadBytes = 65536
+
+contextPackSemanticIndexQuery : Str
+contextPackSemanticIndexQuery = "semanticIndex entries editFiles artifactRefs surfaceIds queryText route schema host-boundary action-item"
+
+semanticIndexArtifactKind : Str
+semanticIndexArtifactKind = "agent-pack"
+
+swarmRoot : Str -> SwarmRoot
+swarmRoot path = SwarmRoot { path = path }
+
+objectiveHandle : SwarmRoot -> Str -> ObjectiveHandle
+objectiveHandle root objectiveId = ObjectiveHandle { root = root, objectiveId = objectiveId }
+
+taskHandle : SwarmRoot -> Str -> Str -> TaskHandle
+taskHandle root taskId actor = TaskHandle { root = root, taskId = taskId, actor = actor }
+
+objectiveResultError : Str -> Result SwarmObjective
+objectiveResultError message = Err message
+
+taskResultError : Str -> Result SwarmTask
+taskResultError message = Err message
+
+artifactResultError : Str -> Result SwarmArtifact
+artifactResultError message = Err message
+
+artifactSearchResultListError : Str -> Result [SwarmArtifactSearchResult]
+artifactSearchResultListError message = Err message
+
+contextPackResultError : Str -> Result SwarmContextPack
+contextPackResultError message = Err message
+
+objectiveResult : Result Str -> Result SwarmObjective
+objectiveResult value = match value {
+  Ok raw -> Ok (decode SwarmObjective raw),
+  Err message -> objectiveResultError message
+}
+
+taskResult : Result Str -> Result SwarmTask
+taskResult value = match value {
+  Ok raw -> Ok (decode SwarmTask raw),
+  Err message -> taskResultError message
+}
+
+artifactResult : Result Str -> Result SwarmArtifact
+artifactResult value = match value {
+  Ok raw -> Ok (decode SwarmArtifact raw),
+  Err message -> artifactResultError message
+}
+
+artifactSearchResultListResult : Result Str -> Result [SwarmArtifactSearchResult]
+artifactSearchResultListResult value = match value {
+  Ok raw -> Ok (decode [SwarmArtifactSearchResult] raw),
+  Err message -> artifactSearchResultListError message
+}
+
+objectiveCreate : SwarmRoot -> Str -> Str -> Int -> Int -> Result SwarmObjective
+objectiveCreate root objectiveId detail maxTasks maxRuns =
+  objectiveResult (swarmObjectiveCreateRaw root.path objectiveId detail maxTasks maxRuns)
+
+taskCreate : ObjectiveHandle -> Str -> Str -> [Str] -> Int -> Int -> Result SwarmTask
+taskCreate handle taskId detail dependencies maxRuns leaseTimeoutMs =
+  taskResult (swarmTaskCreateRaw handle.root.path handle.objectiveId taskId detail dependencies maxRuns leaseTimeoutMs)
+
+artifactWrite : TaskHandle -> Str -> Str -> Result SwarmArtifact
+artifactWrite handle kind text =
+  artifactResult (swarmArtifactWriteRaw handle.root.path handle.taskId handle.actor kind text)
+
+artifactSearch : TaskHandle -> Str -> Str -> Int -> Int -> Result [SwarmArtifactSearchResult]
+artifactSearch handle kind query limit maxBytes =
+  artifactSearchResultListResult (swarmArtifactSearchRaw handle.root.path handle.taskId kind query limit maxBytes)
+
+semanticIndexEntry : Str -> Str -> [Str] -> [Str] -> [Str] -> Str -> SwarmSemanticIndexEntry
+semanticIndexEntry id kind editFiles artifactRefs surfaceIds queryText =
+  SwarmSemanticIndexEntry {
+    id = id,
+    kind = kind,
+    editFiles = editFiles,
+    artifactRefs = artifactRefs,
+    surfaceIds = surfaceIds,
+    queryText = queryText
+  }
+
+semanticIndexArtifactText : [SwarmSemanticIndexEntry] -> Str
+semanticIndexArtifactText entries =
+  encode
+    (SwarmSemanticIndexArtifact {
+      semanticIndex = SwarmSemanticIndex {
+        entries = entries
+      }
+    })
+
+artifactWriteSemanticIndex : TaskHandle -> [SwarmSemanticIndexEntry] -> Result SwarmArtifact
+artifactWriteSemanticIndex handle entries =
+  artifactWrite handle semanticIndexArtifactKind (semanticIndexArtifactText entries)
+
+semanticArtifactSearch : TaskHandle -> Str -> Int -> Int -> Result [SwarmArtifactSearchResult]
+semanticArtifactSearch handle query limit maxBytes =
+  artifactSearch handle semanticIndexArtifactKind query limit maxBytes
+
+semanticIndexSearchResultEntries : SwarmArtifactSearchResult -> [SwarmSemanticIndexEntry]
+semanticIndexSearchResultEntries result =
+  if result.excerpt.truncated then
+    emptySwarmSemanticIndexEntries
+  else
+    (decode SwarmSemanticIndexArtifact result.excerpt.text).semanticIndex.entries
+
+appendSemanticIndexSearchResultEntries : [SwarmSemanticIndexEntry] -> SwarmArtifactSearchResult -> [SwarmSemanticIndexEntry]
+appendSemanticIndexSearchResultEntries entries result =
+  append entries (semanticIndexSearchResultEntries result)
+
+semanticIndexEntriesFromSearchResults : [SwarmArtifactSearchResult] -> [SwarmSemanticIndexEntry]
+semanticIndexEntriesFromSearchResults results =
+  fold appendSemanticIndexSearchResultEntries emptySwarmSemanticIndexEntries results
+
+semanticIndexEntryId : SwarmSemanticIndexEntry -> Str
+semanticIndexEntryId entry = entry.id
+
+semanticIndexEntryQueryText : SwarmSemanticIndexEntry -> Str
+semanticIndexEntryQueryText entry = entry.queryText
+
+appendSemanticIndexEntryEditFiles : [Str] -> SwarmSemanticIndexEntry -> [Str]
+appendSemanticIndexEntryEditFiles values entry =
+  append values entry.editFiles
+
+appendSemanticIndexEntryArtifactRefs : [Str] -> SwarmSemanticIndexEntry -> [Str]
+appendSemanticIndexEntryArtifactRefs values entry =
+  append values entry.artifactRefs
+
+appendSemanticIndexEntrySurfaceIds : [Str] -> SwarmSemanticIndexEntry -> [Str]
+appendSemanticIndexEntrySurfaceIds values entry =
+  append values entry.surfaceIds
+
+semanticIndexEntryEditFiles : [SwarmSemanticIndexEntry] -> [Str]
+semanticIndexEntryEditFiles entries =
+  fold appendSemanticIndexEntryEditFiles emptyTexts entries
+
+semanticIndexEntryArtifactRefs : [SwarmSemanticIndexEntry] -> [Str]
+semanticIndexEntryArtifactRefs entries =
+  fold appendSemanticIndexEntryArtifactRefs emptyTexts entries
+
+semanticIndexEntrySurfaceIds : [SwarmSemanticIndexEntry] -> [Str]
+semanticIndexEntrySurfaceIds entries =
+  fold appendSemanticIndexEntrySurfaceIds emptyTexts entries
+
+semanticSummaryTextSearchStep : SemanticSummaryTextSearch -> Str -> SemanticSummaryTextSearch
+semanticSummaryTextSearchStep state value =
+  if state.found then
+    state
+  else
+    SemanticSummaryTextSearch { wanted = state.wanted, found = value == state.wanted }
+
+semanticSummaryTextListHas : Str -> [Str] -> Bool
+semanticSummaryTextListHas wanted values =
+  (fold semanticSummaryTextSearchStep (SemanticSummaryTextSearch { wanted = wanted, found = false }) values).found
+
+semanticSummaryAppendUniqueText : [Str] -> Str -> [Str]
+semanticSummaryAppendUniqueText values value =
+  if value == "" then
+    values
+  else if semanticSummaryTextListHas value values then
+    values
+  else
+    append values [value]
+
+semanticSummaryAppendUniqueTexts : [Str] -> [Str] -> [Str]
+semanticSummaryAppendUniqueTexts values additions = {
+  let mut rendered = values;
+  for value in additions {
+    rendered = semanticSummaryAppendUniqueText rendered value;
+    rendered
+  };
+  rendered
+}
+
+semanticSummaryTextListWhenPresent : Str -> [Str]
+semanticSummaryTextListWhenPresent value =
+  if value == "" then
+    emptyTexts
+  else
+    [value]
+
+semanticSummaryStandardQueryTokens : Str
+semanticSummaryStandardQueryTokens = "semanticIndex entries editFiles artifactRefs surfaceIds queryText semantic-summary route schema host-boundary action-item compiler-owned"
+
+semanticSummaryModuleSurfaceIds : SwarmSemanticSummaryModule -> [Str]
+semanticSummaryModuleSurfaceIds moduleInfo = {
+  let mut surfaceIds = emptyTexts;
+  surfaceIds = semanticSummaryAppendUniqueTexts surfaceIds moduleInfo.declaredSurfaces;
+  surfaceIds = semanticSummaryAppendUniqueTexts surfaceIds moduleInfo.affectedSurfaces;
+  surfaceIds = semanticSummaryAppendUniqueTexts surfaceIds moduleInfo.affectedRoutes;
+  surfaceIds = semanticSummaryAppendUniqueTexts surfaceIds moduleInfo.affectedSchemas;
+  surfaceIds = semanticSummaryAppendUniqueTexts surfaceIds moduleInfo.affectedForeignBoundaries;
+  surfaceIds
+}
+
+semanticSummaryModuleQueryText : SwarmSemanticSummaryModule -> Str
+semanticSummaryModuleQueryText moduleInfo =
+  textJoin " " [
+    semanticSummaryStandardQueryTokens,
+    "module",
+    moduleInfo.module,
+    moduleInfo.moduleId,
+    moduleInfo.sourceId,
+    moduleInfo.role,
+    moduleInfo.file,
+    moduleInfo.sourceFingerprint,
+    textJoin " " moduleInfo.imports,
+    textJoin " " moduleInfo.declaredSurfaces,
+    textJoin " " moduleInfo.affectedSurfaces,
+    textJoin " " moduleInfo.affectedRoutes,
+    textJoin " " moduleInfo.affectedSchemas,
+    textJoin " " moduleInfo.affectedForeignBoundaries
+  ]
+
+semanticSummaryModuleIndexEntry : Str -> SwarmSemanticSummaryModule -> SwarmSemanticIndexEntry
+semanticSummaryModuleIndexEntry artifactRef moduleInfo =
+  semanticIndexEntry
+    moduleInfo.sourceId
+    "module"
+    (semanticSummaryTextListWhenPresent moduleInfo.file)
+    (semanticSummaryTextListWhenPresent artifactRef)
+    (semanticSummaryModuleSurfaceIds moduleInfo)
+    (semanticSummaryModuleQueryText moduleInfo)
+
+semanticSummaryDefinitionQueryText : SwarmSemanticSummaryDefinition -> Str
+semanticSummaryDefinitionQueryText definition =
+  textJoin " " [
+    semanticSummaryStandardQueryTokens,
+    "definition",
+    definition.id,
+    definition.kind,
+    definition.name,
+    definition.module,
+    definition.file,
+    definition.typeSummary
+  ]
+
+semanticSummaryDefinitionIndexEntry : Str -> SwarmSemanticSummaryDefinition -> SwarmSemanticIndexEntry
+semanticSummaryDefinitionIndexEntry artifactRef definition =
+  semanticIndexEntry
+    definition.id
+    definition.kind
+    (semanticSummaryTextListWhenPresent definition.file)
+    (semanticSummaryTextListWhenPresent artifactRef)
+    (semanticSummaryTextListWhenPresent definition.id)
+    (semanticSummaryDefinitionQueryText definition)
+
+semanticSummaryIndexEntriesFromSummary : Str -> SwarmSemanticSummary -> [SwarmSemanticIndexEntry]
+semanticSummaryIndexEntriesFromSummary artifactRef summary = {
+  let effectiveArtifactRef = if artifactRef == "" then summary.input else artifactRef;
+  let mut entries = emptySwarmSemanticIndexEntries;
+  if summary.format == "clasp-semantic-summary-v1" then
+    if summary.status == "ok" then {
+      for moduleInfo in summary.modules {
+        entries = append entries [semanticSummaryModuleIndexEntry effectiveArtifactRef moduleInfo];
+        entries
+      };
+      for definition in summary.definitions {
+        entries = append entries [semanticSummaryDefinitionIndexEntry effectiveArtifactRef definition];
+        entries
+      };
+      entries
+    } else
+      entries
+  else
+    entries
+}
+
+semanticSummaryIndexEntries : Str -> Str -> [SwarmSemanticIndexEntry]
+semanticSummaryIndexEntries artifactRef summaryText =
+  semanticSummaryIndexEntriesFromSummary artifactRef (decode SwarmSemanticSummary summaryText)
+
+artifactWriteSemanticSummaryIndex : TaskHandle -> Str -> Str -> Result SwarmArtifact
+artifactWriteSemanticSummaryIndex handle artifactRef summaryText =
+  artifactWriteSemanticIndex handle (semanticSummaryIndexEntries artifactRef summaryText)
+
+taskContextPack : TaskHandle -> Str -> Int -> Result SwarmContextPack
+taskContextPack handle query limit =
+  match semanticArtifactSearch handle contextPackSemanticIndexQuery limit contextPackSemanticIndexReadBytes {
+    Ok semanticSearchResultsValue ->
+      let semanticIndexEntriesValue = semanticIndexEntriesFromSearchResults semanticSearchResultsValue in
+      Ok (SwarmContextPack {
+        semanticArtifactMatches = semanticSearchResultsValue,
+        semanticIndexEntryIds = map semanticIndexEntryId semanticIndexEntriesValue,
+        semanticIndexEditFiles = semanticIndexEntryEditFiles semanticIndexEntriesValue,
+        semanticIndexArtifactRefs = semanticIndexEntryArtifactRefs semanticIndexEntriesValue,
+        semanticIndexSurfaceIds = semanticIndexEntrySurfaceIds semanticIndexEntriesValue,
+        semanticIndexQueryTexts = map semanticIndexEntryQueryText semanticIndexEntriesValue
+      }),
+    Err message ->
+      contextPackResultError message
+  }
 
 stateRootPath : Str
 stateRootPath =

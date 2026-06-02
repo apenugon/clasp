@@ -11,11 +11,18 @@ cleanup() {
 }
 trap cleanup EXIT
 
-"$node_bin" - "$project_root/src/Compiler/Emit/JavaScript.clasp" <<'NODE'
+"$node_bin" - "$project_root" <<'NODE'
 const fs = require("node:fs");
+const path = require("node:path");
 
-const [emitterPath] = process.argv.slice(2);
-const source = fs.readFileSync(emitterPath, "utf8");
+const [projectRoot] = process.argv.slice(2);
+const source = [
+  "src/Compiler/Emit/JavaScript.clasp",
+  "src/Compiler/Emit/JavaScript/Expr.clasp",
+  "src/Compiler/Emit/JavaScript/Runtime.clasp",
+  "src/Compiler/Emit/JavaScript/Prelude.clasp",
+  "src/Compiler/Emit/JavaScript/Schema.clasp",
+].map((relativePath) => fs.readFileSync(path.join(projectRoot, relativePath), "utf8")).join("\n");
 
 function assert(condition, message) {
   if (!condition) {

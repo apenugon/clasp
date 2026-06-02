@@ -1,7 +1,9 @@
 module GoalManagerBootstrapPlanner
 
+import AgentBackend
 import GoalManagerMailboxSummary
 import GoalManagerPlannerMemory
+import GoalManagerResourceHealth
 import GoalManagerPreludeProject
 import GoalManagerPrelude
 import GoalManagerConfig
@@ -11,34 +13,153 @@ plannerPromptPathForWave : Int -> Str
 plannerPromptPathForWave wave =
   pathJoin [stateRootPath, textConcat ["planner-", encode wave, ".prompt.txt"]]
 
+plannerAgentBackend : AgentBackendSpec
+plannerAgentBackend =
+  goalManagerAgentBackend plannerAgentCommandTemplate resolvedWorkspaceRoot
+
+plannerAgentBackendSummary : AgentBackendSummary
+plannerAgentBackendSummary =
+  agentBackendSummary plannerAgentBackend
+
+plannerAgentBackendPolicySummary : AgentBackendPolicySummary
+plannerAgentBackendPolicySummary =
+  if plannerRequireStandaloneAgentBackend then
+    agentBackendStandalonePolicySummary plannerAgentBackend
+  else
+    agentBackendPolicySummary "default" agentBackendDefaultPolicy plannerAgentBackend
+
+plannerAgentBackendCapabilityProfile : AgentBackendCapabilityProfile
+plannerAgentBackendCapabilityProfile =
+  agentBackendCapabilityProfileForBackend plannerAgentCapabilityProfileName plannerAgentBackend
+
+plannerAgentBackendCapabilitySummary : AgentBackendCapabilitySummary
+plannerAgentBackendCapabilitySummary =
+  agentBackendStandaloneCapabilitySummary plannerAgentBackendCapabilityProfile plannerAgentBackend
+
+plannerAgentBackendValidationMessage : Str
+plannerAgentBackendValidationMessage =
+  if plannerRequireStandaloneAgentBackend then
+    agentBackendPolicyValidationMessage agentBackendStandalonePolicy plannerAgentBackend
+  else
+    agentBackendValidationMessage plannerAgentBackend
+
+plannerAgentBackendPolicyListText : [Str] -> Str
+plannerAgentBackendPolicyListText values =
+  if length values == 0 then
+    "none"
+  else
+    textJoin " | " values
+
+plannerAgentBackendSummaryText : Str
+plannerAgentBackendSummaryText =
+  textConcat [
+    "Planner agent backend: kind=",
+    plannerAgentBackendSummary.kind,
+    " promptTransport=",
+    plannerAgentBackendSummary.promptTransport,
+    " valid=",
+    if plannerAgentBackendSummary.valid then "true" else "false",
+    " standaloneRequired=",
+    if plannerRequireStandaloneAgentBackend then "true" else "false",
+    " policyValid=",
+    if plannerAgentBackendPolicySummary.valid then "true" else "false",
+    " policyMessage=",
+    plannerAgentBackendPolicySummary.validationMessage
+  ]
+
+plannerAgentBackendPolicyRepairText : Str
+plannerAgentBackendPolicyRepairText =
+  textJoin "\n" [
+    "Planner agent backend policy repair:",
+    textConcat [
+      "policyBlockingGaps=",
+      plannerAgentBackendPolicyListText plannerAgentBackendPolicySummary.blockingGaps
+    ],
+    textConcat [
+      "policyMessages=",
+      plannerAgentBackendPolicyListText plannerAgentBackendPolicySummary.validationMessages
+    ],
+    textConcat [
+      "policyRequiredClosure=",
+      plannerAgentBackendPolicyListText plannerAgentBackendPolicySummary.requiredClosure
+    ],
+    textConcat [
+      "policyMissingPlaceholders=",
+      plannerAgentBackendPolicyListText plannerAgentBackendPolicySummary.missingPlaceholders
+    ],
+    textConcat [
+      "policyRecommendedTemplate=",
+      plannerAgentBackendPolicyListText plannerAgentBackendPolicySummary.recommendedTemplate
+    ]
+  ]
+
+plannerAgentBackendCapabilityText : Str
+plannerAgentBackendCapabilityText =
+  textJoin "\n" [
+    "Planner agent backend capability repair:",
+    textConcat [
+      "capabilityProfile=",
+      plannerAgentBackendCapabilitySummary.profileName,
+      " backendKind=",
+      plannerAgentBackendCapabilitySummary.backendKind,
+      " promptTransport=",
+      plannerAgentBackendCapabilitySummary.promptTransport,
+      " standaloneReady=",
+      if plannerAgentBackendCapabilitySummary.standaloneReady then "true" else "false",
+      " roleCoverage=",
+      plannerAgentBackendPolicyListText plannerAgentBackendCapabilitySummary.roleCoverage
+    ],
+    textConcat [
+      "capabilitySupports=planner:",
+      if plannerAgentBackendCapabilitySummary.supportsPlannerRole then "true" else "false",
+      " builder:",
+      if plannerAgentBackendCapabilitySummary.supportsBuilderRole then "true" else "false",
+      " verifier:",
+      if plannerAgentBackendCapabilitySummary.supportsVerifierRole then "true" else "false",
+      " workspaceEdits:",
+      if plannerAgentBackendCapabilitySummary.supportsWorkspaceEdits then "true" else "false",
+      " childTaskPlanning:",
+      if plannerAgentBackendCapabilitySummary.supportsChildTaskPlanning then "true" else "false",
+      " structuredReports:",
+      if plannerAgentBackendCapabilitySummary.supportsStructuredReports then "true" else "false",
+      " externalModel:",
+      if plannerAgentBackendCapabilitySummary.requiresExternalModel then "true" else "false"
+    ],
+    textConcat [
+      "capabilityMessages=",
+      plannerAgentBackendPolicyListText plannerAgentBackendCapabilitySummary.validationMessages
+    ],
+    textConcat [
+      "capabilityBlockingGaps=",
+      plannerAgentBackendPolicyListText plannerAgentBackendCapabilitySummary.blockingGaps
+    ],
+    textConcat [
+      "capabilityRequiredClosure=",
+      plannerAgentBackendPolicyListText plannerAgentBackendCapabilitySummary.requiredClosure
+    ]
+  ]
+
+plannerAgentBackendConfigRepairText : Str -> Str
+plannerAgentBackendConfigRepairText backendError =
+  textJoin "\n" [
+    textConcat ["plannerBackendConfigError=", backendError],
+    "plannerBackendConfigRepair=agent-backend",
+    plannerAgentBackendSummaryText,
+    plannerAgentBackendPolicyRepairText,
+    plannerAgentBackendCapabilityText
+  ]
+
 codexCommandDefault : Str -> Str -> Str -> [Str]
-codexCommandDefault schemaPath reportPath prompt = [
-  agentBin,
-  "exec",
-  "--json",
-  "--cd",
-  resolvedWorkspaceRoot,
-  "-m",
-  agentModel,
-  "-c",
-  codexReasoningConfig,
-  "--skip-git-repo-check",
-  "--sandbox",
-  agentSandbox,
-  "--ephemeral",
-  "--output-schema",
-  schemaPath,
-  "-o",
-  reportPath,
-  prompt
-]
+codexCommandDefault schemaPath reportPath prompt =
+  agentBackendCodexCommand
+    plannerAgentBackend
+    (agentCommandRequest "planner" schemaPath reportPath "" prompt)
 
 plannerAgentCommandArgs : Str -> Str -> Str -> Str -> [Str]
 plannerAgentCommandArgs schemaPath reportPath promptPath prompt =
-  if length plannerAgentCommandTemplate > 0 then
-    renderAgentCommand plannerAgentCommandTemplate "planner" schemaPath reportPath promptPath prompt resolvedWorkspaceRoot
-  else
-    codexCommandDefault schemaPath reportPath prompt
+  agentBackendCommand
+    plannerAgentBackend
+    (agentCommandRequest "planner" schemaPath reportPath promptPath prompt)
 
 codexCommand : Str -> Str -> Str -> [Str]
 codexCommand schemaPath reportPath prompt = plannerAgentCommandArgs schemaPath reportPath "" prompt
@@ -76,7 +197,7 @@ managerHealthSummaryText wave =
     textConcat ["taskWorkspaceRoot=", plannerTaskWorkspaceCacheRoot],
     textConcat ["taskBaselineRoot=", plannerTaskWorkspaceBaselineCacheRoot],
     textConcat ["managerCache=", managerXdgCacheHome],
-    "hostProbe=disabled-in-native-fast-path"
+    managerResourceHealthSummary
   ]
 
 plannerContextBoolText : Bool -> Str
@@ -196,7 +317,25 @@ renderPlannerContextPack pack =
       " manager-task-status=",
       pack.managerAction.taskStatus
     ],
+    textConcat [
+      "spawn policy: parent=",
+      pack.task.parentTaskId,
+      " depth=",
+      encode pack.task.spawnDepth,
+      "/",
+      encode pack.task.maxSpawnDepth,
+      " children=",
+      encode pack.task.childTaskCount,
+      "/",
+      encode pack.task.maxChildTasks,
+      " remaining-child-budget=",
+      encode pack.task.remainingChildTaskBudget
+    ],
+    plannerContextListSection "child task ids:" pack.task.childTaskIds,
     textConcat ["ready tasks: ", textJoin ", " pack.readyTaskIds],
+    plannerContextListSection "dependency task ids:" pack.dependencyTaskIds,
+    plannerContextListSection "dependency task statuses:" pack.dependencyTaskStatuses,
+    plannerContextListSection "dependency task ready:" (map plannerContextBoolText pack.dependencyTaskReady),
     textConcat [
       "mailbox: runs=",
       encode pack.mailboxSummary.runCount,
@@ -235,6 +374,62 @@ plannerContextSectionFor wave =
     Err message -> textConcat ["Planner context pack unavailable: ", message]
   }
 
+plannerPromptNonEmptyText : Str -> Bool
+plannerPromptNonEmptyText value = value != ""
+
+plannerPromptJsonBlockOrEmpty : Str -> Str -> Str -> Str
+plannerPromptJsonBlockOrEmpty header footer raw =
+  if raw == "" then
+    ""
+  else
+    textJoin "\n" [header, raw, footer]
+
+plannerPromptPathBlockOrEmpty : Str -> Str -> Str -> Str
+plannerPromptPathBlockOrEmpty header footer path =
+  if path == "" then
+    ""
+  else
+    textJoin "\n" [header, path, footer]
+
+plannerAffectedVerificationPlanPromptBlock : Str
+plannerAffectedVerificationPlanPromptBlock =
+  plannerPromptJsonBlockOrEmpty
+    "Affected verification plan JSON:"
+    "End affected verification plan JSON."
+    childAffectedVerificationPlanInlineJson
+
+plannerAffectedVerificationPlanPathPromptBlock : Str
+plannerAffectedVerificationPlanPathPromptBlock =
+  plannerPromptPathBlockOrEmpty
+    "Affected verification plan path:"
+    "End affected verification plan path."
+    childAffectedVerificationPlanPath
+
+plannerAffectedVerificationLaunchPolicyPromptBlock : Str
+plannerAffectedVerificationLaunchPolicyPromptBlock =
+  plannerPromptJsonBlockOrEmpty
+    "Affected verification launch policy JSON:"
+    "End affected verification launch policy JSON."
+    childAffectedVerificationLaunchPolicyInlineJson
+
+plannerAffectedVerificationLaunchPolicyPathPromptBlock : Str
+plannerAffectedVerificationLaunchPolicyPathPromptBlock =
+  plannerPromptPathBlockOrEmpty
+    "Affected verification launch policy path:"
+    "End affected verification launch policy path."
+    childAffectedVerificationLaunchPolicyPath
+
+plannerAffectedVerificationContextSection : Str
+plannerAffectedVerificationContextSection =
+  textJoin
+    "\n"
+    (filter plannerPromptNonEmptyText [
+      plannerAffectedVerificationPlanPromptBlock,
+      plannerAffectedVerificationPlanPathPromptBlock,
+      plannerAffectedVerificationLaunchPolicyPromptBlock,
+      plannerAffectedVerificationLaunchPolicyPathPromptBlock
+    ])
+
 plannerPromptFor : Int -> Str -> Str
 plannerPromptFor wave benchmarkSummary =
   textJoin "\n" [
@@ -245,6 +440,12 @@ plannerPromptFor wave benchmarkSummary =
     goalText,
     "Current manager health/resource context:",
     managerHealthSummaryText wave,
+    "Prior swarm mailbox/recovery context:",
+    mailboxSummaryText wave,
+    plannerAgentBackendSummaryText,
+    plannerAgentBackendPolicyRepairText,
+    plannerAgentBackendCapabilityText,
+    plannerAffectedVerificationContextSection,
     plannerContextSectionFor wave,
     "Planning is a control-plane step, not a verification or implementation step.",
     "Do not run repo-wide verification, benchmarks, builds, package installs, or other long commands from the planner.",

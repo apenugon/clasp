@@ -1,0 +1,28 @@
+module StandaloneSwarmVerifier
+
+verifierStatus : Str
+verifierStatus = "open"
+
+standaloneVerifierEvidenceKeys : [Str]
+standaloneVerifierEvidenceKeys = [
+  "local_verifier_gate",
+  "clasp-local-agent-direct-source-edit",
+  "clasp-local-agent-source-patch-postcheck",
+  "clasp-local-planner-backend-policy-repair",
+  "clasp-managed-swarm-proof"
+]
+
+standaloneVerifierPatchTarget : Str
+standaloneVerifierPatchTarget = "verifierStatus = \"open\""
+
+standaloneVerifierFixedValue : Str
+standaloneVerifierFixedValue = "verifierStatus = \"standalone-swarm-fixed-after-feedback\""
+
+standaloneVerifierProbeText : Str
+standaloneVerifierProbeText =
+  textJoin "\n" [
+    textConcat ["status=", verifierStatus],
+    textConcat ["evidenceKeys=", textJoin " | " standaloneVerifierEvidenceKeys],
+    textConcat ["patchTarget=", standaloneVerifierPatchTarget],
+    textConcat ["fixedValue=", standaloneVerifierFixedValue]
+  ]

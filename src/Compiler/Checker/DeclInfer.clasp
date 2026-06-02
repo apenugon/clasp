@@ -1,0 +1,67 @@
+module Compiler.Checker.DeclInfer
+
+import Compiler.Ast
+import Compiler.Checker.DeclFunction
+import Compiler.Checker.InferExpr
+import Compiler.Checker.TypeOps
+import Compiler.Checker.Types
+
+inferDecl : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> HostedDeclAst -> InferDeclResult
+inferDecl typeDecls recordDecls env decl = if hasDeclParams decl then inferFunctionDecl typeDecls recordDecls env decl else inferValueDecl typeDecls recordDecls env decl
+
+inferValueDecl : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> HostedDeclAst -> InferDeclResult
+inferValueDecl typeDecls recordDecls env decl =
+  if hasAnnotationAst (declAnnotation decl) then {
+    let declaredType = typeFromHostedTypeAst (annotationTypeAst (declAnnotation decl));
+    if typeIsFunction declaredType then {
+      InferDeclError (textConcat ["Expected a value annotation for `", declName decl, "`."])
+    } else {
+      let checkedType = if typeHasGenericVars declaredType then instantiateGenericType (textConcat ["decl:", declName decl]) declaredType else declaredType;
+      match inferExprAgainst typeDecls recordDecls env emptyTypeBindings OutsideFunction checkedType (declBody decl) {
+        InferExprError message ->
+          InferDeclError message,
+        InferredExpr bodyType ->
+          if typeHasGenericVars declaredType then {
+            let generalizedType = generalizeBindingType env emptyTypeBindings OutsideFunction bodyType;
+            if sameType generalizedType declaredType then InferredDecl (TypeBinding (declName decl) declaredType) else InferDeclError (typeMismatchMessage (declName decl) declaredType generalizedType)
+          } else {
+            InferredDecl (TypeBinding (declName decl) declaredType)
+          }
+      }
+    }
+  } else {
+    match inferExpr typeDecls recordDecls env emptyTypeBindings OutsideFunction (declBody decl) {
+      InferExprError message ->
+        InferDeclError message,
+      InferredExpr bodyType ->
+        InferredDecl (TypeBinding (declName decl) (generalizeBindingType env emptyTypeBindings OutsideFunction bodyType))
+    }
+}
+
+inferFunctionDecl : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> HostedDeclAst -> InferDeclResult
+inferFunctionDecl typeDecls recordDecls env decl = if hasAnnotationAst (declAnnotation decl) then {
+  let declaredType = typeFromHostedTypeAst (annotationTypeAst (declAnnotation decl));
+  let checkedType = instantiateGenericType (textConcat ["decl:", declName decl]) declaredType;
+  match bindFunctionParams decl checkedType {
+    BindingParamError message ->
+      InferDeclError message,
+    BindingParams localEnv expectedBodyType ->
+      match inferExprAgainst typeDecls recordDecls env localEnv (InsideFunction expectedBodyType) expectedBodyType (declBody decl) {
+        InferExprError message ->
+          InferDeclError message,
+        InferredExpr bodyType -> {
+          let inferredFunctionType = generalizeBindingType env emptyTypeBindings OutsideFunction (buildInferredFunctionType (declParams decl) localEnv bodyType);
+          if sameType inferredFunctionType declaredType then InferredDecl (TypeBinding (declName decl) declaredType) else InferDeclError (typeMismatchMessage (declName decl) declaredType inferredFunctionType)
+        }
+      }
+  }
+} else {
+  let localEnv = inferUnannotatedFunctionParamBindings decl;
+  let inferredReturnType = TUnknown (textConcat [declName decl, ".result"]);
+  match inferExpr typeDecls recordDecls env localEnv (InsideFunction inferredReturnType) (declBody decl) {
+    InferExprError message ->
+      InferDeclError message,
+    InferredExpr bodyType ->
+      InferredDecl (TypeBinding (declName decl) (generalizeBindingType env emptyTypeBindings OutsideFunction (buildInferredFunctionType (declParams decl) localEnv bodyType)))
+  }
+}

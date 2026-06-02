@@ -32,7 +32,12 @@ claspc_bin="$(
   CLASP_CLASPC= CLASPC_BIN= CLASP_PROJECT_ROOT="$project_root" \
     "$project_root/scripts/resolve-claspc.sh"
 )"
-demo_path="$project_root/examples/safe-subprocess/Main.clasp"
+demo_path="$project_root/examples/safe-subprocess/SafeSubprocessHarness.clasp"
+
+if grep -F 'import Process' "$demo_path" >/dev/null; then
+  printf 'safe subprocess harness must stay single-source; found import Process\n' >&2
+  exit 1
+fi
 
 timeout "$timeout_secs" "$claspc_bin" --json check "$demo_path" | grep -F '"status":"ok"' >/dev/null
 timeout "$timeout_secs" "$claspc_bin" run "$demo_path" -- "$workspace_root" "$outside_root" >"$output_path"

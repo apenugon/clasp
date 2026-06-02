@@ -29,6 +29,7 @@ benchmarks/workspaces/*
 /.clasp-test-tmp/
 /.clasp-verify/
 /.clasp-verify-tmp/
+/.clasp-managed-job-admission.lock
 /.codex
 /--help/
 /run/

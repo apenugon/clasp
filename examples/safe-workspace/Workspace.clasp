@@ -6,6 +6,11 @@ foreign workspaceWriteFileRaw : Str -> Str -> Str -> Result Str = "workspaceWrit
 foreign workspaceAppendFileRaw : Str -> Str -> Str -> Result Str = "workspaceAppendFile"
 foreign workspaceMkdirAllRaw : Str -> Str -> Result Str = "workspaceMkdirAll"
 foreign workspaceListDirRaw : Str -> Str -> Result [Str] = "workspaceListDir"
+foreign workspaceListTreeRaw : Str -> Str -> Int -> Int -> Result [Str] = "workspaceListTree"
+foreign workspaceSearchTextRaw : Str -> Str -> Str -> Int -> Int -> Int -> Int -> Result [Str] = "workspaceSearchText"
+foreign workspaceReplaceTextRaw : Str -> Str -> Str -> Str -> Int -> Int -> Result Int = "workspaceReplaceText"
+foreign workspacePathSizeMbRaw : Str -> Str -> Result Int = "workspacePathSizeMb"
+foreign workspaceRemovePathRaw : Str -> Str -> Result Str = "workspaceRemovePath"
 
 workspacePath : Str -> Str -> Result Str
 workspacePath root relative = workspacePathRaw root relative
@@ -24,3 +29,28 @@ workspaceMkdirAll root relative = workspaceMkdirAllRaw root relative
 
 workspaceListDir : Str -> Str -> Result [Str]
 workspaceListDir root relative = workspaceListDirRaw root relative
+
+workspaceListTree : Str -> Str -> Int -> Int -> Result [Str]
+workspaceListTree root relative maxEntries maxDepth = workspaceListTreeRaw root relative maxEntries maxDepth
+
+workspaceSearchTextBounded : Str -> Str -> Str -> Int -> Int -> Int -> Int -> Result [Str]
+workspaceSearchTextBounded root relative needle maxMatches maxFiles maxFileBytes maxDepth =
+  workspaceSearchTextRaw root relative needle maxMatches maxFiles maxFileBytes maxDepth
+
+workspaceSearchText : Str -> Str -> Str -> Result [Str]
+workspaceSearchText root relative needle =
+  workspaceSearchTextBounded root relative needle 64 2000 262144 16
+
+workspaceReplaceTextBounded : Str -> Str -> Str -> Str -> Int -> Int -> Result Int
+workspaceReplaceTextBounded root relative findText replaceText maxReplacements maxFileBytes =
+  workspaceReplaceTextRaw root relative findText replaceText maxReplacements maxFileBytes
+
+workspaceReplaceText : Str -> Str -> Str -> Str -> Result Int
+workspaceReplaceText root relative findText replaceText =
+  workspaceReplaceTextBounded root relative findText replaceText 64 262144
+
+workspacePathSizeMb : Str -> Str -> Result Int
+workspacePathSizeMb root relative = workspacePathSizeMbRaw root relative
+
+workspaceRemovePath : Str -> Str -> Result Str
+workspaceRemovePath root relative = workspaceRemovePathRaw root relative

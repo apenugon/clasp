@@ -1,0 +1,79 @@
+module Compiler.Emit.JavaScript.Schema
+
+import Compiler.Ast
+import Compiler.Emit.JavaScript.Util
+
+emitTypeSchemaDecodeExpr : HostedTypeAst -> Str -> Str -> Str
+emitTypeSchemaDecodeExpr typ valueRef pathRef = match typ {
+  HostedTypeName name ->
+    if name == "Str" then textConcat ["$claspExpectString(", valueRef, ", ", pathRef, ")"] else if name == "Int" then textConcat ["$claspExpectInt(", valueRef, ", ", pathRef, ")"] else if name == "Bool" then textConcat ["$claspExpectBool(", valueRef, ", ", pathRef, ")"] else if name == "Prompt" then textConcat ["$claspExpectPrompt(", valueRef, ", ", pathRef, ")"] else textConcat ["((__claspSchemas[", emitJsString name, "] ?? { fromHost(value) { return value; } }).fromHost(", valueRef, ", ", pathRef, "))"],
+  HostedTypeApply name args ->
+    textConcat ["((__claspSchemas[", emitJsString name, "] ?? { fromHost(value) { return value; } }).fromHost(", valueRef, ", ", pathRef, "))"],
+  HostedTypeVar name ->
+    valueRef,
+  HostedTypeList itemType ->
+    textConcat ["Object.freeze($claspExpectArray(", valueRef, ", ", pathRef, ").map((item) => ", emitTypeSchemaDecodeExpr itemType "item" pathRef, "))"],
+  HostedTypeFunction input result ->
+    valueRef
+}
+
+emitSchemaFieldNames : [HostedRecordFieldDeclAst] -> [Str]
+emitSchemaFieldNames fields = {
+  let mut rendered = emptyRenderedTexts;
+  for field in fields {
+    rendered = appendRenderedText rendered (emitJsString (recordFieldDeclName field));
+    rendered
+  };
+  rendered
+}
+
+emitSchemaFieldLines : [HostedRecordFieldDeclAst] -> [Str]
+emitSchemaFieldLines fields = {
+  let mut rendered = emptyRenderedTexts;
+  for field in fields {
+    let fieldName = recordFieldDeclName field;
+    rendered = appendRenderedText rendered (textConcat ["      ", fieldName, ": ", emitTypeSchemaDecodeExpr (recordFieldDeclType field) (textConcat ["objectValue.", fieldName]) (textConcat ["`${path}.", fieldName, "`"]), ","]);
+    rendered
+  };
+  rendered
+}
+
+emitRecordSchema : HostedRecordDeclAst -> [Str]
+emitRecordSchema decl = {
+  let schemaName = recordDeclName decl;
+  let schemaConstName = textConcat ["$claspSchema_", schemaName];
+  let header = [textConcat ["const ", schemaConstName, " = {"], "  kind: \"clasp-schema-contract\",", "  version: 1,", textConcat ["  name: ", emitJsString schemaName, ","], textConcat ["  schema: Object.freeze({ kind: \"record\", name: ", emitJsString schemaName, ", fields: Object.freeze([", textJoin ", " (emitSchemaFieldNames (recordDeclFields decl)), "]) }),"], "  seed: null,", "  fromHost(value, path = \"value\") {", "    const objectValue = $claspExpectObject(value, path);", "    return Object.freeze({"];
+  let footer = [ "    });", "  },", "  toHost(value, path = \"value\") { return this.fromHost(value, path); },", "  decodeJson(jsonText) { return this.fromHost(JSON.parse(jsonText), \"value\"); },", "  encodeJson(value) { return $claspStableStringify(this.toHost(value, \"value\")); },", "  stream(initial = null) { return $claspCreateSchemaStream(this, initial); }", "};", "" ];
+  append header (append (emitSchemaFieldLines (recordDeclFields decl)) footer)
+}
+
+emitSchemas : [HostedRecordDeclAst] -> [Str]
+emitSchemas recordDecls = {
+  let mut rendered = emptyRenderedTexts;
+  for recordDecl in recordDecls {
+    rendered = append rendered (emitRecordSchema recordDecl);
+    rendered
+  };
+  let mut entries = emptyRenderedTexts;
+  for recordDecl in recordDecls {
+    let recordName = recordDeclName recordDecl;
+    entries = appendRenderedText entries (textConcat [recordName, ": $claspSchema_", recordName]);
+    entries
+  };
+  append rendered [textConcat ["export const __claspSchemas = Object.freeze({ ", textJoin ", " entries, " });"], "for (const schemaContract of Object.values(__claspSchemas)) {", "  schemaContract.binary = $claspCreateSchemaBinaryCodec(schemaContract);", "  schemaContract.encodeBinary = function (value) { return this.binary.encode(value); };", "  schemaContract.decodeBinary = function (payload, path = \"value\") { return this.binary.decode(payload, path); };", "  schemaContract.encodeFramedBinary = function (value) { return this.binary.frame(value); };", "  schemaContract.decodeFramedBinary = function (frame, path = \"value\") { return this.binary.unframe(frame, path); };", "  Object.freeze(schemaContract);", "}", ""]
+}
+
+emitExportsRegistry : HostedModuleAst -> [Str]
+emitExportsRegistry modl = {
+  let mut entries = emptyRenderedTexts;
+  for decl in moduleDeclarations modl {
+    if declIsMetadataDeclaration decl then {
+      entries
+    } else {
+      let exportName = declName decl;
+      entries = appendRenderedText entries (textConcat [exportName, ": ", exportName]);
+      entries
+    }
+  };
+  [textConcat ["const __claspExports = Object.freeze({ ", textJoin ", " entries, " });"], ""]
+}

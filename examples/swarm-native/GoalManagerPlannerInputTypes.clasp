@@ -1,0 +1,18 @@
+module GoalManagerPlannerInputTypes
+
+record PlannerInputState = {
+  fingerprint : Str,
+  goalText : Str,
+  plannerPolicy : Str,
+  schemaPath : Str,
+  workspaceRoot : Str,
+  mailboxSummary : Str
+}
+
+record LegacyPlannerInputState = {
+  fingerprint : Str,
+  goalText : Str,
+  plannerPolicy : Str,
+  schemaPath : Str,
+  workspaceRoot : Str
+}

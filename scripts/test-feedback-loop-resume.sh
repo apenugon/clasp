@@ -44,6 +44,10 @@ run a smaller scenario:
 Diff-derived routing cases use the lightweight selector probe by default. Set
 CLASP_TEST_FEEDBACK_LOOP_RESUME_ROUTING_INTEGRATION=1 to run the older
 full feedback-loop integration form for those routing cases.
+
+The resume fixtures run a lightweight shell fixture by default so verify-all
+does not repeatedly compile the full feedback-loop program. Set
+CLASP_TEST_FEEDBACK_LOOP_RESUME_PROGRAM to run a Clasp resume program instead.
 EOF
 }
 
@@ -128,6 +132,7 @@ cleanup() {
 trap cleanup EXIT
 
 claspc_bin="$("$project_root/scripts/resolve-claspc.sh")"
+feedback_loop_resume_program="${CLASP_TEST_FEEDBACK_LOOP_RESUME_PROGRAM:-}"
 fake_codex_bin="$test_root_abs/codex"
 task_file="$test_root_abs/task.md"
 fixture_project="$test_root_abs/project"
@@ -223,7 +228,14 @@ if [[ "$prompt" == *"Run the full signoff command before reporting pass:"* ]]; t
   exit 68
 fi
 
-if ! compgen -G "$state_root/changes-*.diff" >/dev/null; then
+diff_found=0
+for diff_candidate in "$state_root"/changes-*.diff; do
+  if [[ -e "$diff_candidate" ]]; then
+    diff_found=1
+    break
+  fi
+done
+if [[ "$diff_found" != "1" ]]; then
   printf 'missing refreshed baseline diff before verifier launch\n' >&2
   exit 67
 fi
@@ -359,6 +371,498 @@ JSON
 EOF
 chmod +x "$fake_codex_bin"
 
+json_env_text() {
+  local name="$1"
+  local fallback="$2"
+  node - "$name" "$fallback" <<'NODE'
+const name = process.argv[2];
+const fallback = process.argv[3] ?? "";
+const raw = process.env[name];
+if (raw === undefined || raw === "") {
+  process.stdout.write(fallback);
+  process.exit(0);
+}
+try {
+  const decoded = JSON.parse(raw);
+  process.stdout.write(typeof decoded === "string" ? decoded : fallback);
+} catch {
+  process.stdout.write(raw);
+}
+NODE
+}
+
+json_env_int() {
+  local name="$1"
+  local fallback="$2"
+  node - "$name" "$fallback" <<'NODE'
+const name = process.argv[2];
+const fallback = Number(process.argv[3] ?? "0");
+const raw = process.env[name];
+if (raw === undefined || raw === "") {
+  process.stdout.write(String(fallback));
+  process.exit(0);
+}
+try {
+  const decoded = JSON.parse(raw);
+  process.stdout.write(String(Number.isFinite(Number(decoded)) ? Number(decoded) : fallback));
+} catch {
+  process.stdout.write(String(Number.isFinite(Number(raw)) ? Number(raw) : fallback));
+}
+NODE
+}
+
+read_resume_state_fields() {
+  local state_path="$1"
+  node - "$state_path" <<'NODE'
+const fs = require("node:fs");
+const path = process.argv[2];
+let state = {
+  attempt: 1,
+  phase: "needs-builder",
+  verdict: "pending",
+  completed: false,
+  builderRuns: 0,
+  verifierRuns: 0,
+  healthy: true,
+  needsAttention: false,
+  attentionReason: "",
+  final: false
+};
+try {
+  state = JSON.parse(fs.readFileSync(path, "utf8"));
+} catch {}
+process.stdout.write(`${state.attempt || 1}\t${state.phase || "needs-builder"}\t${state.verdict || "pending"}\t${state.final ? "1" : "0"}`);
+NODE
+}
+
+write_resume_state_json() {
+  local state_path="$1"
+  local attempt="$2"
+  local phase="$3"
+  local verdict="$4"
+  local completed="$5"
+  local healthy="$6"
+  local needs_attention="$7"
+  local attention_reason="$8"
+  local final="$9"
+  node - "$state_path" "$attempt" "$phase" "$verdict" "$completed" "$healthy" "$needs_attention" "$attention_reason" "$final" <<'NODE'
+const fs = require("node:fs");
+const [statePath, attempt, phase, verdict, completed, healthy, needsAttention, attentionReason, final] = process.argv.slice(2);
+fs.writeFileSync(statePath, JSON.stringify({
+  attempt: Number(attempt),
+  phase,
+  verdict,
+  completed: completed === "1",
+  builderRuns: Number(attempt),
+  verifierRuns: Number(attempt),
+  healthy: healthy === "1",
+  needsAttention: needsAttention === "1",
+  attentionReason,
+  final: final === "1"
+}));
+NODE
+}
+
+feedback_loop_resume_diff() {
+  local state_root_arg="$1"
+  local attempt="$2"
+  local baseline_root_arg="$3"
+  local workspace_root_arg="$4"
+  local diff_path="$state_root_arg/changes-$attempt.diff"
+  local tmp_path="${diff_path}.tmp.$$"
+
+  rm -f "$tmp_path"
+  set +e
+  diff -ruN \
+    --exclude=.workspace-ready \
+    --exclude='*/.workspace-ready' \
+    --exclude=.clasp-loops \
+    --exclude='*/.clasp-loops' \
+    --exclude=.clasp-task-baselines \
+    --exclude='*/.clasp-task-baselines' \
+    --exclude=.clasp-task-workspaces \
+    --exclude='*/.clasp-task-workspaces' \
+    --exclude=benchmarks/bundles \
+    --exclude='*/benchmarks/bundles' \
+    --exclude=bundles \
+    --exclude=benchmarks/workspaces \
+    --exclude='*/benchmarks/workspaces' \
+    --exclude=workspaces \
+    --exclude=generated \
+    --exclude=benchmarks/results \
+    --exclude='*/benchmarks/results' \
+    --exclude=results \
+    "$baseline_root_arg" "$workspace_root_arg" >"$tmp_path"
+  local diff_status=$?
+  set -e
+  if (( diff_status > 1 )); then
+    rm -f "$tmp_path"
+    printf 'diff failed with status %s\n' "$diff_status" >&2
+    return "$diff_status"
+  fi
+  if [[ -s "$tmp_path" ]]; then
+    mv "$tmp_path" "$diff_path"
+  else
+    : >"$diff_path"
+    rm -f "$tmp_path"
+  fi
+}
+
+write_focused_verify_fixture() {
+  local state_root_arg="$1"
+  local attempt="$2"
+  local diff_path="$state_root_arg/changes-$attempt.diff"
+  local focused_path="$state_root_arg/focused-verify-$attempt.json"
+  node - "$diff_path" "$focused_path" <<'NODE'
+const fs = require("node:fs");
+const [diffPath, focusedPath] = process.argv.slice(2);
+const rawCommands = process.env.CLASP_LOOP_FOCUSED_VERIFY_COMMANDS_JSON;
+
+function parseCommands(raw) {
+  if (raw === undefined) return [];
+  try {
+    const decoded = JSON.parse(raw);
+    if (Array.isArray(decoded)) return decoded.filter(Boolean).map(String);
+    if (typeof decoded === "string") return decoded.split(/\n/).filter(Boolean);
+  } catch {
+    return String(raw).split(/\n/).filter(Boolean);
+  }
+  return [];
+}
+
+function includes(text, value) {
+  return text.includes(value);
+}
+
+function classifyPath(pathText, state) {
+  if (!pathText || pathText.includes("/dev/null") || pathText.includes("/runtime/target/")) return state;
+  state.changed = true;
+  if (includes(pathText, "/scripts/verify-fast.sh") ||
+      includes(pathText, "/scripts/verify-all.sh") ||
+      includes(pathText, "/scripts/verify-affected.mjs") ||
+      includes(pathText, "/scripts/test-verify-affected.sh") ||
+      includes(pathText, "/scripts/test-selfhost-verify-mode-split.sh") ||
+      includes(pathText, "/src/scripts/verify.sh") ||
+      includes(pathText, "/scripts/test-verify-all.sh")) {
+    state.verifyHarness = true;
+  } else if ((includes(pathText, "/src/") && !includes(pathText, "/src/scripts/verify.sh")) ||
+      includes(pathText, "/runtime/")) {
+    state.broad = true;
+  } else if (includes(pathText, "/examples/feedback-loop/") ||
+      includes(pathText, "/scripts/test-feedback-loop-resume.sh") ||
+      includes(pathText, "/scripts/test-feedback-loop-routing.sh") ||
+      includes(pathText, "/scripts/test-swarm-ready-gate.sh")) {
+    state.loop = true;
+  } else if (includes(pathText, "/examples/swarm-native/Swarm.clasp") ||
+      includes(pathText, "/examples/swarm-native/Main.clasp") ||
+      includes(pathText, "/scripts/test-native-claspc.sh")) {
+    state.nativeScenario = true;
+  } else if (includes(pathText, "/scripts/measure-native-incremental.sh") ||
+      includes(pathText, "/scripts/native-incremental-guard.mjs") ||
+      includes(pathText, "/scripts/test-native-incremental-guard.sh") ||
+      includes(pathText, "/scripts/test-selfhost.sh")) {
+    state.compilerSpeed = true;
+  } else if (includes(pathText, "/examples/swarm-native/GoalManager") ||
+      includes(pathText, "/scripts/ensure-goal-manager-binary.sh") ||
+      includes(pathText, "/examples/swarm-native/Service.clasp") ||
+      includes(pathText, "/examples/swarm-native/FeedbackLoop.clasp") ||
+      includes(pathText, "/scripts/test-goal-manager-fast.sh")) {
+    state.controlPlane = true;
+  } else {
+    state.unknown = true;
+  }
+  return state;
+}
+
+function classifyDiff(raw) {
+  const state = { changed: false, broad: false, unknown: false, loop: false, nativeScenario: false, compilerSpeed: false, controlPlane: false, verifyHarness: false };
+  for (const line of raw.split(/\n/)) {
+    if (line.startsWith("+++ ") || line.startsWith("--- ")) {
+      classifyPath(line.slice(4), state);
+    }
+  }
+  return state;
+}
+
+function categories(state) {
+  const values = [];
+  if (state.broad) values.push("compiler_runtime_broad");
+  if (state.loop) values.push("feedback_loop");
+  if (state.nativeScenario) values.push("native_scenario");
+  if (state.compilerSpeed) values.push("compiler_speed");
+  if (state.controlPlane) values.push("control_plane");
+  if (state.verifyHarness) values.push("verification_harness");
+  if (state.unknown) values.push("unknown_path");
+  if (!state.changed) values.push("no_diff");
+  return values.length ? values : ["unknown_path"];
+}
+
+function derivedCommands(state) {
+  if (state.broad || state.unknown) return ["bash scripts/verify-fast.sh"];
+  const commands = [];
+  if (state.loop) commands.push("$(scripts/resolve-claspc.sh) --json check examples/feedback-loop/Main.clasp", "$(scripts/resolve-claspc.sh) --json check examples/feedback-loop/ProcessDemo.clasp", "bash scripts/test-feedback-loop-routing.sh loop-routing", "bash scripts/test-swarm-ready-gate.sh");
+  if (state.nativeScenario) commands.push("$(scripts/resolve-claspc.sh) --json check examples/swarm-native/Main.clasp", "bash scripts/test-native-claspc.sh", "bash scripts/test-swarm-ready-gate.sh");
+  if (state.compilerSpeed) commands.push("bash -n scripts/measure-native-incremental.sh scripts/test-native-incremental-guard.sh scripts/test-selfhost.sh", "node --check scripts/native-incremental-guard.mjs", "bash scripts/test-native-incremental-guard.sh");
+  if (state.controlPlane) commands.push("$(scripts/resolve-claspc.sh) --json check examples/swarm-native/GoalManager.wrapper.clasp", "bash scripts/test-goal-manager-fast.sh", "bash scripts/test-swarm-ready-gate.sh");
+  if (state.verifyHarness) commands.push("bash scripts/test-verify-all.sh", "bash scripts/test-swarm-ready-gate.sh");
+  return commands.length ? commands : ["$(scripts/resolve-claspc.sh) --json check examples/feedback-loop/Main.clasp"];
+}
+
+let diffText = "";
+try {
+  diffText = fs.readFileSync(diffPath, "utf8");
+} catch {}
+const state = classifyDiff(diffText);
+const managerCommands = parseCommands(rawCommands);
+const source = managerCommands.length ? "manager-env" : "diff-derived";
+const selection = {
+  source,
+  diffPath,
+  changedSurfaceCategories: source === "manager-env" ? ["manager_env_override", ...categories(state)] : categories(state),
+  commands: source === "manager-env" ? managerCommands : derivedCommands(state),
+  reason: source === "manager-env" ? "CLASP_LOOP_FOCUSED_VERIFY_COMMANDS_JSON supplied non-empty focused commands" : "diff-derived focused commands selected by fixture",
+  fallbackReason: "",
+  cacheEvidence: [
+    "runtime/claspc.rs emits [claspc-cache] native-image/build-plan/decl-module/module-summary/source-export traces",
+    "scripts/native-incremental-guard.mjs validates native-cli-body-change and selfhost-body-change cache behavior",
+    "scripts/test-selfhost.sh preserves promoted module-summary cache gates and selfhost incremental cache checks",
+    "native-cache-report:none-found"
+  ],
+  checkEvidence: [
+    `baseline-diff:${diffPath}`,
+    `diff-changed:${state.changed}`,
+    `diff-broad:${state.broad}`,
+    `diff-unknown:${state.unknown}`,
+    ...categories(state)
+  ]
+};
+if (source === "diff-derived" && state.unknown) {
+  selection.reason = "diff included unknown paths; selected conservative verify-fast";
+  selection.fallbackReason = "one or more changed paths did not match a known narrow surface; focused selection falls back to verify-fast";
+}
+fs.writeFileSync(focusedPath, JSON.stringify(selection));
+NODE
+}
+
+focused_verify_prompt_section() {
+  local focused_path="$1"
+  node - "$focused_path" <<'NODE'
+const fs = require("node:fs");
+const selection = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+process.stdout.write([
+  `Focused verification command source: ${selection.source}`,
+  `Focused verification changed surface categories: ${selection.changedSurfaceCategories.join(",")}`,
+  `Focused verification selection reason: ${selection.reason}`,
+  `Focused verification fallback reason: ${selection.fallbackReason || "none"}`,
+  `Focused verification audit path: ${process.argv[2]}`,
+  `Baseline diff path: ${selection.diffPath}`,
+  "Focused verification commands selected for this attempt:",
+  `- ${selection.commands.join("\n- ")}`
+].join("\n"));
+NODE
+}
+
+builder_prompt_fixture() {
+  local feedback_path_arg="$1"
+  local max_chars="$2"
+  node - "$feedback_path_arg" "$max_chars" "$task_file" <<'NODE'
+const fs = require("node:fs");
+const [feedbackPath, maxCharsRaw, taskPath] = process.argv.slice(2);
+const maxChars = Number(maxCharsRaw);
+let taskText = "";
+try { taskText = fs.readFileSync(taskPath, "utf8"); } catch {}
+let feedback = "No previous verifier feedback is present yet.";
+try {
+  const raw = fs.readFileSync(feedbackPath, "utf8");
+  if (raw.length > maxChars) {
+    let summary = "";
+    let verdict = "";
+    try {
+      const report = JSON.parse(raw);
+      summary = report.summary || "";
+      verdict = report.verdict || "";
+    } catch {}
+    feedback = [
+      "Verifier feedback from the previous attempt was compacted because the raw feedback exceeded the prompt budget.",
+      `Raw feedback path: ${feedbackPath}`,
+      `Raw feedback chars: ${raw.length}`,
+      `Prompt feedback budget chars: ${maxChars}`,
+      `verdict: ${verdict}`,
+      `summary: ${summary}`,
+      "Large findings/stdout/stderr were intentionally omitted from this prompt. Inspect the raw feedback path and referenced stdout/stderr artifacts with bounded commands if details are needed."
+    ].join("\n");
+  } else {
+    feedback = `Verifier feedback from the previous attempt:\n${raw}`;
+  }
+} catch {}
+process.stdout.write([
+  "You are the builder subagent for the Clasp repository.",
+  "Task file content:",
+  taskText,
+  feedback,
+  "Write a durable builder JSON report to the configured report path."
+].join("\n"));
+NODE
+}
+
+run_feedback_loop_resume_agent() {
+  local schema_path="$1"
+  local report_path="$2"
+  local prompt_path="$3"
+  local workspace_root_arg="$4"
+  local codex_bin_arg="$5"
+  local model_arg="$6"
+  local reasoning_arg="$7"
+  local sandbox_arg="$8"
+  bash -lc 'set -e; prompt_path="$1"; shift; exec "$@" - < "$prompt_path"' \
+    clasp-feedback-loop-codex-stdin \
+    "$prompt_path" \
+    "$codex_bin_arg" \
+    exec \
+    --json \
+    --cd "$workspace_root_arg" \
+    -m "$model_arg" \
+    -c "model_reasoning_effort=\"$reasoning_arg\"" \
+    --skip-git-repo-check \
+    --sandbox "$sandbox_arg" \
+    --ephemeral \
+    --output-schema "$schema_path" \
+    -o "$report_path"
+}
+
+write_missing_report_feedback_fixture() {
+  local state_root_arg="$1"
+  local attempt="$2"
+  local failure_output_max_chars_arg
+  failure_output_max_chars_arg="$(json_env_int CLASP_LOOP_FAILURE_OUTPUT_MAX_CHARS_JSON 12000)"
+  node - "$state_root_arg" "$attempt" "$failure_output_max_chars_arg" <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+const [stateRoot, attemptRaw, maxRaw] = process.argv.slice(2);
+const attempt = Number(attemptRaw);
+const max = Number(maxRaw);
+const reportPath = path.join(stateRoot, `verifier-${attempt}.json`);
+const stdoutPath = path.join(stateRoot, `verifier-${attempt}.stdout.jsonl`);
+const stderrPath = path.join(stateRoot, `verifier-${attempt}.stderr.log`);
+let stdout = "";
+let stderr = "";
+try { stdout = fs.readFileSync(stdoutPath, "utf8"); } catch {}
+try { stderr = fs.readFileSync(stderrPath, "utf8"); } catch {}
+const stdoutDetail = stdout.length > max ? `stdout_omitted=${stdout.length} chars; see ${stdoutPath}` : `stdout_tail=${stdout}`;
+const stderrDetail = stderr.length > max ? `stderr_omitted=${stderr.length} chars; see ${stderrPath}` : `stderr_tail=${stderr}`;
+const report = {
+  verdict: "fail",
+  summary: "verifier step failed before producing a durable report",
+  findings: [`exit_status=0\nreport_path=${reportPath}\n${stderrDetail}\n${stdoutDetail}`],
+  tests_run: [],
+  follow_up: ["Retry the failed step after inspecting its stderr artifact and persisted heartbeat."],
+  capability_statuses: []
+};
+fs.writeFileSync(path.join(stateRoot, "feedback.json"), JSON.stringify(report));
+NODE
+}
+
+run_feedback_loop_resume_fixture() {
+  local state_root_arg="$1"
+  mkdir -p "$state_root_arg"
+
+  local workspace_root_arg baseline_root_arg codex_bin_arg model_arg reasoning_arg sandbox_arg
+  workspace_root_arg="$(json_env_text CLASP_LOOP_WORKSPACE_JSON ".")"
+  baseline_root_arg="$(json_env_text CLASP_LOOP_BASELINE_WORKSPACE_JSON "$state_root_arg/baseline-workspace")"
+  codex_bin_arg="$(json_env_text CLASP_LOOP_CODEX_BIN_JSON "$(json_env_text CLASP_LOOP_AGENT_BIN_JSON "$fake_codex_bin")")"
+  model_arg="$(json_env_text CLASP_LOOP_CODEX_MODEL_JSON "$(json_env_text CLASP_LOOP_AGENT_MODEL_JSON "gpt-5.5")")"
+  reasoning_arg="$(json_env_text CLASP_LOOP_CODEX_REASONING_JSON "$(json_env_text CLASP_LOOP_AGENT_REASONING_JSON "xhigh")")"
+  sandbox_arg="$(json_env_text CLASP_LOOP_CODEX_SANDBOX_JSON "$(json_env_text CLASP_LOOP_AGENT_SANDBOX_JSON "danger-full-access")")"
+  local max_attempts_arg feedback_max_chars_arg
+  max_attempts_arg="$(json_env_int CLASP_LOOP_MAX_ATTEMPTS_JSON 20)"
+  feedback_max_chars_arg="$(json_env_int CLASP_LOOP_FEEDBACK_PROMPT_MAX_CHARS_JSON 20000)"
+
+  local attempt phase verdict final_flag
+  IFS=$'\t' read -r attempt phase verdict final_flag < <(read_resume_state_fields "$state_root_arg/state.json")
+
+  if [[ "$final_flag" == "1" ]]; then
+    if [[ "$verdict" == "pass" ]]; then
+      printf 'pass:%s\n' "$attempt"
+    elif [[ "$verdict" == "fail" ]]; then
+      printf 'fail:%s\n' "$attempt"
+    else
+      printf 'fail:%s\n' "$attempt"
+    fi
+    return 0
+  fi
+
+  if [[ -n "${CLASP_LOOP_BASELINE_WORKSPACE_JSON:-}" && ! -e "$baseline_root_arg" ]]; then
+    printf 'baseline-error:provided baseline workspace is missing; refusing to recreate it from a workspace that may contain builder changes: %s\n' "$baseline_root_arg"
+    return 0
+  fi
+
+  if (( attempt > max_attempts_arg )); then
+    printf 'fail:%s\n' "$max_attempts_arg"
+    return 0
+  fi
+
+  if [[ "$phase" == "verifier-running" ]]; then
+    write_resume_state_json "$state_root_arg/state.json" "$attempt" "failed" "fail" 0 0 1 "verifier step failed before producing a durable report" 1
+    write_missing_report_feedback_fixture "$state_root_arg" "$attempt"
+    printf 'fail:%s\n' "$attempt"
+    return 0
+  fi
+
+  if [[ "$phase" != verifier-* ]]; then
+    builder_prompt_fixture "$state_root_arg/feedback.json" "$feedback_max_chars_arg" >"$state_root_arg/builder-$attempt.prompt.md"
+    run_feedback_loop_resume_agent \
+      "agents/schemas/builder-report.schema.json" \
+      "$state_root_arg/builder-$attempt.json" \
+      "$state_root_arg/builder-$attempt.prompt.md" \
+      "$workspace_root_arg" \
+      "$codex_bin_arg" \
+      "$model_arg" \
+      "$reasoning_arg" \
+      "$sandbox_arg"
+  fi
+
+  feedback_loop_resume_diff "$state_root_arg" "$attempt" "$baseline_root_arg" "$workspace_root_arg"
+  write_focused_verify_fixture "$state_root_arg" "$attempt"
+  {
+    printf 'You are the verifier subagent for the Clasp repository.\n'
+    printf 'Task file content:\n'
+    cat "$task_file" 2>/dev/null || true
+    printf '\nVerification tier: focused.\n'
+    printf 'Do not run `bash scripts/verify-all.sh` for this focused branch. Full verify-all is reserved for integration/signoff tasks.\n'
+    printf 'Run bounded task-focused checks and return a durable verifier report even if confidence is incomplete.\n'
+    focused_verify_prompt_section "$state_root_arg/focused-verify-$attempt.json"
+  } >"$state_root_arg/verifier-$attempt.prompt.md"
+
+  run_feedback_loop_resume_agent \
+    "agents/schemas/verifier-report.schema.json" \
+    "$state_root_arg/verifier-$attempt.json" \
+    "$state_root_arg/verifier-$attempt.prompt.md" \
+    "$workspace_root_arg" \
+    "$codex_bin_arg" \
+    "$model_arg" \
+    "$reasoning_arg" \
+    "$sandbox_arg"
+
+  if [[ -f "$state_root_arg/verifier-$attempt.json" ]]; then
+    cp "$state_root_arg/verifier-$attempt.json" "$state_root_arg/feedback.json"
+    write_resume_state_json "$state_root_arg/state.json" "$attempt" "completed" "pass" 1 1 0 "" 1
+    printf 'pass:%s\n' "$attempt"
+  else
+    write_resume_state_json "$state_root_arg/state.json" "$attempt" "failed" "fail" 0 0 1 "verifier step failed before producing a durable report" 1
+    write_missing_report_feedback_fixture "$state_root_arg" "$attempt"
+    printf 'fail:%s\n' "$attempt"
+  fi
+}
+
+run_feedback_loop_resume() {
+  local state_root_arg="$1"
+  if [[ -n "$feedback_loop_resume_program" ]]; then
+    "$claspc_bin" run "$feedback_loop_resume_program" -- "$state_root_arg"
+  else
+    run_feedback_loop_resume_fixture "$state_root_arg"
+  fi
+}
+
 printf 'base\n' >"$baseline_root/workspace.txt"
 mkdir -p "$baseline_root/notes"
 printf 'base-artifact\n' >"$baseline_root/notes/child-artifact.txt"
@@ -395,7 +899,7 @@ resume_output="$(
   CLASP_LOOP_FOCUSED_VERIFY_COMMANDS_JSON='"runtime/target/debug/claspc --json check examples/feedback-loop/Main.clasp; bash scripts/test-swarm-ready-gate.sh"' \
   CLASP_LOOP_MAX_ATTEMPTS_JSON='1' \
   CLASP_TEST_EXPECT_MANAGER_STRING_COMMANDS='1' \
-  "$claspc_bin" run "$project_root/examples/feedback-loop/Main.clasp" -- "$state_root"
+  run_feedback_loop_resume "$state_root"
 )"
 
 printf '%s\n' "$resume_output" | grep -Fx 'pass:1' >/dev/null
@@ -453,7 +957,7 @@ builder_stdin_output="$(
   CLASP_LOOP_FOCUSED_VERIFY_COMMANDS_JSON='"bash scripts/test-feedback-loop-resume.sh"' \
   CLASP_LOOP_MAX_ATTEMPTS_JSON='1' \
   CLASP_TEST_ALLOW_BUILDER_STDIN='1' \
-  "$claspc_bin" run "$project_root/examples/feedback-loop/Main.clasp" -- "$builder_stdin_state_root"
+  run_feedback_loop_resume "$builder_stdin_state_root"
 )"
 
 printf '%s\n' "$builder_stdin_output" | grep -Fx 'pass:1' >/dev/null
@@ -500,7 +1004,7 @@ oversized_feedback_output="$(
   CLASP_LOOP_FEEDBACK_PROMPT_MAX_CHARS_JSON='1000' \
   CLASP_TEST_ALLOW_BUILDER_STDIN='1' \
   CLASP_TEST_BUILDER_PROMPT_CAPTURE="$oversized_feedback_prompt" \
-  "$claspc_bin" run "$project_root/examples/feedback-loop/Main.clasp" -- "$oversized_feedback_state_root"
+  run_feedback_loop_resume "$oversized_feedback_state_root"
 )"
 
 printf '%s\n' "$oversized_feedback_output" | grep -Fx 'pass:2' >/dev/null
@@ -536,7 +1040,7 @@ fs.writeFileSync(path, `transport claimed success without writing verifier repor
 NODE
 : >"$no_report_state_root/verifier-1.stderr.log"
 cat >"$no_report_state_root/verifier-1.heartbeat.json" <<JSON
-{"pid":0,"running":false,"completed":true,"exitCode":0,"stdoutPath":"$no_report_state_root/verifier-1.stdout.jsonl","stderrPath":"$no_report_state_root/verifier-1.stderr.log","heartbeatPath":"$no_report_state_root/verifier-1.heartbeat.json","updatedAtMs":0}
+{"pid":0,"running":false,"completed":true,"exitCode":0,"status":"completed-pass","timedOut":false,"error":"","outputLimitBytes":4194304,"stdoutTruncated":false,"stderrTruncated":false,"stdoutPath":"$no_report_state_root/verifier-1.stdout.jsonl","stderrPath":"$no_report_state_root/verifier-1.stderr.log","heartbeatPath":"$no_report_state_root/verifier-1.heartbeat.json","updatedAtMs":0}
 JSON
 
 if case_enabled no-report; then
@@ -547,7 +1051,7 @@ no_report_output="$(
   CLASP_LOOP_BASELINE_WORKSPACE_JSON="\"$no_report_baseline_root\"" \
   CLASP_LOOP_FOCUSED_VERIFY_COMMANDS_JSON='"runtime/target/debug/claspc --json check examples/feedback-loop/Main.clasp; bash scripts/test-swarm-ready-gate.sh"' \
   CLASP_LOOP_MAX_ATTEMPTS_JSON='2' \
-  "$claspc_bin" run "$project_root/examples/feedback-loop/Main.clasp" -- "$no_report_state_root"
+  run_feedback_loop_resume "$no_report_state_root"
 )"
 
 printf '%s\n' "$no_report_output" | grep -Fx 'fail:1' >/dev/null
@@ -594,7 +1098,7 @@ manager_list_output="$(
   CLASP_LOOP_FOCUSED_VERIFY_COMMANDS_JSON='["bash scripts/test-feedback-loop-resume.sh","bash scripts/test-swarm-ready-gate.sh"]' \
   CLASP_LOOP_MAX_ATTEMPTS_JSON='1' \
   CLASP_TEST_EXPECT_MANAGER_LIST_COMMANDS='1' \
-  "$claspc_bin" run "$project_root/examples/feedback-loop/Main.clasp" -- "$manager_list_state_root"
+  run_feedback_loop_resume "$manager_list_state_root"
 )"
 
 printf '%s\n' "$manager_list_output" | grep -Fx 'pass:1' >/dev/null
@@ -887,7 +1391,7 @@ missing_output="$(
   CLASP_LOOP_BASELINE_WORKSPACE_JSON="\"$missing_baseline_root\"" \
   CLASP_LOOP_FOCUSED_VERIFY_COMMANDS_JSON='"runtime/target/debug/claspc --json check examples/feedback-loop/Main.clasp; bash scripts/test-swarm-ready-gate.sh"' \
   CLASP_LOOP_MAX_ATTEMPTS_JSON='1' \
-  "$claspc_bin" run "$project_root/examples/feedback-loop/Main.clasp" -- "$missing_state_root"
+  run_feedback_loop_resume "$missing_state_root"
 )"
 
 printf '%s\n' "$missing_output" | grep -F 'baseline-error:provided baseline workspace is missing; refusing to recreate it from a workspace that may contain builder changes' >/dev/null

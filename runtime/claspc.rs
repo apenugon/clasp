@@ -7,19 +7,21 @@ use std::env;
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
+#[cfg(target_os = "linux")]
+use std::os::raw::c_int;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, ExitCode, Stdio};
-use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use tool_support::{
     build_project_bundle, build_project_bundle_build, cached_project_bundle_identity,
     execute_native_export_from_image_path, execute_native_export_from_image_path_args,
     execute_native_export_from_image_path_args_local_only, execute_native_route_from_image_text,
-    project_declares_backend_surface, run_native_export_host_server, ProjectBundleBuild,
-    ProjectBundleModule, PROJECT_BUNDLE_SEPARATOR,
+    project_declares_backend_surface, run_native_export_host_server, ProjectBundleBuild, ProjectBundleModule,
+    PROJECT_BUNDLE_SEPARATOR,
 };
 
 const EMBEDDED_NATIVE_IMAGE: &str = include_str!("../src/stage1.native.image.json");
@@ -31,6 +33,121 @@ const PROMOTED_COMPILER_SOURCE_EXPORT_CACHE: &str =
 const EMBEDDED_IMAGE_MARKER: &[u8] = b"CLASP_EMBEDDED_IMAGE_V1\0";
 const NATIVE_IMAGE_SECTION_WORKER_STACK_BYTES: usize = 32 * 1024 * 1024;
 const CLASPC_MAIN_STACK_BYTES: usize = 64 * 1024 * 1024;
+const CLASPC_MEMORY_LIMIT_ENV: &str = "CLASP_CLASPC_MEMORY_MB";
+const CLASPC_DISABLE_MEMORY_LIMIT_ENV: &str = "CLASP_CLASPC_DISABLE_MEMORY_LIMIT";
+const DEFAULT_CLASPC_MEMORY_LIMIT_MB: u64 = 8 * 1024;
+const BYTES_PER_MIB: u64 = 1024 * 1024;
+
+#[cfg(target_os = "linux")]
+const RLIMIT_AS: c_int = 9;
+
+#[cfg(target_os = "linux")]
+const RLIM_INFINITY: u64 = u64::MAX;
+
+#[cfg(target_os = "linux")]
+#[repr(C)]
+struct RLimit {
+    rlim_cur: u64,
+    rlim_max: u64,
+}
+
+#[cfg(target_os = "linux")]
+extern "C" {
+    fn getrlimit(resource: c_int, rlim: *mut RLimit) -> c_int;
+    fn setrlimit(resource: c_int, rlim: *const RLimit) -> c_int;
+}
+
+fn env_value_is_enabled(value: Option<&str>) -> bool {
+    match value.map(str::trim) {
+        Some("1") => true,
+        Some(value) => {
+            value.eq_ignore_ascii_case("true")
+                || value.eq_ignore_ascii_case("yes")
+                || value.eq_ignore_ascii_case("on")
+        }
+        None => false,
+    }
+}
+
+fn claspc_memory_limit_mb_from_env_values(
+    memory_limit_value: Option<&str>,
+    disable_value: Option<&str>,
+) -> Option<u64> {
+    if env_value_is_enabled(disable_value) {
+        return None;
+    }
+
+    match memory_limit_value.map(str::trim) {
+        Some("0") => None,
+        Some(value) if !value.is_empty() => value
+            .parse::<u64>()
+            .ok()
+            .filter(|limit| *limit > 0)
+            .or(Some(DEFAULT_CLASPC_MEMORY_LIMIT_MB)),
+        _ => Some(DEFAULT_CLASPC_MEMORY_LIMIT_MB),
+    }
+}
+
+fn claspc_memory_limit_mb() -> Option<u64> {
+    let memory_limit_value = env::var(CLASPC_MEMORY_LIMIT_ENV).ok();
+    let disable_value = env::var(CLASPC_DISABLE_MEMORY_LIMIT_ENV).ok();
+    claspc_memory_limit_mb_from_env_values(
+        memory_limit_value.as_deref(),
+        disable_value.as_deref(),
+    )
+}
+
+#[cfg(target_os = "linux")]
+fn install_claspc_memory_limit_mb(limit_mb: u64) -> Result<(), String> {
+    let requested_bytes = limit_mb
+        .checked_mul(BYTES_PER_MIB)
+        .ok_or_else(|| format!("{CLASPC_MEMORY_LIMIT_ENV} value `{limit_mb}` is too large"))?;
+    let mut current = RLimit {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
+    let get_status = unsafe { getrlimit(RLIMIT_AS, &mut current as *mut RLimit) };
+    if get_status != 0 {
+        return Err(format!(
+            "failed to inspect current address-space limit: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+
+    let mut effective_bytes = requested_bytes;
+    if current.rlim_cur != RLIM_INFINITY {
+        effective_bytes = effective_bytes.min(current.rlim_cur);
+    }
+    if current.rlim_max != RLIM_INFINITY {
+        effective_bytes = effective_bytes.min(current.rlim_max);
+    }
+
+    let limit = RLimit {
+        rlim_cur: effective_bytes,
+        rlim_max: effective_bytes,
+    };
+    let set_status = unsafe { setrlimit(RLIMIT_AS, &limit as *const RLimit) };
+    if set_status != 0 {
+        return Err(format!(
+            "failed to apply {CLASPC_MEMORY_LIMIT_ENV}={limit_mb}: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn install_claspc_memory_limit_mb(_limit_mb: u64) -> Result<(), String> {
+    Ok(())
+}
+
+fn install_claspc_memory_limit() -> Result<(), String> {
+    match claspc_memory_limit_mb() {
+        Some(limit_mb) => install_claspc_memory_limit_mb(limit_mb),
+        None => Ok(()),
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Command {
@@ -262,6 +379,7 @@ const NATIVE_IMAGE_CONSTRUCTOR_DECLS_EXPORT: &str = "nativeImageProjectConstruct
 const NATIVE_IMAGE_DECL_MODULE_PLAN_EXPORT: &str = "nativeImageProjectDeclModulePlanText";
 const NATIVE_IMAGE_DECL_NAMES_EXPORT: &str = "nativeImageProjectDeclNamesText";
 const NATIVE_IMAGE_MODULE_DECLS_EXPORT: &str = "nativeImageProjectModuleDeclsText";
+const NATIVE_IMAGE_MODULE_NAMED_DECLS_EXPORT: &str = "nativeImageProjectModuleNamedDeclsText";
 const NATIVE_IMAGE_NAMED_DECLS_EXPORT: &str = "nativeImageProjectNamedDeclsText";
 const NATIVE_IMAGE_PLAN_EXPORT: &str = "nativeImageProjectPlanText";
 const NATIVE_IMAGE_PLAN_FIELD_SEPARATOR: &str = "\n-- CLASP_NATIVE_IMAGE_PLAN_FIELD --\n";
@@ -280,14 +398,22 @@ const NATIVE_IMAGE_FALLBACK_PLAN_EXPORTS: [(&str, &str); 7] = [
     ("constructor_decls", NATIVE_IMAGE_CONSTRUCTOR_DECLS_EXPORT),
     ("decl_names", NATIVE_IMAGE_DECL_NAMES_EXPORT),
 ];
-const NATIVE_IMAGE_CACHE_VERSION: &str = "native-image-cache-v6";
-const NATIVE_IMAGE_BUILD_PLAN_CACHE_VERSION: &str = "native-image-build-plan-cache-v6";
-const NATIVE_IMAGE_DECL_MODULE_CACHE_VERSION: &str = "native-image-decl-module-cache-v1";
+const NATIVE_IMAGE_CACHE_VERSION: &str = "native-image-cache-v7";
+const NATIVE_IMAGE_BUILD_PLAN_CACHE_VERSION: &str = "native-image-build-plan-cache-v7";
+const NATIVE_IMAGE_DECL_MODULE_CACHE_VERSION: &str = "native-image-decl-module-cache-v2";
+const NATIVE_IMAGE_DECL_CHUNK_CACHE_VERSION: &str = "native-image-decl-chunk-cache-v2";
 const MODULE_SUMMARY_CACHE_VERSION: &str = "module-summary-cache-v3";
 const SOURCE_EXPORT_CACHE_VERSION: &str = "source-export-cache-v2";
 const RUN_BINARY_CACHE_VERSION: &str = "run-binary-cache-v2";
+const RUN_BINARY_CACHE_DIR_ENV: &str = "CLASP_NATIVE_RUN_BINARY_CACHE_DIR";
+const RUN_BINARY_CACHE_MAX_BYTES_ENV: &str = "CLASP_NATIVE_RUN_BINARY_CACHE_MAX_BYTES";
+const RUN_BINARY_CACHE_MAX_MB_ENV: &str = "CLASP_NATIVE_RUN_BINARY_CACHE_MAX_MB";
+const DISABLE_RUN_BINARY_CACHE_PRUNE_ENV: &str = "CLASP_NATIVE_DISABLE_RUN_BINARY_CACHE_PRUNE";
+const DEFAULT_RUN_BINARY_CACHE_MAX_MB: u64 = 2048;
 const DEFAULT_NATIVE_IMAGE_SECTION_JOBS: usize = 8;
 const DEFAULT_NATIVE_IMAGE_MONOLITHIC_DECL_THRESHOLD: usize = 4096;
+const DEFAULT_NATIVE_IMAGE_MODULE_DECL_CHUNK_SIZE: usize = 8;
+const DEFAULT_NATIVE_IMAGE_LEGACY_NAMED_DECL_CHUNK_SIZE: usize = 8;
 const DEFAULT_SHARED_CACHE_ROOT: &str = "/tmp/clasp-nix-cache";
 
 static PROMOTED_MODULE_SUMMARY_ENTRIES: OnceLock<HashMap<String, PromotedModuleSummaryEntry>> =
@@ -440,6 +566,16 @@ fn print_json_error(message: &str) {
 fn trace_native_cache(message: &str) {
     if env::var("CLASP_NATIVE_TRACE_CACHE").is_ok() {
         eprintln!("[claspc-cache] {message}");
+    }
+}
+
+fn trace_native_cache_timing(label: &str, started: Instant) {
+    if env::var("CLASP_NATIVE_TRACE_CACHE").is_ok() {
+        trace_native_cache(&format!(
+            "timing {} elapsed_ms={}",
+            label,
+            started.elapsed().as_millis()
+        ));
     }
 }
 
@@ -881,7 +1017,9 @@ fn compiler_builtin_reference_names() -> &'static [&'static str] {
         "runCommandJson",
         "runCommandTimeoutJson",
         "spawnCommandJson",
+        "spawnCommandWithLimitsJson",
         "watchCommandJson",
+        "watchCommandWithLimitsJson",
         "awaitWatchedProcessJson",
         "awaitWatchedProcessTimeoutJson",
         "writeFile",
@@ -1616,6 +1754,39 @@ fn monolithic_decl_threshold() -> usize {
         .unwrap_or(DEFAULT_NATIVE_IMAGE_MONOLITHIC_DECL_THRESHOLD)
 }
 
+fn module_decl_chunk_size() -> usize {
+    env::var("CLASP_NATIVE_IMAGE_MODULE_DECL_CHUNK_SIZE")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(DEFAULT_NATIVE_IMAGE_MODULE_DECL_CHUNK_SIZE)
+}
+
+fn legacy_named_decl_chunk_size() -> usize {
+    env::var("CLASP_NATIVE_IMAGE_LEGACY_NAMED_DECL_CHUNK_SIZE")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(DEFAULT_NATIVE_IMAGE_LEGACY_NAMED_DECL_CHUNK_SIZE)
+}
+
+fn effective_module_decl_chunk_size(
+    configured_chunk_size: usize,
+    legacy_chunk_size: usize,
+    supports_module_named_decl_export: bool,
+) -> Option<usize> {
+    if supports_module_named_decl_export {
+        if configured_chunk_size == 0 {
+            None
+        } else {
+            Some(configured_chunk_size)
+        }
+    } else if configured_chunk_size == 0 {
+        Some(legacy_chunk_size)
+    } else {
+        Some(configured_chunk_size.min(legacy_chunk_size).max(1))
+    }
+}
+
 fn monolithic_bundle_bytes_threshold() -> Option<usize> {
     env::var("CLASP_NATIVE_IMAGE_MONOLITHIC_BUNDLE_BYTES_THRESHOLD")
         .ok()
@@ -1949,9 +2120,32 @@ fn top_level_definition_name(line: &str) -> Option<String> {
 }
 
 fn brace_delta(text: &str) -> isize {
-    let opens = text.bytes().filter(|byte| *byte == b'{').count() as isize;
-    let closes = text.bytes().filter(|byte| *byte == b'}').count() as isize;
-    opens - closes
+    let mut delta = 0isize;
+    let mut in_string = false;
+    let mut escaped = false;
+
+    for byte in text.bytes() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if in_string {
+            if byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match byte {
+            b'"' => in_string = true,
+            b'{' => delta += 1,
+            b'}' => delta -= 1,
+            _ => {}
+        }
+    }
+
+    delta
 }
 
 fn conservative_module_interface_fingerprint(source: &str) -> String {
@@ -3166,56 +3360,39 @@ fn load_cached_or_execute_native_image_build_plan(
     bundle_build: &ProjectBundleBuild,
 ) -> Result<(String, NativeImageProjectPlan, NativeImageDeclModulePlan), String> {
     if let Some(cached) = read_cached_native_image_build_plan(image_path, bundle_build) {
-        if cached.modules.len() == bundle_build.modules.len() {
-            let mut cache_matches = true;
-            for (current_module, cached_module) in bundle_build.modules.iter().zip(cached.modules.iter()) {
-                if current_module.canonical_path != cached_module.canonical_path
-                    || current_module.module_name != cached_module.module_name
-                {
-                    cache_matches = false;
-                    break;
-                }
-                let current_interface_fingerprint =
-                    if current_module.source_fingerprint == cached_module.source_fingerprint {
-                        cached_module.interface_fingerprint.clone()
-                    } else {
-                        let current_conservative_fingerprint =
-                            match source_module_conservative_interface_fingerprint(current_module) {
-                                Ok(value) => value,
-                                Err(_) => {
-                                    cache_matches = false;
-                                    break;
-                                }
-                            };
-                        if current_conservative_fingerprint == cached_module.conservative_interface_fingerprint {
-                            cached_module.interface_fingerprint.clone()
-                        } else {
-                            cache_matches = false;
-                            break;
-                        }
-                    };
-                if current_interface_fingerprint != cached_module.interface_fingerprint {
-                    cache_matches = false;
-                    break;
-                }
+        if cached_native_image_build_plan_matches_current_modules(&cached, bundle_build) {
+            if let Ok((plan, decl_module_plan)) =
+                parse_native_image_project_build_plan(&cached.build_plan_text)
+            {
+                return Ok((cached.build_plan_text, plan, decl_module_plan));
             }
-
-            if cache_matches {
-                if let Ok((plan, decl_module_plan)) =
-                    parse_native_image_project_build_plan(&cached.build_plan_text)
-                {
-                    return Ok((cached.build_plan_text, plan, decl_module_plan));
-                }
-            } else if relaxed_native_image_build_plan_cache() {
-                if let Ok((plan, decl_module_plan)) =
-                    parse_native_image_project_build_plan(&cached.build_plan_text)
-                {
-                    trace_native_cache(
-                        "build-plan relaxed-hit; reusing cached surface plan after interface-only mismatch",
-                    );
-                    return Ok((cached.build_plan_text, plan, decl_module_plan));
-                }
+        } else if cached.modules.len() == bundle_build.modules.len() && relaxed_native_image_build_plan_cache() {
+            if let Ok((plan, decl_module_plan)) =
+                parse_native_image_project_build_plan(&cached.build_plan_text)
+            {
+                trace_native_cache(
+                    "build-plan relaxed-hit; reusing cached surface plan after interface-only mismatch",
+                );
+                return Ok((cached.build_plan_text, plan, decl_module_plan));
             }
+        }
+    } else if let Some((candidate_path, cached)) =
+        read_indexed_matching_native_image_build_plan(image_path, bundle_build)
+    {
+        if let Ok((plan, decl_module_plan)) =
+            parse_native_image_project_build_plan(&cached.build_plan_text)
+        {
+            trace_native_cache(&format!(
+                "build-plan hit path={} reuse=interface-index",
+                candidate_path.display()
+            ));
+            write_cached_native_image_build_plan(
+                image_path,
+                bundle_build,
+                &cached.build_plan_text,
+                &decl_module_plan,
+            );
+            return Ok((cached.build_plan_text, plan, decl_module_plan));
         }
     }
 
@@ -3310,6 +3487,25 @@ fn split_decl_name_chunks(decl_names: &[String], max_jobs: usize) -> Vec<String>
         .collect()
 }
 
+fn split_decl_name_count_chunks(decl_names_text: &str, max_names_per_chunk: usize) -> Vec<String> {
+    let decl_names: Vec<String> = decl_names_text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(ToOwned::to_owned)
+        .collect();
+    if decl_names.is_empty() {
+        return Vec::new();
+    }
+    if max_names_per_chunk == 0 || decl_names.len() <= max_names_per_chunk {
+        return vec![decl_names.join("\n")];
+    }
+    decl_names
+        .chunks(max_names_per_chunk)
+        .map(|chunk| chunk.join("\n"))
+        .collect()
+}
+
 fn count_decl_names(decl_names_text: &str) -> usize {
     decl_names_text
         .lines()
@@ -3320,6 +3516,10 @@ fn count_decl_names(decl_names_text: &str) -> usize {
 
 fn should_fallback_to_monolithic_decls(error: &str) -> bool {
     error.contains("runtime failed to execute native compiler export")
+}
+
+fn should_fallback_to_module_named_decls_export(error: &str) -> bool {
+    error.contains(NATIVE_IMAGE_MODULE_NAMED_DECLS_EXPORT)
 }
 
 fn execute_parallel_decl_section_export(
@@ -3429,10 +3629,7 @@ fn execute_project_module_decls_export(
     bundle: &str,
     module_name: &str,
 ) -> Result<String, String> {
-    if env::var("CLASP_NATIVE_IMAGE_MODULE_DECL_FRESH_PROCESS")
-        .map(|value| value != "0" && value != "false")
-        .unwrap_or(false)
-    {
+    if native_image_module_decl_fresh_process_enabled() {
         return execute_project_export_args_fresh_process(
             image_path,
             NATIVE_IMAGE_MODULE_DECLS_EXPORT,
@@ -3459,6 +3656,295 @@ fn execute_project_module_decls_export_local_only(
     )
 }
 
+fn native_image_module_decl_fresh_process_enabled() -> bool {
+    env::var("CLASP_NATIVE_IMAGE_MODULE_DECL_FRESH_PROCESS")
+        .map(|value| value != "0" && value != "false")
+        .unwrap_or(false)
+}
+
+fn execute_project_export_args_for_decl_cache(
+    image_path: &str,
+    export_name: &str,
+    args: &[String],
+) -> Result<String, String> {
+    let started = Instant::now();
+    let use_fresh_process = native_image_module_decl_fresh_process_enabled();
+    let result = if use_fresh_process {
+        execute_project_export_args_fresh_process(image_path, export_name, args)
+    } else {
+        execute_project_export_args(image_path, export_name, args)
+    };
+    let mode = if use_fresh_process { "fresh-process" } else { "in-process" };
+    let status = if result.is_ok() { "ok" } else { "err" };
+    trace_native_cache_timing(
+        &format!("decl-cache-export export={export_name} mode={mode} status={status}"),
+        started,
+    );
+    result
+}
+
+fn native_image_declares_export(image_path: &str, export_name: &str) -> bool {
+    let Some(image_text) = cached_file_text(Path::new(image_path)) else {
+        return true;
+    };
+    let Ok(image_json) = serde_json::from_str::<serde_json::Value>(&image_text) else {
+        return true;
+    };
+    image_json
+        .get("exports")
+        .and_then(serde_json::Value::as_array)
+        .map(|exports| {
+            exports
+                .iter()
+                .any(|export| export.as_str() == Some(export_name))
+        })
+        .unwrap_or(true)
+}
+
+fn execute_project_named_decl_chunk_export(
+    image_path: &str,
+    bundle: &str,
+    module_name: &str,
+    chunk: &str,
+    use_module_named_decl_export: bool,
+) -> Result<(String, bool), String> {
+    let chunk_decl_count = count_decl_names(chunk);
+    let first_decl_name = chunk
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or("<empty>");
+    trace_native_cache(&format!(
+        "decl-chunk export module={} decl_count={} first={} module_named_export={}",
+        module_name, chunk_decl_count, first_decl_name, use_module_named_decl_export
+    ));
+    if use_module_named_decl_export {
+        return match execute_project_export_args_for_decl_cache(
+            image_path,
+            NATIVE_IMAGE_MODULE_NAMED_DECLS_EXPORT,
+            &[bundle.to_owned(), module_name.to_owned(), chunk.to_owned()],
+        ) {
+            Ok(value) => Ok((value, true)),
+            Err(message) if should_fallback_to_module_named_decls_export(&message) => {
+                trace_native_cache(&format!(
+                    "decl-chunk module-named fallback-to-named module={} reason={}",
+                    module_name, message
+                ));
+                execute_project_export_args_for_decl_cache(
+                    image_path,
+                    NATIVE_IMAGE_NAMED_DECLS_EXPORT,
+                    &[bundle.to_owned(), chunk.to_owned()],
+                )
+                .map(|value| (value, false))
+            }
+            Err(message) => Err(message),
+        };
+    }
+
+    execute_project_export_args_for_decl_cache(
+        image_path,
+        NATIVE_IMAGE_NAMED_DECLS_EXPORT,
+        &[bundle.to_owned(), chunk.to_owned()],
+    )
+    .map(|value| (value, false))
+}
+
+fn execute_project_named_decl_chunks_export(
+    image_path: &str,
+    bundle: &str,
+    module_name: &str,
+    module_source_fingerprint: &str,
+    module_context_fingerprint: &str,
+    decl_names_text: &str,
+    max_jobs: usize,
+) -> Result<Option<String>, String> {
+    let decl_count = count_decl_names(decl_names_text);
+    if decl_count == 0 {
+        return Ok(None);
+    }
+
+    let mut use_module_named_decl_export =
+        native_image_declares_export(image_path, NATIVE_IMAGE_MODULE_NAMED_DECLS_EXPORT);
+    let Some(max_names_per_chunk) = effective_module_decl_chunk_size(
+        module_decl_chunk_size(),
+        legacy_named_decl_chunk_size(),
+        use_module_named_decl_export,
+    ) else {
+        return Ok(None);
+    };
+    if !use_module_named_decl_export {
+        trace_native_cache(&format!(
+            "decl-module named-chunks scoped-fallback module={} reason=missing-module-named-export",
+            module_name
+        ));
+    }
+    let export_bundle = bundle;
+
+    trace_native_cache(&format!(
+        "decl-module named-chunks decl_count={} chunk_size={}",
+        decl_count, max_names_per_chunk
+    ));
+    let chunks = split_decl_name_count_chunks(decl_names_text, max_names_per_chunk);
+    let mut sections: Vec<Option<String>> = chunks.iter().map(|_| None).collect();
+    let mut uncached_work = Vec::new();
+    for (index, chunk) in chunks.iter().enumerate() {
+        if let Some(cached) = read_cached_native_image_decl_chunk(
+            image_path,
+            module_context_fingerprint,
+            module_name,
+            module_source_fingerprint,
+            chunk,
+        ) {
+            sections[index] = Some(cached);
+        } else {
+            uncached_work.push((index, chunk.clone()));
+        }
+    }
+
+    let worker_count = max_jobs.max(1);
+    if worker_count <= 1 || uncached_work.len() <= 1 {
+        for (index, chunk) in uncached_work {
+            let (decl_text, still_use_module_named_decl_export) = execute_project_named_decl_chunk_export(
+                image_path,
+                export_bundle,
+                module_name,
+                &chunk,
+                use_module_named_decl_export,
+            )?;
+            use_module_named_decl_export = still_use_module_named_decl_export;
+            write_cached_native_image_decl_chunk(
+                image_path,
+                module_context_fingerprint,
+                module_name,
+                module_source_fingerprint,
+                &chunk,
+                &decl_text,
+            );
+            sections[index] = Some(decl_text);
+        }
+    } else {
+        let mut start_index = 0;
+        if let Some((index, chunk)) = uncached_work.first().cloned() {
+            let (decl_text, still_use_module_named_decl_export) = execute_project_named_decl_chunk_export(
+                image_path,
+                export_bundle,
+                module_name,
+                &chunk,
+                use_module_named_decl_export,
+            )?;
+            use_module_named_decl_export = still_use_module_named_decl_export;
+            write_cached_native_image_decl_chunk(
+                image_path,
+                module_context_fingerprint,
+                module_name,
+                module_source_fingerprint,
+                &chunk,
+                &decl_text,
+            );
+            sections[index] = Some(decl_text);
+            start_index = 1;
+        }
+
+        for chunk_group in uncached_work[start_index..].chunks(worker_count) {
+            let mut handles = Vec::new();
+            for (index, chunk) in chunk_group.iter().cloned() {
+                let worker_image_path = image_path.to_owned();
+                let worker_bundle = export_bundle.to_owned();
+                let worker_module_name = module_name.to_owned();
+                let worker_chunk = chunk.clone();
+                let worker_use_module_named_decl_export = use_module_named_decl_export;
+                handles.push((
+                    index,
+                    thread::Builder::new()
+                        .stack_size(NATIVE_IMAGE_SECTION_WORKER_STACK_BYTES)
+                        .spawn(move || {
+                            execute_project_named_decl_chunk_export(
+                                &worker_image_path,
+                                &worker_bundle,
+                                &worker_module_name,
+                                &worker_chunk,
+                                worker_use_module_named_decl_export,
+                            )
+                            .map(|(decl_text, still_use_module_named_decl_export)| {
+                                (worker_chunk, decl_text, still_use_module_named_decl_export)
+                            })
+                        })
+                        .map_err(|err| format!("failed to spawn native image decl chunk worker: {err}"))?,
+                ));
+            }
+
+            for (index, handle) in handles {
+                let (chunk, decl_text, still_use_module_named_decl_export) = handle
+                    .join()
+                    .map_err(|_| "parallel native image decl chunk worker panicked".to_owned())??;
+                if !still_use_module_named_decl_export {
+                    use_module_named_decl_export = false;
+                }
+                write_cached_native_image_decl_chunk(
+                    image_path,
+                    module_context_fingerprint,
+                    module_name,
+                    module_source_fingerprint,
+                    &chunk,
+                    &decl_text,
+                );
+                sections[index] = Some(decl_text);
+            }
+        }
+    }
+
+    let merged_sections: Vec<String> = sections
+        .into_iter()
+        .map(|decl_text| decl_text.unwrap_or_else(|| "[]".to_owned()))
+        .collect();
+    merge_json_arrays(&merged_sections).map(Some)
+}
+
+fn execute_project_module_or_named_decls_export(
+    image_path: &str,
+    bundle: &str,
+    module_name: &str,
+    module_source_fingerprint: &str,
+    module_context_fingerprint: &str,
+    decl_names_text: &str,
+    max_jobs: usize,
+) -> Result<String, String> {
+    match execute_project_named_decl_chunks_export(
+        image_path,
+        bundle,
+        module_name,
+        module_source_fingerprint,
+        module_context_fingerprint,
+        decl_names_text,
+        max_jobs,
+    )? {
+        Some(decls) => Ok(decls),
+        None => execute_project_module_decls_export(image_path, bundle, module_name),
+    }
+}
+
+fn execute_project_module_or_named_decls_export_local_only(
+    image_path: &str,
+    bundle: &str,
+    module_name: &str,
+    module_source_fingerprint: &str,
+    module_context_fingerprint: &str,
+    decl_names_text: &str,
+) -> Result<String, String> {
+    match execute_project_named_decl_chunks_export(
+        image_path,
+        bundle,
+        module_name,
+        module_source_fingerprint,
+        module_context_fingerprint,
+        decl_names_text,
+        1,
+    )? {
+        Some(decls) => Ok(decls),
+        None => execute_project_module_decls_export_local_only(image_path, bundle, module_name),
+    }
+}
+
 fn temp_exec_image_path(label: &str, extension: &str) -> PathBuf {
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -3475,6 +3961,7 @@ fn execute_project_export_args_fresh_process(
     export_name: &str,
     args: &[String],
 ) -> Result<String, String> {
+    let started = Instant::now();
     let current_exe =
         env::current_exe().map_err(|err| format!("failed to resolve current claspc binary: {err}"))?;
     let input_path = temp_exec_image_path("exec-image-input", "clasp-bundle");
@@ -3523,6 +4010,8 @@ fn execute_project_export_args_fresh_process(
         })
     })();
 
+    let status = if result.is_ok() { "ok" } else { "err" };
+    trace_native_cache_timing(&format!("fresh-export export={export_name} status={status}"), started);
     let _ = fs::remove_file(&input_path);
     let _ = fs::remove_file(&output_path);
     result
@@ -3561,6 +4050,8 @@ fn execute_parallel_module_decl_section_export(
     for chunk in decl_plan.modules.chunks(max_jobs.max(1)) {
         let mut group_results: Vec<Option<String>> = chunk.iter().map(|_| None).collect();
         let mut uncached_work = Vec::new();
+        let supports_module_named_decl_export =
+            native_image_declares_export(image_path, NATIVE_IMAGE_MODULE_NAMED_DECLS_EXPORT);
 
         for (index, module_entry) in chunk.iter().enumerate() {
             if module_entry.decl_names_text.trim().is_empty() {
@@ -3627,6 +4118,7 @@ fn execute_parallel_module_decl_section_export(
             uncached_work.push((
                 index,
                 module_entry.module_name.clone(),
+                module_entry.decl_names_text.clone(),
                 module_source_fingerprint.to_owned(),
                 module_context_fingerprint,
             ));
@@ -3639,7 +4131,12 @@ fn execute_parallel_module_decl_section_export(
                 "decl-module summary-plan needed uncached={}",
                 uncached_work.len()
             ));
+            let summary_started = Instant::now();
             summary_plan_cache = Some(plan_incremental_project_summary(bundle_build)?);
+            trace_native_cache_timing(
+                &format!("decl-module summary-plan uncached={}", uncached_work.len()),
+                summary_started,
+            );
         } else {
             trace_native_cache(&format!(
                 "decl-module summary-plan reused uncached={}",
@@ -3648,8 +4145,8 @@ fn execute_parallel_module_decl_section_export(
         };
 
         if max_jobs <= 1 || uncached_work.len() <= 1 {
-            for (index, module_name, source_fingerprint, module_context_fingerprint) in uncached_work {
-                let module_bundle = summary_plan_cache
+            for (index, module_name, decl_names_text, source_fingerprint, module_context_fingerprint) in uncached_work {
+                let module_plan = summary_plan_cache
                     .as_ref()
                     .and_then(|plan| plan.modules.get(&module_name))
                     .ok_or_else(|| {
@@ -3657,11 +4154,37 @@ fn execute_parallel_module_decl_section_export(
                             "internal error: missing scoped bundle plan for project module `{}`",
                             module_name
                         )
-                    })?
-                    .scoped_bundle
-                    .clone();
+                    })?;
                 trace_native_cache(&format!("decl-module export module={module_name} mode=single"));
-                let decl_text = execute_project_module_decls_export(image_path, &module_bundle, &module_name)?;
+                let export_started = Instant::now();
+                let decl_text = if supports_module_named_decl_export {
+                    execute_project_module_or_named_decls_export(
+                        image_path,
+                        &module_plan.scoped_bundle,
+                        &module_name,
+                        &source_fingerprint,
+                        &module_context_fingerprint,
+                        &decl_names_text,
+                        max_jobs,
+                    )?
+                } else {
+                    trace_native_cache(&format!(
+                        "decl-module old-image reduced-named export module={module_name}"
+                    ));
+                    execute_project_module_or_named_decls_export(
+                        image_path,
+                        &module_plan.scoped_bundle,
+                        &module_name,
+                        &source_fingerprint,
+                        &module_context_fingerprint,
+                        &decl_names_text,
+                        max_jobs,
+                    )?
+                };
+                trace_native_cache_timing(
+                    &format!("decl-module export module={module_name} mode=single"),
+                    export_started,
+                );
                 write_cached_native_image_decl_module(
                     image_path,
                     &module_context_fingerprint,
@@ -3673,8 +4196,8 @@ fn execute_parallel_module_decl_section_export(
             }
         } else {
             let mut handles = Vec::new();
-            for (index, module_name, source_fingerprint, module_context_fingerprint) in uncached_work {
-                let module_bundle = summary_plan_cache
+            for (index, module_name, decl_names_text, source_fingerprint, module_context_fingerprint) in uncached_work {
+                let module_plan = summary_plan_cache
                     .as_ref()
                     .and_then(|plan| plan.modules.get(&module_name))
                     .ok_or_else(|| {
@@ -3682,22 +4205,44 @@ fn execute_parallel_module_decl_section_export(
                             "internal error: missing scoped bundle plan for project module `{}`",
                             module_name
                         )
-                    })?
-                    .scoped_bundle
-                    .clone();
+                    })?;
+                let scoped_bundle = module_plan.scoped_bundle.clone();
                 let worker_image_path = image_path.to_owned();
+                let worker_supports_module_named_decl_export = supports_module_named_decl_export;
                 trace_native_cache(&format!("decl-module export module={module_name} mode=worker"));
                 handles.push((
                     index,
                     thread::Builder::new()
                         .stack_size(NATIVE_IMAGE_SECTION_WORKER_STACK_BYTES)
                         .spawn(move || {
-                            execute_project_module_decls_export_local_only(
-                                &worker_image_path,
-                                &module_bundle,
-                                &module_name,
-                            )
-                            .map(|decl_text| {
+                            let export_started = Instant::now();
+                            let decl_text = if worker_supports_module_named_decl_export {
+                                execute_project_module_or_named_decls_export_local_only(
+                                    &worker_image_path,
+                                    &scoped_bundle,
+                                    &module_name,
+                                    &source_fingerprint,
+                                    &module_context_fingerprint,
+                                    &decl_names_text,
+                                )?
+                            } else {
+                                trace_native_cache(&format!(
+                                    "decl-module old-image reduced-named export module={module_name}"
+                                ));
+                                execute_project_module_or_named_decls_export_local_only(
+                                    &worker_image_path,
+                                    &scoped_bundle,
+                                    &module_name,
+                                    &source_fingerprint,
+                                    &module_context_fingerprint,
+                                    &decl_names_text,
+                                )?
+                            };
+                            trace_native_cache_timing(
+                                &format!("decl-module export module={module_name} mode=worker"),
+                                export_started,
+                            );
+                            Ok::<_, String>({
                                 // Persist inside the worker so an outer timeout still preserves
                                 // completed module work even if another worker blocks the join.
                                 write_cached_native_image_decl_module(
@@ -3904,14 +4449,17 @@ fn harden_native_image_runtime_bindings(output: Vec<u8>) -> Vec<u8> {
 }
 
 fn execute_parallel_native_image_export(image_path: &str, bundle_build: &ProjectBundleBuild) -> Result<Vec<u8>, String> {
+    let total_started = Instant::now();
     if let Some(cached) = read_cached_native_image(image_path, &bundle_build.bundle) {
         let image_bytes = harden_native_image_runtime_bindings(cached);
         write_cached_native_image(image_path, &bundle_build.bundle, &image_bytes);
+        trace_native_cache_timing("native-image total status=cache-hit", total_started);
         return Ok(image_bytes);
     }
     if let Some(cached) = read_cached_source_export(image_path, NATIVE_IMAGE_MONOLITHIC_EXPORT, &bundle_build.bundle) {
         let image_bytes = harden_native_image_runtime_bindings(cached);
         write_cached_native_image(image_path, &bundle_build.bundle, &image_bytes);
+        trace_native_cache_timing("native-image total status=source-export-hit", total_started);
         return Ok(image_bytes);
     }
 
@@ -3921,11 +4469,13 @@ fn execute_parallel_native_image_export(image_path: &str, bundle_build: &Project
                 execute_project_export(image_path, NATIVE_IMAGE_MONOLITHIC_EXPORT, &bundle_build.bundle)?.into_bytes(),
             );
             write_cached_native_image(image_path, &bundle_build.bundle, &image_bytes);
+            trace_native_cache_timing("native-image total status=monolithic-threshold", total_started);
             return Ok(image_bytes);
         }
     }
 
     let max_jobs = default_native_image_jobs();
+    let build_plan_started = Instant::now();
     let (_build_plan_text, plan, decl_module_plan) =
         match load_cached_or_execute_native_image_build_plan(image_path, bundle_build) {
         Ok(value) => value,
@@ -3955,7 +4505,9 @@ fn execute_parallel_native_image_export(image_path: &str, bundle_build: &Project
         }
         Err(message) => return Err(message),
     };
+    trace_native_cache_timing("native-image build-plan", build_plan_started);
 
+    let decls_started = Instant::now();
     let decls = if !decl_module_plan.modules.is_empty() {
         match execute_parallel_module_decl_section_export(
             image_path,
@@ -3992,7 +4544,12 @@ fn execute_parallel_native_image_export(image_path: &str, bundle_build: &Project
             Err(message) => return Err(message),
         }
     };
+    trace_native_cache_timing(
+        &format!("native-image decls module_count={}", decl_module_plan.modules.len()),
+        decls_started,
+    );
 
+    let assemble_started = Instant::now();
     let plan = native_image_plan_with_decl_exports(plan, &decls);
     let sections = NativeImageSections {
         module_name: plan.module_name,
@@ -4006,6 +4563,8 @@ fn execute_parallel_native_image_export(image_path: &str, bundle_build: &Project
 
     let image_bytes = harden_native_image_runtime_bindings(assemble_native_image_text(&sections).into_bytes());
     write_cached_native_image(image_path, &bundle_build.bundle, &image_bytes);
+    trace_native_cache_timing("native-image assemble-write", assemble_started);
+    trace_native_cache_timing("native-image total status=rebuilt", total_started);
     Ok(image_bytes)
 }
 
@@ -4045,8 +4604,8 @@ mod tests {
         native_route_error_http_response, native_route_info_from_image, parse_cli,
         plan_incremental_project_summary, read_cached_native_image,
         record_field_separator_parse_diagnostic_for_source, replace_extension,
-        semantic_summary_output, split_decl_name_chunks, write_cached_native_image, Command,
-        NativeImageDeclModuleEntry, NativeImageDeclModulePlan, ProjectBundleBuild,
+        semantic_summary_output, split_decl_name_chunks, split_decl_name_count_chunks,
+        write_cached_native_image, Command, NativeImageDeclModuleEntry, NativeImageDeclModulePlan, ProjectBundleBuild,
         ProjectBundleModule, PROJECT_BUNDLE_SEPARATOR,
     };
     use std::fs;
@@ -4059,6 +4618,44 @@ mod tests {
             .expect("system time before unix epoch")
             .as_nanos();
         std::env::temp_dir().join(format!("clasp-claspc-{name}-{}-{stamp}", std::process::id()))
+    }
+
+    #[test]
+    fn claspc_memory_limit_defaults_to_a_hard_cap() {
+        assert_eq!(
+            super::claspc_memory_limit_mb_from_env_values(None, None),
+            Some(super::DEFAULT_CLASPC_MEMORY_LIMIT_MB)
+        );
+        assert_eq!(
+            super::claspc_memory_limit_mb_from_env_values(Some("8192"), None),
+            Some(8192)
+        );
+        assert_eq!(
+            super::claspc_memory_limit_mb_from_env_values(Some("0"), None),
+            None
+        );
+        assert_eq!(
+            super::claspc_memory_limit_mb_from_env_values(Some("8192"), Some("1")),
+            None
+        );
+        assert_eq!(
+            super::claspc_memory_limit_mb_from_env_values(Some("nope"), None),
+            Some(super::DEFAULT_CLASPC_MEMORY_LIMIT_MB)
+        );
+    }
+
+    #[test]
+    fn module_decl_fresh_process_defaults_to_in_process() {
+        let _env_lock = super::tool_support::TEST_ENV_LOCK.lock().expect("lock test env");
+        std::env::remove_var("CLASP_NATIVE_IMAGE_MODULE_DECL_FRESH_PROCESS");
+        assert!(!super::native_image_module_decl_fresh_process_enabled());
+
+        std::env::set_var("CLASP_NATIVE_IMAGE_MODULE_DECL_FRESH_PROCESS", "1");
+        assert!(super::native_image_module_decl_fresh_process_enabled());
+
+        std::env::set_var("CLASP_NATIVE_IMAGE_MODULE_DECL_FRESH_PROCESS", "false");
+        assert!(!super::native_image_module_decl_fresh_process_enabled());
+        std::env::remove_var("CLASP_NATIVE_IMAGE_MODULE_DECL_FRESH_PROCESS");
     }
 
     fn native_image_binding_names(output: Vec<u8>) -> Vec<String> {
@@ -4980,8 +5577,75 @@ main = textJoim "," ["a", "b"]
     }
 
     #[test]
+    fn split_decl_name_count_chunks_caps_chunk_size() {
+        let chunks = split_decl_name_count_chunks("alpha\n\n beta \ngamma\ndelta\n", 2);
+        assert_eq!(
+            chunks,
+            vec![
+                "alpha\nbeta".to_owned(),
+                "gamma\ndelta".to_owned()
+            ]
+        );
+    }
+
+    #[test]
+    fn split_decl_name_count_chunks_zero_disables_splitting() {
+        let chunks = split_decl_name_count_chunks("alpha\nbeta\ngamma\n", 0);
+        assert_eq!(chunks, vec!["alpha\nbeta\ngamma".to_owned()]);
+    }
+
+    #[test]
+    fn legacy_decl_chunk_size_keeps_old_images_chunked() {
+        assert_eq!(super::DEFAULT_NATIVE_IMAGE_MODULE_DECL_CHUNK_SIZE, 8);
+        assert_eq!(super::effective_module_decl_chunk_size(0, 32, true), None);
+        assert_eq!(super::effective_module_decl_chunk_size(0, 32, false), Some(32));
+        assert_eq!(super::effective_module_decl_chunk_size(128, 32, false), Some(32));
+        assert_eq!(super::effective_module_decl_chunk_size(16, 32, false), Some(16));
+        assert_eq!(super::effective_module_decl_chunk_size(128, 32, true), Some(128));
+    }
+
+    #[test]
     fn count_decl_names_ignores_empty_lines() {
         assert_eq!(count_decl_names("alpha\n\n beta \n\n gamma\n"), 3);
+    }
+
+    #[test]
+    fn module_named_decl_export_fallback_stays_on_chunked_path() {
+        assert!(super::should_fallback_to_module_named_decls_export(
+            "fresh native export process failed for `nativeImageProjectModuleNamedDeclsText`: Unknown name `nativeImageProjectModuleNamedDeclsText`."
+        ));
+        assert!(super::should_fallback_to_module_named_decls_export(
+            "fresh native export process failed for `nativeImageProjectModuleNamedDeclsText`: Type mismatch"
+        ));
+        assert!(super::should_fallback_to_module_named_decls_export(
+            "fresh native export process failed for `nativeImageProjectModuleNamedDeclsText`: runtime failed to execute native compiler export `nativeImageProjectModuleNamedDeclsText`"
+        ));
+        assert!(!super::should_fallback_to_module_named_decls_export(
+            "fresh native export process failed for `nativeImageProjectNamedDeclsText`: Unknown name `nativeImageProjectNamedDeclsText`."
+        ));
+    }
+
+    #[test]
+    fn native_image_declares_export_reads_export_list() {
+        let root = unique_test_root("image-exports");
+        fs::create_dir_all(&root).expect("create test root");
+        let image_path = root.join("image.json");
+        fs::write(
+            &image_path,
+            r#"{"format":"clasp-native-image-v1","exports":["nativeImageProjectModuleDeclsText"]}"#,
+        )
+        .expect("write image");
+
+        assert!(super::native_image_declares_export(
+            image_path.to_str().expect("image path utf8"),
+            "nativeImageProjectModuleDeclsText"
+        ));
+        assert!(!super::native_image_declares_export(
+            image_path.to_str().expect("image path utf8"),
+            "nativeImageProjectModuleNamedDeclsText"
+        ));
+
+        fs::remove_dir_all(&root).expect("remove test root");
     }
 
     #[test]
@@ -5419,6 +6083,33 @@ keep = "stable"
     }
 
     #[test]
+    fn module_validation_parser_ignores_braces_inside_strings() {
+        let source = r#"
+module Main
+
+parseProjectionDecl : Str -> Str
+parseProjectionDecl value = {
+  let spaced = " {";
+  let open = "{";
+  let joined = textConcat ["{", value];
+  textConcat [spaced, open, joined, "}"]
+}
+
+parseModuleAst : Str -> Str
+parseModuleAst source = source
+"#;
+        let parsed = super::parse_module_validation_source(source).expect("parse validation source");
+        let names = parsed
+            .declarations
+            .iter()
+            .map(|decl| decl.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(names.contains(&"parseProjectionDecl"));
+        assert!(names.contains(&"parseModuleAst"));
+    }
+
+    #[test]
     fn native_image_cache_roundtrips_for_same_image_and_bundle() {
         let _env_lock = super::tool_support::TEST_ENV_LOCK.lock().expect("lock test env");
         let cache_root = unique_test_root("native-image-cache");
@@ -5492,6 +6183,202 @@ keep = "stable"
     }
 
     #[test]
+    fn native_image_build_plan_cache_key_includes_module_source_fingerprint() {
+        let _env_lock = super::tool_support::TEST_ENV_LOCK.lock().expect("lock test env");
+        let cache_root = unique_test_root("native-build-plan-cache-source-fingerprint");
+        std::env::set_var("XDG_CACHE_HOME", &cache_root);
+
+        let image_path = cache_root.join("compiler.native.image.json");
+        fs::create_dir_all(&cache_root).expect("create cache root");
+        fs::write(&image_path, "image-bytes").expect("write image");
+
+        let build_a = ProjectBundleBuild {
+            bundle: "module Main\n\nmain = \"a\"\n".to_owned(),
+            modules: vec![ProjectBundleModule {
+                canonical_path: "/tmp/Main.clasp".to_owned(),
+                module_name: "Main".to_owned(),
+                source_fingerprint: "source-a".to_owned(),
+                import_module_names: Vec::new(),
+            }],
+        };
+        let build_b = ProjectBundleBuild {
+            bundle: "module Main\n\nmain = \"b\"\n".to_owned(),
+            modules: vec![ProjectBundleModule {
+                canonical_path: "/tmp/Main.clasp".to_owned(),
+                module_name: "Main".to_owned(),
+                source_fingerprint: "source-b".to_owned(),
+                import_module_names: Vec::new(),
+            }],
+        };
+
+        let path_a = super::native_image_build_plan_cache_path(
+            image_path.to_str().expect("utf8 path"),
+            &build_a,
+        )
+        .expect("cache path a");
+        let path_b = super::native_image_build_plan_cache_path(
+            image_path.to_str().expect("utf8 path"),
+            &build_b,
+        )
+        .expect("cache path b");
+
+        assert_ne!(path_a, path_b);
+
+        std::env::remove_var("XDG_CACHE_HOME");
+        let _ = fs::remove_dir_all(cache_root);
+    }
+
+    #[test]
+    fn native_image_build_plan_index_reuses_interface_equivalent_body_change() {
+        let _env_lock = super::tool_support::TEST_ENV_LOCK.lock().expect("lock test env");
+        let cache_root = unique_test_root("native-build-plan-cache-interface-index");
+        let previous_disable =
+            std::env::var_os("CLASP_NATIVE_DISABLE_NATIVE_IMAGE_BUILD_PLAN_CACHE");
+        std::env::set_var("XDG_CACHE_HOME", &cache_root);
+        std::env::remove_var("CLASP_NATIVE_DISABLE_NATIVE_IMAGE_BUILD_PLAN_CACHE");
+
+        let image_path = cache_root.join("compiler.native.image.json");
+        let source_path = cache_root.join("Main.clasp");
+        fs::create_dir_all(&cache_root).expect("create cache root");
+        fs::write(&image_path, "image-bytes").expect("write image");
+
+        let original_source = "module Main\n\nmain : Str\nmain = \"planner\"\n";
+        let changed_source = "module Main\n\nmain : Str\nmain = \"operator\"\n";
+        fs::write(&source_path, original_source).expect("write original source");
+        let original_build = ProjectBundleBuild {
+            bundle: original_source.to_owned(),
+            modules: vec![ProjectBundleModule {
+                canonical_path: source_path.to_string_lossy().into_owned(),
+                module_name: "Main".to_owned(),
+                source_fingerprint: super::stable_fingerprint_text(original_source),
+                import_module_names: Vec::new(),
+            }],
+        };
+        let changed_build = ProjectBundleBuild {
+            bundle: changed_source.to_owned(),
+            modules: vec![ProjectBundleModule {
+                canonical_path: source_path.to_string_lossy().into_owned(),
+                module_name: "Main".to_owned(),
+                source_fingerprint: super::stable_fingerprint_text(changed_source),
+                import_module_names: Vec::new(),
+            }],
+        };
+        let decl_plan = NativeImageDeclModulePlan {
+            context_fingerprint: "context".to_owned(),
+            modules: vec![NativeImageDeclModuleEntry {
+                module_name: "Main".to_owned(),
+                decl_names_text: "main".to_owned(),
+                interface_fingerprint: "interface-main".to_owned(),
+            }],
+        };
+
+        super::write_cached_native_image_build_plan(
+            image_path.to_str().expect("utf8 image path"),
+            &original_build,
+            "plan-text",
+            &decl_plan,
+        );
+        let original_cache_path = super::native_image_build_plan_cache_path(
+            image_path.to_str().expect("utf8 image path"),
+            &original_build,
+        )
+        .expect("original cache path");
+        let changed_cache_path = super::native_image_build_plan_cache_path(
+            image_path.to_str().expect("utf8 image path"),
+            &changed_build,
+        )
+        .expect("changed cache path");
+        assert_ne!(original_cache_path, changed_cache_path);
+        assert!(!changed_cache_path.exists());
+
+        fs::write(&source_path, changed_source).expect("write changed source");
+        let (candidate_path, cached) = super::read_indexed_matching_native_image_build_plan(
+            image_path.to_str().expect("utf8 image path"),
+            &changed_build,
+        )
+        .expect("indexed body-change build plan");
+        assert_eq!(candidate_path, original_cache_path);
+        assert_eq!(cached.build_plan_text, "plan-text");
+
+        match previous_disable {
+            Some(value) => {
+                std::env::set_var("CLASP_NATIVE_DISABLE_NATIVE_IMAGE_BUILD_PLAN_CACHE", value)
+            }
+            None => std::env::remove_var("CLASP_NATIVE_DISABLE_NATIVE_IMAGE_BUILD_PLAN_CACHE"),
+        }
+        std::env::remove_var("XDG_CACHE_HOME");
+        let _ = fs::remove_dir_all(cache_root);
+    }
+
+    #[test]
+    fn native_image_build_plan_index_rejects_interface_change() {
+        let _env_lock = super::tool_support::TEST_ENV_LOCK.lock().expect("lock test env");
+        let cache_root = unique_test_root("native-build-plan-cache-interface-reject");
+        let previous_disable =
+            std::env::var_os("CLASP_NATIVE_DISABLE_NATIVE_IMAGE_BUILD_PLAN_CACHE");
+        std::env::set_var("XDG_CACHE_HOME", &cache_root);
+        std::env::remove_var("CLASP_NATIVE_DISABLE_NATIVE_IMAGE_BUILD_PLAN_CACHE");
+
+        let image_path = cache_root.join("compiler.native.image.json");
+        let source_path = cache_root.join("Main.clasp");
+        fs::create_dir_all(&cache_root).expect("create cache root");
+        fs::write(&image_path, "image-bytes").expect("write image");
+
+        let original_source = "module Main\n\nmain : Str\nmain = \"planner\"\n";
+        let changed_source = "module Main\n\nmain : Str\nmain = \"operator\"\n\nhelper : Str\nhelper = \"new\"\n";
+        fs::write(&source_path, original_source).expect("write original source");
+        let original_build = ProjectBundleBuild {
+            bundle: original_source.to_owned(),
+            modules: vec![ProjectBundleModule {
+                canonical_path: source_path.to_string_lossy().into_owned(),
+                module_name: "Main".to_owned(),
+                source_fingerprint: super::stable_fingerprint_text(original_source),
+                import_module_names: Vec::new(),
+            }],
+        };
+        let changed_build = ProjectBundleBuild {
+            bundle: changed_source.to_owned(),
+            modules: vec![ProjectBundleModule {
+                canonical_path: source_path.to_string_lossy().into_owned(),
+                module_name: "Main".to_owned(),
+                source_fingerprint: super::stable_fingerprint_text(changed_source),
+                import_module_names: Vec::new(),
+            }],
+        };
+        let decl_plan = NativeImageDeclModulePlan {
+            context_fingerprint: "context".to_owned(),
+            modules: vec![NativeImageDeclModuleEntry {
+                module_name: "Main".to_owned(),
+                decl_names_text: "main".to_owned(),
+                interface_fingerprint: "interface-main".to_owned(),
+            }],
+        };
+
+        super::write_cached_native_image_build_plan(
+            image_path.to_str().expect("utf8 image path"),
+            &original_build,
+            "plan-text",
+            &decl_plan,
+        );
+        fs::write(&source_path, changed_source).expect("write changed source");
+
+        assert!(super::read_indexed_matching_native_image_build_plan(
+            image_path.to_str().expect("utf8 image path"),
+            &changed_build,
+        )
+        .is_none());
+
+        match previous_disable {
+            Some(value) => {
+                std::env::set_var("CLASP_NATIVE_DISABLE_NATIVE_IMAGE_BUILD_PLAN_CACHE", value)
+            }
+            None => std::env::remove_var("CLASP_NATIVE_DISABLE_NATIVE_IMAGE_BUILD_PLAN_CACHE"),
+        }
+        std::env::remove_var("XDG_CACHE_HOME");
+        let _ = fs::remove_dir_all(cache_root);
+    }
+
+    #[test]
     fn native_image_decl_module_cache_respects_disable_env() {
         let _env_lock = super::tool_support::TEST_ENV_LOCK.lock().expect("lock test env");
         let cache_root = unique_test_root("native-decl-module-cache-disable");
@@ -5527,6 +6414,68 @@ keep = "stable"
             "context",
             "Main",
             "module-fingerprint",
+        )
+        .is_none());
+
+        match previous_disable {
+            Some(value) => {
+                std::env::set_var("CLASP_NATIVE_DISABLE_NATIVE_IMAGE_DECL_MODULE_CACHE", value)
+            }
+            None => std::env::remove_var("CLASP_NATIVE_DISABLE_NATIVE_IMAGE_DECL_MODULE_CACHE"),
+        }
+        std::env::remove_var("XDG_CACHE_HOME");
+        let _ = fs::remove_dir_all(cache_root);
+    }
+
+    #[test]
+    fn native_image_decl_chunk_cache_roundtrips_and_respects_disable_env() {
+        let _env_lock = super::tool_support::TEST_ENV_LOCK.lock().expect("lock test env");
+        let cache_root = unique_test_root("native-decl-chunk-cache-disable");
+        let previous_disable =
+            std::env::var_os("CLASP_NATIVE_DISABLE_NATIVE_IMAGE_DECL_MODULE_CACHE");
+        std::env::set_var("XDG_CACHE_HOME", &cache_root);
+        std::env::remove_var("CLASP_NATIVE_DISABLE_NATIVE_IMAGE_DECL_MODULE_CACHE");
+
+        let image_path = cache_root.join("compiler.native.image.json");
+        fs::create_dir_all(&cache_root).expect("create cache root");
+        fs::write(&image_path, "image-bytes").expect("write image");
+        super::write_cached_native_image_decl_chunk(
+            image_path.to_str().expect("utf8 path"),
+            "context",
+            "Main",
+            "module-fingerprint",
+            "main\nhelper",
+            "[{\"kind\":\"global\",\"name\":\"main\"}]",
+        );
+
+        assert_eq!(
+            super::read_cached_native_image_decl_chunk(
+                image_path.to_str().expect("utf8 path"),
+                "context",
+                "Main",
+                "module-fingerprint",
+                "main\nhelper",
+            )
+            .as_deref(),
+            Some("[{\"kind\":\"global\",\"name\":\"main\"}]"),
+        );
+        assert!(super::read_cached_native_image_decl_chunk(
+            image_path.to_str().expect("utf8 path"),
+            "context",
+            "Main",
+            "module-fingerprint",
+            "other",
+        )
+        .is_none());
+        assert!(super::native_image_decl_chunk_cache_dir().exists());
+
+        std::env::set_var("CLASP_NATIVE_DISABLE_NATIVE_IMAGE_DECL_MODULE_CACHE", "1");
+        assert!(super::read_cached_native_image_decl_chunk(
+            image_path.to_str().expect("utf8 path"),
+            "context",
+            "Main",
+            "module-fingerprint",
+            "main\nhelper",
         )
         .is_none());
 
@@ -6116,6 +7065,101 @@ route customerRoute = GET "/support/customer" Empty -> Customer customer
     }
 
     #[test]
+    fn cached_file_bytes_reuses_bytes_until_metadata_changes() {
+        let root = unique_test_root("cached-file-bytes");
+        fs::create_dir_all(&root).expect("create root");
+        let path = root.join("image.json");
+        fs::write(&path, "first-image-bytes").expect("write first");
+
+        let first = super::cached_file_bytes(&path).expect("first cache read");
+        let first_again = super::cached_file_bytes(&path).expect("second cache read");
+        assert!(std::sync::Arc::ptr_eq(&first, &first_again));
+        assert_eq!(
+            super::cached_file_text(&path).expect("cached file text"),
+            "first-image-bytes"
+        );
+
+        fs::write(&path, "second-image-bytes-with-different-length").expect("write second");
+        let second = super::cached_file_bytes(&path).expect("third cache read");
+        assert!(!std::sync::Arc::ptr_eq(&first, &second));
+        assert_eq!(
+            String::from_utf8(second.as_ref().clone()).expect("utf8 cached bytes"),
+            "second-image-bytes-with-different-length"
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn run_binary_cache_limit_uses_default_and_env_overrides() {
+        assert_eq!(
+            super::run_binary_cache_max_bytes_from_env_values(None, None, None),
+            Some(super::DEFAULT_RUN_BINARY_CACHE_MAX_MB * super::BYTES_PER_MIB)
+        );
+        assert_eq!(
+            super::run_binary_cache_max_bytes_from_env_values(None, Some("4096"), Some("1")),
+            Some(4096)
+        );
+        assert_eq!(
+            super::run_binary_cache_max_bytes_from_env_values(None, None, Some("3")),
+            Some(3 * super::BYTES_PER_MIB)
+        );
+        assert_eq!(
+            super::run_binary_cache_max_bytes_from_env_values(Some("1"), Some("4096"), Some("3")),
+            None
+        );
+        assert_eq!(
+            super::run_binary_cache_max_bytes_from_env_values(None, Some("none"), Some("3")),
+            None
+        );
+    }
+
+    #[test]
+    fn run_binary_cache_dir_can_be_isolated_without_moving_other_native_caches() {
+        let _env_lock = super::tool_support::TEST_ENV_LOCK.lock().expect("lock test env");
+        let cache_root = unique_test_root("run-binary-cache-dir");
+        let run_binary_cache = cache_root.join("run-binary-only");
+        std::env::set_var(super::RUN_BINARY_CACHE_DIR_ENV, &run_binary_cache);
+        std::env::set_var("XDG_CACHE_HOME", cache_root.join("xdg"));
+
+        assert_eq!(super::run_binary_cache_dir(), run_binary_cache);
+        assert!(super::native_image_cache_dir().ends_with(super::NATIVE_IMAGE_CACHE_VERSION));
+
+        std::env::remove_var(super::RUN_BINARY_CACHE_DIR_ENV);
+        std::env::remove_var("XDG_CACHE_HOME");
+        let _ = fs::remove_dir_all(cache_root);
+    }
+
+    #[test]
+    fn run_binary_cache_prune_removes_old_entries_but_keeps_protected_entry() {
+        let _env_lock = super::tool_support::TEST_ENV_LOCK.lock().expect("lock test env");
+        let cache_root = unique_test_root("run-binary-cache-prune");
+        std::env::set_var("XDG_CACHE_HOME", &cache_root);
+        std::env::set_var(super::RUN_BINARY_CACHE_MAX_BYTES_ENV, "15");
+        std::env::remove_var(super::RUN_BINARY_CACHE_MAX_MB_ENV);
+        std::env::remove_var(super::DISABLE_RUN_BINARY_CACHE_PRUNE_ENV);
+
+        let cache_dir = super::run_binary_cache_dir();
+        fs::create_dir_all(&cache_dir).expect("create run binary cache");
+        let old_a = cache_dir.join("old-a");
+        let old_b = cache_dir.join("old-b");
+        let protected = cache_dir.join("protected");
+        fs::write(&old_a, [1u8; 10]).expect("write old a");
+        fs::write(&old_b, [2u8; 10]).expect("write old b");
+        fs::write(&protected, [3u8; 10]).expect("write protected");
+
+        super::prune_run_binary_cache(Some(&protected));
+
+        assert!(!old_a.exists());
+        assert!(!old_b.exists());
+        assert!(protected.exists());
+
+        std::env::remove_var("XDG_CACHE_HOME");
+        std::env::remove_var(super::RUN_BINARY_CACHE_MAX_BYTES_ENV);
+        let _ = fs::remove_dir_all(cache_root);
+    }
+
+    #[test]
     fn embedded_app_image_path_uses_cache_root_and_reuses_same_file() {
         let _env_lock = super::tool_support::TEST_ENV_LOCK.lock().expect("lock test env");
         let cache_root = unique_test_root("embedded-app-image-cache");
@@ -6208,6 +7252,10 @@ fn native_image_decl_module_cache_dir() -> PathBuf {
     cache_root().join(NATIVE_IMAGE_DECL_MODULE_CACHE_VERSION)
 }
 
+fn native_image_decl_chunk_cache_dir() -> PathBuf {
+    cache_root().join(NATIVE_IMAGE_DECL_CHUNK_CACHE_VERSION)
+}
+
 fn source_export_cache_dir() -> PathBuf {
     cache_root().join(SOURCE_EXPORT_CACHE_VERSION)
 }
@@ -6217,12 +7265,188 @@ fn module_summary_cache_dir() -> PathBuf {
 }
 
 fn run_binary_cache_dir() -> PathBuf {
+    if let Ok(value) = env::var(RUN_BINARY_CACHE_DIR_ENV) {
+        return PathBuf::from(value);
+    }
     cache_root().join(RUN_BINARY_CACHE_VERSION)
 }
 
+#[derive(Clone)]
+struct RunBinaryCacheEntry {
+    path: PathBuf,
+    size_bytes: u64,
+    modified_key: u128,
+}
+
+fn parse_optional_cache_limit_bytes(value: &str, multiplier: u64) -> Option<Option<u64>> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    match trimmed {
+        "none" | "None" | "NONE" | "unlimited" | "Unlimited" | "UNLIMITED" => Some(None),
+        _ => trimmed
+            .parse::<u64>()
+            .ok()
+            .map(|limit| Some(limit.saturating_mul(multiplier))),
+    }
+}
+
+fn run_binary_cache_max_bytes_from_env_values(
+    disable_prune: Option<&str>,
+    max_bytes: Option<&str>,
+    max_mb: Option<&str>,
+) -> Option<u64> {
+    if env_value_is_enabled(disable_prune) {
+        return None;
+    }
+    if let Some(parsed) = max_bytes.and_then(|value| parse_optional_cache_limit_bytes(value, 1)) {
+        return parsed;
+    }
+    if let Some(parsed) =
+        max_mb.and_then(|value| parse_optional_cache_limit_bytes(value, BYTES_PER_MIB))
+    {
+        return parsed;
+    }
+    Some(DEFAULT_RUN_BINARY_CACHE_MAX_MB.saturating_mul(BYTES_PER_MIB))
+}
+
+fn run_binary_cache_max_bytes() -> Option<u64> {
+    run_binary_cache_max_bytes_from_env_values(
+        env::var(DISABLE_RUN_BINARY_CACHE_PRUNE_ENV).ok().as_deref(),
+        env::var(RUN_BINARY_CACHE_MAX_BYTES_ENV).ok().as_deref(),
+        env::var(RUN_BINARY_CACHE_MAX_MB_ENV).ok().as_deref(),
+    )
+}
+
+fn run_binary_cache_entry_is_prunable(path: &Path) -> bool {
+    let Some(file_name) = path.file_name().and_then(|value| value.to_str()) else {
+        return false;
+    };
+    if file_name.starts_with('.') {
+        return false;
+    }
+    path.extension().and_then(|value| value.to_str()) != Some("lock")
+}
+
+fn run_binary_cache_entry_has_live_lock(path: &Path) -> bool {
+    path.with_extension("lock").exists()
+}
+
+fn run_binary_cache_modified_key(metadata: &fs::Metadata) -> u128 {
+    metadata
+        .modified()
+        .unwrap_or(UNIX_EPOCH)
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_else(|_| Duration::from_secs(0))
+        .as_nanos()
+}
+
+#[derive(Clone, Eq, Hash, PartialEq)]
+struct FileBytesCacheKey {
+    path: PathBuf,
+    len: u64,
+    modified_key: u128,
+}
+
+static FILE_BYTES_CACHE: OnceLock<Mutex<HashMap<FileBytesCacheKey, Arc<Vec<u8>>>>> = OnceLock::new();
+
+fn cached_file_bytes(path: &Path) -> Option<Arc<Vec<u8>>> {
+    let metadata = fs::metadata(path).ok()?;
+    let key = FileBytesCacheKey {
+        path: fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()),
+        len: metadata.len(),
+        modified_key: run_binary_cache_modified_key(&metadata),
+    };
+    let cache = FILE_BYTES_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+
+    if let Ok(guard) = cache.lock() {
+        if let Some(bytes) = guard.get(&key) {
+            return Some(bytes.clone());
+        }
+    }
+
+    let bytes = Arc::new(fs::read(path).ok()?);
+    if let Ok(mut guard) = cache.lock() {
+        guard.insert(key, bytes.clone());
+    }
+    Some(bytes)
+}
+
+fn cached_file_text(path: &Path) -> Option<String> {
+    let bytes = cached_file_bytes(path)?;
+    std::str::from_utf8(bytes.as_slice()).ok().map(ToOwned::to_owned)
+}
+
+fn run_binary_cache_entries(cache_dir: &Path) -> Vec<RunBinaryCacheEntry> {
+    let mut entries = Vec::new();
+    let Ok(read_dir) = fs::read_dir(cache_dir) else {
+        return entries;
+    };
+    for entry in read_dir.flatten() {
+        let path = entry.path();
+        if !run_binary_cache_entry_is_prunable(&path)
+            || run_binary_cache_entry_has_live_lock(&path)
+        {
+            continue;
+        }
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+        entries.push(RunBinaryCacheEntry {
+            path,
+            size_bytes: metadata.len(),
+            modified_key: run_binary_cache_modified_key(&metadata),
+        });
+    }
+    entries
+}
+
+fn prune_run_binary_cache(protected_path: Option<&Path>) {
+    let Some(max_bytes) = run_binary_cache_max_bytes() else {
+        return;
+    };
+    let cache_dir = run_binary_cache_dir();
+    let mut entries = run_binary_cache_entries(&cache_dir);
+    let mut total_bytes = entries
+        .iter()
+        .fold(0u64, |total, entry| total.saturating_add(entry.size_bytes));
+    if total_bytes <= max_bytes {
+        return;
+    }
+
+    entries.sort_by(|left, right| {
+        left.modified_key
+            .cmp(&right.modified_key)
+            .then_with(|| left.path.cmp(&right.path))
+    });
+
+    for entry in entries {
+        if total_bytes <= max_bytes {
+            break;
+        }
+        if protected_path.map(|path| path == entry.path.as_path()).unwrap_or(false) {
+            continue;
+        }
+        let removed = if entry.path.is_dir() {
+            fs::remove_dir_all(&entry.path)
+        } else {
+            fs::remove_file(&entry.path)
+        };
+        if removed.is_ok() {
+            trace_native_cache(&format!(
+                "run-binary pruned path={} size_bytes={}",
+                entry.path.display(),
+                entry.size_bytes
+            ));
+            total_bytes = total_bytes.saturating_sub(entry.size_bytes);
+        }
+    }
+}
+
 fn native_image_cache_path(image_path: &str, bundle: &str) -> Option<PathBuf> {
-    let image_bytes = fs::read(image_path).ok()?;
-    let cache_key = stable_fingerprint_parts(&[&image_bytes, bundle.as_bytes()]);
+    let image_bytes = cached_file_bytes(Path::new(image_path))?;
+    let cache_key = stable_fingerprint_parts(&[image_bytes.as_slice(), bundle.as_bytes()]);
     Some(native_image_cache_dir().join(format!("{cache_key}.json")))
 }
 
@@ -6232,9 +7456,9 @@ fn native_image_decl_module_cache_path(
     module_name: &str,
     module_source_fingerprint: &str,
 ) -> Option<PathBuf> {
-    let image_bytes = fs::read(image_path).ok()?;
+    let image_bytes = cached_file_bytes(Path::new(image_path))?;
     let cache_key = stable_fingerprint_parts(&[
-        &image_bytes,
+        image_bytes.as_slice(),
         context_fingerprint.as_bytes(),
         module_name.as_bytes(),
         module_source_fingerprint.as_bytes(),
@@ -6242,27 +7466,61 @@ fn native_image_decl_module_cache_path(
     Some(native_image_decl_module_cache_dir().join(format!("{cache_key}.json")))
 }
 
+fn native_image_decl_chunk_cache_path(
+    image_path: &str,
+    context_fingerprint: &str,
+    module_name: &str,
+    module_source_fingerprint: &str,
+    decl_names_text: &str,
+) -> Option<PathBuf> {
+    let image_bytes = cached_file_bytes(Path::new(image_path))?;
+    let cache_key = stable_fingerprint_parts(&[
+        image_bytes.as_slice(),
+        context_fingerprint.as_bytes(),
+        module_name.as_bytes(),
+        module_source_fingerprint.as_bytes(),
+        decl_names_text.as_bytes(),
+    ]);
+    Some(native_image_decl_chunk_cache_dir().join(format!("{cache_key}.json")))
+}
+
 fn native_image_build_plan_cache_path(image_path: &str, bundle_build: &ProjectBundleBuild) -> Option<PathBuf> {
-    let image_bytes = fs::read(image_path).ok()?;
-    let mut parts: Vec<&[u8]> = vec![&image_bytes];
+    let image_bytes = cached_file_bytes(Path::new(image_path))?;
+    let mut parts: Vec<&[u8]> = vec![image_bytes.as_slice()];
     for module in &bundle_build.modules {
         parts.push(module.canonical_path.as_bytes());
         parts.push(module.module_name.as_bytes());
+        parts.push(module.source_fingerprint.as_bytes());
     }
     let cache_key = stable_fingerprint_parts(&parts);
     Some(native_image_build_plan_cache_dir().join(format!("{cache_key}.cache")))
 }
 
+fn native_image_build_plan_cache_index_path(image_path: &str, bundle_build: &ProjectBundleBuild) -> Option<PathBuf> {
+    let image_bytes = cached_file_bytes(Path::new(image_path))?;
+    let mut parts: Vec<&[u8]> = vec![image_bytes.as_slice(), b"build-plan-index-v1"];
+    for module in &bundle_build.modules {
+        parts.push(module.canonical_path.as_bytes());
+        parts.push(module.module_name.as_bytes());
+    }
+    let cache_key = stable_fingerprint_parts(&parts);
+    Some(native_image_build_plan_cache_dir().join(format!("{cache_key}.index")))
+}
+
 fn source_export_cache_path(image_path: &str, export_name: &str, bundle: &str) -> Option<PathBuf> {
-    let image_bytes = fs::read(image_path).ok()?;
-    let cache_key = stable_fingerprint_parts(&[&image_bytes, export_name.as_bytes(), bundle.as_bytes()]);
+    let image_bytes = cached_file_bytes(Path::new(image_path))?;
+    let cache_key = stable_fingerprint_parts(&[image_bytes.as_slice(), export_name.as_bytes(), bundle.as_bytes()]);
     Some(source_export_cache_dir().join(format!("{cache_key}.cache")))
 }
 
 fn run_binary_cache_path(current_exe: &Path, image_path: &str, bundle: &str) -> Option<PathBuf> {
-    let launcher_bytes = fs::read(current_exe).ok()?;
-    let image_bytes = fs::read(image_path).ok()?;
-    let cache_key = stable_fingerprint_parts(&[&launcher_bytes, &image_bytes, bundle.as_bytes()]);
+    let launcher_bytes = cached_file_bytes(current_exe)?;
+    let image_bytes = cached_file_bytes(Path::new(image_path))?;
+    let cache_key = stable_fingerprint_parts(&[
+        launcher_bytes.as_slice(),
+        image_bytes.as_slice(),
+        bundle.as_bytes(),
+    ]);
     Some(run_binary_cache_dir().join(cache_key))
 }
 
@@ -6271,11 +7529,11 @@ fn run_binary_project_cache_path(
     image_path: &str,
     project_cache_identity: &str,
 ) -> Option<PathBuf> {
-    let launcher_bytes = fs::read(current_exe).ok()?;
-    let image_bytes = fs::read(image_path).ok()?;
+    let launcher_bytes = cached_file_bytes(current_exe)?;
+    let image_bytes = cached_file_bytes(Path::new(image_path))?;
     let cache_key = stable_fingerprint_parts(&[
-        &launcher_bytes,
-        &image_bytes,
+        launcher_bytes.as_slice(),
+        image_bytes.as_slice(),
         b"project-bundle-cache",
         project_cache_identity.as_bytes(),
     ]);
@@ -6308,7 +7566,7 @@ fn module_summary_cache_path(
     imported_summaries_text: &str,
     interface_fingerprints: &HashMap<String, String>,
 ) -> Option<PathBuf> {
-    let image_bytes = fs::read(image_path).ok()?;
+    let image_bytes = cached_file_bytes(Path::new(image_path))?;
     project_bundle_module(bundle_build, module_name)?;
     let module_interface_fingerprint = interface_fingerprints.get(module_name)?;
     let mut imported_interface_fingerprints = Vec::new();
@@ -6317,7 +7575,7 @@ fn module_summary_cache_path(
     }
 
     let mut parts: Vec<&[u8]> = vec![
-        &image_bytes,
+        image_bytes.as_slice(),
         module_name.as_bytes(),
         module_interface_fingerprint.as_bytes(),
         imported_summaries_text.as_bytes(),
@@ -6341,7 +7599,7 @@ fn module_summary_validation_cache_path(
     imported_summaries_text: &str,
     interface_fingerprints: &HashMap<String, String>,
 ) -> Option<PathBuf> {
-    let image_bytes = fs::read(image_path).ok()?;
+    let image_bytes = cached_file_bytes(Path::new(image_path))?;
     let module = project_bundle_module(bundle_build, module_name)?;
     let module_interface_fingerprint = interface_fingerprints.get(module_name)?;
     let mut imported_interface_fingerprints = Vec::new();
@@ -6350,7 +7608,7 @@ fn module_summary_validation_cache_path(
     }
 
     let mut parts: Vec<&[u8]> = vec![
-        &image_bytes,
+        image_bytes.as_slice(),
         module_name.as_bytes(),
         module.source_fingerprint.as_bytes(),
         module_interface_fingerprint.as_bytes(),
@@ -6434,7 +7692,7 @@ fn write_decl_fingerprints_to_summary_cache_path(
 
 fn read_decl_fingerprints_from_summary_cache_path(cache_path: &Path) -> Option<HashMap<String, String>> {
     let decl_cache_path = module_summary_decl_fingerprints_cache_path_from_summary_path(cache_path);
-    let text = fs::read_to_string(decl_cache_path).ok()?;
+    let text = cached_file_text(&decl_cache_path)?;
     parse_decl_fingerprints_json(&text)
 }
 
@@ -6602,12 +7860,12 @@ fn promoted_source_export_entry_output(entry: &PromotedSourceExportEntry) -> Opt
 
     let output_path = entry.output_path.as_deref()?;
     for path in promoted_source_export_output_path_candidates(output_path) {
-        if let Ok(bytes) = fs::read(&path) {
+        if let Some(bytes) = cached_file_bytes(&path) {
             trace_native_cache(&format!(
                 "source-export promoted output-path hit path={}",
                 path.display()
             ));
-            return Some(bytes);
+            return Some(bytes.as_ref().clone());
         }
     }
     None
@@ -6668,12 +7926,12 @@ fn read_cached_native_image(image_path: &str, bundle: &str) -> Option<Vec<u8>> {
         return None;
     }
     let cache_path = native_image_cache_path(image_path, bundle)?;
-    match fs::read(&cache_path) {
-        Ok(bytes) => {
+    match cached_file_bytes(&cache_path) {
+        Some(bytes) => {
             trace_native_cache(&format!("native-image hit path={}", cache_path.display()));
-            Some(bytes)
+            Some(bytes.as_ref().clone())
         }
-        Err(_) => {
+        None => {
             trace_native_cache(&format!("native-image miss path={}", cache_path.display()));
             None
         }
@@ -6695,8 +7953,8 @@ fn read_cached_native_image_decl_module(
         module_name,
         module_source_fingerprint,
     )?;
-    match fs::read_to_string(&cache_path) {
-        Ok(text) => {
+    match cached_file_text(&cache_path) {
+        Some(text) => {
             trace_native_cache(&format!(
                 "decl-module hit module={} path={}",
                 module_name,
@@ -6704,9 +7962,46 @@ fn read_cached_native_image_decl_module(
             ));
             Some(text)
         }
-        Err(_) => {
+        None => {
             trace_native_cache(&format!(
                 "decl-module miss module={} path={}",
+                module_name,
+                cache_path.display()
+            ));
+            None
+        }
+    }
+}
+
+fn read_cached_native_image_decl_chunk(
+    image_path: &str,
+    context_fingerprint: &str,
+    module_name: &str,
+    module_source_fingerprint: &str,
+    decl_names_text: &str,
+) -> Option<String> {
+    if env::var("CLASP_NATIVE_DISABLE_NATIVE_IMAGE_DECL_MODULE_CACHE").is_ok() {
+        return None;
+    }
+    let cache_path = native_image_decl_chunk_cache_path(
+        image_path,
+        context_fingerprint,
+        module_name,
+        module_source_fingerprint,
+        decl_names_text,
+    )?;
+    match cached_file_text(&cache_path) {
+        Some(text) => {
+            trace_native_cache(&format!(
+                "decl-chunk hit module={} path={}",
+                module_name,
+                cache_path.display()
+            ));
+            Some(text)
+        }
+        None => {
+            trace_native_cache(&format!(
+                "decl-chunk miss module={} path={}",
                 module_name,
                 cache_path.display()
             ));
@@ -6747,6 +8042,41 @@ fn parse_cached_native_image_build_plan(text: &str) -> Option<NativeImageBuildPl
     })
 }
 
+fn cached_native_image_build_plan_matches_current_modules(
+    cached: &NativeImageBuildPlanCacheEntry,
+    bundle_build: &ProjectBundleBuild,
+) -> bool {
+    if cached.modules.len() != bundle_build.modules.len() {
+        return false;
+    }
+
+    for (current_module, cached_module) in bundle_build.modules.iter().zip(cached.modules.iter()) {
+        if current_module.canonical_path != cached_module.canonical_path
+            || current_module.module_name != cached_module.module_name
+        {
+            return false;
+        }
+
+        if current_module.source_fingerprint == cached_module.source_fingerprint {
+            continue;
+        }
+        if cached_module.interface_fingerprint.is_empty() {
+            return false;
+        }
+
+        let Ok(current_conservative_fingerprint) =
+            source_module_conservative_interface_fingerprint(current_module)
+        else {
+            return false;
+        };
+        if current_conservative_fingerprint != cached_module.conservative_interface_fingerprint {
+            return false;
+        }
+    }
+
+    true
+}
+
 fn read_cached_native_image_build_plan(
     image_path: &str,
     bundle_build: &ProjectBundleBuild,
@@ -6755,12 +8085,12 @@ fn read_cached_native_image_build_plan(
         return None;
     }
     let cache_path = native_image_build_plan_cache_path(image_path, bundle_build)?;
-    let cache_text = match fs::read_to_string(&cache_path) {
-        Ok(text) => {
+    let cache_text = match cached_file_text(&cache_path) {
+        Some(text) => {
             trace_native_cache(&format!("build-plan hit path={}", cache_path.display()));
             text
         }
-        Err(_) => {
+        None => {
             trace_native_cache(&format!("build-plan miss path={}", cache_path.display()));
             return None;
         }
@@ -6768,21 +8098,71 @@ fn read_cached_native_image_build_plan(
     parse_cached_native_image_build_plan(&cache_text)
 }
 
+fn read_indexed_native_image_build_plan_candidates(
+    image_path: &str,
+    bundle_build: &ProjectBundleBuild,
+) -> Vec<(PathBuf, NativeImageBuildPlanCacheEntry)> {
+    let Some(index_path) = native_image_build_plan_cache_index_path(image_path, bundle_build) else {
+        return Vec::new();
+    };
+    let Some(index_text) = cached_file_text(&index_path) else {
+        return Vec::new();
+    };
+    let Some(cache_dir) = index_path.parent().map(Path::to_path_buf) else {
+        return Vec::new();
+    };
+
+    let mut candidates = Vec::new();
+    let mut seen = HashSet::new();
+    for raw_line in index_text.lines() {
+        let file_name = raw_line.trim();
+        if file_name.is_empty()
+            || file_name.contains('/')
+            || file_name.contains('\\')
+            || !file_name.ends_with(".cache")
+            || !seen.insert(file_name.to_owned())
+        {
+            continue;
+        }
+        let candidate_path = cache_dir.join(file_name);
+        let Some(cache_text) = cached_file_text(&candidate_path) else {
+            continue;
+        };
+        if let Some(cached) = parse_cached_native_image_build_plan(&cache_text) {
+            candidates.push((candidate_path, cached));
+        }
+    }
+
+    candidates
+}
+
+fn read_indexed_matching_native_image_build_plan(
+    image_path: &str,
+    bundle_build: &ProjectBundleBuild,
+) -> Option<(PathBuf, NativeImageBuildPlanCacheEntry)> {
+    for (candidate_path, cached) in read_indexed_native_image_build_plan_candidates(image_path, bundle_build) {
+        if cached_native_image_build_plan_matches_current_modules(&cached, bundle_build) {
+            return Some((candidate_path, cached));
+        }
+    }
+    None
+}
+
 fn read_cached_source_export(image_path: &str, export_name: &str, bundle: &str) -> Option<Vec<u8>> {
     if env::var("CLASP_NATIVE_DISABLE_SOURCE_EXPORT_CACHE").is_ok() {
         return None;
     }
     let cache_path = source_export_cache_path(image_path, export_name, bundle)?;
-    match fs::read(&cache_path) {
-        Ok(bytes) => {
+    match cached_file_bytes(&cache_path) {
+        Some(bytes) => {
             trace_native_cache(&format!(
                 "source-export hit export={} path={}",
                 export_name,
                 cache_path.display()
             ));
-            Some(bytes)
+            Some(bytes.as_ref().clone())
         }
-        Err(_) => {
+        None => {
             if let Some(bytes) = read_promoted_source_export(&cache_path, export_name) {
                 return Some(bytes);
             }
@@ -6821,8 +8201,8 @@ fn read_cached_module_summary(
         imported_summaries_text,
         interface_fingerprints,
     )?;
-    match fs::read_to_string(&cache_path) {
-        Ok(text) => {
+    match cached_file_text(&cache_path) {
+        Some(text) => {
             let validated_for_current_source = validation_cache_path.is_file();
             let cache_status = if validated_for_current_source {
                 "hit"
@@ -6842,7 +8222,7 @@ fn read_cached_module_summary(
                 decl_fingerprints,
             })
         }
-        Err(_) => {
+        None => {
             if let Some(hit) =
                 read_promoted_module_summary(&cache_path, module_name, module_source_fingerprint)
             {
@@ -6917,6 +8297,26 @@ fn write_cached_native_image_decl_module(
     let _ = atomic_write(&cache_path, decl_text.as_bytes());
 }
 
+fn write_cached_native_image_decl_chunk(
+    image_path: &str,
+    context_fingerprint: &str,
+    module_name: &str,
+    module_source_fingerprint: &str,
+    decl_names_text: &str,
+    decl_text: &str,
+) {
+    let Some(cache_path) = native_image_decl_chunk_cache_path(
+        image_path,
+        context_fingerprint,
+        module_name,
+        module_source_fingerprint,
+        decl_names_text,
+    ) else {
+        return;
+    };
+    let _ = atomic_write(&cache_path, decl_text.as_bytes());
+}
+
 fn write_cached_native_image_build_plan(
     image_path: &str,
     bundle_build: &ProjectBundleBuild,
@@ -6956,6 +8356,42 @@ fn write_cached_native_image_build_plan(
         module_entries.join(NATIVE_IMAGE_BUILD_PLAN_CACHE_MODULE_SEPARATOR)
     );
     let _ = atomic_write(&cache_path, cache_text.as_bytes());
+    write_native_image_build_plan_cache_index(image_path, bundle_build, &cache_path);
+}
+
+fn write_native_image_build_plan_cache_index(
+    image_path: &str,
+    bundle_build: &ProjectBundleBuild,
+    cache_path: &Path,
+) {
+    let Some(index_path) = native_image_build_plan_cache_index_path(image_path, bundle_build) else {
+        return;
+    };
+    let Some(cache_file_name) = cache_path.file_name().and_then(|value| value.to_str()) else {
+        return;
+    };
+
+    let mut entries = vec![cache_file_name.to_owned()];
+    if let Some(index_text) = cached_file_text(&index_path) {
+        for raw_line in index_text.lines() {
+            let file_name = raw_line.trim();
+            if file_name.is_empty()
+                || file_name == cache_file_name
+                || file_name.contains('/')
+                || file_name.contains('\\')
+                || !file_name.ends_with(".cache")
+            {
+                continue;
+            }
+            entries.push(file_name.to_owned());
+            if entries.len() >= 16 {
+                break;
+            }
+        }
+    }
+
+    let index_text = format!("{}\n", entries.join("\n"));
+    let _ = atomic_write(&index_path, index_text.as_bytes());
 }
 
 fn write_cached_source_export(image_path: &str, export_name: &str, bundle: &str, output: &[u8]) {
@@ -10473,6 +11909,10 @@ fn run_main(args: Vec<String>) -> ExitCode {
                 !output_path.is_file()
             };
 
+            if options.output_path.is_none() {
+                prune_run_binary_cache(Some(&output_path));
+            }
+
             if needs_build {
                 let _cache_lock = if options.output_path.is_none() {
                     match CacheLock::acquire(&output_path, "run-binary") {
@@ -10501,6 +11941,9 @@ fn run_main(args: Vec<String>) -> ExitCode {
                     };
                     if let Err(message) = write_result {
                         return fail(&message, false);
+                    }
+                    if options.output_path.is_none() {
+                        prune_run_binary_cache(Some(&output_path));
                     }
                 }
             } else {
@@ -10532,6 +11975,11 @@ fn run_main(args: Vec<String>) -> ExitCode {
 }
 
 fn main() -> ExitCode {
+    if let Err(message) = install_claspc_memory_limit() {
+        eprintln!("{message}");
+        return ExitCode::from(125);
+    }
+
     let args: Vec<String> = env::args().collect();
     match thread::Builder::new()
         .name("claspc-main".to_owned())

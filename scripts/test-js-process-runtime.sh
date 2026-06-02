@@ -42,15 +42,40 @@ import path from "node:path";
 
 const [projectRoot, programPath, foreignSafetyPath] = process.argv.slice(2);
 const emitterPath = path.join(projectRoot, "src/Compiler/Emit/JavaScript.clasp");
+const emitterNeedsPath = path.join(projectRoot, "src/Compiler/Emit/JavaScript/Needs.clasp");
+const emitterPreludePath = path.join(projectRoot, "src/Compiler/Emit/JavaScript/Prelude.clasp");
+const emitterForeignPath = path.join(projectRoot, "src/Compiler/Emit/JavaScript/Foreign.clasp");
+const emitterUtilPath = path.join(projectRoot, "src/Compiler/Emit/JavaScript/Util.clasp");
 const checkerPath = path.join(projectRoot, "src/Compiler/Checker.clasp");
+const checkerBuiltinsPath = path.join(projectRoot, "src/Compiler/Checker/Builtins.clasp");
+const checkerBindingsPath = path.join(projectRoot, "src/Compiler/Checker/Bindings.clasp");
 const frontendDriverPath = path.join(projectRoot, "src/Compiler/Driver/Frontend.clasp");
 const nativeEmitterPath = path.join(projectRoot, "src/Compiler/Emit/Native.clasp");
+const nativeRuntimeBindingsPath = path.join(projectRoot, "src/Compiler/Emit/Native/RuntimeBindings.clasp");
 const runtimePath = path.join(projectRoot, "runtime/clasp_runtime.rs");
+const feedbackProcessPath = path.join(projectRoot, "examples/feedback-loop/Process.clasp");
 const emitterSource = fs.readFileSync(emitterPath, "utf8");
+const emitterNeedsSource = fs.readFileSync(emitterNeedsPath, "utf8");
+const emitterPreludeSource = fs.readFileSync(emitterPreludePath, "utf8");
+const emitterForeignSource = fs.readFileSync(emitterForeignPath, "utf8");
+const emitterUtilSource = fs.readFileSync(emitterUtilPath, "utf8");
+const jsEmitterSource = [
+  emitterSource,
+  emitterNeedsSource,
+  emitterPreludeSource,
+  emitterForeignSource,
+  emitterUtilSource,
+].join("\n");
 const checkerSource = fs.readFileSync(checkerPath, "utf8");
+const checkerBuiltinsSource = fs.readFileSync(checkerBuiltinsPath, "utf8");
+const checkerBindingsSource = fs.readFileSync(checkerBindingsPath, "utf8");
+const checkerCombinedSource = [checkerSource, checkerBuiltinsSource, checkerBindingsSource].join("\n");
 const frontendDriverSource = fs.readFileSync(frontendDriverPath, "utf8");
 const nativeEmitterSource = fs.readFileSync(nativeEmitterPath, "utf8");
+const nativeRuntimeBindingsSource = fs.readFileSync(nativeRuntimeBindingsPath, "utf8");
+const nativeEmitterCombinedSource = [nativeEmitterSource, nativeRuntimeBindingsSource].join("\n");
 const runtimeSource = fs.readFileSync(runtimePath, "utf8");
+const feedbackProcessSource = fs.readFileSync(feedbackProcessPath, "utf8");
 
 function assert(condition, message) {
   if (!condition) {
@@ -104,57 +129,95 @@ function extractClaspStringList(source, bindingName) {
 }
 
 assert(
-  emitterSource.includes('emitNodeProcessPrelude decls foreignDecls =') &&
-    emitterSource.includes('import { spawnSync as $claspNodeSpawnSync } from \\"node:child_process\\";'),
+  jsEmitterSource.includes('emitNodeProcessPrelude decls foreignDecls =') &&
+    jsEmitterSource.includes('import { spawnSync as $claspNodeSpawnSync } from \\"node:child_process\\";'),
   "JS emitter should conditionally import node:child_process for process builtins",
 );
 assert(
-  emitterSource.includes('foreignDeclNeedsNodeProcessPrelude : HostedForeignDeclAst -> Bool') &&
-    emitterSource.includes('moduleNeedsNodeProcessPreludeWithForeigns decls foreignDecls') &&
-    emitterSource.includes('rendered = append rendered (emitNodeProcessPrelude decls foreignDecls)'),
+  jsEmitterSource.includes('foreignDeclNeedsNodeProcessPrelude : HostedForeignDeclAst -> Bool') &&
+    jsEmitterSource.includes('moduleNeedsNodeProcessPreludeWithForeigns decls foreignDecls') &&
+    jsEmitterSource.includes('rendered = append rendered (emitNodeProcessPrelude decls foreignDecls)'),
   "JS emitter should include node:child_process when runtime foreigns target process builtins",
 );
 assert(
-  emitterSource.includes('moduleNeedsBuiltinPreludeWithForeigns : [LowerDeclText] -> [HostedForeignDeclAst] -> Bool') &&
-    emitterSource.includes('rendered = append rendered (emitBuiltinPrelude decls foreignDecls)') &&
-    emitterSource.includes('const builtin = typeof $claspBuiltinRuntime !== \\"undefined\\" ? $claspBuiltinRuntime[name] : null;'),
+  jsEmitterSource.includes('moduleNeedsBuiltinPreludeWithForeigns : [LowerDeclText] -> [HostedForeignDeclAst] -> Bool') &&
+    jsEmitterSource.includes('rendered = append rendered (emitBuiltinPrelude decls foreignDecls)') &&
+    jsEmitterSource.includes('const builtin = typeof $claspBuiltinRuntime !== \\"undefined\\" ? $claspBuiltinRuntime[name] : null;'),
   "runtime foreign calls should fall back to process builtins when no host runtime is installed",
 );
 assert(
-  checkerSource.includes('TypeBinding "runCommandTimeoutJson" runCommandTimeoutJsonBuiltinType') &&
-    checkerSource.includes('awaitWatchedProcessTimeoutJsonBuiltinType'),
+  checkerCombinedSource.includes('TypeBinding "runCommandTimeoutJson" runCommandTimeoutJsonBuiltinType') &&
+    checkerCombinedSource.includes('TypeBinding "spawnCommandWithLimitsJson" spawnCommandWithLimitsJsonBuiltinType') &&
+    checkerCombinedSource.includes('TypeBinding "watchCommandWithLimitsJson" watchCommandWithLimitsJsonBuiltinType') &&
+    checkerCombinedSource.includes('awaitWatchedProcessTimeoutJsonBuiltinType'),
   "checker should expose timeout process builtins",
 );
 assert(
-  nativeEmitterSource.includes('runCommandTimeoutJson{runtime=runCommandTimeoutJson, symbol=clasp_rt_run_command_timeout_json') &&
-    nativeEmitterSource.includes('awaitWatchedProcessTimeoutJson{runtime=awaitWatchedProcessTimeoutJson'),
+  nativeEmitterCombinedSource.includes('NativeRuntimeBindingSpec "runCommandTimeoutJson" "runCommandTimeoutJson"') &&
+    nativeEmitterCombinedSource.includes('NativeRuntimeBindingSpec "spawnCommandWithLimitsJson" "spawnCommandWithLimitsJson"') &&
+    nativeEmitterCombinedSource.includes('NativeRuntimeBindingSpec "watchCommandWithLimitsJson" "watchCommandWithLimitsJson"') &&
+    nativeEmitterCombinedSource.includes('NativeRuntimeBindingSpec "awaitWatchedProcessTimeoutJson" "awaitWatchedProcessTimeoutJson"') &&
+    nativeEmitterCombinedSource.includes("emitNativeRuntimeBindingText foreignDecl ="),
   "native emitter should expose timeout runtime binding metadata",
 );
 assert(
   runtimeSource.includes('fn render_run_command_timeout_payload') &&
     runtimeSource.includes('pub unsafe extern "C" fn clasp_rt_run_command_timeout_json') &&
+    runtimeSource.includes('pub unsafe extern "C" fn clasp_rt_spawn_command_with_limits_json') &&
+    runtimeSource.includes('pub unsafe extern "C" fn clasp_rt_watch_command_with_limits_json') &&
+    runtimeSource.includes('("spawnCommandWithLimitsJson", 7)') &&
+    runtimeSource.includes('("watchCommandWithLimitsJson", 7)') &&
     runtimeSource.includes('("runCommandTimeoutJson", 3)'),
   "native runtime should implement and dispatch runCommandTimeoutJson",
 );
 assert(
-  emitterSource.includes("jsIdentifierIsSafe : Str -> Bool") &&
-    emitterSource.includes("emitJsIdentifier : Str -> Str") &&
-    emitterSource.includes("emitJsIdentifier (foreignDeclRuntimeName foreignDecl)") &&
-    emitterSource.includes("emitJsString specifier") &&
-    emitterSource.includes("emitJsString (foreignDeclSignature foreignDecl)"),
+  runtimeSource.includes("RLIMIT_CORE") &&
+    runtimeSource.includes("disable_core_dumps") &&
+    runtimeSource.includes("configure_no_core_dump_process_command") &&
+    runtimeSource.includes("ulimit -c 0 >/dev/null 2>&1 || true"),
+  "native process runtime should disable core dumps for launched commands",
+);
+assert(
+  runtimeSource.includes("DEFAULT_WATCHED_PROCESS_OUTPUT_LIMIT_BYTES") &&
+    runtimeSource.includes("CLASP_RT_WATCH_OUTPUT_LIMIT_BYTES") &&
+    runtimeSource.includes('error == "output-limit"') &&
+    runtimeSource.includes('"outputLimitBytes": output_limit_bytes') &&
+    runtimeSource.includes('"stdoutTruncated": stdout_truncated') &&
+    runtimeSource.includes('"stderrTruncated": stderr_truncated') &&
+    runtimeSource.includes('"outputLimitBytes":%s,"stdoutTruncated":%s,"stderrTruncated":%s') &&
+    runtimeSource.includes("truncate_watched_process_outputs_to_limit") &&
+    runtimeSource.includes("terminate_child_for_output_limit") &&
+    runtimeSource.includes("output-limit"),
+  "native watched process runtime should cap stdout/stderr logs",
+);
+assert(
+  feedbackProcessSource.includes("outputLimitBytes : Int") &&
+    feedbackProcessSource.includes("stdoutTruncated : Bool") &&
+    feedbackProcessSource.includes("stderrTruncated : Bool") &&
+    feedbackProcessSource.includes("outputLimitBytes = process.outputLimitBytes") &&
+    feedbackProcessSource.includes("stdoutTruncated = process.stdoutTruncated") &&
+    feedbackProcessSource.includes("stderrTruncated = process.stderrTruncated"),
+  "feedback-loop process helpers should expose watched output truncation metadata",
+);
+assert(
+  jsEmitterSource.includes("jsIdentifierIsSafe : Str -> Bool") &&
+    jsEmitterSource.includes("emitJsIdentifier : Str -> Str") &&
+    jsEmitterSource.includes("emitJsIdentifier (foreignDeclRuntimeName foreignDecl)") &&
+    jsEmitterSource.includes("emitJsString specifier") &&
+    jsEmitterSource.includes("emitJsString (foreignDeclSignature foreignDecl)"),
   "JS emitter should validate package-import identifiers and encode foreign metadata strings",
 );
 assert(
-  emitterSource.includes("emitHostBindingEntry foreignDecl =") &&
-    emitterSource.includes("emitJsString (foreignDeclName foreignDecl)") &&
-    emitterSource.includes("emitJsString (foreignDeclRuntimeName foreignDecl)") &&
-    emitterSource.includes("emitPackageBindingEntry foreignDecl ="),
+  jsEmitterSource.includes("emitHostBindingEntry foreignDecl =") &&
+    jsEmitterSource.includes("emitJsString (foreignDeclName foreignDecl)") &&
+    jsEmitterSource.includes("emitJsString (foreignDeclRuntimeName foreignDecl)") &&
+    jsEmitterSource.includes("emitPackageBindingEntry foreignDecl ="),
   "JS host binding manifests should encode foreign names and package binding keys",
 );
 assert(
-  checkerSource.includes("moduleForeignInteropValidationError : HostedModuleAst -> Str") &&
-    checkerSource.includes("Package foreign import runtime name") &&
-    checkerSource.includes("must be a safe JavaScript identifier"),
+  checkerCombinedSource.includes("moduleForeignInteropValidationError : HostedModuleAst -> Str") &&
+    checkerCombinedSource.includes("Package foreign import runtime name") &&
+    checkerCombinedSource.includes("must be a safe JavaScript identifier"),
   "checker should reject unsafe JavaScript foreign/package import identifiers",
 );
 assert(
@@ -164,18 +227,25 @@ assert(
   "frontend compile driver should fail closed on checker and project errors",
 );
 assert(
-  nativeEmitterSource.includes("emitNativeStringLiteral : Str -> Str") &&
-    nativeEmitterSource.includes('textConcat ["string(", encode value, ")"]') &&
-    nativeEmitterSource.includes("emitNativeMetadataField : Str -> Str -> Str") &&
-    nativeEmitterSource.includes("runtimeBinding{"),
+  nativeEmitterCombinedSource.includes("emitNativeMetadataField : Str -> Str -> Str") &&
+    nativeEmitterCombinedSource.includes('textConcat [name, "=", encode value]') &&
+    nativeEmitterCombinedSource.includes("runtimeBinding{"),
   "native text emitter should encode string literals and custom runtime binding metadata",
 );
 
-const builtinPrelude = extractClaspStringList(emitterSource, "builtinPreludeLines").join("\n");
+const builtinPrelude = extractClaspStringList(emitterPreludeSource, "builtinPreludeLines").join("\n");
 assert(builtinPrelude.includes("function runCommandJson"), "builtin prelude should include runCommandJson");
 assert(
   builtinPrelude.includes("function runCommandTimeoutJson"),
   "builtin prelude should include runCommandTimeoutJson",
+);
+assert(
+  builtinPrelude.includes("function spawnCommandWithLimitsJson"),
+  "builtin prelude should include spawnCommandWithLimitsJson",
+);
+assert(
+  builtinPrelude.includes("function watchCommandWithLimitsJson"),
+  "builtin prelude should include watchCommandWithLimitsJson",
 );
 assert(
   builtinPrelude.includes("$claspRunCommandJsonNode"),

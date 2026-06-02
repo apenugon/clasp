@@ -85,10 +85,14 @@ The repository-wide minimum gate is:
 bash scripts/verify-all.sh
 ```
 
-`verify-all` runs under the managed memory guard by default, including a 16 GiB
-job cap, a 40 GiB host memory reserve, serial native image/export settings, and
+`verify-all` runs under the managed memory guard by default, including an 8 GiB
+job cap, a 45 GiB host memory reserve, serial native image/export settings, and
 a single top-level parallel job. Use `CLASP_VERIFY_MANAGED=0` only for harness
 tests that need to inspect the unwrapped script behavior.
+Those unwrapped `verify-all` and `verify-affected` paths still apply a
+virtual-memory cap by default through `CLASP_VERIFY_DIRECT_MEMORY_LIMIT_MB` and
+`CLASP_VERIFY_AFFECTED_DIRECT_MEMORY_LIMIT_MB`, so forcing current-shell
+execution does not leave the verifier unbounded.
 The managed runner also preflights the job cap plus host memory reserve before
 spawning the workload, so an already-low-memory VM fails the job before a
 builder or verifier can start.

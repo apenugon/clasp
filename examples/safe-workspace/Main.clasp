@@ -11,6 +11,23 @@ record SafeWorkspaceReport = {
   appendedText : Str,
   nestedListing : Str,
   rootListing : Str,
+  treeListing : Str,
+  limitedTreeListing : Str,
+  escapedTreeListing : Str,
+  searchListing : Str,
+  defaultSearchListing : Str,
+  limitedSearchListing : Str,
+  escapedSearchListing : Str,
+  emptySearchListing : Str,
+  replaceCount : Int,
+  replacedText : Str,
+  missingReplaceResult : Str,
+  emptyReplaceResult : Str,
+  limitedReplaceResult : Str,
+  removeFileResult : Str,
+  removedRead : Str,
+  removeDirResult : Str,
+  removedDirListing : Str,
   parentEscape : Str,
   absoluteEscape : Str,
   chainedEscape : Str,
@@ -72,6 +89,18 @@ resultListText result = match result {
   Err message -> textConcat ["ERR:", message]
 }
 
+resultIntOrNegativeOne : Result Int -> Int
+resultIntOrNegativeOne result = match result {
+  Ok value -> value,
+  Err message -> -1
+}
+
+resultIntText : Result Int -> Str
+resultIntText result = match result {
+  Ok value -> encode value,
+  Err message -> textConcat ["ERR:", message]
+}
+
 absoluteEscapeResult : Str
 absoluteEscapeResult =
   if outsidePath == "" then
@@ -90,6 +119,25 @@ scenarioReport = {
   let appendedBack = resultText (workspaceReadText workspaceRoot "logs/events.jsonl");
   let nestedNames = resultListText (workspaceListDir workspaceRoot "nested");
   let rootNames = resultListText (workspaceListDir workspaceRoot ".");
+  let treeNames = resultListText (workspaceListTree workspaceRoot "." 64 4);
+  let limitedTreeNames = resultListText (workspaceListTree workspaceRoot "." 1 4);
+  let escapedTreeNames = resultListText (workspaceListTree workspaceRoot "../outside" 64 4);
+  let searchNames = resultListText (workspaceSearchTextBounded workspaceRoot "." "workspace-text" 8 64 1024 4);
+  let defaultSearchNames = resultListText (workspaceSearchText workspaceRoot "." "event-two");
+  let limitedSearchNames = resultListText (workspaceSearchTextBounded workspaceRoot "." "workspace-text" 0 64 1024 4);
+  let escapedSearchNames = resultListText (workspaceSearchTextBounded workspaceRoot "../outside" "workspace-text" 8 64 1024 4);
+  let emptySearchNames = resultListText (workspaceSearchTextBounded workspaceRoot "." "" 8 64 1024 4);
+  let replacedCount = resultIntOrNegativeOne (workspaceReplaceText workspaceRoot "nested/result.txt" "workspace-text" "workspace-updated");
+  let replacedBack = resultText (workspaceReadText workspaceRoot "nested/result.txt");
+  let missingReplace = resultIntText (workspaceReplaceText workspaceRoot "nested/result.txt" "workspace-text" "workspace-unexpected");
+  let emptyReplace = resultIntText (workspaceReplaceTextBounded workspaceRoot "nested/result.txt" "" "workspace-unexpected" 64 262144);
+  let repeatWrite = resultText (workspaceWriteText workspaceRoot "nested/repeat.txt" "repeat repeat");
+  let limitedReplace = resultIntText (workspaceReplaceTextBounded workspaceRoot "nested/repeat.txt" "repeat" "done" 1 262144);
+  let removableWrite = resultText (workspaceWriteText workspaceRoot "removable/file.txt" "remove-me");
+  let removedFile = resultText (workspaceRemovePath workspaceRoot "removable/file.txt");
+  let removedRead = resultText (workspaceReadText workspaceRoot "removable/file.txt");
+  let removedDir = resultText (workspaceRemovePath workspaceRoot "removable");
+  let removedDirListing = resultListText (workspaceListDir workspaceRoot "removable");
   let parentEscape = resultText (workspaceWriteText workspaceRoot "../outside.txt" "leaked");
   let chainedEscape = resultText (workspaceReadText workspaceRoot "nested/../../outside.txt");
   let missingRead = resultText (workspaceReadText workspaceRoot "missing.txt");
@@ -102,6 +150,23 @@ scenarioReport = {
     appendedText = appendedBack,
     nestedListing = nestedNames,
     rootListing = rootNames,
+    treeListing = treeNames,
+    limitedTreeListing = limitedTreeNames,
+    escapedTreeListing = escapedTreeNames,
+    searchListing = searchNames,
+    defaultSearchListing = defaultSearchNames,
+    limitedSearchListing = limitedSearchNames,
+    escapedSearchListing = escapedSearchNames,
+    emptySearchListing = emptySearchNames,
+    replaceCount = replacedCount,
+    replacedText = replacedBack,
+    missingReplaceResult = missingReplace,
+    emptyReplaceResult = emptyReplace,
+    limitedReplaceResult = limitedReplace,
+    removeFileResult = removedFile,
+    removedRead = removedRead,
+    removeDirResult = removedDir,
+    removedDirListing = removedDirListing,
     parentEscape = parentEscape,
     absoluteEscape = absoluteEscapeResult,
     chainedEscape = chainedEscape,

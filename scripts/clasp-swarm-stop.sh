@@ -9,8 +9,8 @@ usage() {
 usage: scripts/clasp-swarm-stop.sh [--force-signal] [wave]
 
 By default this requests cooperative managed-job stops. --force-signal passes
-through to stop-managed-job.sh, which only signals validated session members
-and exact marked managed-job processes after validating the job metadata.
+through to stop-managed-job.sh, which only signals exact marked managed-job
+processes after validating the job metadata.
 EOF
 }
 
@@ -46,6 +46,44 @@ if [[ -z "$wave_name" ]]; then
   wave_name="$(clasp_swarm_default_wave)"
 fi
 
+stop_child_managed_jobs() {
+  local lane_name="$1"
+  local runtime_root="$2"
+  local child_jobs_root="$runtime_root/child-jobs"
+  local child_job_dir=""
+  local child_job_name=""
+  local child_status=""
+  local child_pid=""
+
+  [[ -d "$child_jobs_root" ]] || return 0
+
+  while IFS= read -r child_job_dir; do
+    [[ -n "$child_job_dir" ]] || continue
+    child_job_name="$(basename "$child_job_dir")"
+    child_status="$(clasp_swarm_managed_job_status "$child_job_dir")"
+
+    if clasp_swarm_managed_job_status_is_terminal "$child_status"; then
+      continue
+    fi
+
+    child_pid=""
+    if [[ -f "$child_job_dir/pid" ]]; then
+      child_pid="$(tr -d '[:space:]' <"$child_job_dir/pid")"
+    fi
+
+    if "$project_root/scripts/stop-managed-job.sh" "${force_signal_args[@]}" --jobs-root "$child_jobs_root" "$child_job_dir"; then
+      if [[ -n "$child_pid" ]]; then
+        echo "stopped lane=$lane_name child=$child_job_name pid=$child_pid"
+      else
+        echo "stopped lane=$lane_name child=$child_job_name"
+      fi
+    else
+      echo "failed to stop lane=$lane_name child=$child_job_name via managed job metadata" >&2
+      exit 1
+    fi
+  done < <(find "$child_jobs_root" -mindepth 1 -maxdepth 1 -type d | sort)
+}
+
 while IFS= read -r lane_dir; do
   lane_name="$(clasp_swarm_lane_name "$lane_dir")"
   runtime_root="$project_root/.clasp-swarm/$wave_name/$lane_name"
@@ -69,8 +107,11 @@ while IFS= read -r lane_dir; do
       echo "failed to stop lane=$lane_name via managed job metadata" >&2
       exit 1
     fi
+    stop_child_managed_jobs "$lane_name" "$runtime_root"
     continue
   fi
+
+  stop_child_managed_jobs "$lane_name" "$runtime_root"
 
   if [[ ! -f "$pid_file" ]]; then
     echo "lane $lane_name is not running"

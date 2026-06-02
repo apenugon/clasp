@@ -1,5 +1,6 @@
 module GoalManagerStateRuntime
 
+import GoalManagerPlannerInputTypes
 import GoalManagerPlannerIO
 import GoalManagerPreludeProject
 import GoalManagerPrelude

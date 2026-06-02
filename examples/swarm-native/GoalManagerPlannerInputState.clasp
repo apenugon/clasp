@@ -1,0 +1,16 @@
+module GoalManagerPlannerInputState
+
+import GoalManagerPlannerInputFingerprint
+import GoalManagerPlannerInputTypes
+
+plannerInputStateFor : Int -> Str -> PlannerInputState
+plannerInputStateFor wave benchmarkSummary =
+  let mailboxSummary = plannerInputMailboxSummaryText wave in
+  PlannerInputState {
+    fingerprint = textFingerprint64Hex (plannerInputFingerprintSourceFor wave benchmarkSummary),
+    goalText = plannerInputGoalText,
+    plannerPolicy = plannerInputPlannerPolicyText,
+    schemaPath = plannerInputResolvedPlannerSchemaPath,
+    workspaceRoot = plannerInputResolvedWorkspaceRoot,
+    mailboxSummary = mailboxSummary
+  }

@@ -1,0 +1,481 @@
+module MonitoredRunLogHarness
+
+foreign watchCommandRaw : Str -> Str -> Str -> Str -> Int -> [Str] -> Result Str = "watchCommandJson"
+foreign watchCommandWithLimitsRaw : Str -> Str -> Str -> Str -> Int -> Int -> [Str] -> Result Str = "watchCommandWithLimitsJson"
+foreign spawnCommandRaw : Str -> Str -> Str -> Str -> Int -> [Str] -> Result Str = "spawnCommandJson"
+foreign spawnCommandWithLimitsRaw : Str -> Str -> Str -> Str -> Int -> Int -> [Str] -> Result Str = "spawnCommandWithLimitsJson"
+foreign cancelWatchedProcessRaw : Str -> Result Str = "cancelWatchedProcessJson"
+foreign awaitWatchedProcessTimeoutRaw : Str -> Int -> Int -> Result Str = "awaitWatchedProcessTimeoutJson"
+
+harnessWatchMemoryLimitMb : Int
+harnessWatchMemoryLimitMb = 8192
+
+record WatchedProcessDetails = {
+  pid : Int,
+  status : Str,
+  running : Bool,
+  completed : Bool,
+  exitCode : Int,
+  timedOut : Bool,
+  error : Str,
+  command : [Str],
+  stdoutPath : Str,
+  stderrPath : Str,
+  heartbeatPath : Str,
+  startedAtMs : Int,
+  endedAtMs : Int,
+  durationMs : Int,
+  updatedAtMs : Int
+}
+
+record MonitoredStepResult = {
+  status : Str,
+  exitCode : Int,
+  stdout : Str,
+  stderr : Str,
+  command : [Str],
+  stdoutPath : Str,
+  stderrPath : Str,
+  heartbeatPath : Str,
+  running : Bool,
+  completed : Bool,
+  timedOut : Bool,
+  error : Str,
+  startedAtMs : Int,
+  endedAtMs : Int,
+  durationMs : Int,
+  updatedAtMs : Int
+}
+
+record WatchedCommandSpec = {
+  cwd : Str,
+  stdoutPath : Str,
+  stderrPath : Str,
+  heartbeatPath : Str,
+  watchPollMs : Int,
+  command : [Str]
+}
+
+record MonitoredRunSpec = {
+  runId : Str,
+  role : Str,
+  statusPath : Str,
+  eventLogPath : Str,
+  watched : WatchedCommandSpec
+}
+
+record MonitoredRunEvent = {
+  kind : Str,
+  runId : Str,
+  role : Str,
+  status : Str,
+  detail : Str,
+  atMs : Int
+}
+
+record MonitoredRunRecord = {
+  runId : Str,
+  role : Str,
+  status : Str,
+  exitCode : Int,
+  stdout : Str,
+  stderr : Str,
+  command : [Str],
+  statusPath : Str,
+  eventLogPath : Str,
+  stdoutPath : Str,
+  stderrPath : Str,
+  heartbeatPath : Str,
+  running : Bool,
+  completed : Bool,
+  timedOut : Bool,
+  error : Str,
+  startedAtMs : Int,
+  endedAtMs : Int,
+  durationMs : Int,
+  updatedAtMs : Int
+}
+
+record MonitoredRunLogReport = {
+  scenarioId : Str,
+  finalStatus : Str,
+  completed : Bool,
+  runCount : Int,
+  passStatus : Str,
+  failStatus : Str,
+  timeoutStatus : Str,
+  stateRoot : Str,
+  eventLogPath : Str,
+  passRun : MonitoredRunRecord,
+  failRun : MonitoredRunRecord,
+  timeoutRun : MonitoredRunRecord,
+  summary : Str
+}
+
+watchedProcessDetailsError : Str -> Result WatchedProcessDetails
+watchedProcessDetailsError message = Err message
+
+monitoredStepError : Str -> Result MonitoredStepResult
+monitoredStepError message = Err message
+
+monitoredRunRecordError : Str -> Result MonitoredRunRecord
+monitoredRunRecordError message = Err message
+
+watchedCommandSpec : Str -> Str -> Str -> Str -> Int -> [Str] -> WatchedCommandSpec
+watchedCommandSpec cwd stdoutPath stderrPath heartbeatPath watchPollMs command =
+  WatchedCommandSpec {
+    cwd = cwd,
+    stdoutPath = stdoutPath,
+    stderrPath = stderrPath,
+    heartbeatPath = heartbeatPath,
+    watchPollMs = watchPollMs,
+    command = command
+  }
+
+monitoredRunSpec : Str -> Str -> Str -> Str -> WatchedCommandSpec -> MonitoredRunSpec
+monitoredRunSpec runId role statusPath eventLogPath watched =
+  MonitoredRunSpec {
+    runId = runId,
+    role = role,
+    statusPath = statusPath,
+    eventLogPath = eventLogPath,
+    watched = watched
+  }
+
+watchedProcessDetailsResult : Result Str -> Result WatchedProcessDetails
+watchedProcessDetailsResult value = match value {
+  Ok raw -> Ok (decode WatchedProcessDetails raw),
+  Err message -> watchedProcessDetailsError message
+}
+
+processReadTextOrEmpty : Str -> Str
+processReadTextOrEmpty path = match readFile path {
+  Ok raw -> raw,
+  Err message -> ""
+}
+
+watchedProcessStatus : WatchedProcessDetails -> Str
+watchedProcessStatus process =
+  if process.timedOut then
+    "timeout"
+  else if process.status != "" then
+    process.status
+  else if process.completed then
+    if process.exitCode == 0 then
+      "completed-pass"
+    else
+      "completed-fail"
+  else if process.running then
+    "running"
+  else
+    "stopped"
+
+monitoredStepResultWithStatus : WatchedProcessDetails -> Str -> Int -> Bool -> MonitoredStepResult
+monitoredStepResultWithStatus process status exitCode timedOut =
+  MonitoredStepResult {
+    status = status,
+    exitCode = exitCode,
+    stdout = processReadTextOrEmpty process.stdoutPath,
+    stderr = processReadTextOrEmpty process.stderrPath,
+    command = process.command,
+    stdoutPath = process.stdoutPath,
+    stderrPath = process.stderrPath,
+    heartbeatPath = process.heartbeatPath,
+    running = process.running,
+    completed = process.completed,
+    timedOut = timedOut,
+    error = if timedOut then "timeout" else process.error,
+    startedAtMs = process.startedAtMs,
+    endedAtMs = process.endedAtMs,
+    durationMs = process.durationMs,
+    updatedAtMs = process.updatedAtMs
+  }
+
+monitoredStepResult : WatchedProcessDetails -> MonitoredStepResult
+monitoredStepResult process =
+  monitoredStepResultWithStatus process (watchedProcessStatus process) process.exitCode process.timedOut
+
+watchDetails : WatchedCommandSpec -> Result WatchedProcessDetails
+watchDetails spec =
+  watchedProcessDetailsResult (
+    watchCommandWithLimitsRaw
+      spec.cwd
+      spec.stdoutPath
+      spec.stderrPath
+      spec.heartbeatPath
+      spec.watchPollMs
+      harnessWatchMemoryLimitMb
+      spec.command
+  )
+
+spawnDetails : WatchedCommandSpec -> Result WatchedProcessDetails
+spawnDetails spec =
+  watchedProcessDetailsResult (
+    spawnCommandWithLimitsRaw
+      spec.cwd
+      spec.stdoutPath
+      spec.stderrPath
+      spec.heartbeatPath
+      spec.watchPollMs
+      harnessWatchMemoryLimitMb
+      spec.command
+  )
+
+cancelDetails : Str -> Result WatchedProcessDetails
+cancelDetails heartbeatPath = watchedProcessDetailsResult (cancelWatchedProcessRaw heartbeatPath)
+
+awaitTimeoutDetails : Str -> Int -> Int -> Result WatchedProcessDetails
+awaitTimeoutDetails heartbeatPath watchPollMs timeoutMs =
+  watchedProcessDetailsResult (awaitWatchedProcessTimeoutRaw heartbeatPath watchPollMs timeoutMs)
+
+runMonitored : WatchedCommandSpec -> Result MonitoredStepResult
+runMonitored spec = match watchDetails spec {
+  Ok process -> Ok (monitoredStepResult process),
+  Err message -> monitoredStepError message
+}
+
+runMonitoredTimeout : WatchedCommandSpec -> Int -> Result MonitoredStepResult
+runMonitoredTimeout spec timeoutMs =
+  if timeoutMs < 1 then
+    runMonitored spec
+  else
+    match spawnDetails spec {
+      Err message ->
+        monitoredStepError message,
+      Ok initial ->
+        match awaitTimeoutDetails spec.heartbeatPath spec.watchPollMs timeoutMs {
+          Ok process ->
+            Ok (monitoredStepResult process),
+          Err message ->
+            if message == "timeout" then
+              match cancelDetails spec.heartbeatPath {
+                Ok process ->
+                  Ok (monitoredStepResultWithStatus process "timeout" 124 true),
+                Err reconcileMessage ->
+                  monitoredStepError reconcileMessage
+              }
+            else
+              monitoredStepError message
+        }
+    }
+
+monitoredRunEvent : MonitoredRunSpec -> Str -> Str -> Str -> MonitoredRunEvent
+monitoredRunEvent spec kind status detail =
+  MonitoredRunEvent {
+    kind = kind,
+    runId = spec.runId,
+    role = spec.role,
+    status = status,
+    detail = detail,
+    atMs = timeUnixMs
+  }
+
+appendMonitoredRunEvent : MonitoredRunSpec -> Str -> Str -> Str -> Str
+appendMonitoredRunEvent spec kind status detail =
+  match appendFile spec.eventLogPath (textConcat [encode (monitoredRunEvent spec kind status detail), "\n"]) {
+    Ok written -> "",
+    Err message -> message
+  }
+
+monitoredRunRecordFromResult : MonitoredRunSpec -> MonitoredStepResult -> MonitoredRunRecord
+monitoredRunRecordFromResult spec result =
+  MonitoredRunRecord {
+    runId = spec.runId,
+    role = spec.role,
+    status = result.status,
+    exitCode = result.exitCode,
+    stdout = result.stdout,
+    stderr = result.stderr,
+    command = result.command,
+    statusPath = spec.statusPath,
+    eventLogPath = spec.eventLogPath,
+    stdoutPath = result.stdoutPath,
+    stderrPath = result.stderrPath,
+    heartbeatPath = result.heartbeatPath,
+    running = result.running,
+    completed = result.completed,
+    timedOut = result.timedOut,
+    error = result.error,
+    startedAtMs = result.startedAtMs,
+    endedAtMs = result.endedAtMs,
+    durationMs = result.durationMs,
+    updatedAtMs = result.updatedAtMs
+  }
+
+monitoredRunRecordFromError : MonitoredRunSpec -> Str -> MonitoredRunRecord
+monitoredRunRecordFromError spec message =
+  MonitoredRunRecord {
+    runId = spec.runId,
+    role = spec.role,
+    status = "runtime-error",
+    exitCode = 127,
+    stdout = "",
+    stderr = message,
+    command = spec.watched.command,
+    statusPath = spec.statusPath,
+    eventLogPath = spec.eventLogPath,
+    stdoutPath = spec.watched.stdoutPath,
+    stderrPath = spec.watched.stderrPath,
+    heartbeatPath = spec.watched.heartbeatPath,
+    running = false,
+    completed = false,
+    timedOut = false,
+    error = message,
+    startedAtMs = 0,
+    endedAtMs = 0,
+    durationMs = 0,
+    updatedAtMs = timeUnixMs
+  }
+
+persistMonitoredRunRecord : MonitoredRunRecord -> Result MonitoredRunRecord
+persistMonitoredRunRecord record =
+  match writeFile record.statusPath (encode record) {
+    Ok written -> Ok record,
+    Err message -> monitoredRunRecordError message
+  }
+
+finishMonitoredRunLog : MonitoredRunSpec -> Result MonitoredStepResult -> Result MonitoredRunRecord
+finishMonitoredRunLog spec stepResult = {
+  let record = match stepResult {
+    Ok result -> monitoredRunRecordFromResult spec result,
+    Err message -> monitoredRunRecordFromError spec message
+  };
+  match persistMonitoredRunRecord record {
+    Err message -> monitoredRunRecordError message,
+    Ok persisted -> {
+      let kind = if persisted.status == "runtime-error" then "run-error" else "run-completed";
+      let detail = textConcat ["exit=", encode persisted.exitCode];
+      let closed = appendMonitoredRunEvent spec kind persisted.status detail;
+      Ok persisted
+    }
+  }
+}
+
+runMonitoredLogged : MonitoredRunSpec -> Result MonitoredRunRecord
+runMonitoredLogged spec = {
+  let opened = appendMonitoredRunEvent spec "run-started" "running" "command started";
+  let stepResult = runMonitored spec.watched;
+  finishMonitoredRunLog spec stepResult
+}
+
+runMonitoredLoggedTimeout : MonitoredRunSpec -> Int -> Result MonitoredRunRecord
+runMonitoredLoggedTimeout spec timeoutMs = {
+  let opened = appendMonitoredRunEvent spec "run-started" "running" "command started";
+  let stepResult = runMonitoredTimeout spec.watched timeoutMs;
+  finishMonitoredRunLog spec stepResult
+}
+
+stateRoot : Str
+stateRoot =
+  if textJoin "" argv == "" then
+    "feedback-loop-monitored-run-log-state"
+  else
+    pathJoin argv
+
+scenarioId : Str
+scenarioId = "ordinary-clasp-monitored-run-log"
+
+eventLogPath : Str
+eventLogPath = pathJoin [stateRoot, "monitored-runs.jsonl"]
+
+watchPollMs : Int
+watchPollMs = 25
+
+runStatusPath : Str -> Str
+runStatusPath runId = pathJoin [stateRoot, textConcat [runId, ".run.json"]]
+
+runStdoutPath : Str -> Str
+runStdoutPath runId = pathJoin [stateRoot, textConcat [runId, ".stdout.log"]]
+
+runStderrPath : Str -> Str
+runStderrPath runId = pathJoin [stateRoot, textConcat [runId, ".stderr.log"]]
+
+runHeartbeatPath : Str -> Str
+runHeartbeatPath runId = pathJoin [stateRoot, textConcat [runId, ".heartbeat.json"]]
+
+directNodeCommand : Str -> [Str]
+directNodeCommand script = ["node", "-e", script]
+
+passCommand : [Str]
+passCommand =
+  directNodeCommand "process.stdout.write('pass-out'); process.stderr.write('pass-err');"
+
+failCommand : [Str]
+failCommand =
+  directNodeCommand "process.stdout.write('fail-out'); process.stderr.write('fail-err'); process.exit(5);"
+
+timeoutCommand : [Str]
+timeoutCommand =
+  directNodeCommand "process.stdout.write('timeout-start'); setInterval(() => {}, 1000);"
+
+runSpec : Str -> Str -> [Str] -> MonitoredRunSpec
+runSpec runId role command =
+  monitoredRunSpec
+    runId
+    role
+    (runStatusPath runId)
+    eventLogPath
+    (watchedCommandSpec "." (runStdoutPath runId) (runStderrPath runId) (runHeartbeatPath runId) watchPollMs command)
+
+fallbackRunRecord : MonitoredRunSpec -> Str -> MonitoredRunRecord
+fallbackRunRecord spec message = monitoredRunRecordFromError spec message
+
+runLogged : MonitoredRunSpec -> MonitoredRunRecord
+runLogged spec =
+  match runMonitoredLogged spec {
+    Ok record -> record,
+    Err message -> fallbackRunRecord spec message
+  }
+
+runLoggedTimeout : MonitoredRunSpec -> Int -> MonitoredRunRecord
+runLoggedTimeout spec timeoutMs =
+  match runMonitoredLoggedTimeout spec timeoutMs {
+    Ok record -> record,
+    Err message -> fallbackRunRecord spec message
+  }
+
+runReport : MonitoredRunRecord -> MonitoredRunRecord -> MonitoredRunRecord -> MonitoredRunLogReport
+runReport passRun failRun timeoutRun =
+  MonitoredRunLogReport {
+    scenarioId = scenarioId,
+    finalStatus =
+      if passRun.status == "completed-pass" then
+        if failRun.status == "completed-fail" then
+          if timeoutRun.status == "timeout" then
+            "completed"
+          else
+            "unexpected-timeout-status"
+        else
+          "unexpected-fail-status"
+      else
+        "unexpected-pass-status",
+    completed = true,
+    runCount = 3,
+    passStatus = passRun.status,
+    failStatus = failRun.status,
+    timeoutStatus = timeoutRun.status,
+    stateRoot = stateRoot,
+    eventLogPath = eventLogPath,
+    passRun = passRun,
+    failRun = failRun,
+    timeoutRun = timeoutRun,
+    summary = textConcat ["runs=3 final=", if timeoutRun.status == "timeout" then "completed" else "incomplete"]
+  }
+
+runScenario : Str
+runScenario = {
+  let passSpec = runSpec "pass" "builder" passCommand;
+  let failSpec = runSpec "fail" "verifier" failCommand;
+  let timeoutSpec = runSpec "timeout" "supervisor" timeoutCommand;
+  let passRun = runLogged passSpec;
+  let failRun = runLogged failSpec;
+  let timeoutRun = runLoggedTimeout timeoutSpec 80;
+  encode (runReport passRun failRun timeoutRun)
+}
+
+main : Str
+main =
+  match mkdirAll stateRoot {
+    Err message -> textConcat ["error:", message],
+    Ok created -> runScenario
+  }

@@ -3,6 +3,7 @@ module GoalManagerTaskWorkspaceRuntime
 import GoalManagerPreludeProject
 import GoalManagerPrelude
 import GoalManagerConfig
+import GoalManagerResourceHealth
 import GoalManagerTypes
 import Service
 import Swarm
@@ -192,91 +193,101 @@ createTaskWorkspaceSnapshot taskId = {
   if removed.exitCode != 0 then
     textConcat ["task workspace cleanup failed: ", taskId, ": ", removed.stderr]
   else {
-    let created =
-      match runCommand "." ["mkdir", "-p", resolvedTaskWorkspaceActualRoot taskId] {
-        Ok result -> result,
-        Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
-      } in
-    if created.exitCode != 0 then
-      textConcat ["task workspace mkdir failed: ", taskId, ": ", created.stderr]
+    let materializationResourceError = managerWorkspaceMaterializationResourceError in
+    if materializationResourceError != "" then
+      textConcat ["task workspace materialization blocked: ", taskId, ": ", materializationResourceError]
     else {
-      let copied =
-        match runCommand "." [
-          "bash",
-          "-c",
-          textConcat [
-            "tar -cf - ",
-            workspaceCloneExcludeFlags,
-            "-C ",
-            resolvedWorkspaceRoot,
-            " . | tar -xf - -C ",
-            resolvedTaskWorkspaceActualRoot taskId
-          ]
-        ] {
+      let created =
+        match runCommand "." ["mkdir", "-p", resolvedTaskWorkspaceActualRoot taskId] {
           Ok result -> result,
           Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
         } in
-      if copied.exitCode != 0 then
-        textConcat ["task workspace snapshot failed: ", taskId, ": ", copied.stderr]
+      if created.exitCode != 0 then
+        textConcat ["task workspace mkdir failed: ", taskId, ": ", created.stderr]
       else {
-        let artifactError = repairPromotedNativeWorkspaceArtifacts resolvedWorkspaceRoot (resolvedTaskWorkspaceActualRoot taskId) in
-        if artifactError != "" then
-          textConcat ["task workspace artifact repair failed: ", taskId, ": ", artifactError]
+        let copied =
+          match runCommand "." [
+            "bash",
+            "-c",
+            textConcat [
+              "tar -cf - ",
+              workspaceCloneExcludeFlags,
+              "-C ",
+              resolvedWorkspaceRoot,
+              " . | tar -xf - -C ",
+              resolvedTaskWorkspaceActualRoot taskId
+            ]
+          ] {
+            Ok result -> result,
+            Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
+          } in
+        if copied.exitCode != 0 then
+          textConcat ["task workspace snapshot failed: ", taskId, ": ", copied.stderr]
         else {
-          let baselineCreated =
-            match runCommand "." ["mkdir", "-p", resolvedTaskWorkspaceBaselineActualRoot taskId] {
-              Ok result -> result,
-              Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
-            } in
-          if baselineCreated.exitCode != 0 then
-            textConcat ["task baseline workspace mkdir failed: ", taskId, ": ", baselineCreated.stderr]
+          let artifactError = repairPromotedNativeWorkspaceArtifacts resolvedWorkspaceRoot (resolvedTaskWorkspaceActualRoot taskId) in
+          if artifactError != "" then
+            textConcat ["task workspace artifact repair failed: ", taskId, ": ", artifactError]
           else {
-            let baselineCopied =
-              match runCommand "." [
-                "bash",
-                "-c",
-                textConcat [
-                  "tar -cf - -C ",
-                  resolvedTaskWorkspaceActualRoot taskId,
-                  " . | tar -xf - -C ",
-                  resolvedTaskWorkspaceBaselineActualRoot taskId
-                ]
-              ] {
-                Ok result -> result,
-                Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
-              } in
-            if baselineCopied.exitCode != 0 then
-              textConcat ["task baseline workspace snapshot failed: ", taskId, ": ", baselineCopied.stderr]
+            let baselineResourceError = managerWorkspaceMaterializationResourceError in
+            if baselineResourceError != "" then
+              textConcat ["task baseline workspace materialization blocked: ", taskId, ": ", baselineResourceError]
             else {
-              let manifestError = writeTaskWorkspaceManifests taskId timeUnixMs in
-              if manifestError != "" then
-                manifestError
+              let baselineCreated =
+                match runCommand "." ["mkdir", "-p", resolvedTaskWorkspaceBaselineActualRoot taskId] {
+                  Ok result -> result,
+                  Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
+                } in
+              if baselineCreated.exitCode != 0 then
+                textConcat ["task baseline workspace mkdir failed: ", taskId, ": ", baselineCreated.stderr]
               else {
-                let gitError = initializeWorkspaceGitRepo (resolvedTaskWorkspaceActualRoot taskId) in
-                if gitError != "" then
-                  textConcat ["task workspace git init failed: ", taskId, ": ", gitError]
+                let baselineCopied =
+                  match runCommand "." [
+                    "bash",
+                    "-c",
+                    textConcat [
+                      "tar -cf - -C ",
+                      resolvedTaskWorkspaceActualRoot taskId,
+                      " . | tar -xf - -C ",
+                      resolvedTaskWorkspaceBaselineActualRoot taskId
+                    ]
+                  ] {
+                    Ok result -> result,
+                    Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
+                  } in
+                if baselineCopied.exitCode != 0 then
+                  textConcat ["task baseline workspace snapshot failed: ", taskId, ": ", baselineCopied.stderr]
                 else {
-                  let linkParentCreated =
-                    match runCommand "." ["mkdir", "-p", taskWorkspaceBaseRoot] {
-                      Ok result -> result,
-                      Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
-                    } in
-                  if linkParentCreated.exitCode != 0 then
-                    textConcat ["task workspace link parent mkdir failed: ", taskId, ": ", linkParentCreated.stderr]
-                  else
-                    let linked =
-                      match runCommand "." ["ln", "-s", resolvedTaskWorkspaceActualRoot taskId, taskWorkspaceRoot taskId] {
-                        Ok result -> result,
-                        Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
-                      } in
-                    if linked.exitCode != 0 then
-                      textConcat ["task workspace link failed: ", taskId, ": ", linked.stderr]
-                    else
-                      match writeFile (taskWorkspaceReadyPath taskId) "ready" {
-                        Ok written -> "",
-                        Err message ->
-                          textConcat ["task workspace ready marker failed: ", taskId, ": ", message]
-                      }
+                  let manifestError = writeTaskWorkspaceManifests taskId timeUnixMs in
+                  if manifestError != "" then
+                    manifestError
+                  else {
+                    let gitError = initializeWorkspaceGitRepo (resolvedTaskWorkspaceActualRoot taskId) in
+                    if gitError != "" then
+                      textConcat ["task workspace git init failed: ", taskId, ": ", gitError]
+                    else {
+                      let linkParentCreated =
+                        match runCommand "." ["mkdir", "-p", taskWorkspaceBaseRoot] {
+                          Ok result -> result,
+                          Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
+                        } in
+                      if linkParentCreated.exitCode != 0 then
+                        textConcat ["task workspace link parent mkdir failed: ", taskId, ": ", linkParentCreated.stderr]
+                      else
+                        let linked =
+                          match runCommand "." ["ln", "-s", resolvedTaskWorkspaceActualRoot taskId, taskWorkspaceRoot taskId] {
+                            Ok result -> result,
+                            Err message -> ProcessResult { exitCode = 1, stdout = "", stderr = message }
+                          } in
+                        if linked.exitCode != 0 then
+                          textConcat ["task workspace link failed: ", taskId, ": ", linked.stderr]
+                        else
+                          match writeFile (taskWorkspaceReadyPath taskId) "ready" {
+                            Ok written -> "",
+                            Err message ->
+                              textConcat ["task workspace ready marker failed: ", taskId, ": ", message]
+                          }
+                    }
+                  }
                 }
               }
             }
@@ -298,6 +309,20 @@ ensureTaskWorkspace taskId =
   } else
     createTaskWorkspaceSnapshot taskId
 
+ensureTaskWorkspaceOrCleanup : Str -> Str
+ensureTaskWorkspaceOrCleanup taskId = {
+  let workspaceError = ensureTaskWorkspace taskId in
+  if workspaceError == "" then
+    ""
+  else {
+    let cleanupError = cleanupFailedTaskWorkspace taskId in
+    if cleanupError != "" then
+      textConcat [workspaceError, "; cleanup failed: ", cleanupError]
+    else
+      workspaceError
+  }
+}
+
 taskWorkspacePromotionScript : Str
 taskWorkspacePromotionScript = textJoin "\n" [
   "set -euo pipefail",
@@ -315,6 +340,7 @@ taskWorkspacePromotionScript = textJoin "\n" [
   "heartbeat_actor=\"${12:-}\"",
   "heartbeat_claspc=\"${13:-}\"",
   "heartbeat_interval_secs=\"${14:-0.05}\"",
+  "diff_limit_bytes=\"${15:-262144}\"",
   "heartbeat_pid=\"\"",
   "mkdir -p \"$(dirname \"$conflict_marker\")\" \"$(dirname \"$diff_out\")\" \"$(dirname \"$ledger_out\")\"",
   "rm -f \"$conflict_marker\" \"$diff_out\" \"$ledger_out\"",
@@ -349,7 +375,17 @@ taskWorkspacePromotionScript = textJoin "\n" [
   "write_recoverable_diff() {",
   "  tmp_diff=\"$diff_out.tmp.$$\"",
   "  diff -ruN --exclude=.workspace-ready --exclude=.clasp-task-workspace-manifest.json --exclude=.git --exclude=.clasp-agents --exclude=.clasp-loops --exclude=.clasp-swarm --exclude=.clasp-task-workspaces --exclude=.clasp-task-baselines --exclude=.clasp-test-tmp --exclude=.clasp-test-tmp-* --exclude=.clasp-verify-tmp --exclude=.clasp-verify-tmp-* --exclude=workspaces --exclude=results --exclude=dist --exclude=dist-newstyle --exclude=result --exclude=target --exclude=node_modules --exclude=__serve-native-export-host --exclude=exec-image \"$base\" \"$src\" >\"$tmp_diff\" || true",
-  "  if [ -s \"$tmp_diff\" ]; then mv \"$tmp_diff\" \"$diff_out\"; else rm -f \"$tmp_diff\" \"$diff_out\"; fi",
+  "  if [ -s \"$tmp_diff\" ]; then",
+  "    diff_size=\"$(wc -c <\"$tmp_diff\" 2>/dev/null || printf '0')\"",
+  "    if [ \"$diff_limit_bytes\" -gt 0 ] && [ \"$diff_size\" -gt \"$diff_limit_bytes\" ]; then",
+  "      { head -c \"$diff_limit_bytes\" \"$tmp_diff\"; printf '\\n[recoverable diff truncated: originalBytes=%s limitBytes=%s]\\n' \"$diff_size\" \"$diff_limit_bytes\"; } >\"$diff_out\"",
+  "      rm -f \"$tmp_diff\"",
+  "    else",
+  "      mv \"$tmp_diff\" \"$diff_out\"",
+  "    fi",
+  "  else",
+  "    rm -f \"$tmp_diff\" \"$diff_out\"",
+  "  fi",
   "}",
   "write_promotion_ledger() {",
   "  status=\"$1\"",
@@ -464,13 +500,19 @@ taskWorkspaceRecoverableDiffScript = textJoin "\n" [
   "base=\"$2\"",
   "diff_out=\"$3\"",
   "message=\"$4\"",
+  "diff_limit_bytes=\"${5:-262144}\"",
   "mkdir -p \"$(dirname \"$diff_out\")\"",
   "tmp_diff=\"$diff_out.tmp.$$\"",
   "rm -f \"$tmp_diff\" \"$diff_out\"",
   "if [ -d \"$src\" ] && [ -d \"$base\" ]; then",
   "  diff -ruN --exclude=.workspace-ready --exclude=.clasp-task-workspace-manifest.json --exclude=.git --exclude=.clasp-agents --exclude=.clasp-loops --exclude=.clasp-swarm --exclude=.clasp-task-workspaces --exclude=.clasp-task-baselines --exclude=.clasp-test-tmp --exclude=.clasp-test-tmp-* --exclude=.clasp-verify-tmp --exclude=.clasp-verify-tmp-* --exclude=workspaces --exclude=results --exclude=dist --exclude=dist-newstyle --exclude=result --exclude=target --exclude=node_modules --exclude=__serve-native-export-host --exclude=exec-image \"$base\" \"$src\" >\"$tmp_diff\" || true",
   "  if [ -s \"$tmp_diff\" ]; then",
-  "    { printf '%s\n' \"$message\"; cat \"$tmp_diff\"; } >\"$diff_out\"",
+  "    diff_size=\"$(wc -c <\"$tmp_diff\" 2>/dev/null || printf '0')\"",
+  "    if [ \"$diff_limit_bytes\" -gt 0 ] && [ \"$diff_size\" -gt \"$diff_limit_bytes\" ]; then",
+  "      { printf '%s\n' \"$message\"; head -c \"$diff_limit_bytes\" \"$tmp_diff\"; printf '\\n[recoverable diff truncated: originalBytes=%s limitBytes=%s]\\n' \"$diff_size\" \"$diff_limit_bytes\"; } >\"$diff_out\"",
+  "    else",
+  "      { printf '%s\n' \"$message\"; cat \"$tmp_diff\"; } >\"$diff_out\"",
+  "    fi",
   "  else",
   "    printf '%s\n' \"$message\" >\"$diff_out\"",
   "  fi",
@@ -490,7 +532,8 @@ writeTaskWorkspaceRecoverableDiff taskId message =
     resolvedTaskWorkspaceActualRoot taskId,
     resolvedTaskWorkspaceBaselineActualRoot taskId,
     taskPromotionDiffPath taskId,
-    message
+    message,
+    encode taskPromotionDiffMaxBytes
   ] {
     Err runMessage ->
       runMessage,
@@ -537,7 +580,9 @@ promoteVerifiedTaskWorkspace spec = {
       if taskPromotionHeartbeatEnabled then stateRootPath else "",
       if taskPromotionHeartbeatEnabled then spec.taskId else "",
       if taskPromotionHeartbeatEnabled then actorName else "",
-      if taskPromotionHeartbeatEnabled then resolvedManagerClaspcBin else ""
+      if taskPromotionHeartbeatEnabled then resolvedManagerClaspcBin else "",
+      "0.05",
+      encode taskPromotionDiffMaxBytes
     ] {
       Err message ->
         textConcat ["task workspace promotion failed: ", spec.taskId, ": promotion command failed: ", message],

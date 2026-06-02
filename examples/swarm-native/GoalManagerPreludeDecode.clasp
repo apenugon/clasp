@@ -1,5 +1,6 @@
 module GoalManagerPreludeDecode
 
+import GoalManagerPlannerInputTypes
 import GoalManagerPreludeProject
 import GoalManagerPrelude
 import GoalManagerConfig
@@ -9,6 +10,44 @@ import Swarm
 
 plannerReportError : Str -> Result PlannerReport
 plannerReportError message = Err message
+
+record PlannerReportBoundarySummary = {
+  schemaName : Str,
+  schemaVersion : Str,
+  trustPolicy : Str,
+  trust : Str,
+  accepted : Bool,
+  reason : Str,
+  format : Str
+}
+
+record TrustedPlannerReport = {
+  summary : PlannerReportBoundarySummary,
+  report : PlannerReport
+}
+
+plannerReportBoundarySummary : Str -> Bool -> Str -> PlannerReportBoundarySummary
+plannerReportBoundarySummary format accepted reason =
+  PlannerReportBoundarySummary {
+    schemaName = "PlannerReport",
+    schemaVersion = "v1",
+    trustPolicy = "untrusted-until-planner-report-decode",
+    trust = if accepted then "validated" else "untrusted",
+    accepted = accepted,
+    reason = reason,
+    format = format
+  }
+
+trustedPlannerReportOk : Str -> PlannerReport -> Result TrustedPlannerReport
+trustedPlannerReportOk format report =
+  Ok
+    (TrustedPlannerReport {
+      summary = plannerReportBoundarySummary format true "",
+      report = report
+    })
+
+trustedPlannerReportError : Str -> Result TrustedPlannerReport
+trustedPlannerReportError message = Err message
 
 defaultPlannerTaskRole : Str -> Str -> Str
 defaultPlannerTaskRole taskId detail =
@@ -92,14 +131,34 @@ plannerReportRawLooksLegacy raw =
   else
     false
 
+trustedPlannerReportFromRaw : Str -> Result TrustedPlannerReport
+trustedPlannerReportFromRaw raw =
+  if plannerReportRawLooksCurrent raw then
+    match tryDecode PlannerReport raw {
+      Ok report -> trustedPlannerReportOk "current" report,
+      Err message -> trustedPlannerReportError (textConcat ["planner report decode failed: ", message])
+    }
+  else if plannerReportRawLooksLegacy raw then
+    match tryDecode LegacyPlannerReport raw {
+      Ok report -> trustedPlannerReportOk "legacy" (legacyPlannerReportToCurrent report),
+      Err message -> trustedPlannerReportError (textConcat ["legacy planner report decode failed: ", message])
+    }
+  else
+    trustedPlannerReportError "planner report missing required fields"
+
+plannerReportBoundarySummaryFromRaw : Str -> PlannerReportBoundarySummary
+plannerReportBoundarySummaryFromRaw raw =
+  match trustedPlannerReportFromRaw raw {
+    Ok trusted -> trusted.summary,
+    Err message -> plannerReportBoundarySummary "unknown" false message
+  }
+
 plannerReportFromRaw : Str -> Result PlannerReport
 plannerReportFromRaw raw =
-  if plannerReportRawLooksCurrent raw then
-    Ok (decode PlannerReport raw)
-  else if plannerReportRawLooksLegacy raw then
-    Ok (legacyPlannerReportToCurrent (decode LegacyPlannerReport raw))
-  else
-    plannerReportError "planner report missing required fields"
+  match trustedPlannerReportFromRaw raw {
+    Ok trusted -> Ok trusted.report,
+    Err message -> plannerReportError message
+  }
 
 readPlannerReportPath : Str -> Result PlannerReport
 readPlannerReportPath path = match readFile path {
@@ -121,31 +180,55 @@ legacyPlannerInputStateToCurrent state =
     mailboxSummary = ""
   }
 
-plannerInputStateFromRaw : Str -> PlannerInputState
+plannerInputStateFromRaw : Str -> Result PlannerInputState
 plannerInputStateFromRaw raw =
   if length (textSplit raw "\"mailboxSummary\":") > 1 then
-    decode PlannerInputState raw
+    match tryDecode PlannerInputState raw {
+      Ok state -> Ok state,
+      Err message -> plannerInputStateError (textConcat ["planner input state decode failed: ", message])
+    }
   else
-    legacyPlannerInputStateToCurrent (decode LegacyPlannerInputState raw)
+    match tryDecode LegacyPlannerInputState raw {
+      Ok state -> Ok (legacyPlannerInputStateToCurrent state),
+      Err message -> plannerInputStateError (textConcat ["legacy planner input state decode failed: ", message])
+    }
 
 readPlannerInputStatePath : Str -> Result PlannerInputState
 readPlannerInputStatePath path = match readFile path {
-  Ok raw -> Ok (plannerInputStateFromRaw raw),
+  Ok raw -> plannerInputStateFromRaw raw,
   Err message -> plannerInputStateError message
 }
 
 watchedProcessError : Str -> Result WatchedProcess
 watchedProcessError message = Err message
 
+watchedProcessFromRaw : Str -> Result WatchedProcess
+watchedProcessFromRaw raw =
+  match tryDecode WatchedProcess raw {
+    Ok process -> Ok process,
+    Err message ->
+      match tryDecode LegacyWatchedProcess raw {
+        Ok legacyProcess -> Ok (watchedProcessFromLegacy legacyProcess),
+        Err legacyMessage ->
+          watchedProcessError
+            (textConcat [
+              "watched process decode failed: ",
+              message,
+              "; legacy watched process decode failed: ",
+              legacyMessage
+            ])
+      }
+  }
+
 watchedProcessResult : Result Str -> Result WatchedProcess
 watchedProcessResult value = match value {
-  Ok raw -> Ok (decode WatchedProcess raw),
+  Ok raw -> watchedProcessFromRaw raw,
   Err message -> watchedProcessError message
 }
 
 readWatchedProcessPath : Str -> Result WatchedProcess
 readWatchedProcessPath path = match readFile path {
-  Ok raw -> Ok (decode WatchedProcess raw),
+  Ok raw -> watchedProcessFromRaw raw,
   Err message -> watchedProcessError message
 }
 
@@ -160,15 +243,26 @@ spawnWatchedProcess : Str -> Str -> Str -> Str -> Int -> [Str] -> Result Watched
 spawnWatchedProcess cwd stdoutPath stderrPath heartbeatPath pollMs command =
   watchedProcessResult (spawnCommandRaw cwd stdoutPath stderrPath heartbeatPath pollMs command)
 
+spawnWatchedProcessWithLimits : Str -> Str -> Str -> Str -> Int -> Int -> [Str] -> Result WatchedProcess
+spawnWatchedProcessWithLimits cwd stdoutPath stderrPath heartbeatPath pollMs memoryLimitMb command =
+  watchedProcessResult (spawnCommandWithLimitsRaw cwd stdoutPath stderrPath heartbeatPath pollMs memoryLimitMb command)
+
 sleepMsValue : Int -> Result Str
 sleepMsValue delayMs = sleepMsRaw delayMs
 
 childLoopStateError : Str -> Result ChildLoopState
 childLoopStateError message = Err message
 
+childLoopStateFromRaw : Str -> Result ChildLoopState
+childLoopStateFromRaw raw =
+  match tryDecode ChildLoopState raw {
+    Ok state -> Ok state,
+    Err message -> childLoopStateError (textConcat ["child loop state decode failed: ", message])
+  }
+
 readChildLoopStatePath : Str -> Result ChildLoopState
 readChildLoopStatePath path = match readFile path {
-  Ok raw -> Ok (decode ChildLoopState raw),
+  Ok raw -> childLoopStateFromRaw raw,
   Err message -> childLoopStateError message
 }
 
@@ -185,7 +279,14 @@ syntheticFailureReport summary detail =
 
 readVerifierReportPath : Str -> VerifierReport
 readVerifierReportPath path = match readFile path {
-  Ok raw -> decode VerifierReport raw,
+  Ok raw ->
+    match tryDecode VerifierReport raw {
+      Ok report -> report,
+      Err message ->
+        syntheticFailureReport
+          (textConcat ["invalid verifier report: ", message])
+          message
+    },
   Err message ->
     syntheticFailureReport
       (textConcat ["missing verifier report: ", message])
@@ -197,15 +298,22 @@ builderFeedbackError message = Err message
 
 readBuilderReportPath : Str -> Result BuilderReport
 readBuilderReportPath path = match readFile path {
-  Ok raw -> Ok (decode BuilderReport raw),
+  Ok raw -> tryDecode BuilderReport raw,
   Err message -> builderFeedbackError message
 }
 
 readMailboxMessagesPath : Str -> [SwarmMailboxMessage]
 readMailboxMessagesPath path = match readFile path {
-  Ok raw -> decode [SwarmMailboxMessage] raw,
+  Ok raw -> mailboxMessagesFromRaw raw,
   Err message -> emptySwarmMailboxMessages
 }
+
+mailboxMessagesFromRaw : Str -> [SwarmMailboxMessage]
+mailboxMessagesFromRaw raw =
+  match tryDecode [SwarmMailboxMessage] raw {
+    Ok messages -> messages,
+    Err message -> emptySwarmMailboxMessages
+  }
 
 writeMailboxMessages : [SwarmMailboxMessage] -> Str
 writeMailboxMessages messages = match writeFile mailboxPath (encode messages) {

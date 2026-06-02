@@ -167,7 +167,11 @@ agentHandoffPersist root snapshot =
 agentHandoffLoad : Str -> Str -> AgentHandoffSnapshot -> AgentHandoffSnapshot
 agentHandoffLoad root snapshotPath fallback =
   match workspaceReadText root snapshotPath {
-    Ok raw -> decode AgentHandoffSnapshot raw,
+    Ok raw ->
+      match tryDecode AgentHandoffSnapshot raw {
+        Ok snapshot -> snapshot,
+        Err message -> fallback
+      },
     Err message -> fallback
   }
 

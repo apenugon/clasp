@@ -6,6 +6,7 @@ foreign workspaceWriteFileRaw : Str -> Str -> Str -> Result Str = "workspaceWrit
 foreign workspaceAppendFileRaw : Str -> Str -> Str -> Result Str = "workspaceAppendFile"
 foreign workspaceMkdirAllRaw : Str -> Str -> Result Str = "workspaceMkdirAll"
 foreign workspaceListDirRaw : Str -> Str -> Result [Str] = "workspaceListDir"
+foreign workspaceRemovePathRaw : Str -> Str -> Result Str = "workspaceRemovePath"
 
 workspacePath : Str -> Str -> Result Str
 workspacePath root relative = workspacePathRaw root relative
@@ -24,3 +25,6 @@ workspaceMkdirAll root relative = workspaceMkdirAllRaw root relative
 
 workspaceListDir : Str -> Str -> Result [Str]
 workspaceListDir root relative = workspaceListDirRaw root relative
+
+workspaceRemovePath : Str -> Str -> Result Str
+workspaceRemovePath root relative = workspaceRemovePathRaw root relative

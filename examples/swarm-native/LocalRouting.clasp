@@ -1,0 +1,614 @@
+module LocalRouting
+
+localRouteTextIncludes : Str -> Str -> Bool
+localRouteTextIncludes value needle = length (textSplit value needle) > 1
+
+localRouteTaskKindGeneric : Str
+localRouteTaskKindGeneric = "generic"
+
+localRouteTaskKindIterationSpeed : Str
+localRouteTaskKindIterationSpeed = "iteration-speed"
+
+localRouteTaskKindResourcePressure : Str
+localRouteTaskKindResourcePressure = "resource-pressure"
+
+localRouteTaskKindAffectedVerification : Str
+localRouteTaskKindAffectedVerification = "affected-verification"
+
+localRouteTaskKindCapabilityAudit : Str
+localRouteTaskKindCapabilityAudit = "capability-audit"
+
+localRouteTaskKindStandaloneSwarm : Str
+localRouteTaskKindStandaloneSwarm = "standalone-swarm"
+
+localRouteTaskKindSemanticContext : Str
+localRouteTaskKindSemanticContext = "semantic-context"
+
+localRouteResourcePressureKindGeneric : Str
+localRouteResourcePressureKindGeneric = "generic"
+
+localRouteResourcePressureKindMemory : Str
+localRouteResourcePressureKindMemory = "resource-memory-pressure"
+
+localRouteResourcePressureKindDisk : Str
+localRouteResourcePressureKindDisk = "resource-disk-pressure"
+
+localRoutePlannerRouteKeyProviderNeutral : Str
+localRoutePlannerRouteKeyProviderNeutral = "provider-neutral"
+
+localRoutePlannerRouteKeyWildcard : Str
+localRoutePlannerRouteKeyWildcard = "*"
+
+localRoutePlannerRouteKeyKnown : Str -> Bool
+localRoutePlannerRouteKeyKnown key =
+  if key == localRoutePlannerRouteKeyWildcard then
+    true
+  else if key == localRoutePlannerRouteKeyProviderNeutral then
+    true
+  else if key == localRouteTaskKindGeneric then
+    true
+  else if key == localRouteTaskKindIterationSpeed then
+    true
+  else if key == localRouteTaskKindResourcePressure then
+    true
+  else if key == localRouteTaskKindAffectedVerification then
+    true
+  else if key == localRouteTaskKindCapabilityAudit then
+    true
+  else if key == localRouteTaskKindStandaloneSwarm then
+    true
+  else if key == localRouteTaskKindSemanticContext then
+    true
+  else if key == localRouteResourcePressureKindMemory then
+    true
+  else
+    key == localRouteResourcePressureKindDisk
+
+localRouteHasNonEmptySection : Str -> Str -> Bool
+localRouteHasNonEmptySection prompt title =
+  if localRouteTextIncludes prompt (textConcat [title, "\n- none"]) then
+    false
+  else
+    localRouteTextIncludes prompt title
+
+localRouteHasCompilerContextEvidence : Str -> Bool
+localRouteHasCompilerContextEvidence prompt =
+  if localRouteTextIncludes prompt "src/Compiler/" then
+    true
+  else if localRouteTextIncludes prompt "Compiler." then
+    true
+  else
+    localRouteTextIncludes prompt "compiler:"
+
+localRouteHasSemanticContextEvidence : Str -> Bool
+localRouteHasSemanticContextEvidence prompt =
+  if localRouteHasNonEmptySection prompt "semantic index artifact matches:" then
+    true
+  else if localRouteHasNonEmptySection prompt "semantic index edit files:" then
+    true
+  else if localRouteHasNonEmptySection prompt "semantic index artifact refs:" then
+    true
+  else if localRouteHasNonEmptySection prompt "semantic index surface ids:" then
+    true
+  else
+    localRouteHasNonEmptySection prompt "semantic index query texts:"
+
+localRouteMentionsAiAgents : Str -> Bool
+localRouteMentionsAiAgents prompt =
+  if localRouteTextIncludes prompt "AI agents" then
+    true
+  else if localRouteTextIncludes prompt "ai agents" then
+    true
+  else
+    false
+
+localRouteMentionsAgentSwarms : Str -> Bool
+localRouteMentionsAgentSwarms prompt =
+  if localRouteTextIncludes prompt "agent swarms" then
+    true
+  else if localRouteTextIncludes prompt "create agent swarms" then
+    true
+  else if localRouteTextIncludes prompt "agent swarm" then
+    true
+  else
+    false
+
+localRouteHasAiAgentSwarmGoal : Str -> Bool
+localRouteHasAiAgentSwarmGoal prompt =
+  if localRouteMentionsAiAgents prompt then
+    localRouteMentionsAgentSwarms prompt
+  else
+    false
+
+localRouteHasSwarmCapabilityAudit : Str -> Bool
+localRouteHasSwarmCapabilityAudit prompt =
+  if localRouteTextIncludes prompt "clasp-swarm-capability-audit" then
+    true
+  else if localRouteTextIncludes prompt "capability_statuses" then
+    if localRouteTextIncludes prompt "overall_status" then
+      localRouteTextIncludes prompt "blocking_gaps"
+    else
+      false
+  else
+    false
+
+localRouteHasCapabilityAuditContextHandoff : Str -> Bool
+localRouteHasCapabilityAuditContextHandoff prompt =
+  if localRouteTextIncludes prompt "Capability audit decision JSON path:" then
+    true
+  else if localRouteTextIncludes prompt "Capability audit decision JSON:" then
+    true
+  else if localRouteTextIncludes prompt "Capability audit JSON path:" then
+    true
+  else if localRouteTextIncludes prompt "Capability audit JSON:" then
+    true
+  else if localRouteTextIncludes prompt "capability-audit-context" then
+    true
+  else if localRouteTextIncludes prompt "capability-audit-json-decode-failed" then
+    true
+  else
+    localRouteTextIncludes prompt "capability-audit-json:repair-context"
+
+localRouteHasCapabilityMailboxHandoff : Str -> Bool
+localRouteHasCapabilityMailboxHandoff prompt =
+  if localRouteTextIncludes prompt "capability-gap=" then
+    true
+  else
+    localRouteTextIncludes prompt "capability-closure="
+
+localRouteHasManagedSwarmProofHandoff : Str -> Bool
+localRouteHasManagedSwarmProofHandoff prompt =
+  if localRouteTextIncludes prompt "Managed swarm proof JSON path:" then
+    true
+  else if localRouteTextIncludes prompt "Managed swarm proof JSON:" then
+    true
+  else
+    localRouteTextIncludes prompt "clasp-managed-swarm-proof"
+
+localRouteHasStandaloneSwarmClosureHandoff : Str -> Bool
+localRouteHasStandaloneSwarmClosureHandoff prompt =
+  if localRouteTextIncludes prompt "Standalone swarm closure report JSON path:" then
+    true
+  else if localRouteTextIncludes prompt "Standalone swarm closure report JSON:" then
+    true
+  else
+    localRouteTextIncludes prompt "standalone-swarm-verifier-report"
+
+localRouteHasAutonomousLaunchGateGap : Str -> Bool
+localRouteHasAutonomousLaunchGateGap prompt =
+  if localRouteTextIncludes prompt "capability-gap=autonomous_launch_gate:" then
+    true
+  else if localRouteTextIncludes prompt "retryRecordRecoveryTask=standalone-swarm-autonomous-launch-gate-repair" then
+    true
+  else if localRouteTextIncludes prompt "retryRecordRecoveryKind=autonomous-launch-gate" then
+    true
+  else if localRouteTextIncludes prompt "retryRecordLatest=phase=autonomous-launch-gate" then
+    true
+  else if localRouteTextIncludes prompt "manager-replan-blocker=autonomous-launch-gate" then
+    true
+  else if localRouteTextIncludes prompt "autonomous-launch-gate-blocker" then
+    true
+  else if localRouteTextIncludes prompt "autonomous-launch:close-launch-gaps" then
+    true
+  else if localRouteTextIncludes prompt "autonomous-launch-ready=false" then
+    true
+  else if localRouteTextIncludes prompt "autonomous-launch-gate-mode:blocked-" then
+    true
+  else if localRouteTextIncludes prompt "autonomous-launch-mode=blocked-" then
+    true
+  else if localRouteTextIncludes prompt "Autonomous launch gate JSON:" then
+    if localRouteTextIncludes prompt "\"ready\":false" then
+      true
+    else if localRouteTextIncludes prompt "\"ready\": false" then
+      true
+    else if localRouteTextIncludes prompt "\"mode\":\"blocked-" then
+      true
+    else
+      localRouteTextIncludes prompt "\"mode\": \"blocked-"
+  else
+    false
+
+localRouteHasBackendConfigRepair : Str -> Bool
+localRouteHasBackendConfigRepair prompt =
+  if localRouteTextIncludes prompt "backendConfigRepair=agent-backend" then
+    true
+  else if localRouteTextIncludes prompt "plannerBackendConfigRepair=agent-backend" then
+    true
+  else
+    localRouteTextIncludes prompt "plannerBackendConfigError="
+
+localRouteMentionsStandaloneSwarmIntent : Str -> Bool
+localRouteMentionsStandaloneSwarmIntent prompt =
+  if localRouteTextIncludes prompt "standalone-swarm" then
+    true
+  else if localRouteTextIncludes prompt "standalone swarm" then
+    true
+  else if localRouteTextIncludes prompt "ordinary-Clasp swarm runtime" then
+    true
+  else if localRouteTextIncludes prompt "Clasp-native swarm" then
+    true
+  else if localRouteTextIncludes prompt "clasp-native swarm" then
+    true
+  else if localRouteTextIncludes prompt "self-improving swarm" then
+    true
+  else if localRouteTextIncludes prompt "self improving swarm" then
+    true
+  else if localRouteTextIncludes prompt "swarm could run" then
+    true
+  else if localRouteTextIncludes prompt "swarm can run" then
+    true
+  else if localRouteTextIncludes prompt "run and improve Clasp itself" then
+    true
+  else if localRouteTextIncludes prompt "run and improve clasp itself" then
+    true
+  else if localRouteTextIncludes prompt "swarms can be implemented in Clasp" then
+    true
+  else if localRouteTextIncludes prompt "swarms can be implemented in clasp" then
+    true
+  else if localRouteTextIncludes prompt "non-Codex swarm" then
+    true
+  else if localRouteTextIncludes prompt "Codex-free swarm" then
+    true
+  else if localRouteTextIncludes prompt "without Codex-specific control flow" then
+    true
+  else if localRouteTextIncludes prompt "without Codex" then
+    localRouteTextIncludes prompt "swarm"
+  else
+    false
+
+localRouteHasPlannerResourcePressure : Str -> Bool
+localRouteHasPlannerResourcePressure prompt =
+  if localRouteTextIncludes prompt "Planner resource health:" then
+    if localRouteTextIncludes prompt "status=blocked" then
+      true
+    else if localRouteTextIncludes prompt "memory-admission: status=blocked" then
+      true
+    else if localRouteTextIncludes prompt "memory-concurrency-admission: status=reduced" then
+      true
+    else if localRouteTextIncludes prompt "memory-concurrency-admission: status=blocked" then
+      true
+    else if localRouteTextIncludes prompt "reserveMet=false" then
+      true
+    else
+      localRouteTextIncludes prompt "headroomMet=false"
+  else if localRouteTextIncludes prompt "resource-pressure-recovery" then
+    true
+  else if localRouteTextIncludes prompt "resource-memory-pressure-recovery" then
+    true
+  else if localRouteTextIncludes prompt "resource-pressure-kind=" then
+    true
+  else if localRouteTextIncludes prompt "resource pressure" then
+    true
+  else if localRouteTextIncludes prompt "generated-state cleanup" then
+    true
+  else if localRouteTextIncludes prompt "GeneratedStateCleanupPlan" then
+    true
+  else if localRouteTextIncludes prompt "CLASP_GENERATED_STATE_APPLY_JSON" then
+    true
+  else
+    false
+
+localRouteHasPlannerMemoryResourcePressure : Str -> Bool
+localRouteHasPlannerMemoryResourcePressure prompt =
+  if localRouteTextIncludes prompt "resource-memory-pressure-recovery" then
+    true
+  else if localRouteTextIncludes prompt "resource-pressure-kind=memory" then
+    true
+  else if localRouteTextIncludes prompt "resource-memory-pressure" then
+    true
+  else if localRouteTextIncludes prompt "memory-admission: status=blocked" then
+    true
+  else if localRouteTextIncludes prompt "memory-concurrency-admission: status=reduced" then
+    true
+  else if localRouteTextIncludes prompt "memory-concurrency-admission: status=blocked" then
+    true
+  else if localRouteTextIncludes prompt "reason=host-memory-reserve" then
+    true
+  else if localRouteTextIncludes prompt "reason=projected-child-memory-reserve" then
+    true
+  else if localRouteTextIncludes prompt "reason=external-agent-memory-reserve" then
+    true
+  else if localRouteTextIncludes prompt "reason=configured-concurrency-exceeds-memory-capacity" then
+    true
+  else if localRouteTextIncludes prompt "reason=no-child-memory-capacity" then
+    true
+  else if localRouteTextIncludes prompt "action=wait-for-memory-or-stop-only-managed-jobs-by-metadata" then
+    true
+  else if localRouteTextIncludes prompt "action=lower-concurrency-or-child-memory-budget" then
+    true
+  else if localRouteTextIncludes prompt "action=lower-concurrency-to-admitted-child-capacity" then
+    true
+  else if localRouteTextIncludes prompt "action=wait-for-memory-or-lower-concurrency-before-launch" then
+    true
+  else if localRouteTextIncludes prompt "action=wait-for-external-agent-pressure-or-lower-concurrency" then
+    true
+  else if localRouteTextIncludes prompt "memory-exceeded" then
+    true
+  else if localRouteTextIncludes prompt "oom-kill" then
+    true
+  else if localRouteTextIncludes prompt "OOM" then
+    true
+  else if localRouteTextIncludes prompt "out of memory" then
+    true
+  else if localRouteTextIncludes prompt "Out of memory" then
+    true
+  else if localRouteTextIncludes prompt "Killed" then
+    true
+  else if localRouteTextIncludes prompt "SIGKILL" then
+    true
+  else if localRouteTextIncludes prompt "signal 9" then
+    true
+  else if localRouteTextIncludes prompt "exit 137" then
+    true
+  else if localRouteTextIncludes prompt "exit-status=137" then
+    true
+  else if localRouteTextIncludes prompt "status=137" then
+    true
+  else if localRouteTextIncludes prompt "externalAgentRssMb=" then
+    true
+  else if localRouteTextIncludes prompt "external_agent_rss_mb" then
+    true
+  else if localRouteTextIncludes prompt "externalAgentReservedMb=" then
+    true
+  else if localRouteTextIncludes prompt "external_agent_reserved_memory_mb" then
+    true
+  else if localRouteTextIncludes prompt "unmanagedRssMb=" then
+    true
+  else if localRouteTextIncludes prompt "available_memory_mb" then
+    true
+  else if localRouteTextIncludes prompt "required_available_memory_mb" then
+    true
+  else if localRouteTextIncludes prompt "memory reserve unmet" then
+    true
+  else if localRouteTextIncludes prompt "external agent reserve unmet" then
+    true
+  else if localRouteTextIncludes prompt "external agent reserve" then
+    localRouteTextIncludes prompt "memory"
+  else if localRouteTextIncludes prompt "Planner resource health:" then
+    if localRouteTextIncludes prompt "memory:" then
+      if localRouteTextIncludes prompt "status=blocked" then
+        true
+      else if localRouteTextIncludes prompt "reserveMet=false" then
+        true
+      else
+        localRouteTextIncludes prompt "headroomMet=false"
+    else
+      false
+  else
+    false
+
+localRouteHasPlannerDiskResourcePressure : Str -> Bool
+localRouteHasPlannerDiskResourcePressure prompt =
+  if localRouteTextIncludes prompt "resource-pressure-kind=disk" then
+    true
+  else if localRouteTextIncludes prompt "disk-exceeded" then
+    true
+  else if localRouteTextIncludes prompt "available_disk_mb" then
+    true
+  else if localRouteTextIncludes prompt "required_available_disk_mb" then
+    true
+  else if localRouteTextIncludes prompt "disk_headroom" then
+    true
+  else if localRouteTextIncludes prompt "GeneratedStateCleanupPlan" then
+    true
+  else if localRouteTextIncludes prompt "generated-state cleanup" then
+    true
+  else if localRouteTextIncludes prompt "CLASP_GENERATED_STATE_APPLY_JSON" then
+    true
+  else if localRouteTextIncludes prompt "Planner resource health:" then
+    localRouteTextIncludes prompt "disk:"
+  else
+    false
+
+localRouteResourcePressureKindForPrompt : Str -> Str
+localRouteResourcePressureKindForPrompt prompt =
+  if localRouteHasPlannerMemoryResourcePressure prompt then
+    localRouteResourcePressureKindMemory
+  else if localRouteHasPlannerDiskResourcePressure prompt then
+    localRouteResourcePressureKindDisk
+  else if localRouteHasPlannerResourcePressure prompt then
+    localRouteTaskKindResourcePressure
+  else
+    localRouteResourcePressureKindGeneric
+
+localRouteHasAffectedVerificationLaunchPolicy : Str -> Bool
+localRouteHasAffectedVerificationLaunchPolicy prompt =
+  if localRouteTextIncludes prompt "affectedVerificationLaunchPolicy" then
+    true
+  else if localRouteTextIncludes prompt "affected-launch-mode=" then
+    true
+  else if localRouteTextIncludes prompt "affected-verification-launch:" then
+    true
+  else if localRouteTextIncludes prompt "affected_verification_plan" then
+    localRouteTextIncludes prompt "affected-verification-plan"
+  else
+    false
+
+localRouteAffectedVerificationTouchesCompilerState : Str -> Bool
+localRouteAffectedVerificationTouchesCompilerState prompt =
+  if localRouteTextIncludes prompt "affected-launch-mode=direct-compiler-state-access" then
+    true
+  else if localRouteTextIncludes prompt "\"mode\":\"direct-compiler-state-access\"" then
+    true
+  else if localRouteTextIncludes prompt "\"mode\": \"direct-compiler-state-access\"" then
+    true
+  else if localRouteTextIncludes prompt "affected verifier plan touches compiler/cache state before launch" then
+    true
+  else
+    localRouteTextIncludes prompt "affected-verification-plan:safe-direct-compiler-state-access"
+
+localRouteAffectedVerificationRequiresManaged : Str -> Bool
+localRouteAffectedVerificationRequiresManaged prompt =
+  if localRouteTextIncludes prompt "affected-launch-mode=heavy-managed" then
+    true
+  else if localRouteTextIncludes prompt "affected-launch-mode=focused-managed" then
+    true
+  else if localRouteTextIncludes prompt "\"mode\":\"heavy-managed\"" then
+    true
+  else if localRouteTextIncludes prompt "\"mode\":\"focused-managed\"" then
+    true
+  else if localRouteTextIncludes prompt "\"mode\": \"heavy-managed\"" then
+    true
+  else if localRouteTextIncludes prompt "\"mode\": \"focused-managed\"" then
+    true
+  else if localRouteTextIncludes prompt "affected-verification-launch:managed-" then
+    true
+  else if localRouteTextIncludes prompt "affected verifier plan requires managed" then
+    true
+  else
+    localRouteTextIncludes prompt "affected-verification-plan:run-managed"
+
+localRouteFocusedVerificationPlanRequiresManaged : Str -> Bool
+localRouteFocusedVerificationPlanRequiresManaged prompt =
+  if localRouteTextIncludes prompt "focused-verification-plan-safe-direct:false" then
+    true
+  else if localRouteTextIncludes prompt "focused-verification-launch-mode=managed-required" then
+    true
+  else if localRouteTextIncludes prompt "focused-verification-launch-policy-mode:managed-required" then
+    true
+  else if localRouteTextIncludes prompt "focused-verification-launch:managed-required" then
+    true
+  else if localRouteTextIncludes prompt "focused-verification-launch-mode=invalid-plan" then
+    true
+  else if localRouteTextIncludes prompt "focused-verification-launch-policy-mode:invalid-plan" then
+    true
+  else if localRouteTextIncludes prompt "focused-verification-launch:repair-plan-section" then
+    true
+  else if localRouteTextIncludes prompt "Focused verification launch policy JSON:" then
+    if localRouteTextIncludes prompt "\"mode\":\"managed-required\"" then
+      true
+    else if localRouteTextIncludes prompt "\"mode\": \"managed-required\"" then
+      true
+    else if localRouteTextIncludes prompt "\"mode\":\"invalid-plan\"" then
+      true
+    else if localRouteTextIncludes prompt "\"mode\": \"invalid-plan\"" then
+      true
+    else if localRouteTextIncludes prompt "\"ready\":false" then
+      true
+    else
+      localRouteTextIncludes prompt "\"ready\": false"
+  else if localRouteTextIncludes prompt "focused-verification-safe-direct=false" then
+    true
+  else if localRouteTextIncludes prompt "focused-verification-plan-managed-required:true" then
+    true
+  else if localRouteTextIncludes prompt "focused-verification-managed-required=true" then
+    true
+  else if localRouteTextIncludes prompt "capability-gap=focused_verification_plan:" then
+    true
+  else if localRouteTextIncludes prompt "capability-gap=focused_verification_launch_policy:" then
+    true
+  else if localRouteTextIncludes prompt "focused verification plan requires managed launch" then
+    true
+  else if localRouteTextIncludes prompt "unmanaged heavy focused plans" then
+    true
+  else
+    localRouteTextIncludes prompt "focusedVerificationPlan:managed-required"
+
+localRouteHasAffectedVerificationLaunchGap : Str -> Bool
+localRouteHasAffectedVerificationLaunchGap prompt =
+  if localRouteFocusedVerificationPlanRequiresManaged prompt then
+    true
+  else if localRouteHasAffectedVerificationLaunchPolicy prompt then
+    if localRouteTextIncludes prompt "affected-launch-ready=false" then
+      true
+    else if localRouteTextIncludes prompt "\"ready\":false" then
+      true
+    else if localRouteTextIncludes prompt "\"ready\": false" then
+      true
+    else if localRouteAffectedVerificationTouchesCompilerState prompt then
+      true
+    else
+      localRouteAffectedVerificationRequiresManaged prompt
+  else
+    false
+
+localRouteTaskKindForPrompt : Str -> Str
+localRouteTaskKindForPrompt prompt =
+  if localRouteHasPlannerResourcePressure prompt then
+    localRouteTaskKindResourcePressure
+  else if localRouteHasAffectedVerificationLaunchGap prompt then
+    localRouteTaskKindAffectedVerification
+  else if localRouteHasSwarmCapabilityAudit prompt then
+    localRouteTaskKindCapabilityAudit
+  else if localRouteHasCapabilityAuditContextHandoff prompt then
+    localRouteTaskKindCapabilityAudit
+  else if localRouteHasCapabilityMailboxHandoff prompt then
+    localRouteTaskKindCapabilityAudit
+  else if localRouteHasManagedSwarmProofHandoff prompt then
+    localRouteTaskKindCapabilityAudit
+  else if localRouteHasStandaloneSwarmClosureHandoff prompt then
+    localRouteTaskKindStandaloneSwarm
+  else if localRouteHasAutonomousLaunchGateGap prompt then
+    localRouteTaskKindStandaloneSwarm
+  else if localRouteHasBackendConfigRepair prompt then
+    localRouteTaskKindStandaloneSwarm
+  else if localRouteTextIncludes prompt "verify-affected" then
+    localRouteTaskKindIterationSpeed
+  else if localRouteTextIncludes prompt "compiler-slice" then
+    localRouteTaskKindIterationSpeed
+  else if localRouteTextIncludes prompt "iteration time" then
+    localRouteTaskKindIterationSpeed
+  else if localRouteHasAiAgentSwarmGoal prompt then
+    localRouteTaskKindStandaloneSwarm
+  else if localRouteMentionsStandaloneSwarmIntent prompt then
+    localRouteTaskKindStandaloneSwarm
+  else if localRouteHasCompilerContextEvidence prompt then
+    localRouteTaskKindIterationSpeed
+  else if localRouteTextIncludes prompt "semantic index projections" then
+    localRouteTaskKindSemanticContext
+  else if localRouteTextIncludes prompt "standalone-agent routing" then
+    localRouteTaskKindSemanticContext
+  else if localRouteHasSemanticContextEvidence prompt then
+    localRouteTaskKindSemanticContext
+  else
+    localRouteTaskKindGeneric
+
+localRouteSelectsIterationSpeed : Str -> Bool
+localRouteSelectsIterationSpeed prompt =
+  localRouteTaskKindForPrompt prompt == localRouteTaskKindIterationSpeed
+
+localRouteSelectsResourcePressure : Str -> Bool
+localRouteSelectsResourcePressure prompt =
+  localRouteTaskKindForPrompt prompt == localRouteTaskKindResourcePressure
+
+localRouteSelectsAffectedVerification : Str -> Bool
+localRouteSelectsAffectedVerification prompt =
+  localRouteTaskKindForPrompt prompt == localRouteTaskKindAffectedVerification
+
+localRouteSelectsProviderNeutral : Str -> Bool
+localRouteSelectsProviderNeutral prompt =
+  if localRouteTextIncludes prompt "provider-neutral planner" then
+    true
+  else if localRouteTextIncludes prompt "child agent command templates" then
+    true
+  else
+    localRouteTextIncludes prompt "generic agent command"
+
+localRouteSelectsMemoryResourcePressure : Str -> Bool
+localRouteSelectsMemoryResourcePressure prompt =
+  localRouteResourcePressureKindForPrompt prompt == localRouteResourcePressureKindMemory
+
+localRouteSelectsDiskResourcePressure : Str -> Bool
+localRouteSelectsDiskResourcePressure prompt =
+  localRouteResourcePressureKindForPrompt prompt == localRouteResourcePressureKindDisk
+
+localRouteSelectsSemanticContext : Str -> Bool
+localRouteSelectsSemanticContext prompt =
+  localRouteTaskKindForPrompt prompt == localRouteTaskKindSemanticContext
+
+localRouteSelectsStandaloneSwarm : Str -> Bool
+localRouteSelectsStandaloneSwarm prompt =
+  localRouteTaskKindForPrompt prompt == localRouteTaskKindStandaloneSwarm
+
+localRouteSelectsCapabilityAudit : Str -> Bool
+localRouteSelectsCapabilityAudit prompt =
+  localRouteTaskKindForPrompt prompt == localRouteTaskKindCapabilityAudit
+
+localRoutePlannerRouteKeyForPrompt : Str -> Str
+localRoutePlannerRouteKeyForPrompt prompt =
+  if localRouteSelectsProviderNeutral prompt then
+    localRoutePlannerRouteKeyProviderNeutral
+  else if localRouteSelectsResourcePressure prompt then
+    localRouteResourcePressureKindForPrompt prompt
+  else
+    localRouteTaskKindForPrompt prompt

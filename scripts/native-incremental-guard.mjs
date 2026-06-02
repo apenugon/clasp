@@ -47,13 +47,27 @@ const scenarios = {
       image: {
         optionKey: "imageLog",
         expected: {
-          buildPlan: ["hit", "miss"],
+          buildPlan: "hit",
           declModule: {
             Helper: "miss",
             Main: "hit",
           },
           sourceExport: {
             nativeImageProjectText: "miss",
+          },
+        },
+      },
+    },
+  },
+  "selfhost-compiler-module-body-change": {
+    changedModules: ["Compiler.Ast"],
+    unchangedModules: ["CompilerMain"],
+    traces: {
+      check: {
+        optionKey: "checkLog",
+        expected: {
+          moduleSummary: {
+            "Compiler.Ast": "validated-hit",
           },
         },
       },
@@ -69,6 +83,7 @@ function usage() {
       "    [--native-log <path>] [--check-log <path>] [--image-log <path>]",
       "    [--time <name>=<path>]",
       "    [--max-duration <name>=<seconds>]",
+      "    [--meta <name>=<value>]",
     ].join("\n"),
   );
 }
@@ -93,6 +108,7 @@ function parseArgs(argv) {
     imageLog: "",
     timePaths: {},
     maxDurations: {},
+    meta: {},
   };
 
   for (let index = 1; index < argv.length; index += 1) {
@@ -144,6 +160,18 @@ function parseArgs(argv) {
         options.maxDurations[key] = maxSeconds;
         break;
       }
+      case "--meta": {
+        index += 1;
+        const value = argv[index] ?? "";
+        const equalsIndex = value.indexOf("=");
+        if (equalsIndex <= 0 || equalsIndex === value.length - 1) {
+          fail(`invalid --meta argument: ${value}`);
+        }
+        const key = value.slice(0, equalsIndex);
+        const metaValue = value.slice(equalsIndex + 1);
+        options.meta[key] = metaValue;
+        break;
+      }
       default:
         fail(`unsupported argument: ${arg}`);
     }
@@ -157,10 +185,18 @@ function parseTraceLog(logPath) {
   const declModule = {};
   const moduleSummary = {};
   const sourceExport = {};
+  const timingMs = {};
   const changedModules = new Set();
   let buildPlan = "";
   let nativeImage = "";
   let bundle = "";
+
+  function recordTiming(label, elapsedMs) {
+    if (!Object.hasOwn(timingMs, label)) {
+      timingMs[label] = [];
+    }
+    timingMs[label].push(elapsedMs);
+  }
 
   for (const line of text.split(/\r?\n/)) {
     let match = /^\[claspc-cache\] build-plan (hit|miss) /.exec(line);
@@ -202,6 +238,12 @@ function parseTraceLog(logPath) {
     match = /^\[claspc-cache\] source-export (hit|miss) export=([^ ]+) /.exec(line);
     if (match) {
       sourceExport[match[2]] = match[1];
+      continue;
+    }
+
+    match = /^\[claspc-cache\] timing (.+) elapsed_ms=([0-9]+)$/.exec(line);
+    if (match) {
+      recordTiming(match[1], Number(match[2]));
     }
   }
 
@@ -213,6 +255,7 @@ function parseTraceLog(logPath) {
     declModule,
     moduleSummary,
     sourceExport,
+    timingMs,
     changedModules: [...changedModules].sort(),
   };
 }
@@ -259,6 +302,9 @@ function compactTrace(trace) {
   }
   if (Object.keys(trace.sourceExport).length > 0) {
     value.sourceExport = trace.sourceExport;
+  }
+  if (Object.keys(trace.timingMs).length > 0) {
+    value.timingMs = trace.timingMs;
   }
 
   return value;
@@ -313,6 +359,16 @@ for (const [traceName, traceSpec] of Object.entries(scenario.traces)) {
   }
   observedTraces[traceName] = parseTraceLog(logPath);
 }
+for (const [traceName, optionKey] of Object.entries({
+  nativeImage: "nativeLog",
+  check: "checkLog",
+  image: "imageLog",
+})) {
+  const logPath = options[optionKey];
+  if (logPath && !observedTraces[traceName]) {
+    observedTraces[traceName] = parseTraceLog(logPath);
+  }
+}
 
 const advisoryTimings = {};
 for (const [name, timePath] of Object.entries(options.timePaths)) {
@@ -362,6 +418,7 @@ const report = {
   ),
   observedChangedModules,
   advisoryTimings,
+  meta: options.meta,
   timingExpectations,
   matchesExpectations: mismatches.length === 0,
   mismatches,

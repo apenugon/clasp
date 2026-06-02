@@ -1,0 +1,102 @@
+module GoalManagerGeneratedCleanupHealth
+
+import GoalManagerResourceContext
+import GeneratedStateCleanupPlan
+import HostResources
+
+managerGeneratedCleanupBoolText : Bool -> Str
+managerGeneratedCleanupBoolText value = if value then "true" else "false"
+
+managerGeneratedCleanupDiskReserveResolvedPath : Str
+managerGeneratedCleanupDiskReserveResolvedPath =
+  if managerDiskReservePath == "" then
+    resolvedWorkspaceRoot
+  else
+    resolveWorkspacePath managerDiskReservePath
+
+managerGeneratedCleanupAvailableDiskMbAt : Str -> Result Int
+managerGeneratedCleanupAvailableDiskMbAt path = hostAvailableDiskMb path
+
+managerGeneratedCleanupDiskHeadroomMbFromAvailable : Int -> Int
+managerGeneratedCleanupDiskHeadroomMbFromAvailable availableMb =
+  intSubtract availableMb managerMinAvailableDiskMb
+
+managerGeneratedCleanupDiskReserveMetFromAvailable : Int -> Bool
+managerGeneratedCleanupDiskReserveMetFromAvailable availableMb =
+  if managerMinAvailableDiskMb < 1 then
+    true
+  else
+    availableMb >= managerMinAvailableDiskMb
+
+managerGeneratedCleanupDiskHeadroomMetFromAvailable : Int -> Bool
+managerGeneratedCleanupDiskHeadroomMetFromAvailable availableMb =
+  if managerMinDiskHeadroomMb < 1 then
+    true
+  else
+    managerGeneratedCleanupDiskHeadroomMbFromAvailable availableMb >= managerMinDiskHeadroomMb
+
+managerGeneratedCleanupDiskPressureDetected : Bool
+managerGeneratedCleanupDiskPressureDetected =
+  if managerResourceGuardEnabled == false then
+    false
+  else
+    match managerGeneratedCleanupAvailableDiskMbAt managerGeneratedCleanupDiskReserveResolvedPath {
+      Err message -> true,
+      Ok availableMb ->
+        if managerGeneratedCleanupDiskReserveMetFromAvailable availableMb == false then
+          true
+        else
+          managerGeneratedCleanupDiskHeadroomMetFromAvailable availableMb == false
+    }
+
+managerGeneratedStateCleanupPlanEnabled : Bool
+managerGeneratedStateCleanupPlanEnabled =
+  if managerGeneratedCleanupDiskPressureDetected then
+    true
+  else
+    readEnvBool "CLASP_MANAGER_INCLUDE_GENERATED_CLEANUP_PLAN_JSON" false
+
+managerGeneratedStateCleanupPlan : GeneratedStateCleanupPlan
+managerGeneratedStateCleanupPlan = generatedStateCleanupPlanFor managerProjectRoot
+
+managerGeneratedStateCleanupPlanSummaryFromPlan : GeneratedStateCleanupPlan -> Str
+managerGeneratedStateCleanupPlanSummaryFromPlan plan =
+  textJoin "\n" [
+    "GeneratedStateCleanupPlan:",
+    textConcat ["generated-state-cleanup-root=", plan.projectRoot],
+    textConcat ["generated-state-cleanup-mode=plan-only"],
+    textConcat ["generated-state-cleanup-action=", plan.recommendedAction],
+    textConcat ["generated-state-cleanup-safe-to-clean=", managerGeneratedCleanupBoolText plan.safeToClean],
+    textConcat ["generated-state-cleanup-configured-target-count=", encode plan.configuredTargetCount],
+    textConcat ["generated-state-cleanup-invalid-configured-target-count=", encode plan.invalidConfiguredTargetCount],
+    textConcat ["generated-state-cleanup-repo-target-count=", encode plan.repoGeneratedTargetCount],
+    textConcat ["generated-state-cleanup-active-process-count=", encode plan.activeProcessCount],
+    textConcat ["generated-state-cleanup-inactive-process-count=", encode plan.inactiveProcessCount],
+    textConcat ["generated-state-cleanup-external-log-count=", encode plan.externalLogCount],
+    textConcat ["generated-state-cleanup-disk-available-mb=", encode plan.disk.availableMb],
+    textConcat ["generated-state-cleanup-disk-required-mb=", encode plan.disk.requiredMb],
+    textConcat ["generated-state-cleanup-disk-headroom-mb=", encode plan.disk.headroomMb],
+    textConcat ["generated-state-cleanup-disk-shortfall-mb=", encode plan.disk.shortfallMb],
+    textConcat ["generated-state-cleanup-repo-reclaimable-mb=", encode plan.cleanup.repoReclaimableMb],
+    textConcat ["generated-state-cleanup-external-log-reclaimable-mb=", encode plan.cleanup.externalLogReclaimableMb],
+    textConcat ["generated-state-cleanup-total-reclaimable-mb=", encode plan.cleanup.totalReclaimableMb],
+    textConcat ["generated-state-cleanup-projected-available-mb=", encode plan.cleanup.projectedAvailableMb],
+    textConcat ["generated-state-cleanup-reserve-shortfall-after-cleanup-mb=", encode plan.cleanup.reserveShortfallAfterCleanupMb],
+    textConcat ["generated-state-cleanup-guard-shortfall-after-cleanup-mb=", encode plan.cleanup.guardShortfallAfterCleanupMb],
+    textConcat ["generated-state-cleanup-can-satisfy-reserve=", managerGeneratedCleanupBoolText plan.cleanup.cleanupCanSatisfyReserve],
+    textConcat ["generated-state-cleanup-can-satisfy-guard=", managerGeneratedCleanupBoolText plan.cleanup.cleanupCanSatisfyGuard],
+    "generated-state-cleanup-apply-requires=CLASP_GENERATED_STATE_APPLY_JSON=true safeToClean=true cleanupCanSatisfyReserve=true-or-cleanupCanSatisfyGuard=true",
+    "End GeneratedStateCleanupPlan."
+  ]
+
+managerGeneratedStateCleanupPlanSummary : Str
+managerGeneratedStateCleanupPlanSummary =
+  if managerGeneratedStateCleanupPlanEnabled then
+    managerGeneratedStateCleanupPlanSummaryFromPlan managerGeneratedStateCleanupPlan
+  else
+    textJoin "\n" [
+      "GeneratedStateCleanupPlan:",
+      "generated-state-cleanup-mode=not-scanned",
+      "generated-state-cleanup-reason=disk-admission-ok",
+      "End GeneratedStateCleanupPlan."
+    ]

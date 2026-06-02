@@ -9,8 +9,8 @@ fi
 prompt_file="$1"
 workspace="$2"
 json_output="${3:-$workspace/codex-run.jsonl}"
-model="${CODEX_MODEL:-gpt-5.4}"
-reasoning_effort="${CODEX_REASONING_EFFORT:-high}"
+model="${CODEX_MODEL:-gpt-5.5}"
+reasoning_effort="${CODEX_REASONING_EFFORT:-xhigh}"
 
 {
   cat <<'EOF'

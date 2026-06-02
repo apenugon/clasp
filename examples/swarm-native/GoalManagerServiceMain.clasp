@@ -7,6 +7,7 @@ import GoalManagerStateView
 import GoalManagerStateRuntime
 import GoalManagerPreludeProject
 import GoalManagerWatch
+import GoalManagerResourceHealth
 import GoalManagerPrelude
 import GoalManagerConfig
 import Service
@@ -106,22 +107,50 @@ managerServiceEnvArgs =
     textConcat ["CLASP_LOOP_AGENT_REASONING_JSON=", encode agentReasoning],
     textConcat ["CLASP_LOOP_AGENT_SANDBOX_JSON=", encode agentSandbox],
     textConcat ["CLASP_LOOP_AGENT_COMMAND_JSON=", encode agentCommandTemplate],
+    textConcat ["CLASP_LOOP_AGENT_CAPABILITY_PROFILE_JSON=", encode agentCapabilityProfileName],
+    textConcat ["CLASP_REQUIRE_STANDALONE_AGENT_BACKEND_JSON=", encode requireStandaloneAgentBackend],
+    textConcat ["CLASP_LOOP_REQUIRE_STANDALONE_AGENT_BACKEND_JSON=", encode loopRequireStandaloneAgentBackend],
     textConcat ["CLASP_LOOP_AGENT_MEMORY_MB_JSON=", encode agentMemoryLimitMb],
+    textConcat ["CLASP_MANAGER_PLANNER_MEMORY_MB_JSON=", encode plannerMemoryLimitMb],
+    textConcat ["CLASP_MANAGER_SERVICE_MEMORY_RESERVE_MB_JSON=", encode managerServiceMemoryReserveMb],
+    textConcat ["CLASP_MANAGER_UPGRADE_MEMORY_RESERVE_MB_JSON=", encode managerUpgradeMemoryReserveMb],
     textConcat ["CLASP_LOOP_BUILDER_MEMORY_MB_JSON=", encode builderMemoryLimitMb],
     textConcat ["CLASP_LOOP_VERIFIER_MEMORY_MB_JSON=", encode verifierMemoryLimitMb],
+    textConcat ["CLASP_LOOP_AFFECTED_VERIFICATION_PLAN_JSON=", encode childAffectedVerificationPlanInlineJson],
+    textConcat ["CLASP_LOOP_AFFECTED_VERIFICATION_PLAN_PATH_JSON=", encode childAffectedVerificationPlanPath],
+    textConcat ["CLASP_LOOP_AFFECTED_VERIFICATION_LAUNCH_POLICY_JSON=", encode childAffectedVerificationLaunchPolicyInlineJson],
+    textConcat ["CLASP_LOOP_AFFECTED_VERIFICATION_LAUNCH_POLICY_PATH_JSON=", encode childAffectedVerificationLaunchPolicyPath],
     textConcat ["CLASP_MANAGER_PLANNER_AGENT_COMMAND_JSON=", encode plannerAgentCommandTemplate],
+    textConcat ["CLASP_MANAGER_PLANNER_AGENT_CAPABILITY_PROFILE_JSON=", encode plannerAgentCapabilityProfileName],
     textConcat ["CLASP_LOOP_WATCH_POLL_MS_JSON=", encode childLoopWatchPollMs],
     textConcat ["CLASP_MANAGER_CHILD_AWAIT_TIMEOUT_MS_JSON=", encode childLoopAwaitTimeoutMs],
     textConcat ["CLASP_MANAGER_MAX_TASKS_JSON=", encode maxTaskLoops],
     textConcat ["CLASP_MANAGER_PLANNER_MAX_RUNS_JSON=", encode plannerTaskMaxRuns],
     textConcat ["CLASP_MANAGER_PLANNER_TIMEOUT_MS_JSON=", encode plannerTimeoutMs],
     textConcat ["CLASP_MANAGER_MAX_WAVES_JSON=", encode maxWaves],
+    textConcat ["CLASP_MANAGER_RESOURCE_RECOVERY_EXTRA_WAVES_JSON=", encode resourceRecoveryExtraWaves],
     textConcat ["CLASP_MANAGER_MAX_CONCURRENT_CHILDREN_JSON=", encode maxConcurrentChildren],
+    textConcat ["CLASP_MANAGER_RESOURCE_GUARD_JSON=", encode managerResourceGuardEnabled],
+    textConcat ["CLASP_MANAGER_DISK_RESERVE_PATH_JSON=", encode managerDiskReservePath],
+    textConcat ["CLASP_MANAGER_MIN_AVAILABLE_DISK_MB_JSON=", encode managerMinAvailableDiskMb],
+    textConcat ["CLASP_MANAGER_MIN_DISK_HEADROOM_MB_JSON=", encode managerMinDiskHeadroomMb],
+    textConcat ["CLASP_MANAGER_MIN_AVAILABLE_MEMORY_MB_JSON=", encode managerMinAvailableMemoryMb],
+    textConcat ["CLASP_MANAGER_CHILD_MEMORY_RESERVE_MB_JSON=", encode managerChildMemoryReserveMb],
+    textConcat ["CLASP_MANAGER_EXTERNAL_AGENT_RESERVE_MB_JSON=", encode managerExternalAgentReserveMb],
+    textConcat ["CLASP_MANAGER_EXTERNAL_AGENT_PROCESS_NAMES_JSON=", encode managerExternalAgentProcessNames],
     textConcat ["CLASP_MANAGER_CHILD_MAX_ATTEMPTS_JSON=", encode childMaxAttempts],
     textConcat ["CLASP_MANAGER_CHILD_REPORT_SETTLE_POLLS_JSON=", encode childReportSettlePolls],
     textConcat ["CLASP_MANAGER_OBJECTIVE_MAX_TASKS_JSON=", encode objectiveTaskBudget],
     textConcat ["CLASP_MANAGER_OBJECTIVE_MAX_RUNS_JSON=", encode objectiveRunBudget],
     textConcat ["CLASP_MANAGER_TASK_LEASE_TIMEOUT_JSON=", encode taskLeaseTimeoutMs],
+    textConcat ["CLASP_MANAGER_TASK_APPROVAL_JSON=", encode plannedTaskApprovalName],
+    textConcat ["CLASP_MANAGER_TASK_MERGEGATE_JSON=", encode plannedTaskMergegateName],
+    textConcat ["CLASP_MANAGER_TASK_REQUIRED_APPROVALS_JSON=", encode plannedTaskRequiredApprovals],
+    textConcat ["CLASP_MANAGER_TASK_REQUIRED_VERIFIERS_JSON=", encode plannedTaskRequiredVerifiers],
+    textConcat ["CLASP_MANAGER_TASK_ALLOWED_PROCESSES_JSON=", encode plannedTaskAllowedProcesses],
+    textConcat ["CLASP_MANAGER_TASK_ALLOWED_WORKSPACE_ROOTS_JSON=", encode plannedTaskAllowedWorkspaceRoots],
+    textConcat ["CLASP_MANAGER_TASK_ALLOWED_READONLY_ROOTS_JSON=", encode plannedTaskAllowedReadonlyRoots],
+    textConcat ["CLASP_MANAGER_TASK_NETWORK_ACCESS_JSON=", encode plannedTaskNetworkAccess],
     textConcat ["CLASP_MANAGER_TASK_WORKSPACE_CACHE_MAX_MB_JSON=", encode taskWorkspaceCacheMaxMb],
     textConcat ["CLASP_MANAGER_TASK_BASELINE_CACHE_MAX_MB_JSON=", encode taskBaselineCacheMaxMb],
     textConcat ["CLASP_MANAGER_FEEDBACK_LOOP_BASELINE_CACHE_MAX_MB_JSON=", encode feedbackLoopBaselineCacheMaxMb],
@@ -132,11 +161,13 @@ managerServiceEnvArgs =
     textConcat ["CLASP_MANAGER_CHILD_FOCUSED_VERIFY_COMMANDS_JSON=", encode childFocusedVerifyCommands],
     textConcat ["CLASP_MANAGER_CHILD_FULL_VERIFY_COMMAND_JSON=", encode childFullVerifyCommand],
     textConcat ["CLASP_MANAGER_TASK_FAILURE_LOG_TAIL_BYTES_JSON=", encode taskFailureLogTailBytes],
+    textConcat ["CLASP_MANAGER_TASK_PROMOTION_DIFF_MAX_BYTES_JSON=", encode taskPromotionDiffMaxBytes],
     textConcat ["CLASP_MANAGER_RETAIN_FAILED_TASK_WORKSPACES_JSON=", encode retainFailedTaskWorkspaces],
     textConcat ["CLASP_MANAGER_BENCHMARK_COMMAND_JSON=", encode benchmarkCommand],
     textConcat ["CLASP_MANAGER_BENCHMARK_CWD_JSON=", encode benchmarkCwd],
     textConcat ["CLASP_MANAGER_BENCHMARK_POLL_MS_JSON=", encode benchmarkWatchPollMs],
     textConcat ["CLASP_MANAGER_BENCHMARK_TIMEOUT_MS_JSON=", encode benchmarkTimeoutMs],
+    textConcat ["CLASP_MANAGER_BENCHMARK_MEMORY_MB_JSON=", encode benchmarkMemoryLimitMb],
     textConcat ["CLASP_MANAGER_PLANNER_POLICY_JSON=", encode plannerPolicyText],
     textConcat ["CLASP_MANAGER_TRACE_JSON=", encode traceEnabled],
     textConcat ["CLASP_MANAGER_SERVICE_ROOT_JSON=", encode serviceRoot],
@@ -199,30 +230,34 @@ waitForManagedServiceCompletion = {
 
 runManagedServiceBootstrap : Str
 runManagedServiceBootstrap =
-  match
-    superviseService (
-      serviceSupervisorSpec
-        managerProjectRoot
-        serviceRoot
-        serviceId
-        serviceReadyPath
-        managerReadyText
-        childLoopWatchPollMs
-        upgradeReadyPollMs
-        upgradeReadyTimeoutMs
-        serviceRestartDelayMs
-        managerServiceCommandArgs
-    )
-  {
-    Ok service ->
-      if service.status == "completed" then
-        recoverManagedService service
-      else if service.status == "failed" then
-        recoverManagedService service
-      else
-        waitForManagedServiceCompletion,
-    Err message -> continueManagedResume (textConcat ["error:", message])
-  }
+  let serviceResourceError = managerServiceLaunchResourceError in
+  if serviceResourceError != "" then
+    continueManagedResume (textConcat ["error:", serviceResourceError])
+  else
+    match
+      superviseService (
+        serviceSupervisorSpec
+          managerProjectRoot
+          serviceRoot
+          serviceId
+          serviceReadyPath
+          managerReadyText
+          childLoopWatchPollMs
+          upgradeReadyPollMs
+          upgradeReadyTimeoutMs
+          serviceRestartDelayMs
+          managerServiceCommandArgs
+      )
+    {
+      Ok service ->
+        if service.status == "completed" then
+          recoverManagedService service
+        else if service.status == "failed" then
+          recoverManagedService service
+        else
+          waitForManagedServiceCompletion,
+      Err message -> continueManagedResume (textConcat ["error:", message])
+    }
 
 runManagedServiceResume : Str
 runManagedServiceResume = {
@@ -251,26 +286,31 @@ runManagerUpgrade = {
     "error:missing-service-id"
   else if upgradeReadyPath == "" then
     "error:missing-upgrade-ready-path"
-  else
-    match
-      upgradeService (
-        serviceUpgradeSpec
-          "."
-          serviceRoot
-          serviceId
-          (encode currentUpgradeSnapshot)
-          upgradeReadyPath
-          upgradeReadyContains
-          childLoopWatchPollMs
-          upgradeReadyPollMs
-          upgradeReadyTimeoutMs
-          upgradeCommitGraceMs
-          upgradeCommandList
-      )
-    {
-      Ok transaction -> encode transaction,
-      Err message -> textConcat ["error:", message]
-    }
+  else {
+    let upgradeResourceError = managerUpgradeLaunchResourceError in
+    if upgradeResourceError != "" then
+      textConcat ["error:", upgradeResourceError]
+    else
+      match
+        upgradeService (
+          serviceUpgradeSpec
+            "."
+            serviceRoot
+            serviceId
+            (encode currentUpgradeSnapshot)
+            upgradeReadyPath
+            upgradeReadyContains
+            childLoopWatchPollMs
+            upgradeReadyPollMs
+            upgradeReadyTimeoutMs
+            upgradeCommitGraceMs
+            upgradeCommandList
+        )
+      {
+        Ok transaction -> encode transaction,
+        Err message -> textConcat ["error:", message]
+      }
+  }
 }
 
 statusOutput : Str

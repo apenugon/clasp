@@ -1,0 +1,258 @@
+module Compiler.Emit.JavaScript.Foreign
+
+import Compiler.Ast
+import Compiler.Emit.JavaScript.Util
+
+defaultForeignParamNames : [Str]
+defaultForeignParamNames = ["arg0", "arg1", "arg2", "arg3", "arg4", "arg5", "arg6", "arg7", "arg8", "arg9", "arg10", "arg11"]
+
+hasForeignDecls : [HostedForeignDeclAst] -> Bool
+hasForeignDecls foreignDecls = {
+  for foreignDecl in foreignDecls {
+    return true
+  };
+  false
+}
+
+emitForeignParamsFromType : HostedTypeAst -> [Str] -> [Str]
+emitForeignParamsFromType typ availableNames = match typ {
+  HostedTypeFunction input result ->
+    append [firstText availableNames] (emitForeignParamsFromType result (remainingTexts availableNames)),
+  HostedTypeName name ->
+    emptyRenderedTexts,
+  HostedTypeApply name args ->
+    emptyRenderedTexts,
+  HostedTypeVar name ->
+    emptyRenderedTexts,
+  HostedTypeList itemType ->
+    emptyRenderedTexts
+}
+
+emitForeignParams : HostedForeignDeclAst -> [Str]
+emitForeignParams foreignDecl = emitForeignParamsFromType (foreignDeclTypeAst foreignDecl) defaultForeignParamNames
+
+emitForeignReturnType : HostedTypeAst -> HostedTypeAst
+emitForeignReturnType typ = match typ {
+  HostedTypeFunction input result ->
+    emitForeignReturnType result,
+  HostedTypeName name ->
+    typ,
+  HostedTypeApply name args ->
+    typ,
+  HostedTypeVar name ->
+    typ,
+  HostedTypeList itemType ->
+    typ
+}
+
+jsIdentifierLowercaseCharIsSafe : Str -> Bool
+jsIdentifierLowercaseCharIsSafe char = if char == "a" then true else if char == "b" then true else if char == "c" then true else if char == "d" then true else if char == "e" then true else if char == "f" then true else if char == "g" then true else if char == "h" then true else if char == "i" then true else if char == "j" then true else if char == "k" then true else if char == "l" then true else if char == "m" then true else if char == "n" then true else if char == "o" then true else if char == "p" then true else if char == "q" then true else if char == "r" then true else if char == "s" then true else if char == "t" then true else if char == "u" then true else if char == "v" then true else if char == "w" then true else if char == "x" then true else if char == "y" then true else if char == "z" then true else false
+
+jsIdentifierDigitCharIsSafe : Str -> Bool
+jsIdentifierDigitCharIsSafe char = if char == "0" then true else if char == "1" then true else if char == "2" then true else if char == "3" then true else if char == "4" then true else if char == "5" then true else if char == "6" then true else if char == "7" then true else if char == "8" then true else if char == "9" then true else false
+
+jsIdentifierStartCharIsSafe : Str -> Bool
+jsIdentifierStartCharIsSafe char = if char == "_" then true else if char == "$" then true else if isUppercaseChar char then true else jsIdentifierLowercaseCharIsSafe char
+
+jsIdentifierPartCharIsSafe : Str -> Bool
+jsIdentifierPartCharIsSafe char = if jsIdentifierStartCharIsSafe char then true else jsIdentifierDigitCharIsSafe char
+
+jsIdentifierIsSafe : Str -> Bool
+jsIdentifierIsSafe value = {
+  let mut seenChar = false;
+  let mut safe = true;
+  for char in textChars value {
+    if seenChar then {
+      if jsIdentifierPartCharIsSafe char then safe else {
+        safe = false;
+        safe
+      }
+    } else {
+      seenChar = true;
+      if jsIdentifierStartCharIsSafe char then safe else {
+        safe = false;
+        safe
+      }
+    }
+  };
+  if seenChar then safe else false
+}
+
+emitJsIdentifier : Str -> Str
+emitJsIdentifier value = if jsIdentifierIsSafe value then value else "$claspInvalidForeignIdentifier"
+
+packageBindingIdentifier : HostedForeignDeclAst -> Str
+packageBindingIdentifier foreignDecl = emitJsIdentifier (textConcat ["$claspPackageBinding_", foreignDeclName foreignDecl])
+
+emitHostedPackageImportKind : HostedPackageImportKindAst -> Str
+emitHostedPackageImportKind kind = match kind {
+  HostedPackageImportNpm ->
+    "npm",
+  HostedPackageImportTypeScript ->
+    "typescript"
+}
+
+emitForeignSourceLiteral : HostedForeignDeclAst -> Str
+emitForeignSourceLiteral foreignDecl = match foreignDeclSource foreignDecl {
+  HostedForeignPackageImport kind specifier declarationPath ->
+    textConcat ["{ kind: ", emitJsString (emitHostedPackageImportKind kind), ", specifier: ", emitJsString specifier, " }"],
+  HostedForeignRuntime ->
+    "null"
+}
+
+emitForeignDeclarationLiteral : HostedForeignDeclAst -> Str
+emitForeignDeclarationLiteral foreignDecl = match foreignDeclSource foreignDecl {
+  HostedForeignPackageImport kind specifier declarationPath ->
+    if foreignDeclSignature foreignDecl == "" then textConcat ["{ path: ", emitJsString declarationPath, ", signature: null }"] else textConcat ["{ path: ", emitJsString declarationPath, ", signature: ", emitJsString (foreignDeclSignature foreignDecl), " }"],
+  HostedForeignRuntime ->
+    "null"
+}
+
+emitIdentityHostCodec : HostedTypeAst -> Str -> Str
+emitIdentityHostCodec typ mode = if mode == "from" then textConcat ["{ type: ", emitJsString (renderHostedType typ), ", fromHost(value, path = \"value\") { return value; }, toHost(value, path = \"value\") { return value; } }"] else textConcat ["{ type: ", emitJsString (renderHostedType typ), ", fromHost(value, path = \"result\") { return value; }, toHost(value, path = \"result\") { return value; } }"]
+
+emitForeignParamCodecsFromType : HostedTypeAst -> [Str]
+emitForeignParamCodecsFromType typ = match typ {
+  HostedTypeFunction input result ->
+    append [emitIdentityHostCodec input "from"] (emitForeignParamCodecsFromType result),
+  HostedTypeName name ->
+    emptyRenderedTexts,
+  HostedTypeApply name args ->
+    emptyRenderedTexts,
+  HostedTypeVar name ->
+    emptyRenderedTexts,
+  HostedTypeList itemType ->
+    emptyRenderedTexts
+}
+
+hasPackageForeignDecl : [HostedForeignDeclAst] -> Bool
+hasPackageForeignDecl foreignDecls = {
+  for foreignDecl in foreignDecls {
+    match foreignDeclSource foreignDecl {
+      HostedForeignPackageImport kind specifier declarationPath ->
+        return true,
+      HostedForeignRuntime ->
+        false
+    }
+  };
+  false
+}
+
+hasRuntimeForeignDecl : [HostedForeignDeclAst] -> Bool
+hasRuntimeForeignDecl foreignDecls = {
+  for foreignDecl in foreignDecls {
+    match foreignDeclSource foreignDecl {
+      HostedForeignPackageImport kind specifier declarationPath ->
+        false,
+      HostedForeignRuntime ->
+        return true
+    }
+  };
+  false
+}
+
+emitPackageForeignImport : HostedForeignDeclAst -> Str
+emitPackageForeignImport foreignDecl = match foreignDeclSource foreignDecl {
+  HostedForeignPackageImport kind specifier declarationPath ->
+    textConcat ["import { ", emitJsIdentifier (foreignDeclRuntimeName foreignDecl), " as ", packageBindingIdentifier foreignDecl, " } from ", emitJsString specifier, ";"],
+  HostedForeignRuntime ->
+    ""
+}
+
+emitPackageForeignImports : [HostedForeignDeclAst] -> [Str]
+emitPackageForeignImports foreignDecls = {
+  let mut rendered = emptyRenderedTexts;
+  for foreignDecl in foreignDecls {
+    match foreignDeclSource foreignDecl {
+      HostedForeignPackageImport kind specifier declarationPath -> {
+        rendered = appendJsRenderedText rendered (emitPackageForeignImport foreignDecl);
+        rendered
+      },
+      HostedForeignRuntime ->
+        rendered
+    }
+  };
+  rendered
+}
+
+emitHostBindingEntry : HostedForeignDeclAst -> Str
+emitHostBindingEntry foreignDecl = textJoin "\n" ["  {", textConcat ["    name: ", emitJsString (foreignDeclName foreignDecl), ","], textConcat ["    runtimeName: ", emitJsString (foreignDeclRuntimeName foreignDecl), ","], textConcat ["    source: ", emitForeignSourceLiteral foreignDecl, ","], textConcat ["    declaration: ", emitForeignDeclarationLiteral foreignDecl, ","], textConcat ["    params: [", textJoin ", " (emitForeignParamCodecsFromType (foreignDeclTypeAst foreignDecl)), "],"], textConcat ["    returns: ", emitIdentityHostCodec (emitForeignReturnType (foreignDeclTypeAst foreignDecl)) "result"], "  },"]
+
+emitHostBindingEntries : [HostedForeignDeclAst] -> [Str]
+emitHostBindingEntries foreignDecls = {
+  let mut rendered = emptyRenderedTexts;
+  for foreignDecl in foreignDecls {
+    rendered = appendJsRenderedText rendered (emitHostBindingEntry foreignDecl);
+    rendered
+  };
+  rendered
+}
+
+emitPackageImportEntry : HostedForeignDeclAst -> Str
+emitPackageImportEntry foreignDecl = match foreignDeclSource foreignDecl {
+  HostedForeignPackageImport kind specifier declarationPath ->
+    textConcat ["  { name: ", emitJsString (foreignDeclName foreignDecl), ", runtimeName: ", emitJsString (foreignDeclRuntimeName foreignDecl), ", kind: ", emitJsString (emitHostedPackageImportKind kind), ", specifier: ", emitJsString specifier, ", declaration: ", emitForeignDeclarationLiteral foreignDecl, " },"],
+  HostedForeignRuntime ->
+    ""
+}
+
+emitPackageImportEntries : [HostedForeignDeclAst] -> [Str]
+emitPackageImportEntries foreignDecls = {
+  let mut rendered = emptyRenderedTexts;
+  for foreignDecl in foreignDecls {
+    match foreignDeclSource foreignDecl {
+      HostedForeignPackageImport kind specifier declarationPath -> {
+        rendered = appendJsRenderedText rendered (emitPackageImportEntry foreignDecl);
+        rendered
+      },
+      HostedForeignRuntime ->
+        rendered
+    }
+  };
+  rendered
+}
+
+emitPackageBindingEntry : HostedForeignDeclAst -> [Str]
+emitPackageBindingEntry foreignDecl = match foreignDeclSource foreignDecl {
+  HostedForeignPackageImport kind specifier declarationPath ->
+    [textConcat ["  ", emitJsString (foreignDeclName foreignDecl), ": ", packageBindingIdentifier foreignDecl, ","], textConcat ["  ", emitJsString (foreignDeclRuntimeName foreignDecl), ": ", packageBindingIdentifier foreignDecl, ","]],
+  HostedForeignRuntime ->
+    emptyRenderedTexts
+}
+
+emitPackageBindingEntries : [HostedForeignDeclAst] -> [Str]
+emitPackageBindingEntries foreignDecls = {
+  let mut rendered = emptyRenderedTexts;
+  for foreignDecl in foreignDecls {
+    rendered = append rendered (emitPackageBindingEntry foreignDecl);
+    rendered
+  };
+  rendered
+}
+
+emitHostBindingPrelude : [HostedForeignDeclAst] -> [Str]
+emitHostBindingPrelude foreignDecls = if hasForeignDecls foreignDecls then ["function $claspRuntime(name) {", "  const runtime = globalThis.__claspRuntime;", "  const binding = runtime && typeof runtime === \"object\" ? runtime[name] : null;", "  if (typeof binding === \"function\") {", "    return binding;", "  }", "  const builtin = typeof $claspBuiltinRuntime !== \"undefined\" ? $claspBuiltinRuntime[name] : null;", "  if (typeof builtin === \"function\") {", "    return builtin;", "  }", "  throw new Error(`Missing Clasp runtime binding: ${name}`);", "}", "function $claspHostBinding(name) {", "  const binding = $claspHostBindingMap[name];", "  if (!binding) {", "    throw new Error(`Missing Clasp host binding manifest: ${name}`);", "  }", "  return binding;", "}", "function $claspCallHostBinding(name, args) {", "  const binding = $claspHostBinding(name);", "  const runtime = $claspRuntime(binding.runtimeName);", "  const hostArgs = binding.params.map((param, index) => param.toHost(args[index]));", "  return binding.returns.fromHost(runtime(...hostArgs));", "}", "function $claspAdaptHostBinding(binding, implementation) {", "  return (...args) => {", "    const preparedArgs = binding.params.map((param, index) => {", "      const path = `arguments[${index}]`;", "      return param.toHost(param.fromHost(args[index], path), path);", "    });", "    return binding.returns.toHost(binding.returns.fromHost(implementation(...preparedArgs), \"result\"), \"result\");", "  };", "}"] else emptyRenderedTexts
+
+emitHostBindingExports : [HostedForeignDeclAst] -> [Str]
+emitHostBindingExports foreignDecls = if hasForeignDecls foreignDecls then ["export const __claspHostBindings = ["] else emptyRenderedTexts
+
+emitPackageImportExports : [HostedForeignDeclAst] -> [Str]
+emitPackageImportExports foreignDecls = if hasForeignDecls foreignDecls then ["];", "export const __claspPackageImports = ["] else emptyRenderedTexts
+
+emitPackageBindingPrelude : [HostedForeignDeclAst] -> [Str]
+emitPackageBindingPrelude foreignDecls = if hasForeignDecls foreignDecls then ["];", "const __claspPackageBindings = Object.freeze({"] else emptyRenderedTexts
+
+emitPackageBindingSupport : [HostedForeignDeclAst] -> [Str]
+emitPackageBindingSupport foreignDecls = if hasForeignDecls foreignDecls then ["});", "const $claspHostBindingMap = Object.fromEntries(__claspHostBindings.map((binding) => [binding.name, binding]));", "export function __claspAdaptHostBindings(implementations = {}) {", "  const runtimeBindings = {};", "  for (const binding of __claspHostBindings) {", "    const byName = implementations[binding.name];", "    const byRuntimeName = implementations[binding.runtimeName];", "    const implementation = typeof byName === \"function\" ? byName : byRuntimeName;", "    if (typeof implementation === \"function\") {", "      runtimeBindings[binding.runtimeName] = $claspAdaptHostBinding(binding, implementation);", "    }", "  }", "  return runtimeBindings;", "}", "export function __claspPackageHostBindings() {", "  return __claspAdaptHostBindings(__claspPackageBindings);", "}"] else emptyRenderedTexts
+
+emitForeignBindings : [HostedForeignDeclAst] -> [Str]
+emitForeignBindings foreignDecls = {
+  let mut rendered = emptyRenderedTexts;
+  for foreignDecl in foreignDecls {
+    let params = emitForeignParams foreignDecl;
+    let bindingLine = if firstText params == "" then textConcat ["export const ", emitJsIdentifier (foreignDeclName foreignDecl), " = () => $claspCallHostBinding(", emitJsString (foreignDeclName foreignDecl), ", []);"] else textConcat ["export function ", emitJsIdentifier (foreignDeclName foreignDecl), "(", textJoin ", " params, ") { return $claspCallHostBinding(", emitJsString (foreignDeclName foreignDecl), ", [", textJoin ", " params, "]); }"];
+    rendered = appendJsRenderedText rendered bindingLine;
+    rendered
+  };
+  rendered
+}

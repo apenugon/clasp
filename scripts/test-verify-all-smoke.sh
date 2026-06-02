@@ -17,6 +17,8 @@ sequential_marker="$test_root/sequential.txt"
 
 grep -F 'bash scripts/test-verify-all-smoke.sh' "$project_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-managed-job.sh' "$project_root/scripts/verify-fast.sh" >/dev/null
+grep -F 'verify_fast_should_resolve_claspc' "$project_root/scripts/verify-fast.sh" >/dev/null
+grep -F 'caller_provided_verify_parallel_commands' "$project_root/scripts/verify-fast.sh" >/dev/null
 if grep -F 'bash scripts/test-verify-all.sh' "$project_root/scripts/verify-fast.sh" >/dev/null 2>&1; then
   printf 'verify-fast should use test-verify-all-smoke, not exhaustive test-verify-all\n' >&2
   exit 1
@@ -24,8 +26,30 @@ fi
 grep -F 'bash scripts/test-verify-all.sh' "$project_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-managed-job.sh' "$project_root/scripts/verify-all.sh" >/dev/null
 grep -F 'CLASP_VERIFY_MANAGED_MEMORY_MB' "$project_root/scripts/verify-all.sh" >/dev/null
+grep -F 'CLASP_VERIFY_DIRECT_MEMORY_LIMIT_MB' "$project_root/scripts/verify-all.sh" >/dev/null
 grep -F 'CLASP_VERIFY_MAX_PARALLEL_JOBS' "$project_root/scripts/verify-all.sh" >/dev/null
 grep -F 'run-managed-job.sh' "$project_root/scripts/verify-all.sh" >/dev/null
+grep -F 'apply_direct_memory_limit' "$project_root/scripts/verify-all.sh" >/dev/null
+grep -F 'ulimit -v "$requested_kb"' "$project_root/scripts/verify-all.sh" >/dev/null
+
+direct_limit_marker="$test_root/direct-limit.txt"
+env \
+  -u CLASP_VERIFY_IN_PROGRESS \
+  -u CLASP_VERIFY_ACTIVE_ROOT \
+  -u CLASP_VERIFY_LOCK_HELD \
+  CLASP_VERIFY_LOCK_FILE="$test_root/direct-limit.lock" \
+  CLASP_VERIFY_USE_CURRENT_SHELL=1 \
+  CLASP_VERIFY_DIRECT_MEMORY_LIMIT_MB=512 \
+  CLASP_VERIFY_PARALLEL_COMMANDS= \
+  CLASP_VERIFY_SEQUENTIAL_COMMANDS="ulimit -v > '$direct_limit_marker'" \
+  CLASP_VERIFY_FALLBACK_COMMANDS="printf fallback-smoke" \
+  bash "$project_root/scripts/verify-fast.sh" >/dev/null
+
+direct_limit_kb="$(tr -d '[:space:]' <"$direct_limit_marker")"
+if ! [[ "$direct_limit_kb" =~ ^[0-9]+$ ]] || (( direct_limit_kb > 524288 )); then
+  printf 'direct verifier should inherit a bounded memory limit, got %s\n' "$direct_limit_kb" >&2
+  exit 1
+fi
 
 env \
   -u CLASP_VERIFY_IN_PROGRESS \

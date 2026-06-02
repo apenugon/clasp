@@ -14,7 +14,7 @@ import GoalManagerTaskSet
 import GoalManagerPlannerMaterialize
 import GoalManagerPlanValidation
 import GoalManagerPlannerRoles
-import GoalManagerMailboxMessages
+import GoalManagerMailboxSummary
 import GoalManagerPrelude
 import GoalManagerConfig
 import GoalManagerTypes
@@ -271,34 +271,62 @@ ensureObjective =
       Err message -> ignoreAlreadyExistsPlannerBootstrap message
     }
 
-ensureTask : Str -> Str -> [Str] -> Str
-ensureTask taskId detail dependencies =
+ensureTaskWithSpawnPolicy : SwarmSpawnPolicy -> Str -> Str -> [Str] -> Str
+ensureTaskWithSpawnPolicy spawnPolicy taskId detail dependencies =
   if taskListHasId taskId (match tasks swarmStateRoot { Ok values -> values, Err message -> [] }) then
     ""
   else
-    match taskCreate objectiveRef taskId detail dependencies childMaxAttempts taskLeaseTimeoutMs {
+    match taskCreateWithSpawnPolicy objectiveRef spawnPolicy taskId detail dependencies childMaxAttempts noDeadlineAtMs 0 taskLeaseTimeoutMs {
       Ok created -> "",
       Err message -> ignoreAlreadyExistsPlannerBootstrap message
     }
 
+ensureTask : Str -> Str -> [Str] -> Str
+ensureTask taskId detail dependencies =
+  ensureTaskWithSpawnPolicy (swarmSpawnPolicy "" 0) taskId detail dependencies
+
+ensurePlannedTask : Str -> Str -> Str -> [Str] -> Str
+ensurePlannedTask parentTaskId taskId detail dependencies =
+  ensureTaskWithSpawnPolicy (swarmSpawnPolicyWithChildBudget parentTaskId 0 0) taskId detail dependencies
+
+ensurePlannedTaskPolicy : Str -> Str
+ensurePlannedTaskPolicy taskId =
+  match policySetVerificationPolicy (taskHandleFor taskId) plannedTaskVerificationPolicy {
+    Ok policyValue -> "",
+    Err message -> message
+  }
+
 ensurePlannerTaskFor : Int -> Str
 ensurePlannerTaskFor wave =
-  ensureTask (plannerTaskIdForWave wave) (textConcat ["planner wave ", encode wave]) emptyTexts
+  ensureTaskWithSpawnPolicy
+    (swarmSpawnPolicyWithChildBudget "" 1 maxTaskLoops)
+    (plannerTaskIdForWave wave)
+    (textConcat ["planner wave ", encode wave])
+    emptyTexts
 
 ensurePlannedTaskStep : EnsurePlanState -> PlannerTaskSpec -> EnsurePlanState
 ensurePlannedTaskStep state spec =
   if state.error != "" then
     state
-  else
-    let taskError = ensureTask spec.taskId (annotatedPlannerTaskDetail spec) spec.dependencies in
-    EnsurePlanState {
-      error = taskError,
-      report = state.report
+  else {
+    let taskError = ensurePlannedTask state.parentTaskId spec.taskId (annotatedPlannerTaskDetail spec) spec.dependencies in
+    if taskError != "" then
+      EnsurePlanState {
+        error = taskError,
+        parentTaskId = state.parentTaskId
+      }
+    else {
+      let policyError = ensurePlannedTaskPolicy spec.taskId in
+      EnsurePlanState {
+        error = policyError,
+        parentTaskId = state.parentTaskId
+      }
     }
+  }
 
-ensurePlannedTasks : PlannerReport -> Str
-ensurePlannedTasks report =
-  (fold ensurePlannedTaskStep (EnsurePlanState { error = "", report = report }) report.tasks).error
+ensurePlannedTasks : Int -> PlannerReport -> Str
+ensurePlannedTasks wave report =
+  (fold ensurePlannedTaskStep (EnsurePlanState { error = "", parentTaskId = plannerTaskIdForWave wave }) report.tasks).error
 
 plannerTaskCountError : PlannerReport -> Str
 plannerTaskCountError report =

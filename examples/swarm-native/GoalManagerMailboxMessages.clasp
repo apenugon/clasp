@@ -1,18 +1,17 @@
 module GoalManagerMailboxMessages
 
-import GoalManagerStateRuntime
-import GoalManagerBenchmarkRuntime
+import GoalManagerBenchmarkCheckpoint
 import GoalManagerChildLoopMonitor
 import GoalManagerPlannerMaterialize
-import GoalManagerPlannerMemory
 import GoalManagerPlannerRoles
 import GoalManagerTaskReportIO
 import GoalManagerMailboxIO
+import GoalManagerPlannerIO
 import GoalManagerCounters
-import GoalManagerPreludeProject
 import GoalManagerPrelude
 import GoalManagerConfig
 import GoalManagerTypes
+import GoalManagerCapabilityMailbox
 
 appendOptionalMailboxDetail : [Str] -> Str -> Str -> [Str]
 appendOptionalMailboxDetail details prefix value =
@@ -35,15 +34,24 @@ appendPrefixedMailboxDetails details prefix values = {
   rendered
 }
 
+capabilityMailboxStatusFromStatus : CapabilityStatus -> CapabilityMailboxStatus
+capabilityMailboxStatusFromStatus status =
+  CapabilityMailboxStatus {
+    name = status.name,
+    status = status.status,
+    evidence = status.evidence,
+    blocking_gaps = status.blocking_gaps,
+    required_closure = status.required_closure
+  }
+
 appendCapabilityMailboxDetails : [Str] -> [CapabilityStatus] -> [Str]
 appendCapabilityMailboxDetails details statuses = {
-  let mut rendered = details;
+  let mut mailboxStatuses = [];
   for status in statuses {
-    rendered =
-      append rendered [textConcat ["capability=", status.name, ":", status.status]];
-    rendered
+    mailboxStatuses = append mailboxStatuses [capabilityMailboxStatusFromStatus status];
+    mailboxStatuses
   };
-  rendered
+  appendCapabilityMailboxStatusDetails details mailboxStatuses
 }
 
 builderReportMailboxDetails : PlannerTaskSpec -> BuilderReport -> [Str]
@@ -98,37 +106,6 @@ taskBuilderMailboxMessages wave spec = {
   else
     emptySwarmMailboxMessages
 }
-
-plannerInputFingerprintSourceFor : Int -> Str -> Str
-plannerInputFingerprintSourceFor wave benchmarkSummary =
-  let mailboxSummary = mailboxSummaryText wave in
-  let plannerMemory = plannerMemoryTextFor wave in
-  let plannerBacklog = plannerBacklogTextFor wave in
-  textJoin "\n" [
-    textConcat ["goal:", goalText],
-    textConcat ["planner-policy:", plannerPolicyText],
-    textConcat ["schema-path:", resolvedPlannerSchemaPath],
-    textConcat ["project-root:", managerProjectRoot],
-    textConcat ["workspace-root:", resolvedWorkspaceRoot],
-    textConcat ["wave:", encode wave],
-    textConcat ["benchmark-enabled:", encode benchmarkEnabled],
-    textConcat ["benchmark-summary:", benchmarkSummary],
-    textConcat ["planner-memory:", plannerMemory],
-    textConcat ["planner-backlog:", plannerBacklog],
-    textConcat ["mailbox-summary:", mailboxSummary]
-  ]
-
-plannerInputStateFor : Int -> Str -> PlannerInputState
-plannerInputStateFor wave benchmarkSummary =
-  let mailboxSummary = mailboxSummaryText wave in
-  PlannerInputState {
-    fingerprint = textFingerprint64Hex (plannerInputFingerprintSourceFor wave benchmarkSummary),
-    goalText = goalText,
-    plannerPolicy = plannerPolicyText,
-    schemaPath = resolvedPlannerSchemaPath,
-    workspaceRoot = resolvedWorkspaceRoot,
-    mailboxSummary = mailboxSummary
-  }
 
 taskVerifierMailboxMessages : Int -> PlannerTaskSpec -> VerifierReport -> [SwarmMailboxMessage]
 taskVerifierMailboxMessages wave spec report = {
@@ -206,7 +183,7 @@ plannerTaskMailboxMessagesForWave wave =
   if wave <= 0 then
     emptySwarmMailboxMessages
   else if fileExists (plannerReportPathFor wave) then
-    match readPlannerReportForWave wave {
+    match readPlannerReportPath (plannerReportPathFor wave) {
       Ok report ->
         taskMailboxMessagesForSpecs wave (materializePlannerReport wave report).tasks,
       Err message ->

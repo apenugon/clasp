@@ -78,7 +78,7 @@ if [[ "$json_mode" == "0" && "$command" == "run" ]]; then
       printf '{"arrayLiteral":"[\\"Ada\\", \\"Grace\\", \\"Linus\\"]","moduleText":"export const names = [\\"Ada\\", \\"Grace\\", \\"Linus\\"];\\nexport function renderNames(names) { return JSON.stringify(names); }"}\n'
       ;;
     examples/compiler-ergonomics.clasp)
-      printf '{"selectedId":"repair","selectedStatus":"running","statusLookup":"running","queueCount":1,"blockerCount":0,"boxValue":"running","summary":"repair:running:running:unblocked"}\n'
+      printf '{"selectedId":"repair","selectedStatus":"running","statusLookup":"running","queueCount":1,"blockerCount":0,"boxValue":"running","loopSummary":"alpha!,beta!","summary":"repair:running:running:unblocked"}\n'
       ;;
     *)
       printf 'unexpected run entry: %s\n' "$entry" >&2

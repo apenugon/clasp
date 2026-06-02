@@ -5,6 +5,7 @@ project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 jobs_root="${CLASP_MANAGED_JOB_ROOT:-$project_root/.clasp-loops/jobs}"
 job_id=""
 kill_after_secs="${CLASP_MANAGED_JOB_KILL_AFTER_SECS:-5}"
+stop_timeout_secs="${CLASP_MANAGED_JOB_STOP_TIMEOUT_SECS:-30}"
 force_signal=0
 
 usage() {
@@ -15,7 +16,13 @@ usage: scripts/stop-managed-job.sh [--jobs-root <dir>] <job-id-or-dir>
 By default this requests a cooperative stop by writing the job stop-request file;
 it also cleans up remaining processes carrying the exact managed-job marker.
 --force-signal is an emergency path for validated sessions and marked managed
-job processes only.
+job processes only. It never signals unmarked same-session processes.
+
+CLASP_MANAGED_JOB_STOP_TIMEOUT_SECS controls how long the cooperative path waits
+for the managed runner to write a terminal status before reporting failure.
+CLASP_MANAGED_JOB_KILL_AFTER_SECS controls the TERM grace period before the
+validated cleanup path escalates remaining marked job processes to KILL. Set it
+to 0 to disable KILL escalation.
 EOF
 }
 
@@ -57,6 +64,18 @@ process_has_marker() {
 session_has_members() {
   local sid="$1"
   ps -eo sid= | awk -v want="$sid" '{ gsub(/[[:space:]]/, "", $1); if ($1 == want) found = 1 } END { exit found ? 0 : 1 }'
+}
+
+managed_job_status_is_terminal() {
+  local status="$1"
+
+  case "$status" in
+    completed|failed|stopped|memory-exceeded|disk-exceeded|memory-enforcer-unavailable|admission-lock-unavailable)
+      return 0
+      ;;
+  esac
+
+  return 1
 }
 
 session_pgids() {
@@ -103,15 +122,17 @@ marked_session_pids() {
 }
 
 marked_job_pids() {
+  local environ_path
   local candidate_pid
 
-  while IFS= read -r candidate_pid; do
-    candidate_pid="${candidate_pid//[[:space:]]/}"
+  while IFS= read -r -d "" environ_path; do
+    candidate_pid="${environ_path#/proc/}"
+    candidate_pid="${candidate_pid%/environ}"
     if [[ -n "$candidate_pid" && "$candidate_pid" != "$$" && "$candidate_pid" =~ ^[0-9]+$ ]] &&
       process_has_marker "$candidate_pid" "$job_id" "$jobs_root" "$token"; then
       printf '%s\n' "$candidate_pid"
     fi
-  done < <(ps -eo pid=)
+  done < <(grep -Zal -- "CLASP_MANAGED_JOB_ID=$job_id" /proc/[0-9]*/environ 2>/dev/null || true)
 }
 
 marked_session_has_members() {
@@ -122,6 +143,20 @@ marked_session_has_members() {
     if [[ -n "$candidate_pid" && "$candidate_pid" != "$$" ]] &&
       process_has_marker "$candidate_pid" "$job_id" "$jobs_root" "$token"; then
       return 0
+    fi
+  done < <(session_pids "$sid")
+  return 1
+}
+
+session_has_unmarked_job_member() {
+  local sid="$1"
+  local candidate_pid
+
+  while IFS= read -r candidate_pid; do
+    if [[ -n "$candidate_pid" && "$candidate_pid" != "$$" ]]; then
+      if ! process_has_marker "$candidate_pid" "$job_id" "$jobs_root" "$token"; then
+        return 0
+      fi
     fi
   done < <(session_pids "$sid")
   return 1
@@ -166,25 +201,11 @@ signal_marked_job_pids() {
   return "$sent"
 }
 
-signal_validated_session_pids() {
-  local signal="$1"
-  local sent=1
-  local candidate_pid
-
-  while IFS= read -r candidate_pid; do
-    if [[ -n "$candidate_pid" && "$candidate_pid" =~ ^[0-9]+$ && "$candidate_pid" != "$$" ]]; then
-      kill "-$signal" "$candidate_pid" >/dev/null 2>&1 || true
-      sent=0
-    fi
-  done < <(session_pids "$sid")
-  return "$sent"
-}
-
 signal_validated_job_pids() {
   local signal="$1"
   local sent=1
 
-  signal_validated_session_pids "$signal" && sent=0 || true
+  signal_marked_session_pids "$signal" && sent=0 || true
   signal_marked_job_pids "$signal" && sent=0 || true
   return "$sent"
 }
@@ -265,6 +286,25 @@ if ! [[ "$pid" =~ ^[0-9]+$ && "$pgid" =~ ^[0-9]+$ && "$sid" =~ ^[0-9]+$ ]]; then
   printf 'managed-job-stop: invalid numeric metadata for %s\n' "$job_id" >&2
   exit 1
 fi
+if ! [[ "$stop_timeout_secs" =~ ^[0-9]+$ && "$stop_timeout_secs" -gt 0 ]]; then
+  printf 'managed-job-stop: invalid CLASP_MANAGED_JOB_STOP_TIMEOUT_SECS: %s\n' "$stop_timeout_secs" >&2
+  exit 2
+fi
+if ! [[ "$kill_after_secs" =~ ^[0-9]+$ ]]; then
+  printf 'managed-job-stop: invalid CLASP_MANAGED_JOB_KILL_AFTER_SECS: %s\n' "$kill_after_secs" >&2
+  exit 2
+fi
+term_grace_iterations() {
+  if [[ "$kill_after_secs" == "0" ]]; then
+    printf '50\n'
+    return 0
+  fi
+  local iterations=$((kill_after_secs * 10))
+  if (( iterations < 1 )); then
+    iterations=1
+  fi
+  printf '%s\n' "$iterations"
+}
 
 if [[ "$pgid" == "$(current_pgid)" || "$sid" == "$(current_sid)" ]]; then
   printf 'managed-job-stop: refusing to stop current shell process group/session for %s\n' "$job_id" >&2
@@ -286,7 +326,7 @@ stop_remaining_marked_job_pids() {
   fi
 
   signal_marked_job_pids TERM || true
-  for _ in $(seq 1 50); do
+  for _ in $(seq 1 "$(term_grace_iterations)"); do
     if ! marked_job_has_members; then
       return 0
     fi
@@ -312,16 +352,14 @@ request_cooperative_stop() {
   if [[ -f "$job_dir/status" ]]; then
     local current_status
     current_status="$(sed -n '1p' "$job_dir/status")"
-    case "$current_status" in
-      completed|failed|stopped)
-        stop_remaining_marked_job_pids || {
-          printf 'managed-job-stop: marked job members still live after cleanup for %s\n' "$job_id" >&2
-          exit 1
-        }
-        printf 'managed-job-stop: %s %s\n' "$current_status" "$job_id"
-        exit 0
-        ;;
-    esac
+    if managed_job_status_is_terminal "$current_status"; then
+      stop_remaining_marked_job_pids || {
+        printf 'managed-job-stop: marked job members still live after cleanup for %s\n' "$job_id" >&2
+        exit 1
+      }
+      printf 'managed-job-stop: %s %s\n' "$current_status" "$job_id"
+      exit 0
+    fi
   fi
 
   if [[ -f "$job_dir/stop-request-path" ]]; then
@@ -340,20 +378,19 @@ request_cooperative_stop() {
   printf 'requested %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$stop_path"
   printf 'stop-requested\n' >"$job_dir/status"
 
-  for _ in $(seq 1 100); do
+  local deadline=$((SECONDS + stop_timeout_secs))
+  while (( SECONDS < deadline )); do
     if [[ -f "$job_dir/status" ]]; then
       local status
       status="$(sed -n '1p' "$job_dir/status")"
-      case "$status" in
-        completed|failed|stopped)
-          stop_remaining_marked_job_pids || {
-            printf 'managed-job-stop: marked job members still live after cleanup for %s\n' "$job_id" >&2
-            exit 1
-          }
-          printf 'managed-job-stop: %s %s\n' "$status" "$job_id"
-          exit 0
-          ;;
-      esac
+      if managed_job_status_is_terminal "$status"; then
+        stop_remaining_marked_job_pids || {
+          printf 'managed-job-stop: marked job members still live after cleanup for %s\n' "$job_id" >&2
+          exit 1
+        }
+        printf 'managed-job-stop: %s %s\n' "$status" "$job_id"
+        exit 0
+      fi
     fi
     sleep 0.1
   done
@@ -395,10 +432,16 @@ else
   printf 'managed-job-stop: root exited; stopping remaining isolated session members or marked job members for %s\n' "$job_id" >&2
 fi
 
+if session_has_unmarked_job_member "$sid"; then
+  printf 'managed-job-stop: refusing force-signal with unmarked session members for %s\n' "$job_id" >&2
+  printf 'managed-job-stop: force-signal is exact-marker-only; request cooperative stop or fix the child marker propagation\n' >&2
+  exit 1
+fi
+
 printf 'stopping\n' >"$job_dir/status"
 signal_validated_job_pids TERM || true
 
-for _ in $(seq 1 50); do
+for _ in $(seq 1 "$(term_grace_iterations)"); do
   if ! job_has_members; then
     printf 'stopped\n' >"$job_dir/status"
     printf 'managed-job-stop: stopped %s\n' "$job_id"

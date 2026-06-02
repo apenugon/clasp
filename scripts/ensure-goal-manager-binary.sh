@@ -23,17 +23,21 @@ goal_manager_source="${CLASP_GOAL_MANAGER_SOURCE:-$(select_default_goal_manager_
 default_cache_parent="${XDG_CACHE_HOME:-/tmp/clasp-nix-cache}"
 cache_root="${CLASP_GOAL_MANAGER_CACHE_DIR:-$default_cache_parent/goal-manager-fast}"
 claspc_bin="${CLASP_GOAL_MANAGER_CLASPC_BIN:-$("$project_root/scripts/resolve-claspc.sh")}"
-compile_timeout_secs="${CLASP_GOAL_MANAGER_COMPILE_TIMEOUT_SECS:-180}"
+compile_timeout_secs="${CLASP_GOAL_MANAGER_COMPILE_TIMEOUT_SECS:-0}"
 compile_attempts="${CLASP_GOAL_MANAGER_COMPILE_ATTEMPTS:-2}"
 compile_managed_mode="${CLASP_GOAL_MANAGER_COMPILE_MANAGED:-auto}"
-compile_memory_mb="${CLASP_GOAL_MANAGER_COMPILE_MEMORY_MB:-8192}"
+compile_memory_mb="${CLASP_GOAL_MANAGER_COMPILE_MEMORY_MB:-12288}"
 compile_min_available_memory_mb="${CLASP_GOAL_MANAGER_COMPILE_MIN_AVAILABLE_MEMORY_MB:-40960}"
+compile_retry_reserve_wait_secs="${CLASP_GOAL_MANAGER_COMPILE_RETRY_RESERVE_WAIT_SECS:-60}"
+compile_min_available_disk_mb="${CLASP_GOAL_MANAGER_COMPILE_MIN_AVAILABLE_DISK_MB:-16384}"
+compile_min_disk_headroom_mb="${CLASP_GOAL_MANAGER_COMPILE_MIN_DISK_HEADROOM_MB:-${CLASP_GENERATED_STATE_MIN_HEADROOM_MB:-1024}}"
 allow_stale_on_compile_failure="${CLASP_GOAL_MANAGER_ALLOW_STALE_ON_COMPILE_FAILURE:-1}"
 allow_unmanaged_stale="${CLASP_GOAL_MANAGER_ALLOW_UNMANAGED_STALE:-0}"
 stale_smoke_timeout_secs="${CLASP_GOAL_MANAGER_STALE_SMOKE_TIMEOUT_SECS:-5}"
 goal_manager_native_bundle_jobs="${CLASP_NATIVE_BUNDLE_JOBS:-1}"
 goal_manager_native_image_section_jobs="${CLASP_NATIVE_IMAGE_SECTION_JOBS:-1}"
-goal_manager_native_image_monolithic_decl_threshold="${CLASP_NATIVE_IMAGE_MONOLITHIC_DECL_THRESHOLD:-999999}"
+goal_manager_native_image_monolithic_decl_threshold="${CLASP_NATIVE_IMAGE_MONOLITHIC_DECL_THRESHOLD:-1}"
+goal_manager_native_image_module_decl_chunk_size="${CLASP_NATIVE_IMAGE_MODULE_DECL_CHUNK_SIZE:-1}"
 goal_manager_relaxed_build_plan_cache="${CLASP_NATIVE_RELAXED_BUILD_PLAN_CACHE:-1}"
 declare -a alias_paths=()
 
@@ -43,9 +47,16 @@ usage: ensure-goal-manager-binary.sh [--alias <path>]...
 
 Environment:
   CLASP_GOAL_MANAGER_COMPILE_MANAGED=0       Disable managed-job memory guard around cache-miss compiles.
-  CLASP_GOAL_MANAGER_COMPILE_MEMORY_MB=8192  Hard memory cap for managed cache-miss compiles.
+  CLASP_GOAL_MANAGER_COMPILE_MEMORY_MB=12288
+                                               Hard memory cap for managed cache-miss compiles.
   CLASP_GOAL_MANAGER_COMPILE_MIN_AVAILABLE_MEMORY_MB=40960
                                                Host memory reserve that stops managed compiles early.
+  CLASP_GOAL_MANAGER_COMPILE_RETRY_RESERVE_WAIT_SECS=60
+                                               Wait this long for memory headroom before retrying a guarded compile.
+  CLASP_GOAL_MANAGER_COMPILE_MIN_AVAILABLE_DISK_MB=16384
+                                               Project filesystem reserve that stops managed compiles early.
+  CLASP_GOAL_MANAGER_COMPILE_MIN_DISK_HEADROOM_MB=1024
+                                               Minimum free margin above the filesystem reserve.
   CLASP_GOAL_MANAGER_ALLOW_UNMANAGED_STALE=1  Permit stale fallback to executables without helper metadata after smoke validation.
 EOF
 }
@@ -78,6 +89,7 @@ emit_goal_manager_build_mode_key() {
   printf 'goal-manager-build-mode\tCLASP_NATIVE_BUNDLE_JOBS\t%s\n' "$goal_manager_native_bundle_jobs"
   printf 'goal-manager-build-mode\tCLASP_NATIVE_IMAGE_SECTION_JOBS\t%s\n' "$goal_manager_native_image_section_jobs"
   printf 'goal-manager-build-mode\tCLASP_NATIVE_IMAGE_MONOLITHIC_DECL_THRESHOLD\t%s\n' "$goal_manager_native_image_monolithic_decl_threshold"
+  printf 'goal-manager-build-mode\tCLASP_NATIVE_IMAGE_MODULE_DECL_CHUNK_SIZE\t%s\n' "$goal_manager_native_image_module_decl_chunk_size"
   emit_optional_build_mode CLASP_NATIVE_IMAGE_MONOLITHIC_BUNDLE_BYTES_THRESHOLD
   emit_optional_build_mode CLASP_NATIVE_DISABLE_EXPORT_HOST
   emit_optional_build_mode CLASP_NATIVE_DISABLE_PROMOTED_MODULE_SUMMARY_CACHE
@@ -283,10 +295,19 @@ normalize_goal_manager_compile_guards() {
     compile_attempts=4
   fi
   if ! [[ "$compile_memory_mb" =~ ^[0-9]+$ ]]; then
-    compile_memory_mb=8192
+    compile_memory_mb=12288
   fi
   if ! [[ "$compile_min_available_memory_mb" =~ ^[0-9]+$ ]]; then
     compile_min_available_memory_mb=40960
+  fi
+  if ! [[ "$compile_retry_reserve_wait_secs" =~ ^[0-9]+$ ]]; then
+    compile_retry_reserve_wait_secs=60
+  fi
+  if ! [[ "$compile_min_available_disk_mb" =~ ^[0-9]+$ ]]; then
+    compile_min_available_disk_mb=16384
+  fi
+  if ! [[ "$compile_min_disk_headroom_mb" =~ ^[0-9]+$ ]]; then
+    compile_min_disk_headroom_mb=1024
   fi
 }
 
@@ -301,6 +322,31 @@ goal_manager_compile_managed_enabled() {
   return 0
 }
 
+host_available_memory_mb() {
+  awk '/MemAvailable:/ { printf "%d\n", int($2 / 1024); found = 1 } END { if (!found) print 0 }' /proc/meminfo 2>/dev/null || printf '0\n'
+}
+
+wait_for_goal_manager_compile_memory_reserve() {
+  local required_available_memory_mb="$compile_min_available_memory_mb"
+  local available_memory_mb=""
+  local deadline=0
+
+  (( compile_retry_reserve_wait_secs > 0 )) || return 0
+  (( compile_min_available_memory_mb > 0 )) || return 0
+  if (( compile_memory_mb > 0 )); then
+    required_available_memory_mb="$((required_available_memory_mb + compile_memory_mb))"
+  fi
+
+  deadline=$((SECONDS + compile_retry_reserve_wait_secs))
+  while (( SECONDS < deadline )); do
+    available_memory_mb="$(host_available_memory_mb)"
+    if [[ "$available_memory_mb" =~ ^[0-9]+$ ]] && (( available_memory_mb >= required_available_memory_mb )); then
+      return 0
+    fi
+    sleep 2
+  done
+}
+
 run_goal_manager_compile_direct() {
   local output_tmp="$1"
 
@@ -312,6 +358,7 @@ run_goal_manager_compile_direct() {
         CLASP_NATIVE_BUNDLE_JOBS="$goal_manager_native_bundle_jobs" \
         CLASP_NATIVE_IMAGE_SECTION_JOBS="$goal_manager_native_image_section_jobs" \
         CLASP_NATIVE_IMAGE_MONOLITHIC_DECL_THRESHOLD="$goal_manager_native_image_monolithic_decl_threshold" \
+        CLASP_NATIVE_IMAGE_MODULE_DECL_CHUNK_SIZE="$goal_manager_native_image_module_decl_chunk_size" \
         CLASP_NATIVE_RELAXED_BUILD_PLAN_CACHE="$goal_manager_relaxed_build_plan_cache" \
         "$claspc_bin" compile "$goal_manager_source" -o "$output_tmp"
   else
@@ -321,6 +368,7 @@ run_goal_manager_compile_direct() {
       CLASP_NATIVE_BUNDLE_JOBS="$goal_manager_native_bundle_jobs" \
       CLASP_NATIVE_IMAGE_SECTION_JOBS="$goal_manager_native_image_section_jobs" \
       CLASP_NATIVE_IMAGE_MONOLITHIC_DECL_THRESHOLD="$goal_manager_native_image_monolithic_decl_threshold" \
+      CLASP_NATIVE_IMAGE_MODULE_DECL_CHUNK_SIZE="$goal_manager_native_image_module_decl_chunk_size" \
       CLASP_NATIVE_RELAXED_BUILD_PLAN_CACHE="$goal_manager_relaxed_build_plan_cache" \
       "$claspc_bin" compile "$goal_manager_source" -o "$output_tmp"
   fi
@@ -340,6 +388,7 @@ run_goal_manager_compile_managed() {
     CLASP_NATIVE_BUNDLE_JOBS="$goal_manager_native_bundle_jobs"
     CLASP_NATIVE_IMAGE_SECTION_JOBS="$goal_manager_native_image_section_jobs"
     CLASP_NATIVE_IMAGE_MONOLITHIC_DECL_THRESHOLD="$goal_manager_native_image_monolithic_decl_threshold"
+    CLASP_NATIVE_IMAGE_MODULE_DECL_CHUNK_SIZE="$goal_manager_native_image_module_decl_chunk_size"
     CLASP_NATIVE_RELAXED_BUILD_PLAN_CACHE="$goal_manager_relaxed_build_plan_cache"
     "$claspc_bin" compile "$goal_manager_source" -o "$output_tmp"
   )
@@ -350,17 +399,27 @@ run_goal_manager_compile_managed() {
   if (( compile_min_available_memory_mb > 0 )); then
     managed_args+=(--min-available-memory-mb "$compile_min_available_memory_mb")
   fi
+  if (( compile_min_available_disk_mb > 0 )); then
+    managed_args+=(--min-available-disk-mb "$compile_min_available_disk_mb" --disk-reserve-path "$project_root")
+  fi
+  if (( compile_min_disk_headroom_mb > 0 )); then
+    managed_args+=(--min-disk-headroom-mb "$compile_min_disk_headroom_mb" --disk-reserve-path "$project_root")
+  fi
 
   if (( compile_timeout_secs > 0 )); then
     job_dir="$(
-      "${managed_args[@]}" \
+      CLASP_MANAGED_JOB_MAX_MEMORY_MB="${CLASP_MANAGED_JOB_MAX_MEMORY_MB:-$compile_memory_mb}" \
+        "${managed_args[@]}" \
         -- timeout --kill-after=5s "$compile_timeout_secs" "${compile_args[@]}"
     )" || launch_status=$?
     if (( launch_status != 0 )); then
       return "$launch_status"
     fi
   else
-    job_dir="$("${managed_args[@]}" -- "${compile_args[@]}")" || launch_status=$?
+    job_dir="$(
+      CLASP_MANAGED_JOB_MAX_MEMORY_MB="${CLASP_MANAGED_JOB_MAX_MEMORY_MB:-$compile_memory_mb}" \
+        "${managed_args[@]}" -- "${compile_args[@]}"
+    )" || launch_status=$?
     if (( launch_status != 0 )); then
       return "$launch_status"
     fi
@@ -369,12 +428,20 @@ run_goal_manager_compile_managed() {
   while true; do
     status="$(sed -n '1p' "$job_dir/status" 2>/dev/null || printf 'missing')"
     case "$status" in
-      completed|failed|stopped)
+      completed|failed|stopped|memory-exceeded|disk-exceeded)
         break
         ;;
     esac
     sleep 0.2
   done
+  # run-managed-job may write memory-exceeded/disk-exceeded before finalizing
+  # exit-status; keep retryable guard exits from collapsing to generic exit 1.
+  if [[ ! -f "$job_dir/exit-status" ]]; then
+    for _ in $(seq 1 100); do
+      [[ -f "$job_dir/exit-status" ]] && break
+      sleep 0.05
+    done
+  fi
 
   if [[ -f "$job_dir/stdout.log" ]]; then
     cat "$job_dir/stdout.log"
@@ -386,11 +453,19 @@ run_goal_manager_compile_managed() {
     printf 'goal manager compile memory guard tripped:\n' >&2
     sed 's/^/  /' "$job_dir/memory-exceeded" >&2 || true
   fi
+  if [[ -f "$job_dir/disk-exceeded" ]]; then
+    printf 'goal manager compile disk guard tripped:\n' >&2
+    sed 's/^/  /' "$job_dir/disk-exceeded" >&2 || true
+  fi
 
   if [[ -f "$job_dir/exit-status" ]]; then
     exit_status="$(tr -d '[:space:]' <"$job_dir/exit-status")"
   elif [[ "$status" == "completed" ]]; then
     exit_status=0
+  elif [[ "$status" == "memory-exceeded" ]]; then
+    exit_status=137
+  elif [[ "$status" == "disk-exceeded" ]]; then
+    exit_status=123
   fi
   if ! [[ "$exit_status" =~ ^[0-9]+$ ]]; then
     exit_status=1
@@ -431,15 +506,23 @@ compile_goal_manager_binary() {
     if ! (( compile_status == 124 || compile_status == 137 )) || (( attempt >= compile_attempts )); then
       break
     fi
-    printf 'goal manager compile timed out after %ss on attempt %s/%s; retrying with warmed caches: %s\n' \
-      "$compile_timeout_secs" "$attempt" "$compile_attempts" "$goal_manager_source" >&2
+    if (( compile_status == 137 )); then
+      wait_for_goal_manager_compile_memory_reserve
+      printf 'goal manager compile stopped by resource guard on attempt %s/%s; retrying with warmed caches: %s\n' \
+        "$attempt" "$compile_attempts" "$goal_manager_source" >&2
+    else
+      printf 'goal manager compile timed out after %ss on attempt %s/%s; retrying with warmed caches: %s\n' \
+        "$compile_timeout_secs" "$attempt" "$compile_attempts" "$goal_manager_source" >&2
+    fi
     attempt=$((attempt + 1))
   done
 
   if (( compile_status != 0 )); then
     rm -f "$output_tmp"
-    if (( compile_status == 124 || compile_status == 137 )); then
+    if (( compile_status == 124 )); then
       printf 'goal manager compile timed out after %ss across %s attempt(s): %s\n' "$compile_timeout_secs" "$compile_attempts" "$goal_manager_source" >&2
+    elif (( compile_status == 137 )); then
+      printf 'goal manager compile stopped by resource guard across %s attempt(s): %s\n' "$compile_attempts" "$goal_manager_source" >&2
     else
       printf 'goal manager compile failed with exit %s: %s\n' "$compile_status" "$goal_manager_source" >&2
     fi

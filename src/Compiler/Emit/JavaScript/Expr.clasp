@@ -1,0 +1,255 @@
+module Compiler.Emit.JavaScript.Expr
+
+import Compiler.Ast
+import Compiler.Lower
+import Compiler.Emit.JavaScript.Util
+
+hasReturnInExprs : [LowerExprText] -> Bool
+hasReturnInExprs exprs = {
+  for expr in exprs {
+    if emitExprContainsReturn expr then return true else false
+  };
+  false
+}
+
+hasReturnInRecordFields : [LowerRecordFieldText] -> Bool
+hasReturnInRecordFields fields = {
+  for field in fields {
+    match field {
+      LowerRecordFieldText name value ->
+        if emitExprContainsReturn value then return true else false
+    }
+  };
+  false
+}
+
+hasReturnInMatchBranches : [LowerMatchBranchText] -> Bool
+hasReturnInMatchBranches branches = {
+  for branch in branches {
+    match branch {
+      LowerMatchBranchText constructorName binders body ->
+        if emitExprContainsReturn body then return true else false
+    }
+  };
+  false
+}
+
+emitExprContainsReturn : LowerExprText -> Bool
+emitExprContainsReturn expr = match expr {
+  LowerName name ->
+    false,
+  LowerLiteral value ->
+    false,
+  LowerInt value ->
+    false,
+  LowerBool value ->
+    false,
+  LowerArray values ->
+    hasReturnInExprs values,
+  LowerListAppend left right ->
+    if emitExprContainsReturn left then true else emitExprContainsReturn right,
+  LowerListPrepend value values ->
+    if emitExprContainsReturn value then true else emitExprContainsReturn values,
+  LowerListReverse values ->
+    emitExprContainsReturn values,
+  LowerLength value ->
+    emitExprContainsReturn value,
+  LowerListMap callee values ->
+    emitExprContainsReturn values,
+  LowerListFilter callee values ->
+    emitExprContainsReturn values,
+  LowerListFind callee values ->
+    emitExprContainsReturn values,
+  LowerListAny callee values ->
+    emitExprContainsReturn values,
+  LowerListAll callee values ->
+    emitExprContainsReturn values,
+  LowerListFold callee initial values ->
+    if emitExprContainsReturn initial then true else emitExprContainsReturn values,
+  LowerViewAppend left right ->
+    if emitExprContainsReturn left then true else emitExprContainsReturn right,
+  LowerEncode value ->
+    emitExprContainsReturn value,
+  LowerDecode targetType value ->
+    emitExprContainsReturn value,
+  LowerTryDecode targetType value ->
+    emitExprContainsReturn value,
+  LowerInvoke callee args ->
+    hasReturnInExprs args,
+  LowerConstructor constructorName args ->
+    hasReturnInExprs args,
+  LowerMatch subject branches ->
+    if emitExprContainsReturn subject then true else hasReturnInMatchBranches branches,
+  LowerRecord recordName fields ->
+    hasReturnInRecordFields fields,
+  LowerFieldAccess recordName subject fieldName ->
+    emitExprContainsReturn subject,
+  LowerLet binder value body ->
+    if emitExprContainsReturn value then true else emitExprContainsReturn body,
+  LowerMutableLet binder value body ->
+    if emitExprContainsReturn value then true else emitExprContainsReturn body,
+  LowerAssign binder value body ->
+    if emitExprContainsReturn value then true else emitExprContainsReturn body,
+  LowerFor binder iterable loopBody body ->
+    if emitExprContainsReturn iterable then true else if emitExprContainsReturn loopBody then true else emitExprContainsReturn body,
+  LowerReturn value ->
+    true,
+  LowerIf condition thenBranch elseBranch ->
+    if emitExprContainsReturn condition then true else if emitExprContainsReturn thenBranch then true else emitExprContainsReturn elseBranch,
+  LowerEqual left right ->
+    if emitExprContainsReturn left then true else emitExprContainsReturn right,
+  LowerNotEqual left right ->
+    if emitExprContainsReturn left then true else emitExprContainsReturn right,
+  LowerLessThan left right ->
+    if emitExprContainsReturn left then true else emitExprContainsReturn right,
+  LowerLessThanOrEqual left right ->
+    if emitExprContainsReturn left then true else emitExprContainsReturn right,
+  LowerGreaterThan left right ->
+    if emitExprContainsReturn left then true else emitExprContainsReturn right,
+  LowerGreaterThanOrEqual left right ->
+    if emitExprContainsReturn left then true else emitExprContainsReturn right
+}
+
+emitExprs : [LowerExprText] -> [Str]
+emitExprs exprs = {
+  let mut rendered = emptyRenderedTexts;
+  for expr in exprs {
+    rendered = appendJsRenderedText rendered (emitExpr expr);
+    rendered
+  };
+  rendered
+}
+
+emitRecordFields : [LowerRecordFieldText] -> [Str]
+emitRecordFields fields = {
+  let mut rendered = emptyRenderedTexts;
+  for field in fields {
+    rendered = appendJsRenderedText rendered (emitRecordField field);
+    rendered
+  };
+  rendered
+}
+
+emitRecordField : LowerRecordFieldText -> Str
+emitRecordField field = match field {
+  LowerRecordFieldText name value ->
+    textConcat [name, ": ", emitExpr value]
+}
+
+emitMatchBranchLines : LowerMatchBranchText -> [Str]
+emitMatchBranchLines branch = match branch {
+  LowerMatchBranchText constructorName binders body ->
+    if hasJsValues binders then [textConcat ["  if (__match[0] === \"", constructorName, "\") {"], textConcat ["    const [_, ", textJoin ", " binders, "] = __match;"], textConcat ["    return ", emitExpr body, ";"], "  }"] else [textConcat ["  if (__match[0] === \"", constructorName, "\") {"], textConcat ["    return ", emitExpr body, ";"], "  }"]
+}
+
+emitMatchBranchBlocks : [LowerMatchBranchText] -> [Str]
+emitMatchBranchBlocks branches = {
+  let mut rendered = emptyRenderedTexts;
+  for branch in branches {
+    rendered = append rendered (emitMatchBranchLines branch);
+    rendered
+  };
+  rendered
+}
+
+emitExpr : LowerExprText -> Str
+emitExpr expr = match expr {
+  LowerName name ->
+    name,
+  LowerLiteral value ->
+    encode value,
+  LowerInt value ->
+    value,
+  LowerBool value ->
+    if value then "true" else "false",
+  LowerArray values ->
+    textConcat ["[", textJoin ", " (emitExprs values), "]"],
+  LowerListAppend left right ->
+    textConcat ["(", emitExpr left, ").concat(", emitExpr right, ")"],
+  LowerListPrepend value values ->
+    textConcat ["[", emitExpr value, "].concat(", emitExpr values, ")"],
+  LowerListReverse values ->
+    textConcat ["(() => { const __values = ", emitExpr values, "; return Object.freeze([...__values].reverse()); })()"],
+  LowerLength value ->
+    textConcat ["(", emitExpr value, ").length"],
+  LowerListMap callee values ->
+    textConcat ["Object.freeze((", emitExpr values, ").map(($item) => ", callee, "($item)))"],
+  LowerListFilter callee values ->
+    textConcat ["Object.freeze((", emitExpr values, ").filter(($item) => ", callee, "($item)))"],
+  LowerListFind callee values ->
+    textJoin "\n" ["(() => {", textConcat ["  for (const __item of ", emitExpr values, ") {"], textConcat ["    if (", callee, "(__item)) {"], "      return [\"Some\", __item];", "    }", "  }", "  return [\"None\"];", "})()"],
+  LowerListAny callee values ->
+    textConcat ["(", emitExpr values, ").some(($item) => ", callee, "($item))"],
+  LowerListAll callee values ->
+    textConcat ["(", emitExpr values, ").every(($item) => ", callee, "($item))"],
+  LowerListFold callee initial values ->
+    textJoin "\n" ["(() => {", textConcat ["  let __acc = ", emitExpr initial, ";"], textConcat ["  for (const __item of ", emitExpr values, ") {"], textConcat ["    __acc = ", callee, "(__acc, __item);"], "  }", "  return __acc;", "})()"],
+  LowerViewAppend left right ->
+    textConcat ["Object.freeze({ $kind: \"append\", left: ", emitExpr left, ", right: ", emitExpr right, " })"],
+  LowerEncode value ->
+    textConcat ["$claspStableStringify(", emitExpr value, ")"],
+  LowerDecode targetType value ->
+    textConcat ["JSON.parse(", emitExpr value, ")"],
+  LowerTryDecode targetType value ->
+    textJoin "\n" ["(() => {", "  try {", textConcat ["    return [\"Ok\", JSON.parse(", emitExpr value, ")];"], "  } catch (error) {", "    return [\"Err\", String(error && error.message ? error.message : error)];", "  }", "})()"],
+  LowerIf condition thenBranch elseBranch ->
+    textJoin "\n" ["(() => {", textConcat ["  if (", emitExpr condition, ") {"], textConcat ["    return ", emitExpr thenBranch, ";"], "  }", textConcat ["  return ", emitExpr elseBranch, ";"], "})()"],
+  LowerEqual left right ->
+    textConcat ["(", emitExpr left, " === ", emitExpr right, ")"],
+  LowerNotEqual left right ->
+    textConcat ["(", emitExpr left, " !== ", emitExpr right, ")"],
+  LowerLessThan left right ->
+    textConcat ["(", emitExpr left, " < ", emitExpr right, ")"],
+  LowerLessThanOrEqual left right ->
+    textConcat ["(", emitExpr left, " <= ", emitExpr right, ")"],
+  LowerGreaterThan left right ->
+    textConcat ["(", emitExpr left, " > ", emitExpr right, ")"],
+  LowerGreaterThanOrEqual left right ->
+    textConcat ["(", emitExpr left, " >= ", emitExpr right, ")"],
+  LowerInvoke callee args ->
+    textConcat [callee, "(", textJoin ", " (emitExprs args), ")"],
+  LowerConstructor constructorName args -> {
+    let renderedArgs = emitExprs args;
+    if hasJsValues renderedArgs then textConcat ["[\"", constructorName, "\", ", textJoin ", " renderedArgs, "]"] else textConcat ["[\"", constructorName, "\"]"]
+  },
+  LowerMatch subject branches ->
+    textJoin "\n" (append ["(() => {", textConcat ["  const __match = ", emitExpr subject, ";"]] (append (emitMatchBranchBlocks branches) ["  return undefined;", "})()"])),
+  LowerRecord recordName fields ->
+    textConcat ["{ ", textJoin ", " (emitRecordFields fields), " }"],
+  LowerFieldAccess recordName subject fieldName ->
+    textConcat ["(", emitExpr subject, ").", fieldName],
+  LowerLet binder value body ->
+    textJoin "\n" ["(() => {", textConcat ["  const ", binder, " = ", emitExpr value, ";"], textConcat ["  return ", emitExpr body, ";"], "})()"],
+  LowerMutableLet binder value body ->
+    textJoin "\n" ["(() => {", textConcat ["  let ", binder, " = ", emitExpr value, ";"], textConcat ["  return ", emitExpr body, ";"], "})()"],
+  LowerAssign binder value body ->
+    textJoin "\n" ["(() => {", textConcat ["  ", binder, " = ", emitExpr value, ";"], textConcat ["  return ", emitExpr body, ";"], "})()"],
+  LowerFor binder iterable loopBody body ->
+    textJoin "\n" ["(() => {", textConcat ["  for (const ", binder, " of ", emitExpr iterable, ") {"], textConcat ["    ", emitExpr loopBody, ";"], "  }", textConcat ["  return ", emitExpr body, ";"], "})()"],
+  LowerReturn value ->
+    textJoin "\n" ["(() => {", textConcat ["  throw $claspEarlyReturn(", emitExpr value, ");"], "})()"]
+}
+
+emitDecl : LowerDeclText -> Str
+emitDecl decl = match decl {
+  LowerConst name body ->
+    textConcat ["export const ", name, " = ", emitExpr body, ";"],
+  LowerFn name params body ->
+    if emitExprContainsReturn body then textJoin "\n" [textConcat ["export function ", name, "(", textJoin ", " params, ") {"], "  try {", textConcat ["    return ", emitExpr body, ";"], "  } catch (error) {", "    if (error && error.$claspEarlyReturn === true) {", "      return error.value;", "    }", "    throw error;", "  }", "}"] else textConcat ["export function ", name, "(", textJoin ", " params, ") { return ", emitExpr body, "; }"]
+}
+
+moduleHasReturn : [LowerDeclText] -> Bool
+moduleHasReturn decls = {
+  for decl in decls {
+    match decl {
+      LowerConst name body ->
+        if emitExprContainsReturn body then return true else false,
+      LowerFn name params body ->
+        if emitExprContainsReturn body then return true else false
+    }
+  };
+  false
+}
+
+emitEarlyReturnPrelude : [LowerDeclText] -> [Str]
+emitEarlyReturnPrelude decls = if moduleHasReturn decls then ["function $claspEarlyReturn(value) {", "  return { $claspEarlyReturn: true, value };", "}"] else emptyRenderedTexts

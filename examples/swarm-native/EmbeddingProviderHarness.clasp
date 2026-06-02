@@ -1,0 +1,1350 @@
+module Main
+
+foreign runCommandTimeoutRaw : Str -> Int -> [Str] -> Result Str = "runCommandTimeoutJson"
+
+record SwarmMemory = {
+  actor : Str,
+  createdAtMs : Int,
+  memoryId : Int,
+  objectiveId : Str,
+  taskId : Str,
+  key : Str,
+  value : Str,
+  updatedAtMs : Int
+}
+
+record SwarmWeightedEmbeddingDimension = {
+  name : Str,
+  weight : Int
+}
+
+record SwarmWeightedEmbedding = {
+  model : Str,
+  scale : Int,
+  dimensions : [SwarmWeightedEmbeddingDimension]
+}
+
+record SwarmWeightedEmbeddedMemoryValue = {
+  text : Str,
+  embedding : SwarmWeightedEmbedding
+}
+
+record SwarmWeightedEmbeddedMemory = {
+  memory : SwarmMemory,
+  text : Str,
+  embedding : SwarmWeightedEmbedding
+}
+
+record SwarmEmbeddingProviderRequest = {
+  provider : Str,
+  model : Str,
+  inputText : Str,
+  scale : Int,
+  schemaVersion : Int
+}
+
+record UntrustedEmbeddingProviderOutput = {
+  provider : Str,
+  model : Str,
+  status : Str,
+  rawText : Str,
+  trusted : Bool
+}
+
+record TrustedWeightedEmbeddingProviderOutput = {
+  provider : Str,
+  model : Str,
+  trust : Str,
+  embedding : SwarmWeightedEmbedding
+}
+
+record SwarmEmbeddingProviderCommandTransport = {
+  cwd : Str,
+  timeoutMs : Int,
+  commandTemplate : [Str]
+}
+
+record SwarmEmbeddingProviderNetworkAdapter = {
+  provider : Str,
+  model : Str,
+  endpoint : Str,
+  authMode : Str,
+  authEnvVar : Str,
+  networkAccess : Str,
+  allowedDestination : Str,
+  transport : SwarmEmbeddingProviderCommandTransport
+}
+
+record SwarmEmbeddingProviderNetworkAdapterSummary = {
+  valid : Bool,
+  status : Str,
+  provider : Str,
+  model : Str,
+  endpoint : Str,
+  authMode : Str,
+  authEnvVar : Str,
+  networkAccess : Str,
+  allowedDestination : Str,
+  commandValid : Bool,
+  endpointHttps : Bool,
+  authenticated : Bool,
+  allowlisted : Bool,
+  commandHasEndpoint : Bool,
+  commandHasAuthEnv : Bool,
+  commandHasNetworkDestination : Bool,
+  validationMessage : Str
+}
+
+record SwarmEmbeddingProviderProcessResult = {
+  exitCode : Int,
+  stdout : Str,
+  stderr : Str,
+  timedOut : Bool,
+  error : Str
+}
+
+record SwarmWeightedVectorIndexEntry = {
+  memory : SwarmMemory,
+  text : Str,
+  embedding : SwarmWeightedEmbedding
+}
+
+record SwarmWeightedVectorIndex = {
+  provider : Str,
+  model : Str,
+  scale : Int,
+  entries : [SwarmWeightedVectorIndexEntry]
+}
+
+record SwarmWeightedVectorIndexSearchResult = {
+  memory : SwarmMemory,
+  text : Str,
+  score : Int,
+  matchedDimensions : [Str],
+  provider : Str,
+  model : Str,
+  scale : Int
+}
+
+record SwarmWeightedVectorStore = {
+  shardCount : Int,
+  entryCount : Int,
+  shards : [SwarmWeightedVectorIndex]
+}
+
+record EmbeddingProviderHarnessReport = {
+  providerValidated : Bool,
+  providerTrust : Str,
+  pretrustedRejected : Bool,
+  providerMismatchRejected : Bool,
+  failedStatusRejected : Bool,
+  payloadScaleRejected : Bool,
+  generatedDimensionNames : [Str],
+  generatedDimensionWeights : [Int],
+  vectorMemoryCount : Int,
+  vectorIndexEntryCount : Int,
+  vectorIndexSkippedInvalidCount : Int,
+  vectorIndexRoundTripDecoded : Bool,
+  vectorIndexEncodedHasEntries : Bool,
+  vectorIndexSearchTexts : [Str],
+  vectorIndexSearchScores : [Int],
+  vectorIndexTopMatchedDimensions : [Str],
+  vectorIndexTopProvider : Str,
+  vectorIndexTopModel : Str,
+  vectorIndexTopScale : Int,
+  renderedCommand : [Str],
+  commandValid : Bool,
+  networkAdapterValid : Bool,
+  networkAdapterStatus : Str,
+  networkAdapterAuthenticated : Bool,
+  networkAdapterAllowlisted : Bool,
+  networkAdapterEndpointHttps : Bool,
+  networkAdapterCommandHasEndpoint : Bool,
+  networkAdapterCommandHasAuthEnv : Bool,
+  networkAdapterCommandHasNetworkDestination : Bool,
+  networkAdapterValidationMessage : Str,
+  invalidNetworkAdapterValidationMessage : Str,
+  renderedNetworkAdapterCommand : [Str],
+  presetNetworkAdapterValid : Bool,
+  presetNetworkAdapterProvider : Str,
+  presetNetworkAdapterAuthEnvVar : Str,
+  presetNetworkAdapterAllowedDestination : Str,
+  renderedPresetNetworkAdapterCommand : [Str],
+  externalTransportValidated : Bool,
+  externalTransportTrust : Str,
+  externalTransportModel : Str,
+  externalTransportScale : Int,
+  externalGeneratedDimensionNames : [Str],
+  externalGeneratedDimensionWeights : [Int],
+  externalPayloadModelRejected : Bool,
+  externalMissingInputTemplateRejected : Bool,
+  externalExitRejected : Bool,
+  externalTransportIndexEntryCount : Int,
+  externalTransportIndexSearchTexts : [Str],
+  externalTransportIndexSearchScores : [Int],
+  externalTransportIndexTopProvider : Str,
+  externalTransportIndexTopModel : Str,
+  externalTransportIndexTopScale : Int,
+  vectorStoreShardCount : Int,
+  vectorStoreEntryCount : Int,
+  vectorStoreRoundTripDecoded : Bool,
+  vectorStoreLocalShardMatches : Int,
+  vectorStoreExternalShardMatches : Int,
+  vectorStoreLocalSearchTexts : [Str],
+  vectorStoreLocalSearchScores : [Int],
+  vectorStoreExternalSearchTexts : [Str],
+  vectorStoreExternalSearchScores : [Int]
+}
+
+weightedEmbeddedMemoryResultError : Str -> Result SwarmWeightedEmbeddedMemory
+weightedEmbeddedMemoryResultError message = Err message
+
+trustedWeightedEmbeddingProviderOutputResultError : Str -> Result TrustedWeightedEmbeddingProviderOutput
+trustedWeightedEmbeddingProviderOutputResultError message = Err message
+
+swarmWeightedVectorIndexEntryResultError : Str -> Result SwarmWeightedVectorIndexEntry
+swarmWeightedVectorIndexEntryResultError message = Err message
+
+swarmMemory : Int -> Str -> SwarmMemory
+swarmMemory memoryId value =
+  SwarmMemory {
+    actor = "embedding-provider-agent",
+    createdAtMs = memoryId,
+    memoryId = memoryId,
+    objectiveId = "embedding-provider-objective",
+    taskId = "",
+    key = "weighted-vector-index",
+    value = value,
+    updatedAtMs = memoryId
+  }
+
+swarmWeightedEmbeddingDimension : Str -> Int -> SwarmWeightedEmbeddingDimension
+swarmWeightedEmbeddingDimension name weight =
+  SwarmWeightedEmbeddingDimension {
+    name = name,
+    weight = weight
+  }
+
+swarmWeightedEmbedding : Str -> Int -> [SwarmWeightedEmbeddingDimension] -> SwarmWeightedEmbedding
+swarmWeightedEmbedding model scale dimensions =
+  SwarmWeightedEmbedding {
+    model = model,
+    scale = scale,
+    dimensions = dimensions
+  }
+
+swarmWeightedEmbeddedMemoryValue : Str -> SwarmWeightedEmbedding -> SwarmWeightedEmbeddedMemoryValue
+swarmWeightedEmbeddedMemoryValue text embedding =
+  SwarmWeightedEmbeddedMemoryValue {
+    text = text,
+    embedding = embedding
+  }
+
+swarmWeightedEmbeddedMemoryText : Str -> SwarmWeightedEmbedding -> Str
+swarmWeightedEmbeddedMemoryText text embedding =
+  encode (swarmWeightedEmbeddedMemoryValue text embedding)
+
+weightedEmbeddedMemoryFromMemory : SwarmMemory -> Result SwarmWeightedEmbeddedMemory
+weightedEmbeddedMemoryFromMemory memory =
+  match tryDecode SwarmWeightedEmbeddedMemoryValue memory.value {
+    Ok value ->
+      Ok (SwarmWeightedEmbeddedMemory {
+        memory = memory,
+        text = value.text,
+        embedding = value.embedding
+      }),
+    Err message ->
+      weightedEmbeddedMemoryResultError message
+  }
+
+swarmTextIncludes : Str -> Str -> Bool
+swarmTextIncludes value needle = length (textSplit value needle) > 1
+
+swarmEmbeddingProviderRequest : Str -> Str -> Str -> Int -> SwarmEmbeddingProviderRequest
+swarmEmbeddingProviderRequest provider model inputText scale =
+  SwarmEmbeddingProviderRequest {
+    provider = provider,
+    model = model,
+    inputText = inputText,
+    scale = scale,
+    schemaVersion = 1
+  }
+
+swarmUntrustedEmbeddingProviderOutput : Str -> Str -> Str -> Str -> Bool -> UntrustedEmbeddingProviderOutput
+swarmUntrustedEmbeddingProviderOutput provider model status rawText trusted =
+  UntrustedEmbeddingProviderOutput {
+    provider = provider,
+    model = model,
+    status = status,
+    rawText = rawText,
+    trusted = trusted
+  }
+
+trustedWeightedEmbeddingProviderOutput : Str -> Str -> SwarmWeightedEmbedding -> TrustedWeightedEmbeddingProviderOutput
+trustedWeightedEmbeddingProviderOutput provider model embedding =
+  TrustedWeightedEmbeddingProviderOutput {
+    provider = provider,
+    model = model,
+    trust = "validated",
+    embedding = embedding
+  }
+
+swarmAppendWeightedDimensionIf : [SwarmWeightedEmbeddingDimension] -> Bool -> Str -> Int -> [SwarmWeightedEmbeddingDimension]
+swarmAppendWeightedDimensionIf dimensions include name weight =
+  if include then
+    append dimensions [swarmWeightedEmbeddingDimension name weight]
+  else
+    dimensions
+
+swarmLocalWeightedEmbeddingDimensionsForText : Str -> [SwarmWeightedEmbeddingDimension]
+swarmLocalWeightedEmbeddingDimensionsForText text =
+  swarmAppendWeightedDimensionIf
+    (swarmAppendWeightedDimensionIf
+      (swarmAppendWeightedDimensionIf
+        (swarmAppendWeightedDimensionIf
+          (swarmAppendWeightedDimensionIf
+            []
+            (swarmTextIncludes text "compiler")
+            "compiler"
+            800)
+          (swarmTextIncludes text "runtime")
+          "runtime"
+          700)
+        (swarmTextIncludes text "verifier")
+        "verification"
+        500)
+      (swarmTextIncludes text "guard")
+      "resource-guard"
+      600)
+    (swarmTextIncludes text "swarm")
+    "swarm"
+    400
+
+swarmLocalWeightedEmbeddingForText : Str -> Int -> Str -> SwarmWeightedEmbedding
+swarmLocalWeightedEmbeddingForText model scale text =
+  swarmWeightedEmbedding model scale (swarmLocalWeightedEmbeddingDimensionsForText text)
+
+swarmLocalWeightedEmbeddingProviderOutput : SwarmEmbeddingProviderRequest -> UntrustedEmbeddingProviderOutput
+swarmLocalWeightedEmbeddingProviderOutput request =
+  swarmUntrustedEmbeddingProviderOutput
+    request.provider
+    request.model
+    "ok"
+    (encode (swarmLocalWeightedEmbeddingForText request.model request.scale request.inputText))
+    false
+
+validateWeightedEmbeddingProviderOutput : SwarmEmbeddingProviderRequest -> UntrustedEmbeddingProviderOutput -> Result TrustedWeightedEmbeddingProviderOutput
+validateWeightedEmbeddingProviderOutput request output =
+  if output.trusted then
+    trustedWeightedEmbeddingProviderOutputResultError "embedding provider output arrived pretrusted"
+  else if output.status != "ok" then
+    trustedWeightedEmbeddingProviderOutputResultError output.status
+  else if output.provider != request.provider then
+    trustedWeightedEmbeddingProviderOutputResultError "embedding provider mismatch"
+  else if output.model != request.model then
+    trustedWeightedEmbeddingProviderOutputResultError "embedding model mismatch"
+  else
+    match tryDecode SwarmWeightedEmbedding output.rawText {
+      Ok embedding ->
+        if embedding.model != request.model then
+          trustedWeightedEmbeddingProviderOutputResultError "embedding payload model mismatch"
+        else if embedding.scale != request.scale then
+          trustedWeightedEmbeddingProviderOutputResultError "embedding payload scale mismatch"
+        else
+          Ok (trustedWeightedEmbeddingProviderOutput request.provider request.model embedding),
+      Err message ->
+        trustedWeightedEmbeddingProviderOutputResultError message
+    }
+
+swarmEmbeddingProviderCommandTransport : Str -> Int -> [Str] -> SwarmEmbeddingProviderCommandTransport
+swarmEmbeddingProviderCommandTransport cwd timeoutMs commandTemplate =
+  SwarmEmbeddingProviderCommandTransport {
+    cwd = cwd,
+    timeoutMs = timeoutMs,
+    commandTemplate = commandTemplate
+  }
+
+swarmEmbeddingProviderNetworkAdapter : Str -> Str -> Str -> Str -> Str -> Str -> Str -> SwarmEmbeddingProviderCommandTransport -> SwarmEmbeddingProviderNetworkAdapter
+swarmEmbeddingProviderNetworkAdapter provider model endpoint authMode authEnvVar networkAccess allowedDestination transport =
+  SwarmEmbeddingProviderNetworkAdapter {
+    provider = provider,
+    model = model,
+    endpoint = endpoint,
+    authMode = authMode,
+    authEnvVar = authEnvVar,
+    networkAccess = networkAccess,
+    allowedDestination = allowedDestination,
+    transport = transport
+  }
+
+swarmEmbeddingProviderNetworkAdapterCommandTransport : Str -> Int -> Str -> SwarmEmbeddingProviderCommandTransport
+swarmEmbeddingProviderNetworkAdapterCommandTransport cwd timeoutMs commandPath =
+  swarmEmbeddingProviderCommandTransport
+    cwd
+    timeoutMs
+    [
+      commandPath,
+      "--endpoint",
+      "{endpoint}",
+      "--auth-env",
+      "{auth_env}",
+      "--network-destination",
+      "{network_destination}",
+      "--provider",
+      "{provider}",
+      "--model",
+      "{model}",
+      "--input",
+      "{input_text}",
+      "--scale",
+      "{scale}"
+    ]
+
+swarmEmbeddingProviderBearerNetworkAdapter : Str -> Str -> Str -> Str -> Str -> Str -> Int -> Str -> SwarmEmbeddingProviderNetworkAdapter
+swarmEmbeddingProviderBearerNetworkAdapter provider model endpoint authEnvVar allowedDestination cwd timeoutMs commandPath =
+  swarmEmbeddingProviderNetworkAdapter
+    provider
+    model
+    endpoint
+    "bearer-env"
+    authEnvVar
+    "allowlisted"
+    allowedDestination
+    (swarmEmbeddingProviderNetworkAdapterCommandTransport cwd timeoutMs commandPath)
+
+swarmOpenAiEmbeddingProviderNetworkAdapter : Str -> Str -> Int -> Str -> SwarmEmbeddingProviderNetworkAdapter
+swarmOpenAiEmbeddingProviderNetworkAdapter model cwd timeoutMs commandPath =
+  swarmEmbeddingProviderBearerNetworkAdapter
+    "openai"
+    model
+    "https://api.openai.com/v1/embeddings"
+    "OPENAI_API_KEY"
+    "api.openai.com:443"
+    cwd
+    timeoutMs
+    commandPath
+
+swarmTextHasPrefix : Str -> Str -> Bool
+swarmTextHasPrefix value prefix =
+  match textPrefix value prefix {
+    Ok remainder -> true,
+    Err message -> false
+  }
+
+swarmEmbeddingProviderNetworkAdapterEndpointHttps : SwarmEmbeddingProviderNetworkAdapter -> Bool
+swarmEmbeddingProviderNetworkAdapterEndpointHttps adapter =
+  swarmTextHasPrefix adapter.endpoint "https://"
+
+swarmEmbeddingProviderNetworkAdapterAuthValid : SwarmEmbeddingProviderNetworkAdapter -> Bool
+swarmEmbeddingProviderNetworkAdapterAuthValid adapter =
+  if adapter.authMode == "bearer-env" then
+    adapter.authEnvVar != ""
+  else if adapter.authMode == "header-env" then
+    adapter.authEnvVar != ""
+  else
+    adapter.authMode == "none"
+
+swarmEmbeddingProviderNetworkAdapterAuthenticated : SwarmEmbeddingProviderNetworkAdapter -> Bool
+swarmEmbeddingProviderNetworkAdapterAuthenticated adapter =
+  if adapter.authMode == "bearer-env" then
+    adapter.authEnvVar != ""
+  else if adapter.authMode == "header-env" then
+    adapter.authEnvVar != ""
+  else
+    false
+
+swarmEmbeddingProviderNetworkAdapterAllowlisted : SwarmEmbeddingProviderNetworkAdapter -> Bool
+swarmEmbeddingProviderNetworkAdapterAllowlisted adapter =
+  if adapter.networkAccess == "allowlisted" then
+    adapter.allowedDestination != ""
+  else
+    false
+
+swarmEmbeddingProviderNetworkAdapterCommandHasEndpoint : SwarmEmbeddingProviderNetworkAdapter -> Bool
+swarmEmbeddingProviderNetworkAdapterCommandHasEndpoint adapter =
+  swarmEmbeddingProviderCommandTemplateContains adapter.transport "{endpoint}"
+
+swarmEmbeddingProviderNetworkAdapterCommandHasAuthEnv : SwarmEmbeddingProviderNetworkAdapter -> Bool
+swarmEmbeddingProviderNetworkAdapterCommandHasAuthEnv adapter =
+  swarmEmbeddingProviderCommandTemplateContains adapter.transport "{auth_env}"
+
+swarmEmbeddingProviderNetworkAdapterCommandHasNetworkDestination : SwarmEmbeddingProviderNetworkAdapter -> Bool
+swarmEmbeddingProviderNetworkAdapterCommandHasNetworkDestination adapter =
+  swarmEmbeddingProviderCommandTemplateContains adapter.transport "{network_destination}"
+
+swarmEmbeddingProviderNetworkAdapterValidationMessage : SwarmEmbeddingProviderNetworkAdapter -> Str
+swarmEmbeddingProviderNetworkAdapterValidationMessage adapter =
+  if adapter.provider == "" then
+    "embedding-provider-network-adapter-missing-provider"
+  else if adapter.model == "" then
+    "embedding-provider-network-adapter-missing-model"
+  else if swarmEmbeddingProviderNetworkAdapterEndpointHttps adapter == false then
+    "embedding-provider-network-adapter-endpoint-not-https"
+  else if swarmEmbeddingProviderNetworkAdapterAuthValid adapter == false then
+    "embedding-provider-network-adapter-auth-invalid"
+  else if swarmEmbeddingProviderNetworkAdapterAllowlisted adapter == false then
+    "embedding-provider-network-adapter-network-not-allowlisted"
+  else if swarmEmbeddingProviderCommandValidationMessage adapter.transport != "" then
+    swarmEmbeddingProviderCommandValidationMessage adapter.transport
+  else if swarmEmbeddingProviderNetworkAdapterCommandHasEndpoint adapter == false then
+    "embedding-provider-network-adapter-missing-endpoint-placeholder"
+  else if adapter.authMode != "none" && swarmEmbeddingProviderNetworkAdapterCommandHasAuthEnv adapter == false then
+    "embedding-provider-network-adapter-missing-auth-env-placeholder"
+  else if swarmEmbeddingProviderNetworkAdapterCommandHasNetworkDestination adapter == false then
+    "embedding-provider-network-adapter-missing-network-destination-placeholder"
+  else
+    ""
+
+swarmEmbeddingProviderNetworkAdapterSummary : SwarmEmbeddingProviderNetworkAdapter -> SwarmEmbeddingProviderNetworkAdapterSummary
+swarmEmbeddingProviderNetworkAdapterSummary adapter = {
+  let validationMessage = swarmEmbeddingProviderNetworkAdapterValidationMessage adapter;
+  SwarmEmbeddingProviderNetworkAdapterSummary {
+    valid = validationMessage == "",
+    status = if validationMessage == "" then "valid" else "invalid",
+    provider = adapter.provider,
+    model = adapter.model,
+    endpoint = adapter.endpoint,
+    authMode = adapter.authMode,
+    authEnvVar = adapter.authEnvVar,
+    networkAccess = adapter.networkAccess,
+    allowedDestination = adapter.allowedDestination,
+    commandValid = swarmEmbeddingProviderCommandValid adapter.transport,
+    endpointHttps = swarmEmbeddingProviderNetworkAdapterEndpointHttps adapter,
+    authenticated = swarmEmbeddingProviderNetworkAdapterAuthenticated adapter,
+    allowlisted = swarmEmbeddingProviderNetworkAdapterAllowlisted adapter,
+    commandHasEndpoint = swarmEmbeddingProviderNetworkAdapterCommandHasEndpoint adapter,
+    commandHasAuthEnv = swarmEmbeddingProviderNetworkAdapterCommandHasAuthEnv adapter,
+    commandHasNetworkDestination = swarmEmbeddingProviderNetworkAdapterCommandHasNetworkDestination adapter,
+    validationMessage = validationMessage
+  }
+}
+
+swarmEmbeddingProviderProcessResultError : Str -> Result SwarmEmbeddingProviderProcessResult
+swarmEmbeddingProviderProcessResultError message = Err message
+
+swarmEmbeddingProviderProcessResultFromJson : Result Str -> Result SwarmEmbeddingProviderProcessResult
+swarmEmbeddingProviderProcessResultFromJson value = match value {
+  Ok raw -> Ok (decode SwarmEmbeddingProviderProcessResult raw),
+  Err message -> swarmEmbeddingProviderProcessResultError message
+}
+
+swarmEmbeddingProviderCommandTemplateContains : SwarmEmbeddingProviderCommandTransport -> Str -> Bool
+swarmEmbeddingProviderCommandTemplateContains transport needle = {
+  let mut found = false;
+  for arg in transport.commandTemplate {
+    if found then
+      found
+    else {
+      found = swarmTextIncludes arg needle;
+      found
+    }
+  };
+  found
+}
+
+swarmEmbeddingProviderCommandHasTextInput : SwarmEmbeddingProviderCommandTransport -> Bool
+swarmEmbeddingProviderCommandHasTextInput transport =
+  swarmEmbeddingProviderCommandTemplateContains transport "{input_text}"
+
+swarmEmbeddingProviderCommandHasJsonInput : SwarmEmbeddingProviderCommandTransport -> Bool
+swarmEmbeddingProviderCommandHasJsonInput transport =
+  swarmEmbeddingProviderCommandTemplateContains transport "{input_json}"
+
+swarmEmbeddingProviderCommandValidationMessage : SwarmEmbeddingProviderCommandTransport -> Str
+swarmEmbeddingProviderCommandValidationMessage transport =
+  if length transport.commandTemplate == 0 then
+    "embedding-provider-command-missing-template"
+  else if swarmEmbeddingProviderCommandTemplateContains transport "{provider}" == false then
+    "embedding-provider-command-missing-provider"
+  else if swarmEmbeddingProviderCommandTemplateContains transport "{model}" == false then
+    "embedding-provider-command-missing-model"
+  else if swarmEmbeddingProviderCommandHasTextInput transport == false && swarmEmbeddingProviderCommandHasJsonInput transport == false then
+    "embedding-provider-command-missing-input"
+  else if swarmEmbeddingProviderCommandTemplateContains transport "{scale}" == false then
+    "embedding-provider-command-missing-scale"
+  else
+    ""
+
+swarmEmbeddingProviderCommandValid : SwarmEmbeddingProviderCommandTransport -> Bool
+swarmEmbeddingProviderCommandValid transport =
+  swarmEmbeddingProviderCommandValidationMessage transport == ""
+
+swarmEmbeddingProviderCommandReplace : Str -> Str -> Str -> Str
+swarmEmbeddingProviderCommandReplace value needle replacement =
+  textJoin replacement (textSplit value needle)
+
+swarmEmbeddingProviderCommandArg : SwarmEmbeddingProviderRequest -> Str -> Str
+swarmEmbeddingProviderCommandArg request value =
+  swarmEmbeddingProviderCommandReplace
+    (swarmEmbeddingProviderCommandReplace
+      (swarmEmbeddingProviderCommandReplace
+        (swarmEmbeddingProviderCommandReplace
+          (swarmEmbeddingProviderCommandReplace
+            value
+            "{provider}"
+            request.provider)
+          "{model}"
+          request.model)
+        "{input_text}"
+        request.inputText)
+      "{input_json}"
+      (encode request.inputText))
+    "{scale}"
+    (encode request.scale)
+
+swarmEmbeddingProviderCommand : SwarmEmbeddingProviderCommandTransport -> SwarmEmbeddingProviderRequest -> [Str]
+swarmEmbeddingProviderCommand transport request = {
+  let mut rendered = [];
+  for arg in transport.commandTemplate {
+    rendered = append rendered [swarmEmbeddingProviderCommandArg request arg];
+    rendered
+  };
+  rendered
+}
+
+swarmEmbeddingProviderNetworkAdapterCommandArg : SwarmEmbeddingProviderNetworkAdapter -> SwarmEmbeddingProviderRequest -> Str -> Str
+swarmEmbeddingProviderNetworkAdapterCommandArg adapter request value =
+  swarmEmbeddingProviderCommandReplace
+    (swarmEmbeddingProviderCommandReplace
+      (swarmEmbeddingProviderCommandReplace
+        (swarmEmbeddingProviderCommandArg request value)
+        "{endpoint}"
+        adapter.endpoint)
+      "{auth_env}"
+      adapter.authEnvVar)
+    "{network_destination}"
+    adapter.allowedDestination
+
+swarmEmbeddingProviderNetworkAdapterCommand : SwarmEmbeddingProviderNetworkAdapter -> SwarmEmbeddingProviderRequest -> [Str]
+swarmEmbeddingProviderNetworkAdapterCommand adapter request = {
+  let mut rendered = [];
+  for arg in adapter.transport.commandTemplate {
+    rendered = append rendered [swarmEmbeddingProviderNetworkAdapterCommandArg adapter request arg];
+    rendered
+  };
+  rendered
+}
+
+swarmRunEmbeddingProviderCommandResultError : Str -> Result TrustedWeightedEmbeddingProviderOutput
+swarmRunEmbeddingProviderCommandResultError message = Err message
+
+swarmRunEmbeddingProviderProcessResult : SwarmEmbeddingProviderCommandTransport -> SwarmEmbeddingProviderRequest -> Result SwarmEmbeddingProviderProcessResult
+swarmRunEmbeddingProviderProcessResult transport request =
+  swarmEmbeddingProviderProcessResultFromJson
+    (runCommandTimeoutRaw transport.cwd transport.timeoutMs (swarmEmbeddingProviderCommand transport request))
+
+swarmRunEmbeddingProviderCommand : SwarmEmbeddingProviderCommandTransport -> SwarmEmbeddingProviderRequest -> Result TrustedWeightedEmbeddingProviderOutput
+swarmRunEmbeddingProviderCommand transport request = {
+  let validationMessage = swarmEmbeddingProviderCommandValidationMessage transport in
+  if validationMessage != "" then
+    swarmRunEmbeddingProviderCommandResultError validationMessage
+  else
+    match swarmRunEmbeddingProviderProcessResult transport request {
+      Err message ->
+        swarmRunEmbeddingProviderCommandResultError message,
+      Ok process ->
+        if process.timedOut then
+          swarmRunEmbeddingProviderCommandResultError "embedding-provider-command-timeout"
+        else if process.error != "" then
+          swarmRunEmbeddingProviderCommandResultError process.error
+        else if process.exitCode != 0 then
+          swarmRunEmbeddingProviderCommandResultError (textConcat ["embedding-provider-command-exit:", encode process.exitCode, ":", process.stderr])
+        else
+          validateWeightedEmbeddingProviderOutput
+            request
+            (swarmUntrustedEmbeddingProviderOutput request.provider request.model "ok" process.stdout false)
+    }
+}
+
+swarmRunEmbeddingProviderNetworkAdapterProcessResult : SwarmEmbeddingProviderNetworkAdapter -> SwarmEmbeddingProviderRequest -> Result SwarmEmbeddingProviderProcessResult
+swarmRunEmbeddingProviderNetworkAdapterProcessResult adapter request =
+  swarmEmbeddingProviderProcessResultFromJson
+    (runCommandTimeoutRaw adapter.transport.cwd adapter.transport.timeoutMs (swarmEmbeddingProviderNetworkAdapterCommand adapter request))
+
+swarmRunEmbeddingProviderNetworkAdapter : SwarmEmbeddingProviderNetworkAdapter -> SwarmEmbeddingProviderRequest -> Result TrustedWeightedEmbeddingProviderOutput
+swarmRunEmbeddingProviderNetworkAdapter adapter request = {
+  let validationMessage = swarmEmbeddingProviderNetworkAdapterValidationMessage adapter in
+  if validationMessage != "" then
+    swarmRunEmbeddingProviderCommandResultError validationMessage
+  else if request.provider != adapter.provider then
+    swarmRunEmbeddingProviderCommandResultError "embedding-provider-network-adapter-request-provider-mismatch"
+  else if request.model != adapter.model then
+    swarmRunEmbeddingProviderCommandResultError "embedding-provider-network-adapter-request-model-mismatch"
+  else
+    match swarmRunEmbeddingProviderNetworkAdapterProcessResult adapter request {
+      Err message ->
+        swarmRunEmbeddingProviderCommandResultError message,
+      Ok process ->
+        if process.timedOut then
+          swarmRunEmbeddingProviderCommandResultError "embedding-provider-network-adapter-timeout"
+        else if process.error != "" then
+          swarmRunEmbeddingProviderCommandResultError process.error
+        else if process.exitCode != 0 then
+          swarmRunEmbeddingProviderCommandResultError (textConcat ["embedding-provider-network-adapter-exit:", encode process.exitCode, ":", process.stderr])
+        else
+          validateWeightedEmbeddingProviderOutput
+            request
+            (swarmUntrustedEmbeddingProviderOutput request.provider request.model "ok" process.stdout false)
+    }
+}
+
+swarmWeightedVectorIndexEntry : SwarmMemory -> Str -> SwarmWeightedEmbedding -> SwarmWeightedVectorIndexEntry
+swarmWeightedVectorIndexEntry memory text embedding =
+  SwarmWeightedVectorIndexEntry {
+    memory = memory,
+    text = text,
+    embedding = embedding
+  }
+
+swarmWeightedVectorIndexEntryFromMemory : Str -> Int -> SwarmMemory -> Result SwarmWeightedVectorIndexEntry
+swarmWeightedVectorIndexEntryFromMemory model scale memory =
+  match weightedEmbeddedMemoryFromMemory memory {
+    Ok embedded ->
+      if embedded.embedding.model != model then
+        swarmWeightedVectorIndexEntryResultError "weighted vector index model mismatch"
+      else if embedded.embedding.scale != scale then
+        swarmWeightedVectorIndexEntryResultError "weighted vector index scale mismatch"
+      else
+        Ok (swarmWeightedVectorIndexEntry embedded.memory embedded.text embedded.embedding),
+    Err message ->
+      swarmWeightedVectorIndexEntryResultError message
+  }
+
+swarmWeightedVectorIndexEntriesFromMemory : Str -> Int -> [SwarmMemory] -> [SwarmWeightedVectorIndexEntry]
+swarmWeightedVectorIndexEntriesFromMemory model scale memories = {
+  let mut entries = [];
+  for memory in memories {
+    match swarmWeightedVectorIndexEntryFromMemory model scale memory {
+      Ok entry -> {
+        entries = append entries [entry];
+        entries
+      },
+      Err message ->
+        entries
+    }
+  };
+  entries
+}
+
+swarmWeightedVectorIndex : Str -> Str -> Int -> [SwarmWeightedVectorIndexEntry] -> SwarmWeightedVectorIndex
+swarmWeightedVectorIndex provider model scale entries =
+  SwarmWeightedVectorIndex {
+    provider = provider,
+    model = model,
+    scale = scale,
+    entries = entries
+  }
+
+swarmWeightedVectorIndexFromMemory : Str -> Str -> Int -> [SwarmMemory] -> SwarmWeightedVectorIndex
+swarmWeightedVectorIndexFromMemory provider model scale memories =
+  swarmWeightedVectorIndex provider model scale (swarmWeightedVectorIndexEntriesFromMemory model scale memories)
+
+swarmWeightedVectorIndexText : SwarmWeightedVectorIndex -> Str
+swarmWeightedVectorIndexText index = encode index
+
+swarmWeightedVectorIndexFromText : Str -> Result SwarmWeightedVectorIndex
+swarmWeightedVectorIndexFromText raw = tryDecode SwarmWeightedVectorIndex raw
+
+swarmWeightedVectorIndexEntryCount : SwarmWeightedVectorIndex -> Int
+swarmWeightedVectorIndexEntryCount index = length index.entries
+
+swarmWeightedVectorStoreEntryCount : [SwarmWeightedVectorIndex] -> Int
+swarmWeightedVectorStoreEntryCount shards = {
+  let mut count = 0;
+  for shard in shards {
+    count = intAdd count (swarmWeightedVectorIndexEntryCount shard);
+    count
+  };
+  count
+}
+
+swarmWeightedVectorStore : [SwarmWeightedVectorIndex] -> SwarmWeightedVectorStore
+swarmWeightedVectorStore shards =
+  SwarmWeightedVectorStore {
+    shardCount = length shards,
+    entryCount = swarmWeightedVectorStoreEntryCount shards,
+    shards = shards
+  }
+
+swarmWeightedVectorStoreFromIndexes : [SwarmWeightedVectorIndex] -> SwarmWeightedVectorStore
+swarmWeightedVectorStoreFromIndexes shards = swarmWeightedVectorStore shards
+
+swarmWeightedVectorStoreText : SwarmWeightedVectorStore -> Str
+swarmWeightedVectorStoreText store = encode store
+
+swarmWeightedVectorStoreFromText : Str -> Result SwarmWeightedVectorStore
+swarmWeightedVectorStoreFromText raw =
+  match tryDecode SwarmWeightedVectorStore raw {
+    Ok store -> Ok (swarmWeightedVectorStore store.shards),
+    Err message -> Err message
+  }
+
+swarmWeightedVectorIndexMatches : Str -> Str -> Int -> SwarmWeightedVectorIndex -> Bool
+swarmWeightedVectorIndexMatches provider model scale index =
+  if index.provider == provider then
+    if index.model == model then
+      index.scale == scale
+    else
+      false
+  else
+    false
+
+swarmWeightedVectorStoreShardCountForQuery : Str -> SwarmWeightedEmbedding -> SwarmWeightedVectorStore -> Int
+swarmWeightedVectorStoreShardCountForQuery provider query store = {
+  let mut count = 0;
+  for shard in store.shards {
+    if swarmWeightedVectorIndexMatches provider query.model query.scale shard then {
+      count = intAdd count 1;
+      count
+    } else
+      count
+  };
+  count
+}
+
+swarmWeightedDimensionOverlapScore : SwarmWeightedEmbeddingDimension -> SwarmWeightedEmbeddingDimension -> Int
+swarmWeightedDimensionOverlapScore query candidate =
+  if query.name == candidate.name then
+    if query.weight < candidate.weight then query.weight else candidate.weight
+  else
+    0
+
+swarmWeightedDimensionBestScore : SwarmWeightedEmbeddingDimension -> [SwarmWeightedEmbeddingDimension] -> Int
+swarmWeightedDimensionBestScore query candidates = {
+  let mut best = 0;
+  for candidate in candidates {
+    let score = swarmWeightedDimensionOverlapScore query candidate;
+    if score > best then {
+      best = score;
+      best
+    } else
+      best
+  };
+  best
+}
+
+swarmWeightedEmbeddingMatchedDimensions : SwarmWeightedEmbedding -> SwarmWeightedEmbedding -> [Str]
+swarmWeightedEmbeddingMatchedDimensions query candidate = {
+  let mut matches = [];
+  if query.model == candidate.model then
+    if query.scale == candidate.scale then {
+      for dimension in query.dimensions {
+        if swarmWeightedDimensionBestScore dimension candidate.dimensions > 0 then {
+          matches = append matches [dimension.name];
+          matches
+        } else
+          matches
+      };
+      matches
+    } else
+      matches
+  else
+    matches
+}
+
+swarmWeightedEmbeddingScore : SwarmWeightedEmbedding -> SwarmWeightedEmbedding -> Int
+swarmWeightedEmbeddingScore query candidate = {
+  let mut score = 0;
+  if query.model == candidate.model then
+    if query.scale == candidate.scale then {
+      for dimension in query.dimensions {
+        score = intAdd score (swarmWeightedDimensionBestScore dimension candidate.dimensions);
+        score
+      };
+      score
+    } else
+      0
+  else
+    0
+}
+
+swarmWeightedVectorIndexSearchResult : SwarmWeightedEmbedding -> SwarmWeightedVectorIndex -> SwarmWeightedVectorIndexEntry -> SwarmWeightedVectorIndexSearchResult
+swarmWeightedVectorIndexSearchResult query index entry =
+  SwarmWeightedVectorIndexSearchResult {
+    memory = entry.memory,
+    text = entry.text,
+    score = swarmWeightedEmbeddingScore query entry.embedding,
+    matchedDimensions = swarmWeightedEmbeddingMatchedDimensions query entry.embedding,
+    provider = index.provider,
+    model = entry.embedding.model,
+    scale = entry.embedding.scale
+  }
+
+swarmWeightedVectorIndexSearchInsert : [SwarmWeightedVectorIndexSearchResult] -> SwarmWeightedVectorIndexSearchResult -> [SwarmWeightedVectorIndexSearchResult]
+swarmWeightedVectorIndexSearchInsert ranked candidate = {
+  let mut next = [];
+  let mut inserted = false;
+  for existing in ranked {
+    if inserted then {
+      next = append next [existing];
+      next
+    } else if candidate.score > existing.score then {
+      next = append next [candidate, existing];
+      inserted = true;
+      next
+    } else {
+      next = append next [existing];
+      next
+    }
+  };
+  if inserted then
+    next
+  else
+    append next [candidate]
+}
+
+swarmWeightedVectorIndexSearchLimit : Int -> [SwarmWeightedVectorIndexSearchResult] -> [SwarmWeightedVectorIndexSearchResult]
+swarmWeightedVectorIndexSearchLimit limit ranked = {
+  let mut kept = [];
+  for item in ranked {
+    if length kept < limit then {
+      kept = append kept [item];
+      kept
+    } else
+      kept
+  };
+  kept
+}
+
+swarmWeightedVectorIndexSearch : SwarmWeightedEmbedding -> SwarmWeightedVectorIndex -> Int -> [SwarmWeightedVectorIndexSearchResult]
+swarmWeightedVectorIndexSearch query index limit = {
+  let mut ranked = [];
+  if query.model == index.model then
+    if query.scale == index.scale then {
+      for entry in index.entries {
+        let result = swarmWeightedVectorIndexSearchResult query index entry;
+        if result.score > 0 then {
+          ranked = swarmWeightedVectorIndexSearchLimit limit (swarmWeightedVectorIndexSearchInsert ranked result);
+          ranked
+        } else
+          ranked
+      };
+      ranked
+    } else
+      ranked
+  else
+    ranked
+}
+
+swarmWeightedVectorStoreSearch : Str -> SwarmWeightedEmbedding -> SwarmWeightedVectorStore -> Int -> [SwarmWeightedVectorIndexSearchResult]
+swarmWeightedVectorStoreSearch provider query store limit = {
+  let mut ranked = [];
+  for shard in store.shards {
+    if swarmWeightedVectorIndexMatches provider query.model query.scale shard then {
+      for result in swarmWeightedVectorIndexSearch query shard limit {
+        ranked = swarmWeightedVectorIndexSearchLimit limit (swarmWeightedVectorIndexSearchInsert ranked result);
+        ranked
+      };
+      ranked
+    } else
+      ranked
+  };
+  ranked
+}
+
+weightedDimensionName : SwarmWeightedEmbeddingDimension -> Str
+weightedDimensionName dimension = dimension.name
+
+weightedDimensionWeight : SwarmWeightedEmbeddingDimension -> Int
+weightedDimensionWeight dimension = dimension.weight
+
+vectorIndexSearchText : SwarmWeightedVectorIndexSearchResult -> Str
+vectorIndexSearchText item = item.text
+
+vectorIndexSearchScore : SwarmWeightedVectorIndexSearchResult -> Int
+vectorIndexSearchScore item = item.score
+
+firstVectorIndexSearchMatchedDimensions : [SwarmWeightedVectorIndexSearchResult] -> [Str]
+firstVectorIndexSearchMatchedDimensions values = {
+  let mut matched = [];
+  let mut found = false;
+  for value in values {
+    if found then
+      found
+    else {
+      matched = value.matchedDimensions;
+      found = true;
+      found
+    }
+  };
+  matched
+}
+
+firstVectorIndexSearchProvider : [SwarmWeightedVectorIndexSearchResult] -> Str
+firstVectorIndexSearchProvider values = {
+  let mut provider = "";
+  let mut found = false;
+  for value in values {
+    if found then
+      found
+    else {
+      provider = value.provider;
+      found = true;
+      found
+    }
+  };
+  provider
+}
+
+firstVectorIndexSearchModel : [SwarmWeightedVectorIndexSearchResult] -> Str
+firstVectorIndexSearchModel values = {
+  let mut model = "";
+  let mut found = false;
+  for value in values {
+    if found then
+      found
+    else {
+      model = value.model;
+      found = true;
+      found
+    }
+  };
+  model
+}
+
+firstVectorIndexSearchScale : [SwarmWeightedVectorIndexSearchResult] -> Int
+firstVectorIndexSearchScale values = {
+  let mut scale = 0;
+  let mut found = false;
+  for value in values {
+    if found then
+      found
+    else {
+      scale = value.scale;
+      found = true;
+      found
+    }
+  };
+  scale
+}
+
+embeddingProviderRequestFor : Str -> SwarmEmbeddingProviderRequest
+embeddingProviderRequestFor text =
+  swarmEmbeddingProviderRequest "local-fixture-embedding-provider" "fixed-point-semantic-v1" text 1000
+
+trustedEmbeddingOrEmpty : SwarmEmbeddingProviderRequest -> TrustedWeightedEmbeddingProviderOutput
+trustedEmbeddingOrEmpty request =
+  match validateWeightedEmbeddingProviderOutput request (swarmLocalWeightedEmbeddingProviderOutput request) {
+    Ok trusted -> trusted,
+    Err message ->
+      trustedWeightedEmbeddingProviderOutput
+        request.provider
+        request.model
+        (swarmWeightedEmbedding request.model request.scale [])
+  }
+
+trustedEmbeddingResultOrEmpty : SwarmEmbeddingProviderRequest -> Result TrustedWeightedEmbeddingProviderOutput -> TrustedWeightedEmbeddingProviderOutput
+trustedEmbeddingResultOrEmpty request result =
+  match result {
+    Ok trusted -> trusted,
+    Err message ->
+      trustedWeightedEmbeddingProviderOutput
+        request.provider
+        request.model
+        (swarmWeightedEmbedding request.model request.scale [])
+  }
+
+rejectsProviderOutput : SwarmEmbeddingProviderRequest -> UntrustedEmbeddingProviderOutput -> Bool
+rejectsProviderOutput request output =
+  match validateWeightedEmbeddingProviderOutput request output {
+    Ok trusted -> false,
+    Err message -> true
+  }
+
+rejectsTrustedProviderResult : Result TrustedWeightedEmbeddingProviderOutput -> Bool
+rejectsTrustedProviderResult result =
+  match result {
+    Ok trusted -> false,
+    Err message -> true
+  }
+
+trustedProviderResultValidated : Result TrustedWeightedEmbeddingProviderOutput -> Bool
+trustedProviderResultValidated result =
+  match result {
+    Ok trusted -> trusted.trust == "validated",
+    Err message -> false
+  }
+
+compilerRequest : SwarmEmbeddingProviderRequest
+compilerRequest = embeddingProviderRequestFor "compiler runtime verifier dense lesson"
+
+runtimeRequest : SwarmEmbeddingProviderRequest
+runtimeRequest = embeddingProviderRequestFor "runtime guard weighted lesson"
+
+swarmRequest : SwarmEmbeddingProviderRequest
+swarmRequest = embeddingProviderRequestFor "swarm routing memory"
+
+queryRequest : SwarmEmbeddingProviderRequest
+queryRequest = embeddingProviderRequestFor "compiler runtime verifier swarm"
+
+compilerTrusted : TrustedWeightedEmbeddingProviderOutput
+compilerTrusted = trustedEmbeddingOrEmpty compilerRequest
+
+runtimeTrusted : TrustedWeightedEmbeddingProviderOutput
+runtimeTrusted = trustedEmbeddingOrEmpty runtimeRequest
+
+swarmTrusted : TrustedWeightedEmbeddingProviderOutput
+swarmTrusted = trustedEmbeddingOrEmpty swarmRequest
+
+queryTrusted : TrustedWeightedEmbeddingProviderOutput
+queryTrusted = trustedEmbeddingOrEmpty queryRequest
+
+vectorMemories : [SwarmMemory]
+vectorMemories = [
+  swarmMemory 1 (swarmWeightedEmbeddedMemoryText compilerRequest.inputText compilerTrusted.embedding),
+  swarmMemory 2 (swarmWeightedEmbeddedMemoryText runtimeRequest.inputText runtimeTrusted.embedding),
+  swarmMemory 3 (swarmWeightedEmbeddedMemoryText swarmRequest.inputText swarmTrusted.embedding),
+  swarmMemory 4 (swarmWeightedEmbeddedMemoryText "same weights incompatible model" (swarmWeightedEmbedding "other-weighted-model" 1000 compilerTrusted.embedding.dimensions)),
+  swarmMemory 5 (swarmWeightedEmbeddedMemoryText "same weights incompatible scale" (swarmWeightedEmbedding "fixed-point-semantic-v1" 100 compilerTrusted.embedding.dimensions)),
+  swarmMemory 6 "not-json"
+]
+
+providerCommandPathFromArgs : [Str] -> Str
+providerCommandPathFromArgs args =
+  if textJoin "" args == "" then
+    "missing-embedding-provider-command"
+  else
+    pathJoin args
+
+externalRequest : SwarmEmbeddingProviderRequest
+externalRequest =
+  swarmEmbeddingProviderRequest "fixture-command-provider" "fixed-point-semantic-v1" "compiler runtime verifier dense lesson" 1000
+
+externalQuery : SwarmWeightedEmbedding
+externalQuery =
+  swarmLocalWeightedEmbeddingForText externalRequest.model externalRequest.scale "compiler runtime verifier swarm"
+
+externalTransportFor : Str -> SwarmEmbeddingProviderCommandTransport
+externalTransportFor providerCommandPath =
+  swarmEmbeddingProviderCommandTransport
+    "."
+    5000
+    [
+      providerCommandPath,
+      "--provider",
+      "{provider}",
+      "--model",
+      "{model}",
+      "--input",
+      "{input_text}",
+      "--scale",
+      "{scale}"
+    ]
+
+externalWrongModelTransportFor : Str -> SwarmEmbeddingProviderCommandTransport
+externalWrongModelTransportFor providerCommandPath =
+  swarmEmbeddingProviderCommandTransport
+    "."
+    5000
+    [
+      providerCommandPath,
+      "--provider",
+      "{provider}",
+      "--model",
+      "{model}-wrong",
+      "--input",
+      "{input_text}",
+      "--scale",
+      "{scale}"
+    ]
+
+externalMissingInputTransportFor : Str -> SwarmEmbeddingProviderCommandTransport
+externalMissingInputTransportFor providerCommandPath =
+  swarmEmbeddingProviderCommandTransport
+    "."
+    5000
+    [
+      providerCommandPath,
+      "--provider",
+      "{provider}",
+      "--model",
+      "{model}",
+      "--scale",
+      "{scale}"
+    ]
+
+externalFailingTransportFor : Str -> SwarmEmbeddingProviderCommandTransport
+externalFailingTransportFor providerCommandPath =
+  swarmEmbeddingProviderCommandTransport
+    "."
+    5000
+    [
+      providerCommandPath,
+      "--provider",
+      "{provider}",
+      "--model",
+      "{model}",
+      "--input",
+      "{input_text}",
+      "--scale",
+      "{scale}",
+      "--fail"
+    ]
+
+networkAdapterTransportFor : Str -> SwarmEmbeddingProviderCommandTransport
+networkAdapterTransportFor providerCommandPath =
+  swarmEmbeddingProviderNetworkAdapterCommandTransport "." 5000 providerCommandPath
+
+networkAdapterFor : Str -> SwarmEmbeddingProviderNetworkAdapter
+networkAdapterFor providerCommandPath =
+  swarmEmbeddingProviderNetworkAdapter
+    externalRequest.provider
+    externalRequest.model
+    "https://embeddings.example.test/v1/embeddings"
+    "bearer-env"
+    "CLASP_TEST_EMBEDDING_API_KEY"
+    "allowlisted"
+    "embeddings.example.test:443"
+    (networkAdapterTransportFor providerCommandPath)
+
+invalidNetworkAdapterFor : Str -> SwarmEmbeddingProviderNetworkAdapter
+invalidNetworkAdapterFor providerCommandPath =
+  swarmEmbeddingProviderNetworkAdapter
+    externalRequest.provider
+    externalRequest.model
+    "http://embeddings.example.test/v1/embeddings"
+    "bearer-env"
+    ""
+    "ambient"
+    ""
+    (externalTransportFor providerCommandPath)
+
+decodedVectorIndexOrEmpty : Str -> Str -> Int -> Str -> SwarmWeightedVectorIndex
+decodedVectorIndexOrEmpty provider model scale raw =
+  match swarmWeightedVectorIndexFromText raw {
+    Ok index -> index,
+    Err message -> swarmWeightedVectorIndex provider model scale []
+  }
+
+decodedVectorStoreOrEmpty : Str -> SwarmWeightedVectorStore
+decodedVectorStoreOrEmpty raw =
+  match swarmWeightedVectorStoreFromText raw {
+    Ok store -> store,
+    Err message -> swarmWeightedVectorStore []
+  }
+
+vectorIndexRoundTripDecoded : Str -> Bool
+vectorIndexRoundTripDecoded raw =
+  match swarmWeightedVectorIndexFromText raw {
+    Ok index -> true,
+    Err message -> false
+  }
+
+vectorStoreRoundTripDecoded : Str -> Bool
+vectorStoreRoundTripDecoded raw =
+  match swarmWeightedVectorStoreFromText raw {
+    Ok store -> true,
+    Err message -> false
+  }
+
+main : Str
+main = {
+  let validOutput = swarmLocalWeightedEmbeddingProviderOutput queryRequest;
+  let pretrustedOutput = swarmUntrustedEmbeddingProviderOutput validOutput.provider validOutput.model "ok" validOutput.rawText true;
+  let providerMismatchOutput = swarmUntrustedEmbeddingProviderOutput "other-provider" validOutput.model "ok" validOutput.rawText false;
+  let failedStatusOutput = swarmUntrustedEmbeddingProviderOutput validOutput.provider validOutput.model "rate-limited" validOutput.rawText false;
+  let payloadScaleMismatchOutput =
+    swarmUntrustedEmbeddingProviderOutput
+      validOutput.provider
+      validOutput.model
+      "ok"
+      (encode (swarmWeightedEmbedding validOutput.model 100 queryTrusted.embedding.dimensions))
+      false;
+  let index = swarmWeightedVectorIndexFromMemory queryRequest.provider queryRequest.model queryRequest.scale vectorMemories;
+  let encodedIndex = swarmWeightedVectorIndexText index;
+  let decodedIndex = decodedVectorIndexOrEmpty queryRequest.provider queryRequest.model queryRequest.scale encodedIndex;
+  let searchResults = swarmWeightedVectorIndexSearch queryTrusted.embedding decodedIndex 10;
+  let providerCommandPath = providerCommandPathFromArgs argv;
+  let externalTransport = externalTransportFor providerCommandPath;
+  let externalWrongModelTransport = externalWrongModelTransportFor providerCommandPath;
+  let externalMissingInputTransport = externalMissingInputTransportFor providerCommandPath;
+  let externalFailingTransport = externalFailingTransportFor providerCommandPath;
+  let networkAdapter = networkAdapterFor providerCommandPath;
+  let networkAdapterSummary = swarmEmbeddingProviderNetworkAdapterSummary networkAdapter;
+  let invalidNetworkAdapter = invalidNetworkAdapterFor providerCommandPath;
+  let invalidNetworkAdapterSummary = swarmEmbeddingProviderNetworkAdapterSummary invalidNetworkAdapter;
+  let presetNetworkAdapter = swarmOpenAiEmbeddingProviderNetworkAdapter externalRequest.model "." 5000 providerCommandPath;
+  let presetNetworkAdapterSummary = swarmEmbeddingProviderNetworkAdapterSummary presetNetworkAdapter;
+  let presetNetworkAdapterRequest = swarmEmbeddingProviderRequest presetNetworkAdapter.provider presetNetworkAdapter.model externalRequest.inputText externalRequest.scale;
+  let externalTransportResult = swarmRunEmbeddingProviderCommand externalTransport externalRequest;
+  let externalTrusted = trustedEmbeddingResultOrEmpty externalRequest externalTransportResult;
+  let externalPayloadModelRejected = rejectsTrustedProviderResult (swarmRunEmbeddingProviderCommand externalWrongModelTransport externalRequest);
+  let externalMissingInputTemplateRejected = rejectsTrustedProviderResult (swarmRunEmbeddingProviderCommand externalMissingInputTransport externalRequest);
+  let externalExitRejected = rejectsTrustedProviderResult (swarmRunEmbeddingProviderCommand externalFailingTransport externalRequest);
+  let externalMemories = [
+    swarmMemory 11 (swarmWeightedEmbeddedMemoryText externalRequest.inputText externalTrusted.embedding),
+    swarmMemory 12 (swarmWeightedEmbeddedMemoryText "runtime guard weighted lesson" (swarmLocalWeightedEmbeddingForText externalRequest.model externalRequest.scale "runtime guard weighted lesson")),
+    swarmMemory 13 (swarmWeightedEmbeddedMemoryText "swarm routing memory" (swarmLocalWeightedEmbeddingForText externalRequest.model externalRequest.scale "swarm routing memory")),
+    swarmMemory 14 (swarmWeightedEmbeddedMemoryText "bad model memory" (swarmWeightedEmbedding "other-model" 1000 externalTrusted.embedding.dimensions))
+  ];
+  let externalIndex = swarmWeightedVectorIndexFromMemory externalRequest.provider externalRequest.model externalRequest.scale externalMemories;
+  let externalSearchResults = swarmWeightedVectorIndexSearch externalQuery externalIndex 10;
+  let vectorStore = swarmWeightedVectorStoreFromIndexes [index, externalIndex];
+  let encodedVectorStore = swarmWeightedVectorStoreText vectorStore;
+  let decodedVectorStore = decodedVectorStoreOrEmpty encodedVectorStore;
+  let vectorStoreLocalSearchResults = swarmWeightedVectorStoreSearch queryRequest.provider queryTrusted.embedding decodedVectorStore 10;
+  let vectorStoreExternalSearchResults = swarmWeightedVectorStoreSearch externalRequest.provider externalQuery decodedVectorStore 10;
+  encode (EmbeddingProviderHarnessReport {
+    providerValidated = queryTrusted.trust == "validated",
+    providerTrust = queryTrusted.trust,
+    pretrustedRejected = rejectsProviderOutput queryRequest pretrustedOutput,
+    providerMismatchRejected = rejectsProviderOutput queryRequest providerMismatchOutput,
+    failedStatusRejected = rejectsProviderOutput queryRequest failedStatusOutput,
+    payloadScaleRejected = rejectsProviderOutput queryRequest payloadScaleMismatchOutput,
+    generatedDimensionNames = map weightedDimensionName queryTrusted.embedding.dimensions,
+    generatedDimensionWeights = map weightedDimensionWeight queryTrusted.embedding.dimensions,
+    vectorMemoryCount = length vectorMemories,
+    vectorIndexEntryCount = length index.entries,
+    vectorIndexSkippedInvalidCount = intSubtract (length vectorMemories) (length index.entries),
+    vectorIndexRoundTripDecoded = vectorIndexRoundTripDecoded encodedIndex,
+    vectorIndexEncodedHasEntries = length (textSplit encodedIndex "\"entries\"") > 1,
+    vectorIndexSearchTexts = map vectorIndexSearchText searchResults,
+    vectorIndexSearchScores = map vectorIndexSearchScore searchResults,
+    vectorIndexTopMatchedDimensions = firstVectorIndexSearchMatchedDimensions searchResults,
+    vectorIndexTopProvider = firstVectorIndexSearchProvider searchResults,
+    vectorIndexTopModel = firstVectorIndexSearchModel searchResults,
+    vectorIndexTopScale = firstVectorIndexSearchScale searchResults,
+    renderedCommand = swarmEmbeddingProviderCommand externalTransport externalRequest,
+    commandValid = swarmEmbeddingProviderCommandValid externalTransport,
+    networkAdapterValid = networkAdapterSummary.valid,
+    networkAdapterStatus = networkAdapterSummary.status,
+    networkAdapterAuthenticated = networkAdapterSummary.authenticated,
+    networkAdapterAllowlisted = networkAdapterSummary.allowlisted,
+    networkAdapterEndpointHttps = networkAdapterSummary.endpointHttps,
+    networkAdapterCommandHasEndpoint = networkAdapterSummary.commandHasEndpoint,
+    networkAdapterCommandHasAuthEnv = networkAdapterSummary.commandHasAuthEnv,
+    networkAdapterCommandHasNetworkDestination = networkAdapterSummary.commandHasNetworkDestination,
+    networkAdapterValidationMessage = networkAdapterSummary.validationMessage,
+    invalidNetworkAdapterValidationMessage = invalidNetworkAdapterSummary.validationMessage,
+    renderedNetworkAdapterCommand = swarmEmbeddingProviderNetworkAdapterCommand networkAdapter externalRequest,
+    presetNetworkAdapterValid = presetNetworkAdapterSummary.valid,
+    presetNetworkAdapterProvider = presetNetworkAdapterSummary.provider,
+    presetNetworkAdapterAuthEnvVar = presetNetworkAdapterSummary.authEnvVar,
+    presetNetworkAdapterAllowedDestination = presetNetworkAdapterSummary.allowedDestination,
+    renderedPresetNetworkAdapterCommand = swarmEmbeddingProviderNetworkAdapterCommand presetNetworkAdapter presetNetworkAdapterRequest,
+    externalTransportValidated = trustedProviderResultValidated externalTransportResult,
+    externalTransportTrust = externalTrusted.trust,
+    externalTransportModel = externalTrusted.embedding.model,
+    externalTransportScale = externalTrusted.embedding.scale,
+    externalGeneratedDimensionNames = map weightedDimensionName externalTrusted.embedding.dimensions,
+    externalGeneratedDimensionWeights = map weightedDimensionWeight externalTrusted.embedding.dimensions,
+    externalPayloadModelRejected = externalPayloadModelRejected,
+    externalMissingInputTemplateRejected = externalMissingInputTemplateRejected,
+    externalExitRejected = externalExitRejected,
+    externalTransportIndexEntryCount = length externalIndex.entries,
+    externalTransportIndexSearchTexts = map vectorIndexSearchText externalSearchResults,
+    externalTransportIndexSearchScores = map vectorIndexSearchScore externalSearchResults,
+    externalTransportIndexTopProvider = firstVectorIndexSearchProvider externalSearchResults,
+    externalTransportIndexTopModel = firstVectorIndexSearchModel externalSearchResults,
+    externalTransportIndexTopScale = firstVectorIndexSearchScale externalSearchResults,
+    vectorStoreShardCount = decodedVectorStore.shardCount,
+    vectorStoreEntryCount = decodedVectorStore.entryCount,
+    vectorStoreRoundTripDecoded = vectorStoreRoundTripDecoded encodedVectorStore,
+    vectorStoreLocalShardMatches = swarmWeightedVectorStoreShardCountForQuery queryRequest.provider queryTrusted.embedding decodedVectorStore,
+    vectorStoreExternalShardMatches = swarmWeightedVectorStoreShardCountForQuery externalRequest.provider externalQuery decodedVectorStore,
+    vectorStoreLocalSearchTexts = map vectorIndexSearchText vectorStoreLocalSearchResults,
+    vectorStoreLocalSearchScores = map vectorIndexSearchScore vectorStoreLocalSearchResults,
+    vectorStoreExternalSearchTexts = map vectorIndexSearchText vectorStoreExternalSearchResults,
+    vectorStoreExternalSearchScores = map vectorIndexSearchScore vectorStoreExternalSearchResults
+  })
+}

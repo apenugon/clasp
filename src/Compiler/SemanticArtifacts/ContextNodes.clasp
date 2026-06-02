@@ -1,0 +1,305 @@
+module Compiler.SemanticArtifacts.ContextNodes
+
+import Compiler.Ast
+import Compiler.Checker
+import Compiler.Checker.Types
+import Compiler.Json
+import Compiler.Project
+import Compiler.SemanticArtifacts.Base
+import Compiler.SemanticArtifacts.Air
+import Compiler.SemanticArtifacts.Names
+import Compiler.SemanticArtifacts.Uses
+
+semanticContextModuleNode : HostedModuleAst -> Str
+semanticContextModuleNode modl =
+  semanticJsonNode
+    (textConcat ["module:", moduleNameOf modl])
+    "module"
+    [ jsonFieldText "name" (moduleNameOf modl)
+    , jsonFieldText "main" (renderMainExpr modl)
+    ]
+
+semanticContextTypeNodes : [HostedTypeDeclAst] -> [Str]
+semanticContextTypeNodes typeDecls = {
+  let mut nodes = emptyRenderedTexts;
+  for typeDecl in typeDecls {
+    nodes =
+      appendRenderedText
+        nodes
+        (semanticJsonNode
+          (semanticTypeNodeId typeDecl)
+          "type"
+          [ jsonFieldText "name" (typeDeclName typeDecl)
+          , jsonFieldRaw "params" (semanticJsonTextArray (typeDeclParams typeDecl))
+          ]);
+    for constructorDecl in typeDeclConstructors typeDecl {
+      nodes =
+        appendRenderedText
+          nodes
+          (semanticJsonNode
+            (semanticConstructorNodeId (typeDeclName typeDecl) constructorDecl)
+            "constructor"
+            [ jsonFieldText "name" (constructorDeclName constructorDecl)
+            , jsonFieldRaw "payloadTypes" (semanticJsonTextArray (renderHostedTypeList (constructorDeclPayloadTypes constructorDecl)))
+            ]);
+      nodes
+    };
+    nodes
+  };
+  nodes
+}
+
+semanticContextRecordNodes : [HostedRecordDeclAst] -> [Str]
+semanticContextRecordNodes recordDecls = {
+  let mut nodes = emptyRenderedTexts;
+  for recordDecl in recordDecls {
+    nodes =
+      appendRenderedText
+        nodes
+        (semanticJsonNode
+          (semanticSchemaNodeId recordDecl)
+          "schema"
+          [ jsonFieldText "name" (recordDeclName recordDecl)
+          , jsonFieldRaw "params" (semanticJsonTextArray (recordDeclParams recordDecl))
+          ]);
+    for field in recordDeclFields recordDecl {
+      nodes =
+        appendRenderedText
+          nodes
+          (semanticJsonNode
+            (semanticSchemaFieldNodeId (recordDeclName recordDecl) field)
+            "schemaField"
+            [ jsonFieldText "name" (recordFieldDeclName field)
+            , jsonFieldText "schema" (recordDeclName recordDecl)
+            , jsonFieldText "type" (renderHostedType (recordFieldDeclType field))
+            , jsonFieldText "classification" (recordFieldDeclClassification field)
+            ]);
+      nodes
+    };
+    nodes
+  };
+  nodes
+}
+
+semanticContextForeignNodes : [HostedForeignDeclAst] -> [Str]
+semanticContextForeignNodes foreignDecls = {
+  let mut nodes = emptyRenderedTexts;
+  for foreignDecl in foreignDecls {
+    nodes =
+      appendRenderedText
+        nodes
+        (semanticJsonNode
+          (semanticForeignNodeId foreignDecl)
+          "foreign"
+          [ jsonFieldText "name" (foreignDeclName foreignDecl)
+          , jsonFieldText "runtimeName" (foreignDeclRuntimeName foreignDecl)
+          , jsonFieldText "type" (renderHostedType (foreignDeclTypeAst foreignDecl))
+          ]);
+    nodes
+  };
+  nodes
+}
+
+semanticContextDeclNodes : [HostedDeclAst] -> [Str]
+semanticContextDeclNodes decls = {
+  let mut nodes = emptyRenderedTexts;
+  for decl in decls {
+    nodes =
+      appendRenderedText
+        nodes
+        (semanticJsonNode
+          (semanticDeclNodeId decl)
+          "decl"
+          [ jsonFieldText "name" (declName decl)
+          , jsonFieldText "annotation" (renderAnnotationAst (declAnnotation decl))
+          , jsonFieldRaw "params" (semanticJsonTextArray (declParams decl))
+          , jsonFieldText "body" (expressionSummary (declBody decl))
+          ]);
+    nodes
+  };
+  nodes
+}
+
+semanticContextGuideNodes : [HostedGuideDeclAst] -> [Str]
+semanticContextGuideNodes guideDecls = semanticAirGuideNodes guideDecls
+
+semanticContextPolicyNodes : [HostedPolicyDeclAst] -> [Str]
+semanticContextPolicyNodes policyDecls = semanticAirPolicyNodes policyDecls
+
+semanticContextProjectionNodes : [HostedProjectionDeclAst] -> [Str]
+semanticContextProjectionNodes projectionDecls = semanticAirProjectionNodes projectionDecls
+
+semanticContextAgentRoleNodes : [HostedAgentRoleDeclAst] -> [Str]
+semanticContextAgentRoleNodes roleDecls = semanticAirAgentRoleNodes roleDecls
+
+semanticContextAgentNodes : [HostedAgentDeclAst] -> [Str]
+semanticContextAgentNodes agentDecls = semanticAirAgentNodes agentDecls
+
+semanticContextWorkflowNodes : [HostedWorkflowDeclAst] -> [Str]
+semanticContextWorkflowNodes workflowDecls = semanticAirWorkflowNodes workflowDecls
+
+semanticContextRouteNodes : [HostedRouteDeclAst] -> [Str]
+semanticContextRouteNodes routeDecls = semanticAirRouteNodes routeDecls
+
+semanticContextHookNodes : [HostedHookDeclAst] -> [Str]
+semanticContextHookNodes hookDecls = semanticAirHookNodes hookDecls
+
+semanticContextToolServerNodes : [HostedToolServerDeclAst] -> [Str]
+semanticContextToolServerNodes toolServerDecls = semanticAirToolServerNodes toolServerDecls
+
+semanticContextToolNodes : [HostedToolDeclAst] -> [Str]
+semanticContextToolNodes toolDecls = semanticAirToolNodes toolDecls
+
+semanticContextVerifierNodes : [HostedVerifierDeclAst] -> [Str]
+semanticContextVerifierNodes verifierDecls = semanticAirVerifierNodes verifierDecls
+
+semanticContextMergeGateNodes : [HostedMergeGateDeclAst] -> [Str]
+semanticContextMergeGateNodes mergeGateDecls = semanticAirMergeGateNodes mergeGateDecls
+
+semanticContextNodes : HostedModuleAst -> [Str]
+semanticContextNodes modl = {
+  let mut nodes = [semanticContextModuleNode modl];
+  nodes = append nodes (semanticAirImportNodes (moduleImports modl));
+  nodes = append nodes (semanticContextTypeNodes (moduleTypeDeclarations modl));
+  nodes = append nodes (semanticContextRecordNodes (moduleRecordDeclarations modl));
+  nodes = append nodes (semanticContextForeignNodes (moduleForeignDeclarations modl));
+  nodes = append nodes (semanticContextDeclNodes (moduleDeclarations modl));
+  nodes = append nodes (semanticContextGuideNodes (moduleGuideDeclarations modl));
+  nodes = append nodes (semanticContextPolicyNodes (modulePolicyDeclarations modl));
+  nodes = append nodes (semanticContextProjectionNodes (moduleProjectionDeclarations modl));
+  nodes = append nodes (semanticContextAgentRoleNodes (moduleAgentRoleDeclarations modl));
+  nodes = append nodes (semanticContextAgentNodes (moduleAgentDeclarations modl));
+  nodes = append nodes (semanticContextWorkflowNodes (moduleWorkflowDeclarations modl));
+  nodes = append nodes (semanticContextRouteNodes (moduleRouteDeclarations modl));
+  nodes = append nodes (semanticContextHookNodes (moduleHookDeclarations modl));
+  nodes = append nodes (semanticContextToolServerNodes (moduleToolServerDeclarations modl));
+  nodes = append nodes (semanticContextToolNodes (moduleToolDeclarations modl));
+  nodes = append nodes (semanticContextVerifierNodes (moduleVerifierDeclarations modl));
+  nodes = append nodes (semanticContextMergeGateNodes (moduleMergeGateDeclarations modl));
+  nodes
+}
+
+semanticContextEdges : HostedModuleAst -> [Str]
+semanticContextEdges modl = {
+  let moduleNodeId = textConcat ["module:", moduleNameOf modl];
+  let mut edges = emptyRenderedTexts;
+  for importName in moduleImports modl {
+    edges = appendRenderedText edges (semanticJsonEdge moduleNodeId (semanticImportNodeId importName) "imports");
+    edges
+  };
+  for typeDecl in moduleTypeDeclarations modl {
+    edges = appendRenderedText edges (semanticJsonEdge moduleNodeId (semanticTypeNodeId typeDecl) "declares");
+    for constructorDecl in typeDeclConstructors typeDecl {
+      edges =
+        appendRenderedText
+          edges
+          (semanticJsonEdge (semanticTypeNodeId typeDecl) (semanticConstructorNodeId (typeDeclName typeDecl) constructorDecl) "constructor");
+      edges
+    };
+    edges
+  };
+  for recordDecl in moduleRecordDeclarations modl {
+    edges = appendRenderedText edges (semanticJsonEdge moduleNodeId (semanticSchemaNodeId recordDecl) "declares");
+    for field in recordDeclFields recordDecl {
+      edges =
+        appendRenderedText
+          edges
+          (semanticJsonEdge (semanticSchemaNodeId recordDecl) (semanticSchemaFieldNodeId (recordDeclName recordDecl) field) "field");
+      edges
+    };
+    edges
+  };
+  for foreignDecl in moduleForeignDeclarations modl {
+    edges = appendRenderedText edges (semanticJsonEdge moduleNodeId (semanticForeignNodeId foreignDecl) "declares");
+    edges
+  };
+  for decl in moduleDeclarations modl {
+    edges = appendRenderedText edges (semanticJsonEdge moduleNodeId (semanticDeclNodeId decl) "declares");
+    edges
+  };
+  for guideDecl in moduleGuideDeclarations modl {
+    edges = appendRenderedText edges (semanticJsonEdge moduleNodeId (semanticGuideNodeId guideDecl) "declares");
+    edges = semanticAppendNamedTargetEdge edges (semanticGuideNames modl) (guideDeclExtends guideDecl) (semanticGuideNodeId guideDecl) "guide:" "extends";
+    for entry in guideDeclEntries guideDecl {
+      edges =
+        appendRenderedText
+          edges
+          (semanticJsonEdge (semanticGuideNodeId guideDecl) (semanticGuideEntryNodeId (guideDeclName guideDecl) entry) "entry");
+      edges
+    };
+    edges
+  };
+  for policyDecl in modulePolicyDeclarations modl {
+    edges = appendRenderedText edges (semanticJsonEdge moduleNodeId (semanticPolicyNodeId policyDecl) "declares");
+    edges
+  };
+  for projectionDecl in moduleProjectionDeclarations modl {
+    edges = appendRenderedText edges (semanticJsonEdge moduleNodeId (semanticProjectionNodeId projectionDecl) "declares");
+    edges = semanticAppendNamedTargetEdge edges (semanticRecordNames modl) (projectionDeclSourceRecordName projectionDecl) (semanticProjectionNodeId projectionDecl) "schema:" "source-schema";
+    edges = semanticAppendNamedTargetEdge edges (semanticPolicyNames modl) (projectionDeclPolicyName projectionDecl) (semanticProjectionNodeId projectionDecl) "policy:" "policy";
+    for field in projectionDeclFields projectionDecl {
+      edges =
+        appendRenderedText
+          edges
+          (semanticJsonEdge (semanticProjectionNodeId projectionDecl) (semanticProjectionFieldNodeId (projectionDeclName projectionDecl) field) "field");
+      edges
+    };
+    edges
+  };
+  for roleDecl in moduleAgentRoleDeclarations modl {
+    edges = appendRenderedText edges (semanticJsonEdge moduleNodeId (semanticAgentRoleNodeId roleDecl) "declares");
+    edges = semanticAppendNamedTargetEdge edges (semanticGuideNames modl) (agentRoleDeclGuideName roleDecl) (semanticAgentRoleNodeId roleDecl) "guide:" "guide";
+    edges = semanticAppendNamedTargetEdge edges (semanticPolicyNames modl) (agentRoleDeclPolicyName roleDecl) (semanticAgentRoleNodeId roleDecl) "policy:" "policy";
+    edges
+  };
+  for agentDecl in moduleAgentDeclarations modl {
+    edges = appendRenderedText edges (semanticJsonEdge moduleNodeId (semanticAgentNodeId agentDecl) "declares");
+    edges = semanticAppendNamedTargetEdge edges (semanticAgentRoleNames modl) (agentDeclRoleName agentDecl) (semanticAgentNodeId agentDecl) "agent-role:" "role";
+    edges
+  };
+  for workflowDecl in moduleWorkflowDeclarations modl {
+    edges = appendRenderedText edges (semanticJsonEdge moduleNodeId (semanticWorkflowNodeId workflowDecl) "declares");
+    edges
+  };
+  for routeDecl in moduleRouteDeclarations modl {
+    edges = appendRenderedText edges (semanticJsonEdge moduleNodeId (semanticRouteNodeId routeDecl) "declares");
+    edges = semanticAppendNamedTargetEdge edges (semanticDeclNames modl) (routeDeclHandlerName routeDecl) (semanticRouteNodeId routeDecl) "decl:" "handler";
+    edges = semanticAppendNamedTargetEdge edges (semanticRecordNames modl) (routeDeclRequestType routeDecl) (semanticRouteNodeId routeDecl) "schema:" "request-schema";
+    edges = semanticAppendNamedTargetEdge edges (semanticRecordNames modl) (routeDeclResponseType routeDecl) (semanticRouteNodeId routeDecl) "schema:" "response-schema";
+    edges
+  };
+  for hookDecl in moduleHookDeclarations modl {
+    edges = appendRenderedText edges (semanticJsonEdge moduleNodeId (semanticHookNodeId hookDecl) "declares");
+    edges = semanticAppendNamedTargetEdge edges (semanticDeclNames modl) (hookDeclHandlerName hookDecl) (semanticHookNodeId hookDecl) "decl:" "handler";
+    edges = semanticAppendNamedTargetEdge edges (semanticRecordNames modl) (hookDeclRequestType hookDecl) (semanticHookNodeId hookDecl) "schema:" "request-schema";
+    edges = semanticAppendNamedTargetEdge edges (semanticRecordNames modl) (hookDeclResponseType hookDecl) (semanticHookNodeId hookDecl) "schema:" "response-schema";
+    edges
+  };
+  for toolServerDecl in moduleToolServerDeclarations modl {
+    edges = appendRenderedText edges (semanticJsonEdge moduleNodeId (semanticToolServerNodeId toolServerDecl) "declares");
+    edges = semanticAppendNamedTargetEdge edges (semanticPolicyNames modl) (toolServerDeclPolicyName toolServerDecl) (semanticToolServerNodeId toolServerDecl) "policy:" "policy";
+    edges
+  };
+  for toolDecl in moduleToolDeclarations modl {
+    edges = appendRenderedText edges (semanticJsonEdge moduleNodeId (semanticToolNodeId toolDecl) "declares");
+    edges = semanticAppendNamedTargetEdge edges (semanticToolServerNames modl) (toolDeclServerName toolDecl) (semanticToolNodeId toolDecl) "toolserver:" "server";
+    edges = semanticAppendNamedTargetEdge edges (semanticRecordNames modl) (toolDeclRequestType toolDecl) (semanticToolNodeId toolDecl) "schema:" "request-schema";
+    edges = semanticAppendNamedTargetEdge edges (semanticRecordNames modl) (toolDeclResponseType toolDecl) (semanticToolNodeId toolDecl) "schema:" "response-schema";
+    edges
+  };
+  for verifierDecl in moduleVerifierDeclarations modl {
+    edges = appendRenderedText edges (semanticJsonEdge moduleNodeId (semanticVerifierNodeId verifierDecl) "declares");
+    edges = semanticAppendNamedTargetEdge edges (semanticToolNames modl) (verifierDeclToolName verifierDecl) (semanticVerifierNodeId verifierDecl) "tool:" "tool";
+    edges
+  };
+  for mergeGateDecl in moduleMergeGateDeclarations modl {
+    edges = appendRenderedText edges (semanticJsonEdge moduleNodeId (semanticMergeGateNodeId mergeGateDecl) "declares");
+    for verifierName in mergeGateDeclVerifierNames mergeGateDecl {
+      edges = semanticAppendNamedTargetEdge edges (semanticVerifierNames modl) verifierName (semanticMergeGateNodeId mergeGateDecl) "verifier:" "verifier";
+      edges
+    };
+    edges
+  };
+  edges = append edges (semanticDeclUseEdges modl);
+  edges
+}

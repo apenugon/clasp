@@ -3,12 +3,12 @@ mod swarm;
 use std::alloc::{alloc_zeroed, dealloc, handle_alloc_error, Layout};
 use std::collections::HashMap;
 use std::env;
-use std::ffi::{c_char, CStr};
+use std::ffi::{c_char, CStr, CString};
 use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Write};
-use std::mem::{align_of, size_of};
+use std::io::{Read, Seek, SeekFrom, Write};
+use std::mem::{align_of, size_of, MaybeUninit};
 #[cfg(unix)]
-use std::os::raw::c_int;
+use std::os::raw::{c_int, c_ulong};
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
 use std::path::{Component, Path, PathBuf};
@@ -35,15 +35,52 @@ const CLASP_RT_INTERPRETER_MAX_DEPTH: usize = 4096;
 const DOCUMENT_UPLOAD_MAX_BYTES: usize = 64 * 1024;
 const DOCUMENT_REFERENCE_MAX_COUNT: usize = 32;
 const DOCUMENT_EXCERPT_MAX_CHARS: usize = 160;
+const DEFAULT_WATCHED_PROCESS_OUTPUT_LIMIT_BYTES: u64 = 4 * 1024 * 1024;
 #[cfg(unix)]
 const SIGTERM: c_int = 15;
 #[cfg(unix)]
 const SIGKILL: c_int = 9;
+#[cfg(target_os = "linux")]
+const RLIMIT_CORE: c_int = 4;
+
+#[cfg(target_os = "linux")]
+#[repr(C)]
+struct RLimit {
+    rlim_cur: c_ulong,
+    rlim_max: c_ulong,
+}
 
 #[cfg(unix)]
 extern "C" {
     fn setsid() -> c_int;
     fn kill(pid: c_int, sig: c_int) -> c_int;
+}
+
+#[cfg(target_os = "linux")]
+extern "C" {
+    fn setrlimit(resource: c_int, rlim: *const RLimit) -> c_int;
+}
+
+#[cfg(unix)]
+#[repr(C)]
+struct Statvfs {
+    f_bsize: c_ulong,
+    f_frsize: c_ulong,
+    f_blocks: c_ulong,
+    f_bfree: c_ulong,
+    f_bavail: c_ulong,
+    f_files: c_ulong,
+    f_ffree: c_ulong,
+    f_favail: c_ulong,
+    f_fsid: c_ulong,
+    f_flag: c_ulong,
+    f_namemax: c_ulong,
+    __f_spare: [c_int; 6],
+}
+
+#[cfg(unix)]
+extern "C" {
+    fn statvfs(path: *const c_char, buf: *mut Statvfs) -> c_int;
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -424,6 +461,7 @@ enum ClaspRtInterpretedIntrinsic {
     ViewAppend(Box<ClaspRtInterpretedExpr>, Box<ClaspRtInterpretedExpr>),
     Encode(Box<ClaspRtInterpretedExpr>),
     Decode(ClaspRtSchemaType, Box<ClaspRtInterpretedExpr>),
+    TryDecode(ClaspRtSchemaType, Box<ClaspRtInterpretedExpr>),
 }
 
 #[derive(Clone)]
@@ -1899,11 +1937,7 @@ fn interpret_legacy_list_builtin_call(
                 };
                 let mut mapped_items = Vec::with_capacity(iterable_items.len());
                 for item in iterable_items {
-                    let step_result = if has_runtime_binding_or_builtin(image, callee) {
-                        interpret_runtime_binding_by_name(image, callee, &[item])
-                    } else {
-                        interpret_native_decl(runtime, image, callee, &[item], depth + 1)
-                    };
+                    let step_result = interpret_native_decl(runtime, image, callee, &[item], depth + 1);
                     if step_result.is_null() {
                         for mapped_item in mapped_items {
                             release_header(runtime, mapped_item);
@@ -1936,11 +1970,7 @@ fn interpret_legacy_list_builtin_call(
                 };
                 let mut filtered_items = Vec::new();
                 for item in iterable_items {
-                    let step_result = if has_runtime_binding_or_builtin(image, callee) {
-                        interpret_runtime_binding_by_name(image, callee, &[item])
-                    } else {
-                        interpret_native_decl(runtime, image, callee, &[item], depth + 1)
-                    };
+                    let step_result = interpret_native_decl(runtime, image, callee, &[item], depth + 1);
                     if step_result.is_null() {
                         for filtered_item in filtered_items {
                             release_header(runtime, filtered_item);
@@ -1985,11 +2015,7 @@ fn interpret_legacy_list_builtin_call(
                 };
                 for item in iterable_items {
                     retain_header(item);
-                    let step_result = if has_runtime_binding_or_builtin(image, callee) {
-                        interpret_runtime_binding_by_name(image, callee, &[item])
-                    } else {
-                        interpret_native_decl(runtime, image, callee, &[item], depth + 1)
-                    };
+                    let step_result = interpret_native_decl(runtime, image, callee, &[item], depth + 1);
                     if step_result.is_null() {
                         release_header(runtime, item);
                         release_header(runtime, values);
@@ -2030,11 +2056,7 @@ fn interpret_legacy_list_builtin_call(
                     return Some(null_mut());
                 };
                 for item in iterable_items {
-                    let step_result = if has_runtime_binding_or_builtin(image, callee) {
-                        interpret_runtime_binding_by_name(image, callee, &[item])
-                    } else {
-                        interpret_native_decl(runtime, image, callee, &[item], depth + 1)
-                    };
+                    let step_result = interpret_native_decl(runtime, image, callee, &[item], depth + 1);
                     if step_result.is_null() {
                         release_header(runtime, values);
                         return Some(null_mut());
@@ -2072,11 +2094,7 @@ fn interpret_legacy_list_builtin_call(
                     return Some(null_mut());
                 };
                 for item in iterable_items {
-                    let step_result = if has_runtime_binding_or_builtin(image, callee) {
-                        interpret_runtime_binding_by_name(image, callee, &[item])
-                    } else {
-                        interpret_native_decl(runtime, image, callee, &[item], depth + 1)
-                    };
+                    let step_result = interpret_native_decl(runtime, image, callee, &[item], depth + 1);
                     if step_result.is_null() {
                         release_header(runtime, values);
                         return Some(null_mut());
@@ -2146,8 +2164,6 @@ fn interpret_legacy_list_builtin_call(
                             (Some(left), Some(right)) => build_runtime_bool(left && right) as *mut ClaspRtHeader,
                             _ => null_mut(),
                         }
-                    } else if has_runtime_binding_or_builtin(image, callee) {
-                        interpret_runtime_binding_by_name(image, callee, &[accumulator, item])
                     } else {
                         interpret_native_decl(runtime, image, callee, &[accumulator, item], depth + 1)
                     };
@@ -2278,16 +2294,7 @@ fn interpret_native_expr(
         ClaspRtInterpretedExpr::Local(name) => {
             let value = read_env_value(env, name);
             if value.is_null() {
-                let runtime_value = if unsafe { has_runtime_binding_or_builtin(image, name) } {
-                    unsafe { interpret_runtime_binding_by_name(image, name, &[]) }
-                } else {
-                    null_mut()
-                };
-                if runtime_value.is_null() {
-                    interpret_native_decl(runtime, image, name, &[], depth + 1)
-                } else {
-                    runtime_value
-                }
+                interpret_native_decl(runtime, image, name, &[], depth + 1)
             } else {
                 unsafe { retain_header(value) };
                 value
@@ -2402,11 +2409,7 @@ fn interpret_native_expr(
                 interpreted_args.push(value);
             }
 
-            let result = if unsafe { has_runtime_binding_or_builtin(image, name) } {
-                unsafe { interpret_runtime_binding_by_name(image, name, &interpreted_args) }
-            } else {
-                interpret_native_decl(runtime, image, name, &interpreted_args, depth + 1)
-            };
+            let result = interpret_native_decl(runtime, image, name, &interpreted_args, depth + 1);
             if result.is_null() && trace_interpreter_enabled() {
                 eprintln!(
                     "clasp native trace: call `{}` returned null at depth {} with {} arg(s)",
@@ -2747,11 +2750,7 @@ fn interpret_native_expr(
                 };
                 let mut mapped_items = Vec::with_capacity(iterable_items.len());
                 for item in iterable_items {
-                    let step_result = if has_runtime_binding_or_builtin(image, callee.as_str()) {
-                        interpret_runtime_binding_by_name(image, callee.as_str(), &[item])
-                    } else {
-                        interpret_native_decl(runtime, image, callee.as_str(), &[item], depth + 1)
-                    };
+                    let step_result = interpret_native_decl(runtime, image, callee.as_str(), &[item], depth + 1);
                     if step_result.is_null() {
                         for mapped_item in mapped_items {
                             release_header(runtime, mapped_item);
@@ -2781,11 +2780,7 @@ fn interpret_native_expr(
                 };
                 let mut filtered_items = Vec::new();
                 for item in iterable_items {
-                    let step_result = if has_runtime_binding_or_builtin(image, callee.as_str()) {
-                        interpret_runtime_binding_by_name(image, callee.as_str(), &[item])
-                    } else {
-                        interpret_native_decl(runtime, image, callee.as_str(), &[item], depth + 1)
-                    };
+                    let step_result = interpret_native_decl(runtime, image, callee.as_str(), &[item], depth + 1);
                     if step_result.is_null() {
                         for filtered_item in filtered_items {
                             release_header(runtime, filtered_item);
@@ -2827,11 +2822,7 @@ fn interpret_native_expr(
                 };
                 for item in iterable_items {
                     retain_header(item);
-                    let step_result = if has_runtime_binding_or_builtin(image, callee.as_str()) {
-                        interpret_runtime_binding_by_name(image, callee.as_str(), &[item])
-                    } else {
-                        interpret_native_decl(runtime, image, callee.as_str(), &[item], depth + 1)
-                    };
+                    let step_result = interpret_native_decl(runtime, image, callee.as_str(), &[item], depth + 1);
                     if step_result.is_null() {
                         release_header(runtime, item);
                         release_header(runtime, values);
@@ -2869,11 +2860,7 @@ fn interpret_native_expr(
                     return null_mut();
                 };
                 for item in iterable_items {
-                    let step_result = if has_runtime_binding_or_builtin(image, callee.as_str()) {
-                        interpret_runtime_binding_by_name(image, callee.as_str(), &[item])
-                    } else {
-                        interpret_native_decl(runtime, image, callee.as_str(), &[item], depth + 1)
-                    };
+                    let step_result = interpret_native_decl(runtime, image, callee.as_str(), &[item], depth + 1);
                     if step_result.is_null() {
                         release_header(runtime, values);
                         return null_mut();
@@ -2908,11 +2895,7 @@ fn interpret_native_expr(
                     return null_mut();
                 };
                 for item in iterable_items {
-                    let step_result = if has_runtime_binding_or_builtin(image, callee.as_str()) {
-                        interpret_runtime_binding_by_name(image, callee.as_str(), &[item])
-                    } else {
-                        interpret_native_decl(runtime, image, callee.as_str(), &[item], depth + 1)
-                    };
+                    let step_result = interpret_native_decl(runtime, image, callee.as_str(), &[item], depth + 1);
                     if step_result.is_null() {
                         release_header(runtime, values);
                         return null_mut();
@@ -2973,11 +2956,8 @@ fn interpret_native_expr(
                 };
                 let mut accumulator = initial_value;
                 for item in iterable_items {
-                    let step_result = if has_runtime_binding_or_builtin(image, callee.as_str()) {
-                        interpret_runtime_binding_by_name(image, callee.as_str(), &[accumulator, item])
-                    } else {
-                        interpret_native_decl(runtime, image, callee.as_str(), &[accumulator, item], depth + 1)
-                    };
+                    let step_result =
+                        interpret_native_decl(runtime, image, callee.as_str(), &[accumulator, item], depth + 1);
                     if step_result.is_null() {
                         release_header(runtime, accumulator);
                         release_header(runtime, values);
@@ -3067,6 +3047,34 @@ fn interpret_native_expr(
                 }
             }
         }
+        ClaspRtInterpretedExpr::Intrinsic(ClaspRtInterpretedIntrinsic::TryDecode(typ, value_expr)) => {
+            let value = interpret_native_expr(runtime, image, value_expr, env, depth + 1);
+            if value.is_null() {
+                return null_mut();
+            }
+            if unsafe { is_early_return_value(value) } {
+                return value;
+            }
+            if unsafe { (*value).layout_id != CLASP_RT_LAYOUT_STRING } {
+                unsafe {
+                    release_header(runtime, value);
+                    return runtime_result_err("tryDecode expects Str");
+                }
+            }
+            let decoded = unsafe {
+                let json_bytes = string_bytes(value as *mut ClaspRtString);
+                let decoded_value = match json_root_value(json_bytes) {
+                    Some(value_slice) => decode_json_to_runtime_value(&*image, typ, json_bytes, value_slice, None),
+                    None => Err(ClaspRtDecodeError::new("value must be valid JSON")),
+                };
+                release_header(runtime, value);
+                decoded_value
+            };
+            match decoded {
+                Ok(decoded_value) => unsafe { runtime_result_ok(decoded_value) },
+                Err(error) => unsafe { runtime_result_err(&error.message) },
+            }
+        }
     }
 }
 
@@ -3146,12 +3154,25 @@ fn interpret_runtime_binding(
         ("pathDirname", 1) => unsafe { clasp_rt_path_dirname(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("fileExists", 1) => unsafe { build_runtime_bool(clasp_rt_file_exists(args[0] as *mut ClaspRtString)) as *mut ClaspRtHeader },
         ("listDir", 1) => unsafe { clasp_rt_list_dir(args[0] as *mut ClaspRtString) },
+        ("hostAvailableDiskMb", 1) => unsafe { clasp_rt_host_available_disk_mb(args[0] as *mut ClaspRtString) },
+        ("hostFileSizeMb", 1) => unsafe { clasp_rt_host_file_size_mb(args[0] as *mut ClaspRtString) },
+        ("hostCapFileTailMb", 2) => unsafe { clasp_rt_host_cap_file_tail_mb(args[0] as *mut ClaspRtString, args[1]) },
+        ("hostAvailableMemoryMb", 0) => unsafe { clasp_rt_host_available_memory_mb() },
+        ("hostProcessAlive", 1) => unsafe { clasp_rt_host_process_alive(args[0] as *mut ClaspRtString) },
+        ("hostProcessCountByName", 1) => unsafe { clasp_rt_host_process_count_by_name(args[0] as *mut ClaspRtStringList) },
+        ("hostUnmanagedProcessCountByName", 1) => unsafe { clasp_rt_host_unmanaged_process_count_by_name(args[0] as *mut ClaspRtStringList) },
+        ("hostUnmanagedProcessRssMbByName", 1) => unsafe { clasp_rt_host_unmanaged_process_rss_mb_by_name(args[0] as *mut ClaspRtStringList) },
         ("workspacePath", 2) => unsafe { clasp_rt_workspace_path(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("workspaceReadFile", 2) => unsafe { clasp_rt_workspace_read_file(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("workspaceWriteFile", 3) => unsafe { clasp_rt_workspace_write_file(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("workspaceAppendFile", 3) => unsafe { clasp_rt_workspace_append_file(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("workspaceMkdirAll", 2) => unsafe { clasp_rt_workspace_mkdir_all(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("workspaceListDir", 2) => unsafe { clasp_rt_workspace_list_dir(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) },
+        ("workspaceListTree", 4) => unsafe { clasp_rt_workspace_list_tree(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2], args[3]) },
+        ("workspaceSearchText", 7) => unsafe { clasp_rt_workspace_search_text(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3], args[4], args[5], args[6]) },
+        ("workspaceReplaceText", 6) => unsafe { clasp_rt_workspace_replace_text(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4], args[5]) },
+        ("workspacePathSizeMb", 2) => unsafe { clasp_rt_workspace_path_size_mb(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) },
+        ("workspaceRemovePath", 2) => unsafe { clasp_rt_workspace_remove_path(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmBootstrapJson", 3) => unsafe { clasp_rt_swarm_bootstrap_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmStartJson", 3) => unsafe { clasp_rt_swarm_start_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmLeaseJson", 3) => unsafe { clasp_rt_swarm_lease_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
@@ -3181,10 +3202,16 @@ fn interpret_runtime_binding(
         ("swarmObjectivesJson", 1) => unsafe { clasp_rt_swarm_objectives_json(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmTaskCreateJson", 7) => unsafe { clasp_rt_swarm_task_create_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4], args[5], args[6]) as *mut ClaspRtHeader },
         ("swarmTaskCreateWithDeadlineJson", 8) => unsafe { clasp_rt_swarm_task_create_with_deadline_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4], args[5], args[6], args[7]) as *mut ClaspRtHeader },
+        ("swarmTaskCreateWithDeadlineAndPriorityJson", 9) => unsafe { clasp_rt_swarm_task_create_with_deadline_and_priority_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4], args[5], args[6], args[7], args[8]) as *mut ClaspRtHeader },
+        ("swarmTaskCreateChildWithDeadlineAndPriorityJson", 11) => unsafe { clasp_rt_swarm_task_create_child_with_deadline_and_priority_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4] as *mut ClaspRtString, args[5], args[6], args[7], args[8], args[9], args[10]) as *mut ClaspRtHeader },
+        ("swarmTaskCreateChildWithPolicyJson", 12) => unsafe { clasp_rt_swarm_task_create_child_with_policy_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4] as *mut ClaspRtString, args[5], args[6], args[7], args[8], args[9], args[10], args[11]) as *mut ClaspRtHeader },
+        ("swarmTaskReprioritizeJson", 4) => unsafe { clasp_rt_swarm_task_reprioritize_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3]) as *mut ClaspRtHeader },
         ("swarmPolicySetJson", 5) => unsafe { clasp_rt_swarm_policy_set_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3], args[4]) as *mut ClaspRtHeader },
         ("swarmPolicySetWithProcessAccessJson", 6) => unsafe { clasp_rt_swarm_policy_set_with_process_access_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3], args[4], args[5]) as *mut ClaspRtHeader },
         ("swarmPolicySetWithAccessJson", 7) => unsafe { clasp_rt_swarm_policy_set_with_access_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3], args[4], args[5], args[6]) as *mut ClaspRtHeader },
         ("swarmPolicySetWithCapabilitiesJson", 8) => unsafe { clasp_rt_swarm_policy_set_with_capabilities_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3], args[4], args[5], args[6], args[7] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("swarmPolicySetWithNetworkAccessJson", 9) => unsafe { clasp_rt_swarm_policy_set_with_network_access_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3], args[4], args[5], args[6], args[7] as *mut ClaspRtString, args[8]) as *mut ClaspRtHeader },
+        ("swarmPolicySetWithFilesystemAccessJson", 10) => unsafe { clasp_rt_swarm_policy_set_with_filesystem_access_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3], args[4], args[5], args[6], args[7], args[8] as *mut ClaspRtString, args[9]) as *mut ClaspRtHeader },
         ("swarmToolRunJson", 5) => unsafe { clasp_rt_swarm_tool_run_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4]) as *mut ClaspRtHeader },
         ("swarmToolRunWithTimeoutJson", 6) => unsafe { clasp_rt_swarm_tool_run_with_timeout_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4], args[5]) as *mut ClaspRtHeader },
         ("swarmToolRunWithLimitsJson", 7) => unsafe { clasp_rt_swarm_tool_run_with_limits_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4], args[5], args[6]) as *mut ClaspRtHeader },
@@ -3233,6 +3260,17 @@ fn interpret_runtime_binding(
                 args[5],
             ) as *mut ClaspRtHeader
         },
+        ("spawnCommandWithLimitsJson", 7) => unsafe {
+            clasp_rt_spawn_command_with_limits_json(
+                args[0] as *mut ClaspRtString,
+                args[1] as *mut ClaspRtString,
+                args[2] as *mut ClaspRtString,
+                args[3] as *mut ClaspRtString,
+                args[4],
+                args[5],
+                args[6],
+            ) as *mut ClaspRtHeader
+        },
         ("watchCommandJson", 6) => unsafe {
             clasp_rt_watch_command_json(
                 args[0] as *mut ClaspRtString,
@@ -3241,6 +3279,17 @@ fn interpret_runtime_binding(
                 args[3] as *mut ClaspRtString,
                 args[4],
                 args[5],
+            ) as *mut ClaspRtHeader
+        },
+        ("watchCommandWithLimitsJson", 7) => unsafe {
+            clasp_rt_watch_command_with_limits_json(
+                args[0] as *mut ClaspRtString,
+                args[1] as *mut ClaspRtString,
+                args[2] as *mut ClaspRtString,
+                args[3] as *mut ClaspRtString,
+                args[4],
+                args[5],
+                args[6],
             ) as *mut ClaspRtHeader
         },
         ("reconcileWatchedProcessJson", 1) => unsafe {
@@ -3393,12 +3442,25 @@ fn interpret_builtin_runtime_binding(
         ("pathDirname", 1) => unsafe { clasp_rt_path_dirname(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("fileExists", 1) => unsafe { build_runtime_bool(clasp_rt_file_exists(args[0] as *mut ClaspRtString)) as *mut ClaspRtHeader },
         ("listDir", 1) => unsafe { clasp_rt_list_dir(args[0] as *mut ClaspRtString) },
+        ("hostAvailableDiskMb", 1) => unsafe { clasp_rt_host_available_disk_mb(args[0] as *mut ClaspRtString) },
+        ("hostFileSizeMb", 1) => unsafe { clasp_rt_host_file_size_mb(args[0] as *mut ClaspRtString) },
+        ("hostCapFileTailMb", 2) => unsafe { clasp_rt_host_cap_file_tail_mb(args[0] as *mut ClaspRtString, args[1]) },
+        ("hostAvailableMemoryMb", 0) => unsafe { clasp_rt_host_available_memory_mb() },
+        ("hostProcessAlive", 1) => unsafe { clasp_rt_host_process_alive(args[0] as *mut ClaspRtString) },
+        ("hostProcessCountByName", 1) => unsafe { clasp_rt_host_process_count_by_name(args[0] as *mut ClaspRtStringList) },
+        ("hostUnmanagedProcessCountByName", 1) => unsafe { clasp_rt_host_unmanaged_process_count_by_name(args[0] as *mut ClaspRtStringList) },
+        ("hostUnmanagedProcessRssMbByName", 1) => unsafe { clasp_rt_host_unmanaged_process_rss_mb_by_name(args[0] as *mut ClaspRtStringList) },
         ("workspacePath", 2) => unsafe { clasp_rt_workspace_path(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("workspaceReadFile", 2) => unsafe { clasp_rt_workspace_read_file(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("workspaceWriteFile", 3) => unsafe { clasp_rt_workspace_write_file(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("workspaceAppendFile", 3) => unsafe { clasp_rt_workspace_append_file(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("workspaceMkdirAll", 2) => unsafe { clasp_rt_workspace_mkdir_all(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("workspaceListDir", 2) => unsafe { clasp_rt_workspace_list_dir(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) },
+        ("workspaceListTree", 4) => unsafe { clasp_rt_workspace_list_tree(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2], args[3]) },
+        ("workspaceSearchText", 7) => unsafe { clasp_rt_workspace_search_text(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3], args[4], args[5], args[6]) },
+        ("workspaceReplaceText", 6) => unsafe { clasp_rt_workspace_replace_text(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4], args[5]) },
+        ("workspacePathSizeMb", 2) => unsafe { clasp_rt_workspace_path_size_mb(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) },
+        ("workspaceRemovePath", 2) => unsafe { clasp_rt_workspace_remove_path(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmBootstrapJson", 3) => unsafe { clasp_rt_swarm_bootstrap_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmStartJson", 3) => unsafe { clasp_rt_swarm_start_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmLeaseJson", 3) => unsafe { clasp_rt_swarm_lease_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString) as *mut ClaspRtHeader },
@@ -3428,10 +3490,16 @@ fn interpret_builtin_runtime_binding(
         ("swarmObjectivesJson", 1) => unsafe { clasp_rt_swarm_objectives_json(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("swarmTaskCreateJson", 7) => unsafe { clasp_rt_swarm_task_create_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4], args[5], args[6]) as *mut ClaspRtHeader },
         ("swarmTaskCreateWithDeadlineJson", 8) => unsafe { clasp_rt_swarm_task_create_with_deadline_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4], args[5], args[6], args[7]) as *mut ClaspRtHeader },
+        ("swarmTaskCreateWithDeadlineAndPriorityJson", 9) => unsafe { clasp_rt_swarm_task_create_with_deadline_and_priority_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4], args[5], args[6], args[7], args[8]) as *mut ClaspRtHeader },
+        ("swarmTaskCreateChildWithDeadlineAndPriorityJson", 11) => unsafe { clasp_rt_swarm_task_create_child_with_deadline_and_priority_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4] as *mut ClaspRtString, args[5], args[6], args[7], args[8], args[9], args[10]) as *mut ClaspRtHeader },
+        ("swarmTaskCreateChildWithPolicyJson", 12) => unsafe { clasp_rt_swarm_task_create_child_with_policy_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4] as *mut ClaspRtString, args[5], args[6], args[7], args[8], args[9], args[10], args[11]) as *mut ClaspRtHeader },
+        ("swarmTaskReprioritizeJson", 4) => unsafe { clasp_rt_swarm_task_reprioritize_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3]) as *mut ClaspRtHeader },
         ("swarmPolicySetJson", 5) => unsafe { clasp_rt_swarm_policy_set_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3], args[4]) as *mut ClaspRtHeader },
         ("swarmPolicySetWithProcessAccessJson", 6) => unsafe { clasp_rt_swarm_policy_set_with_process_access_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3], args[4], args[5]) as *mut ClaspRtHeader },
         ("swarmPolicySetWithAccessJson", 7) => unsafe { clasp_rt_swarm_policy_set_with_access_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3], args[4], args[5], args[6]) as *mut ClaspRtHeader },
         ("swarmPolicySetWithCapabilitiesJson", 8) => unsafe { clasp_rt_swarm_policy_set_with_capabilities_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3], args[4], args[5], args[6], args[7] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("swarmPolicySetWithNetworkAccessJson", 9) => unsafe { clasp_rt_swarm_policy_set_with_network_access_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3], args[4], args[5], args[6], args[7] as *mut ClaspRtString, args[8]) as *mut ClaspRtHeader },
+        ("swarmPolicySetWithFilesystemAccessJson", 10) => unsafe { clasp_rt_swarm_policy_set_with_filesystem_access_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3], args[4], args[5], args[6], args[7], args[8] as *mut ClaspRtString, args[9]) as *mut ClaspRtHeader },
         ("swarmToolRunJson", 5) => unsafe { clasp_rt_swarm_tool_run_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4]) as *mut ClaspRtHeader },
         ("swarmToolRunWithTimeoutJson", 6) => unsafe { clasp_rt_swarm_tool_run_with_timeout_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4], args[5]) as *mut ClaspRtHeader },
         ("swarmToolRunWithLimitsJson", 7) => unsafe { clasp_rt_swarm_tool_run_with_limits_json(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString, args[2] as *mut ClaspRtString, args[3] as *mut ClaspRtString, args[4], args[5], args[6]) as *mut ClaspRtHeader },
@@ -3480,6 +3548,17 @@ fn interpret_builtin_runtime_binding(
                 args[5],
             ) as *mut ClaspRtHeader
         },
+        ("spawnCommandWithLimitsJson", 7) => unsafe {
+            clasp_rt_spawn_command_with_limits_json(
+                args[0] as *mut ClaspRtString,
+                args[1] as *mut ClaspRtString,
+                args[2] as *mut ClaspRtString,
+                args[3] as *mut ClaspRtString,
+                args[4],
+                args[5],
+                args[6],
+            ) as *mut ClaspRtHeader
+        },
         ("watchCommandJson", 6) => unsafe {
             clasp_rt_watch_command_json(
                 args[0] as *mut ClaspRtString,
@@ -3488,6 +3567,17 @@ fn interpret_builtin_runtime_binding(
                 args[3] as *mut ClaspRtString,
                 args[4],
                 args[5],
+            ) as *mut ClaspRtHeader
+        },
+        ("watchCommandWithLimitsJson", 7) => unsafe {
+            clasp_rt_watch_command_with_limits_json(
+                args[0] as *mut ClaspRtString,
+                args[1] as *mut ClaspRtString,
+                args[2] as *mut ClaspRtString,
+                args[3] as *mut ClaspRtString,
+                args[4],
+                args[5],
+                args[6],
             ) as *mut ClaspRtHeader
         },
         ("reconcileWatchedProcessJson", 1) => unsafe {
@@ -3612,12 +3702,25 @@ fn builtin_runtime_binding_name(name: &str) -> bool {
             | "pathDirname"
             | "fileExists"
             | "listDir"
+            | "hostAvailableDiskMb"
+            | "hostFileSizeMb"
+            | "hostCapFileTailMb"
+            | "hostAvailableMemoryMb"
+            | "hostProcessAlive"
+            | "hostProcessCountByName"
+            | "hostUnmanagedProcessCountByName"
+            | "hostUnmanagedProcessRssMbByName"
             | "workspacePath"
             | "workspaceReadFile"
             | "workspaceWriteFile"
             | "workspaceAppendFile"
             | "workspaceMkdirAll"
             | "workspaceListDir"
+            | "workspaceListTree"
+            | "workspaceSearchText"
+            | "workspaceReplaceText"
+            | "workspacePathSizeMb"
+            | "workspaceRemovePath"
             | "swarmBootstrapJson"
             | "swarmStartJson"
             | "swarmLeaseJson"
@@ -3641,10 +3744,16 @@ fn builtin_runtime_binding_name(name: &str) -> bool {
             | "swarmObjectivesJson"
             | "swarmTaskCreateJson"
             | "swarmTaskCreateWithDeadlineJson"
+            | "swarmTaskCreateWithDeadlineAndPriorityJson"
+            | "swarmTaskCreateChildWithDeadlineAndPriorityJson"
+            | "swarmTaskCreateChildWithPolicyJson"
+            | "swarmTaskReprioritizeJson"
             | "swarmPolicySetJson"
             | "swarmPolicySetWithProcessAccessJson"
             | "swarmPolicySetWithAccessJson"
             | "swarmPolicySetWithCapabilitiesJson"
+            | "swarmPolicySetWithNetworkAccessJson"
+            | "swarmPolicySetWithFilesystemAccessJson"
             | "swarmToolRunJson"
             | "swarmToolRunWithTimeoutJson"
             | "swarmToolRunWithLimitsJson"
@@ -3668,7 +3777,9 @@ fn builtin_runtime_binding_name(name: &str) -> bool {
             | "runProcessTimeoutJson"
             | "runWorkspaceCommandTimeoutJson"
             | "spawnCommandJson"
+            | "spawnCommandWithLimitsJson"
             | "watchCommandJson"
+            | "watchCommandWithLimitsJson"
             | "reconcileWatchedProcessJson"
             | "cancelWatchedProcessJson"
             | "awaitWatchedProcessJson"
@@ -5195,6 +5306,7 @@ fn json_array_length(bytes: &[u8], array_slice: JsonSlice) -> usize {
     0
 }
 
+#[cfg(test)]
 fn json_array_item(bytes: &[u8], array_slice: JsonSlice, item_index: usize) -> Option<JsonSlice> {
     if bytes.get(array_slice.start) != Some(&b'[') {
         return None;
@@ -5218,6 +5330,34 @@ fn json_array_item(bytes: &[u8], array_slice: JsonSlice, item_index: usize) -> O
         cursor = skip_json_ws(bytes, value_end);
         match bytes.get(cursor) {
             Some(b']') => return None,
+            Some(b',') => cursor = skip_json_ws(bytes, cursor + 1),
+            _ => return None,
+        }
+    }
+
+    None
+}
+
+fn json_array_items(bytes: &[u8], array_slice: JsonSlice) -> Option<Vec<JsonSlice>> {
+    if bytes.get(array_slice.start) != Some(&b'[') {
+        return None;
+    }
+
+    let mut cursor = skip_json_ws(bytes, array_slice.start + 1);
+    if cursor >= array_slice.end || bytes.get(cursor) == Some(&b']') {
+        return Some(Vec::new());
+    }
+
+    let mut items = Vec::new();
+    while cursor < array_slice.end {
+        let value_end = skip_json_value(bytes, cursor)?;
+        items.push(JsonSlice {
+            start: cursor,
+            end: value_end,
+        });
+        cursor = skip_json_ws(bytes, value_end);
+        match bytes.get(cursor) {
+            Some(b']') => return Some(items),
             Some(b',') => cursor = skip_json_ws(bytes, cursor + 1),
             _ => return None,
         }
@@ -5279,13 +5419,12 @@ fn parse_schema_type_text(value: &str) -> Option<ClaspRtSchemaType> {
 fn load_record_schemas(bytes: &[u8], abi: JsonSlice) -> Option<HashMap<String, ClaspRtRecordSchema>> {
     let record_layouts = json_object_lookup(bytes, abi, "recordLayouts")?;
     let mut schemas = HashMap::new();
-    for index in 0..json_array_length(bytes, record_layouts) {
-        let layout = json_array_item(bytes, record_layouts, index)?;
+    for layout in json_array_items(bytes, record_layouts)? {
         let name = json_string_owned(bytes, json_object_lookup(bytes, layout, "name")?)?;
         let fields_value = json_object_lookup(bytes, layout, "fields")?;
-        let mut fields = Vec::with_capacity(json_array_length(bytes, fields_value));
-        for field_index in 0..json_array_length(bytes, fields_value) {
-            let field = json_array_item(bytes, fields_value, field_index)?;
+        let field_values = json_array_items(bytes, fields_value)?;
+        let mut fields = Vec::with_capacity(field_values.len());
+        for field in field_values {
             let field_name = json_string_owned(bytes, json_object_lookup(bytes, field, "name")?)?;
             let field_type = json_string_owned(bytes, json_object_lookup(bytes, field, "type")?)?;
             let field_typ = parse_schema_type_text(&field_type)?;
@@ -5299,19 +5438,17 @@ fn load_record_schemas(bytes: &[u8], abi: JsonSlice) -> Option<HashMap<String, C
 fn load_variant_schemas(bytes: &[u8], abi: JsonSlice) -> Option<HashMap<String, ClaspRtVariantSchema>> {
     let variant_layouts = json_object_lookup(bytes, abi, "variantLayouts")?;
     let mut schemas = HashMap::new();
-    for index in 0..json_array_length(bytes, variant_layouts) {
-        let layout = json_array_item(bytes, variant_layouts, index)?;
+    for layout in json_array_items(bytes, variant_layouts)? {
         let type_name = json_string_owned(bytes, json_object_lookup(bytes, layout, "name")?)?;
         let constructors_value = json_object_lookup(bytes, layout, "constructors")?;
         let mut constructors = HashMap::new();
         let mut constructor_names = Vec::new();
-        for constructor_index in 0..json_array_length(bytes, constructors_value) {
-            let constructor = json_array_item(bytes, constructors_value, constructor_index)?;
+        for constructor in json_array_items(bytes, constructors_value)? {
             let constructor_name = json_string_owned(bytes, json_object_lookup(bytes, constructor, "name")?)?;
             let payloads_value = json_object_lookup(bytes, constructor, "payloads")?;
-            let mut payloads = Vec::with_capacity(json_array_length(bytes, payloads_value));
-            for payload_index in 0..json_array_length(bytes, payloads_value) {
-                let payload = json_array_item(bytes, payloads_value, payload_index)?;
+            let payload_values = json_array_items(bytes, payloads_value)?;
+            let mut payloads = Vec::with_capacity(payload_values.len());
+            for payload in payload_values {
                 let payload_type = json_string_owned(bytes, json_object_lookup(bytes, payload, "type")?)?;
                 payloads.push(parse_schema_type_text(&payload_type)?);
             }
@@ -5332,8 +5469,7 @@ fn load_variant_schemas(bytes: &[u8], abi: JsonSlice) -> Option<HashMap<String, 
 fn load_route_boundaries(bytes: &[u8], runtime: JsonSlice) -> Option<Vec<ClaspRtNativeRouteBoundary>> {
     let boundaries = json_object_lookup(bytes, runtime, "boundaries")?;
     let mut routes = Vec::new();
-    for index in 0..json_array_length(bytes, boundaries) {
-        let boundary = json_array_item(bytes, boundaries, index)?;
+    for boundary in json_array_items(bytes, boundaries)? {
         let kind = json_string_owned(bytes, json_object_lookup(bytes, boundary, "kind")?)?;
         if kind != "route" {
             continue;
@@ -5593,13 +5729,10 @@ unsafe fn decode_json_to_runtime_value(
             if bytes.get(value_slice.start) != Some(&b'[') {
                 return Err(ClaspRtDecodeError::new(decode_expected_message(image, typ, field_name)));
             }
-            let item_count = json_array_length(bytes, value_slice);
-            let mut decoded_items = Vec::with_capacity(item_count);
-            for index in 0..item_count {
-                let Some(item_slice) = json_array_item(bytes, value_slice, index) else {
-                    release_owned_headers(decoded_items);
-                    return Err(ClaspRtDecodeError::new(decode_expected_message(image, typ, field_name)));
-                };
+            let item_slices = json_array_items(bytes, value_slice)
+                .ok_or_else(|| ClaspRtDecodeError::new(decode_expected_message(image, typ, field_name)))?;
+            let mut decoded_items = Vec::with_capacity(item_slices.len());
+            for (index, item_slice) in item_slices.into_iter().enumerate() {
                 let item_field = format!("{}[{index}]", decode_subject(field_name));
                 let decoded_item = match decode_json_to_runtime_value(
                     image,
@@ -5847,9 +5980,9 @@ fn parse_interpreted_expr_json(bytes: &[u8], expr_slice: JsonSlice) -> Option<Cl
 
     if json_string_equals(bytes, kind_slice, "list") {
         let items_slice = json_object_lookup(bytes, expr_slice, "items")?;
-        let mut items = Vec::with_capacity(json_array_length(bytes, items_slice));
-        for index in 0..json_array_length(bytes, items_slice) {
-            let item_slice = json_array_item(bytes, items_slice, index)?;
+        let item_slices = json_array_items(bytes, items_slice)?;
+        let mut items = Vec::with_capacity(item_slices.len());
+        for item_slice in item_slices {
             items.push(parse_interpreted_expr_json(bytes, item_slice)?);
         }
         return Some(ClaspRtInterpretedExpr::List(items));
@@ -5905,9 +6038,9 @@ fn parse_interpreted_expr_json(bytes: &[u8], expr_slice: JsonSlice) -> Option<Cl
             ClaspRtInterpretedExpr::Local(name) => name,
             _ => return None,
         };
-        let mut args = Vec::with_capacity(json_array_length(bytes, args_slice));
-        for index in 0..json_array_length(bytes, args_slice) {
-            let arg_slice = json_array_item(bytes, args_slice, index)?;
+        let arg_slices = json_array_items(bytes, args_slice)?;
+        let mut args = Vec::with_capacity(arg_slices.len());
+        for arg_slice in arg_slices {
             args.push(parse_interpreted_expr_json(bytes, arg_slice)?);
         }
         return Some(ClaspRtInterpretedExpr::CallLocal(callee_name, args));
@@ -5917,9 +6050,9 @@ fn parse_interpreted_expr_json(bytes: &[u8], expr_slice: JsonSlice) -> Option<Cl
         let scrutinee_slice = json_object_lookup(bytes, expr_slice, "scrutinee")?;
         let branches_slice = json_object_lookup(bytes, expr_slice, "branches")?;
         let scrutinee = parse_interpreted_expr_json(bytes, scrutinee_slice)?;
-        let mut branches = Vec::with_capacity(json_array_length(bytes, branches_slice));
-        for index in 0..json_array_length(bytes, branches_slice) {
-            let branch_slice = json_array_item(bytes, branches_slice, index)?;
+        let branch_slices = json_array_items(bytes, branches_slice)?;
+        let mut branches = Vec::with_capacity(branch_slices.len());
+        for branch_slice in branch_slices {
             branches.push(parse_interpreted_match_branch_json(bytes, branch_slice)?);
         }
         return Some(ClaspRtInterpretedExpr::Match(Box::new(scrutinee), branches));
@@ -5973,9 +6106,9 @@ fn parse_interpreted_expr_json(bytes: &[u8], expr_slice: JsonSlice) -> Option<Cl
         let name_slice = json_object_lookup(bytes, expr_slice, "name")?;
         let args_slice = json_object_lookup(bytes, expr_slice, "args")?;
         let name = json_string_owned(bytes, name_slice)?;
-        let mut args = Vec::with_capacity(json_array_length(bytes, args_slice));
-        for index in 0..json_array_length(bytes, args_slice) {
-            let arg_slice = json_array_item(bytes, args_slice, index)?;
+        let arg_slices = json_array_items(bytes, args_slice)?;
+        let mut args = Vec::with_capacity(arg_slices.len());
+        for arg_slice in arg_slices {
             args.push(parse_interpreted_expr_json(bytes, arg_slice)?);
         }
         return Some(ClaspRtInterpretedExpr::Construct(name, args));
@@ -5985,9 +6118,9 @@ fn parse_interpreted_expr_json(bytes: &[u8], expr_slice: JsonSlice) -> Option<Cl
         let record_name_slice = json_object_lookup(bytes, expr_slice, "recordName")?;
         let fields_slice = json_object_lookup(bytes, expr_slice, "fields")?;
         let record_name = json_string_owned(bytes, record_name_slice)?;
-        let mut fields = Vec::with_capacity(json_array_length(bytes, fields_slice));
-        for index in 0..json_array_length(bytes, fields_slice) {
-            let field_slice = json_array_item(bytes, fields_slice, index)?;
+        let field_slices = json_array_items(bytes, fields_slice)?;
+        let mut fields = Vec::with_capacity(field_slices.len());
+        for field_slice in field_slices {
             fields.push(parse_interpreted_record_field_json(bytes, field_slice)?);
         }
         return Some(ClaspRtInterpretedExpr::Record(record_name, fields));
@@ -6134,6 +6267,17 @@ fn parse_interpreted_expr_json(bytes: &[u8], expr_slice: JsonSlice) -> Option<Cl
                 ),
             ));
         }
+        if json_string_equals(bytes, name_slice, "tryDecode") {
+            let type_slice = json_object_lookup(bytes, expr_slice, "type")?;
+            let value_slice = json_object_lookup(bytes, expr_slice, "value")?;
+            let target_type = parse_schema_type_text(&json_string_owned(bytes, type_slice)?)?;
+            return Some(ClaspRtInterpretedExpr::Intrinsic(
+                ClaspRtInterpretedIntrinsic::TryDecode(
+                    target_type,
+                    Box::new(parse_interpreted_expr_json(bytes, value_slice)?),
+                ),
+            ));
+        }
     }
 
     None
@@ -6148,9 +6292,9 @@ fn parse_interpreted_match_branch_json(
     let body_slice = json_object_lookup(bytes, branch_slice, "body")?;
     let tag = json_string_owned(bytes, tag_slice)?;
     let body = parse_interpreted_expr_json(bytes, body_slice)?;
-    let mut binders = Vec::with_capacity(json_array_length(bytes, binders_slice));
-    for index in 0..json_array_length(bytes, binders_slice) {
-        let binder_slice = json_array_item(bytes, binders_slice, index)?;
+    let binder_slices = json_array_items(bytes, binders_slice)?;
+    let mut binders = Vec::with_capacity(binder_slices.len());
+    for binder_slice in binder_slices {
         binders.push(json_string_owned(bytes, binder_slice)?);
     }
     Some(ClaspRtInterpretedMatchBranch { tag, binders, body })
@@ -6189,9 +6333,9 @@ fn parse_interpreted_decl(bytes: &[u8], decl_slice: JsonSlice) -> Option<ClaspRt
         }),
         "function" => {
             let params_slice = json_object_lookup(bytes, decl_slice, "params")?;
-            let mut params = Vec::new();
-            for index in 0..json_array_length(bytes, params_slice) {
-                let param_slice = json_array_item(bytes, params_slice, index)?;
+            let param_slices = json_array_items(bytes, params_slice)?;
+            let mut params = Vec::with_capacity(param_slices.len());
+            for param_slice in param_slices {
                 params.push(json_string_owned(bytes, param_slice)?);
             }
             Some(ClaspRtInterpretedDecl {
@@ -6681,6 +6825,23 @@ pub unsafe extern "C" fn clasp_rt_native_module_image_load(
     let Some(decls) = json_object_lookup(bytes, root, "decls") else {
         return null_mut();
     };
+    let Some(accepted_previous_fingerprint_values) =
+        json_array_items(bytes, accepted_previous_fingerprints)
+    else {
+        return null_mut();
+    };
+    let Some(runtime_binding_values) = json_array_items(bytes, runtime_bindings) else {
+        return null_mut();
+    };
+    let Some(export_values) = json_array_items(bytes, exports) else {
+        return null_mut();
+    };
+    let Some(entrypoint_values) = json_array_items(bytes, entrypoints) else {
+        return null_mut();
+    };
+    let Some(decl_values) = json_array_items(bytes, decls) else {
+        return null_mut();
+    };
 
     let mut loaded = Box::new(ClaspRtNativeModuleImage {
         module_name: json_string_value(bytes, module_name),
@@ -6702,11 +6863,11 @@ pub unsafe extern "C" fn clasp_rt_native_module_image_load(
         record_schemas: HashMap::new(),
         variant_schemas: HashMap::new(),
         exports: Vec::new(),
-        entrypoint_symbols: vec![null_mut(); json_array_length(bytes, exports)],
-        entrypoints: vec![None; json_array_length(bytes, exports)],
+        entrypoint_symbols: vec![null_mut(); export_values.len()],
+        entrypoints: vec![None; export_values.len()],
         interpreted_decls: Vec::new(),
         interpreted_decl_indexes: HashMap::new(),
-        decl_count: json_array_length(bytes, decls),
+        decl_count: decl_values.len(),
     });
 
     if loaded.module_name.is_null()
@@ -6718,11 +6879,7 @@ pub unsafe extern "C" fn clasp_rt_native_module_image_load(
         return null_mut();
     }
 
-    for index in 0..json_array_length(bytes, accepted_previous_fingerprints) {
-        let Some(fingerprint_value) = json_array_item(bytes, accepted_previous_fingerprints, index) else {
-            drop(loaded);
-            return null_mut();
-        };
+    for fingerprint_value in accepted_previous_fingerprint_values {
         let fingerprint = json_string_value(bytes, fingerprint_value);
         if fingerprint.is_null() {
             drop(loaded);
@@ -6749,11 +6906,7 @@ pub unsafe extern "C" fn clasp_rt_native_module_image_load(
     };
     loaded.route_boundaries = route_boundaries;
 
-    for index in 0..json_array_length(bytes, runtime_bindings) {
-        let Some(binding_value) = json_array_item(bytes, runtime_bindings, index) else {
-            drop(loaded);
-            return null_mut();
-        };
+    for binding_value in runtime_binding_values {
         let Some(name_slice) = json_object_lookup(bytes, binding_value, "name") else {
             drop(loaded);
             return null_mut();
@@ -6785,11 +6938,7 @@ pub unsafe extern "C" fn clasp_rt_native_module_image_load(
             .push(ClaspRtNativeRuntimeBinding { name, runtime_name, binding_type });
     }
 
-    for index in 0..json_array_length(bytes, exports) {
-        let Some(export_value) = json_array_item(bytes, exports, index) else {
-            drop(loaded);
-            return null_mut();
-        };
+    for export_value in export_values {
         let export_name = json_string_value(bytes, export_value);
         if export_name.is_null() {
             drop(loaded);
@@ -6798,11 +6947,7 @@ pub unsafe extern "C" fn clasp_rt_native_module_image_load(
         loaded.exports.push(export_name);
     }
 
-    for index in 0..json_array_length(bytes, entrypoints) {
-        let Some(entrypoint_value) = json_array_item(bytes, entrypoints, index) else {
-            drop(loaded);
-            return null_mut();
-        };
+    for entrypoint_value in entrypoint_values {
         let Some(export_name_slice) = json_object_lookup(bytes, entrypoint_value, "name") else {
             drop(loaded);
             return null_mut();
@@ -6827,11 +6972,7 @@ pub unsafe extern "C" fn clasp_rt_native_module_image_load(
         loaded.entrypoint_symbols[export_index] = symbol;
     }
 
-    for index in 0..json_array_length(bytes, decls) {
-        let Some(decl_value) = json_array_item(bytes, decls, index) else {
-            drop(loaded);
-            return null_mut();
-        };
+    for decl_value in decl_values {
         if let Some(decl) = parse_interpreted_decl(bytes, decl_value) {
             let decl_index = loaded.interpreted_decls.len();
             loaded.interpreted_decl_indexes.insert(decl.name.clone(), decl_index);
@@ -7559,6 +7700,87 @@ fn resolve_existing_workspace_path(root: &str, relative: &str) -> Result<PathBuf
     Ok(canonical)
 }
 
+fn resolve_existing_workspace_regular_file_path(root: &str, relative: &str) -> Result<PathBuf, String> {
+    let root = canonical_workspace_root(root)?;
+    let relative = normalize_workspace_relative_path(relative)?;
+    if relative.as_os_str().is_empty() || relative.file_name().is_none() {
+        return Err(
+            "workspace_invalid_path: replace path must name a file inside the workspace root"
+                .to_owned(),
+        );
+    }
+    let target = root.join(relative);
+    let metadata = fs::symlink_metadata(&target).map_err(|err| {
+        if err.kind() == std::io::ErrorKind::NotFound {
+            format!("workspace_missing: `{}` does not exist", target.display())
+        } else {
+            format!(
+                "workspace_io_error: failed to inspect workspace path `{}`: {err}",
+                target.display()
+            )
+        }
+    })?;
+    if metadata.file_type().is_symlink() {
+        return Err(format!(
+            "workspace_path_escape: symlink file paths are not allowed for workspaceReplaceText: `{}`",
+            target.display()
+        ));
+    }
+    if !metadata.file_type().is_file() {
+        return Err(format!(
+            "workspace_not_file: `{}` is not a regular file",
+            target.display()
+        ));
+    }
+    let canonical = fs::canonicalize(&target).map_err(|err| {
+        format!(
+            "workspace_io_error: failed to resolve workspace path `{}`: {err}",
+            target.display()
+        )
+    })?;
+    if !canonical.starts_with(&root) {
+        return Err(format!(
+            "workspace_path_escape: resolved path `{}` escapes workspace root `{}`",
+            canonical.display(),
+            root.display()
+        ));
+    }
+    Ok(canonical)
+}
+
+fn resolve_existing_workspace_removal_path(root: &str, relative: &str) -> Result<PathBuf, String> {
+    let root = canonical_workspace_root(root)?;
+    let relative = normalize_workspace_relative_path(relative)?;
+    if relative.as_os_str().is_empty() {
+        return Err(
+            "workspace_invalid_path: remove path must name a file or directory inside the workspace root"
+                .to_owned(),
+        );
+    }
+    let target = root.join(&relative);
+    let canonical = fs::canonicalize(&target).map_err(|err| {
+        if err.kind() == std::io::ErrorKind::NotFound {
+            format!("workspace_missing: `{}` does not exist", target.display())
+        } else {
+            format!(
+                "workspace_io_error: failed to resolve workspace path `{}`: {err}",
+                target.display()
+            )
+        }
+    })?;
+    if canonical == root {
+        return Err("workspace_invalid_path: remove path must not name the workspace root".to_owned());
+    }
+    if !canonical.starts_with(&root) {
+        return Err(format!(
+            "workspace_path_escape: resolved path `{}` escapes workspace root `{}`",
+            canonical.display(),
+            root.display()
+        ));
+    }
+    Ok(target)
+}
+
 fn resolve_workspace_process_cwd(root: &str, relative: &str) -> Result<PathBuf, String> {
     let path = resolve_existing_workspace_path(root, relative)?;
     if !path.is_dir() {
@@ -7568,6 +7790,682 @@ fn resolve_workspace_process_cwd(root: &str, relative: &str) -> Result<PathBuf, 
         ));
     }
     Ok(path)
+}
+
+fn workspace_path_size_bytes(path: &Path) -> Result<u128, String> {
+    let metadata = fs::symlink_metadata(path).map_err(|err| {
+        format!(
+            "workspace_io_error: failed to inspect workspace path `{}`: {err}",
+            path.display()
+        )
+    })?;
+    if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() {
+        let mut total = 0u128;
+        let entries = fs::read_dir(path).map_err(|err| {
+            format!(
+                "workspace_io_error: failed to list workspace directory `{}`: {err}",
+                path.display()
+            )
+        })?;
+        for entry in entries {
+            let entry = entry.map_err(|err| {
+                format!(
+                    "workspace_io_error: failed to read workspace directory entry `{}`: {err}",
+                    path.display()
+                )
+            })?;
+            total = total.saturating_add(workspace_path_size_bytes(&entry.path())?);
+        }
+        Ok(total)
+    } else {
+        Ok(metadata.len() as u128)
+    }
+}
+
+fn workspace_path_size_mb(root: &str, relative: &str) -> Result<i64, String> {
+    let path = resolve_existing_workspace_path(root, relative)?;
+    let bytes = workspace_path_size_bytes(&path)?;
+    let mb = (bytes.saturating_add(1_048_575)) / 1_048_576;
+    Ok(mb.min(i64::MAX as u128) as i64)
+}
+
+fn host_file_size_mb(path: &str) -> Result<i64, String> {
+    if path.trim().is_empty() {
+        return Err("host_file_invalid_path: empty path".to_owned());
+    }
+    let path = Path::new(path);
+    let metadata = fs::symlink_metadata(path).map_err(|err| {
+        if err.kind() == std::io::ErrorKind::NotFound {
+            format!("host_file_missing: `{}` does not exist", path.display())
+        } else {
+            format!("host_file_io_error: failed to inspect `{}`: {err}", path.display())
+        }
+    })?;
+    if metadata.file_type().is_symlink() {
+        return Err(format!(
+            "host_file_not_regular: `{}` is a symlink",
+            path.display()
+        ));
+    }
+    if !metadata.file_type().is_file() {
+        return Err(format!(
+            "host_file_not_regular: `{}` is not a regular file",
+            path.display()
+        ));
+    }
+    let mb = ((metadata.len() as u128).saturating_add(1_048_575)) / 1_048_576;
+    Ok(mb.min(i64::MAX as u128) as i64)
+}
+
+fn cap_host_file_tail_mb(path: &str, max_mb: i64) -> Result<i64, String> {
+    if max_mb < 0 {
+        return Err("host_file_invalid_limit: maxMb must be non-negative".to_owned());
+    }
+    if path.trim().is_empty() {
+        return Err("host_file_invalid_path: empty path".to_owned());
+    }
+
+    let path = Path::new(path);
+    let metadata = fs::symlink_metadata(path).map_err(|err| {
+        if err.kind() == std::io::ErrorKind::NotFound {
+            format!("host_file_missing: `{}` does not exist", path.display())
+        } else {
+            format!("host_file_io_error: failed to inspect `{}`: {err}", path.display())
+        }
+    })?;
+    if metadata.file_type().is_symlink() {
+        return Err(format!(
+            "host_file_not_regular: `{}` is a symlink",
+            path.display()
+        ));
+    }
+    if !metadata.file_type().is_file() {
+        return Err(format!(
+            "host_file_not_regular: `{}` is not a regular file",
+            path.display()
+        ));
+    }
+
+    let max_bytes = (max_mb as u128).saturating_mul(1_048_576).min(u64::MAX as u128) as u64;
+    let size_bytes = metadata.len();
+    if size_bytes <= max_bytes {
+        return host_file_size_mb(&path.to_string_lossy());
+    }
+
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let file_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.is_empty())
+        .unwrap_or("clasp-host-file");
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_else(|_| Duration::from_secs(0))
+        .as_nanos();
+    let temp_path = parent.join(format!(".{file_name}.tail.{}.{}.tmp", std::process::id(), stamp));
+
+    let cap_result = (|| -> Result<(), String> {
+        if max_bytes > 0 {
+            let mut source = File::open(path).map_err(|err| {
+                format!("host_file_io_error: failed to open `{}`: {err}", path.display())
+            })?;
+            let start = size_bytes.saturating_sub(max_bytes);
+            source.seek(SeekFrom::Start(start)).map_err(|err| {
+                format!("host_file_io_error: failed to seek `{}`: {err}", path.display())
+            })?;
+            let mut temp = File::create(&temp_path).map_err(|err| {
+                format!(
+                    "host_file_io_error: failed to create cap temp `{}`: {err}",
+                    temp_path.display()
+                )
+            })?;
+            let mut limited = source.take(max_bytes);
+            std::io::copy(&mut limited, &mut temp).map_err(|err| {
+                format!(
+                    "host_file_io_error: failed to copy tail for `{}`: {err}",
+                    path.display()
+                )
+            })?;
+            temp.sync_all().map_err(|err| {
+                format!(
+                    "host_file_io_error: failed to sync cap temp `{}`: {err}",
+                    temp_path.display()
+                )
+            })?;
+        } else {
+            File::create(&temp_path).map_err(|err| {
+                format!(
+                    "host_file_io_error: failed to create cap temp `{}`: {err}",
+                    temp_path.display()
+                )
+            })?;
+        }
+
+        let mut temp = File::open(&temp_path).map_err(|err| {
+            format!(
+                "host_file_io_error: failed to read cap temp `{}`: {err}",
+                temp_path.display()
+            )
+        })?;
+        let mut target = OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .open(path)
+            .map_err(|err| format!("host_file_io_error: failed to truncate `{}`: {err}", path.display()))?;
+        std::io::copy(&mut temp, &mut target).map_err(|err| {
+            format!("host_file_io_error: failed to rewrite `{}`: {err}", path.display())
+        })?;
+        target.sync_all().map_err(|err| {
+            format!("host_file_io_error: failed to sync `{}`: {err}", path.display())
+        })?;
+        Ok(())
+    })();
+
+    let _ = fs::remove_file(&temp_path);
+    cap_result?;
+    host_file_size_mb(&path.to_string_lossy())
+}
+
+fn workspace_relative_output_path(root: &Path, path: &Path, is_dir: bool) -> Result<String, String> {
+    let relative = path.strip_prefix(root).map_err(|_| {
+        format!(
+            "workspace_path_escape: resolved path `{}` escapes workspace root `{}`",
+            path.display(),
+            root.display()
+        )
+    })?;
+    let mut parts = Vec::new();
+    for component in relative.components() {
+        match component {
+            Component::Normal(part) => parts.push(part.to_string_lossy().into_owned()),
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return Err(format!(
+                    "workspace_path_escape: resolved path `{}` escapes workspace root `{}`",
+                    path.display(),
+                    root.display()
+                ));
+            }
+        }
+    }
+    let mut rendered = parts.join("/");
+    if is_dir && !rendered.is_empty() {
+        rendered.push('/');
+    }
+    Ok(rendered)
+}
+
+fn push_workspace_tree_entry(
+    root: &Path,
+    path: &Path,
+    is_dir: bool,
+    output: &mut Vec<String>,
+    max_entries: usize,
+) -> Result<(), String> {
+    if output.len() >= max_entries {
+        return Err(format!(
+            "workspace_limit_exceeded: workspaceListTree reached maxEntries={max_entries}"
+        ));
+    }
+    let rendered = workspace_relative_output_path(root, path, is_dir)?;
+    if !rendered.is_empty() {
+        output.push(rendered);
+    }
+    Ok(())
+}
+
+fn workspace_list_tree_visit(
+    root: &Path,
+    path: &Path,
+    depth: i64,
+    max_depth: i64,
+    max_entries: usize,
+    output: &mut Vec<String>,
+) -> Result<(), String> {
+    if depth >= max_depth {
+        return Ok(());
+    }
+    let entries = fs::read_dir(path).map_err(|err| {
+        format!(
+            "workspace_io_error: failed to list workspace directory `{}`: {err}",
+            path.display()
+        )
+    })?;
+    let mut children = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|err| {
+            format!(
+                "workspace_io_error: failed to read workspace directory entry `{}`: {err}",
+                path.display()
+            )
+        })?;
+        children.push(entry.path());
+    }
+    children.sort_by(|left, right| display_path(left).cmp(&display_path(right)));
+
+    for child in children {
+        let metadata = fs::symlink_metadata(&child).map_err(|err| {
+            format!(
+                "workspace_io_error: failed to inspect workspace path `{}`: {err}",
+                child.display()
+            )
+        })?;
+        let is_real_dir = metadata.file_type().is_dir() && !metadata.file_type().is_symlink();
+        let display_child = if is_real_dir {
+            fs::canonicalize(&child).map_err(|err| {
+                format!(
+                    "workspace_io_error: failed to resolve workspace directory `{}`: {err}",
+                    child.display()
+                )
+            })?
+        } else {
+            child.clone()
+        };
+        if !display_child.starts_with(root) {
+            return Err(format!(
+                "workspace_path_escape: resolved path `{}` escapes workspace root `{}`",
+                display_child.display(),
+                root.display()
+            ));
+        }
+        push_workspace_tree_entry(root, &display_child, is_real_dir, output, max_entries)?;
+        if is_real_dir {
+            workspace_list_tree_visit(root, &display_child, depth + 1, max_depth, max_entries, output)?;
+        }
+    }
+    Ok(())
+}
+
+fn workspace_list_tree(
+    root: &str,
+    relative: &str,
+    max_entries: i64,
+    max_depth: i64,
+) -> Result<Vec<String>, String> {
+    if max_entries <= 0 {
+        return Err("workspace_invalid_limit: maxEntries must be positive".to_owned());
+    }
+    if max_depth < 0 {
+        return Err("workspace_invalid_limit: maxDepth must be non-negative".to_owned());
+    }
+    let max_entries = usize::try_from(max_entries)
+        .map_err(|_| "workspace_invalid_limit: maxEntries is too large".to_owned())?;
+    let root = canonical_workspace_root(root)?;
+    let relative = normalize_workspace_relative_path(relative)?;
+    let target = root.join(&relative);
+    let target = fs::canonicalize(&target).map_err(|err| {
+        if err.kind() == std::io::ErrorKind::NotFound {
+            format!("workspace_missing: `{}` does not exist", target.display())
+        } else {
+            format!(
+                "workspace_io_error: failed to resolve workspace path `{}`: {err}",
+                target.display()
+            )
+        }
+    })?;
+    if !target.starts_with(&root) {
+        return Err(format!(
+            "workspace_path_escape: resolved path `{}` escapes workspace root `{}`",
+            target.display(),
+            root.display()
+        ));
+    }
+    let metadata = fs::symlink_metadata(&target).map_err(|err| {
+        format!(
+            "workspace_io_error: failed to inspect workspace path `{}`: {err}",
+            target.display()
+        )
+    })?;
+    let mut output = Vec::new();
+    if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() {
+        workspace_list_tree_visit(&root, &target, 0, max_depth, max_entries, &mut output)?;
+    } else {
+        push_workspace_tree_entry(&root, &target, false, &mut output, max_entries)?;
+    }
+    Ok(output)
+}
+
+fn workspace_search_result_line(root: &Path, path: &Path, line_index: usize, line: &str) -> Result<String, String> {
+    let rendered_path = workspace_relative_output_path(root, path, false)?;
+    let trimmed = line.trim();
+    let snippet: String = trimmed.chars().take(240).collect();
+    Ok(format!("{}:{}:{}", rendered_path, line_index + 1, snippet))
+}
+
+fn workspace_search_text_file(
+    root: &Path,
+    path: &Path,
+    needle: &str,
+    max_matches: usize,
+    max_files: usize,
+    max_file_bytes: u64,
+    files_seen: &mut usize,
+    output: &mut Vec<String>,
+) -> Result<(), String> {
+    if *files_seen >= max_files {
+        return Err(format!(
+            "workspace_limit_exceeded: workspaceSearchText reached maxFiles={max_files}"
+        ));
+    }
+    *files_seen += 1;
+
+    let metadata = fs::symlink_metadata(path).map_err(|err| {
+        format!(
+            "workspace_io_error: failed to inspect workspace file `{}`: {err}",
+            path.display()
+        )
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
+        return Ok(());
+    }
+    if metadata.len() > max_file_bytes {
+        return Ok(());
+    }
+
+    let bytes = fs::read(path).map_err(|err| {
+        format!(
+            "workspace_io_error: failed to read workspace file `{}`: {err}",
+            path.display()
+        )
+    })?;
+    if bytes.len() > max_file_bytes as usize {
+        return Ok(());
+    }
+    let Ok(text) = String::from_utf8(bytes) else {
+        return Ok(());
+    };
+
+    for (line_index, line) in text.lines().enumerate() {
+        if !line.contains(needle) {
+            continue;
+        }
+        if output.len() >= max_matches {
+            return Err(format!(
+                "workspace_limit_exceeded: workspaceSearchText reached maxMatches={max_matches}"
+            ));
+        }
+        output.push(workspace_search_result_line(root, path, line_index, line)?);
+    }
+    Ok(())
+}
+
+fn workspace_search_text_visit(
+    root: &Path,
+    path: &Path,
+    needle: &str,
+    depth: i64,
+    max_depth: i64,
+    max_matches: usize,
+    max_files: usize,
+    max_file_bytes: u64,
+    files_seen: &mut usize,
+    output: &mut Vec<String>,
+) -> Result<(), String> {
+    if depth > max_depth {
+        return Ok(());
+    }
+    let metadata = fs::symlink_metadata(path).map_err(|err| {
+        format!(
+            "workspace_io_error: failed to inspect workspace path `{}`: {err}",
+            path.display()
+        )
+    })?;
+    if metadata.file_type().is_symlink() {
+        return Ok(());
+    }
+    if metadata.file_type().is_file() {
+        return workspace_search_text_file(
+            root,
+            path,
+            needle,
+            max_matches,
+            max_files,
+            max_file_bytes,
+            files_seen,
+            output,
+        );
+    }
+    if !(metadata.file_type().is_dir()) {
+        return Ok(());
+    }
+    if depth >= max_depth {
+        return Ok(());
+    }
+
+    let entries = fs::read_dir(path).map_err(|err| {
+        format!(
+            "workspace_io_error: failed to list workspace directory `{}`: {err}",
+            path.display()
+        )
+    })?;
+    let mut children = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|err| {
+            format!(
+                "workspace_io_error: failed to read workspace directory entry `{}`: {err}",
+                path.display()
+            )
+        })?;
+        children.push(entry.path());
+    }
+    children.sort_by(|left, right| display_path(left).cmp(&display_path(right)));
+
+    for child in children {
+        let metadata = fs::symlink_metadata(&child).map_err(|err| {
+            format!(
+                "workspace_io_error: failed to inspect workspace path `{}`: {err}",
+                child.display()
+            )
+        })?;
+        if metadata.file_type().is_symlink() {
+            continue;
+        }
+        let child_path = if metadata.file_type().is_dir() {
+            fs::canonicalize(&child).map_err(|err| {
+                format!(
+                    "workspace_io_error: failed to resolve workspace directory `{}`: {err}",
+                    child.display()
+                )
+            })?
+        } else {
+            child
+        };
+        if !child_path.starts_with(root) {
+            return Err(format!(
+                "workspace_path_escape: resolved path `{}` escapes workspace root `{}`",
+                child_path.display(),
+                root.display()
+            ));
+        }
+        workspace_search_text_visit(
+            root,
+            &child_path,
+            needle,
+            depth + 1,
+            max_depth,
+            max_matches,
+            max_files,
+            max_file_bytes,
+            files_seen,
+            output,
+        )?;
+    }
+    Ok(())
+}
+
+fn workspace_search_text(
+    root: &str,
+    relative: &str,
+    needle: &str,
+    max_matches: i64,
+    max_files: i64,
+    max_file_bytes: i64,
+    max_depth: i64,
+) -> Result<Vec<String>, String> {
+    if needle.is_empty() {
+        return Err("workspace_invalid_search: needle must be non-empty".to_owned());
+    }
+    if max_matches <= 0 {
+        return Err("workspace_invalid_limit: maxMatches must be positive".to_owned());
+    }
+    if max_files <= 0 {
+        return Err("workspace_invalid_limit: maxFiles must be positive".to_owned());
+    }
+    if max_file_bytes <= 0 {
+        return Err("workspace_invalid_limit: maxFileBytes must be positive".to_owned());
+    }
+    if max_depth < 0 {
+        return Err("workspace_invalid_limit: maxDepth must be non-negative".to_owned());
+    }
+    let max_matches = usize::try_from(max_matches)
+        .map_err(|_| "workspace_invalid_limit: maxMatches is too large".to_owned())?;
+    let max_files = usize::try_from(max_files)
+        .map_err(|_| "workspace_invalid_limit: maxFiles is too large".to_owned())?;
+    let max_file_bytes = u64::try_from(max_file_bytes)
+        .map_err(|_| "workspace_invalid_limit: maxFileBytes is too large".to_owned())?;
+    let root = canonical_workspace_root(root)?;
+    let relative = normalize_workspace_relative_path(relative)?;
+    let target = root.join(&relative);
+    let target = fs::canonicalize(&target).map_err(|err| {
+        if err.kind() == std::io::ErrorKind::NotFound {
+            format!("workspace_missing: `{}` does not exist", target.display())
+        } else {
+            format!(
+                "workspace_io_error: failed to resolve workspace path `{}`: {err}",
+                target.display()
+            )
+        }
+    })?;
+    if !target.starts_with(&root) {
+        return Err(format!(
+            "workspace_path_escape: resolved path `{}` escapes workspace root `{}`",
+            target.display(),
+            root.display()
+        ));
+    }
+
+    let mut files_seen = 0usize;
+    let mut output = Vec::new();
+    workspace_search_text_visit(
+        &root,
+        &target,
+        needle,
+        0,
+        max_depth,
+        max_matches,
+        max_files,
+        max_file_bytes,
+        &mut files_seen,
+        &mut output,
+    )?;
+    Ok(output)
+}
+
+fn workspace_replace_text_output_len(
+    original_len: usize,
+    find_len: usize,
+    replace_len: usize,
+    replacement_count: usize,
+) -> Result<usize, String> {
+    if replace_len >= find_len {
+        let per_replacement_growth = replace_len - find_len;
+        let total_growth = replacement_count
+            .checked_mul(per_replacement_growth)
+            .ok_or_else(|| "workspace_limit_exceeded: workspaceReplaceText output size overflow".to_owned())?;
+        original_len
+            .checked_add(total_growth)
+            .ok_or_else(|| "workspace_limit_exceeded: workspaceReplaceText output size overflow".to_owned())
+    } else {
+        let per_replacement_shrink = find_len - replace_len;
+        let total_shrink = replacement_count
+            .checked_mul(per_replacement_shrink)
+            .ok_or_else(|| "workspace_limit_exceeded: workspaceReplaceText output size overflow".to_owned())?;
+        Ok(original_len.saturating_sub(total_shrink))
+    }
+}
+
+fn workspace_replace_text(
+    root: &str,
+    relative: &str,
+    find_text: &str,
+    replace_text: &str,
+    max_replacements: i64,
+    max_file_bytes: i64,
+) -> Result<i64, String> {
+    if find_text.is_empty() {
+        return Err("workspace_invalid_replace: findText must be non-empty".to_owned());
+    }
+    if max_replacements <= 0 {
+        return Err("workspace_invalid_limit: maxReplacements must be positive".to_owned());
+    }
+    if max_file_bytes <= 0 {
+        return Err("workspace_invalid_limit: maxFileBytes must be positive".to_owned());
+    }
+    let max_replacements = usize::try_from(max_replacements)
+        .map_err(|_| "workspace_invalid_limit: maxReplacements is too large".to_owned())?;
+    let max_file_bytes_u64 = u64::try_from(max_file_bytes)
+        .map_err(|_| "workspace_invalid_limit: maxFileBytes is too large".to_owned())?;
+    let max_file_bytes_usize = usize::try_from(max_file_bytes)
+        .map_err(|_| "workspace_invalid_limit: maxFileBytes is too large".to_owned())?;
+
+    let path = resolve_existing_workspace_regular_file_path(root, relative)?;
+    let metadata = fs::symlink_metadata(&path).map_err(|err| {
+        format!(
+            "workspace_io_error: failed to inspect workspace file `{}`: {err}",
+            path.display()
+        )
+    })?;
+    if metadata.len() > max_file_bytes_u64 {
+        return Err(format!(
+            "workspace_limit_exceeded: workspaceReplaceText input exceeds maxFileBytes={max_file_bytes}"
+        ));
+    }
+    let bytes = fs::read(&path).map_err(|err| {
+        format!(
+            "workspace_io_error: failed to read workspace file `{}`: {err}",
+            path.display()
+        )
+    })?;
+    if bytes.len() > max_file_bytes_usize {
+        return Err(format!(
+            "workspace_limit_exceeded: workspaceReplaceText input exceeds maxFileBytes={max_file_bytes}"
+        ));
+    }
+    let text = String::from_utf8(bytes).map_err(|_| {
+        format!(
+            "workspace_invalid_utf8: workspaceReplaceText requires UTF-8 text in `{}`",
+            path.display()
+        )
+    })?;
+    let replacement_count = text.matches(find_text).count();
+    if replacement_count == 0 {
+        return Err("workspace_replace_missing: findText was not found".to_owned());
+    }
+    if replacement_count > max_replacements {
+        return Err(format!(
+            "workspace_limit_exceeded: workspaceReplaceText would replace {replacement_count} occurrences, above maxReplacements={max_replacements}"
+        ));
+    }
+    let output_len = workspace_replace_text_output_len(
+        text.len(),
+        find_text.len(),
+        replace_text.len(),
+        replacement_count,
+    )?;
+    if output_len > max_file_bytes_usize {
+        return Err(format!(
+            "workspace_limit_exceeded: workspaceReplaceText output exceeds maxFileBytes={max_file_bytes}"
+        ));
+    }
+    let replaced = text.replace(find_text, replace_text);
+    let path_text = display_path(&path);
+    write_file_atomic(&path_text, replaced.as_bytes()).map_err(|err| {
+        format!(
+            "workspace_io_error: failed to write workspace file `{}`: {err}",
+            path.display()
+        )
+    })?;
+    Ok(replacement_count.min(i64::MAX as usize) as i64)
 }
 
 fn create_workspace_dir_all(root: &str, relative: &str) -> Result<PathBuf, String> {
@@ -7627,6 +8525,7 @@ fn configure_killable_process_command(command: &mut ProcessCommand) {
     #[cfg(unix)]
     unsafe {
         command.pre_exec(|| {
+            disable_core_dumps()?;
             if setsid() < 0 {
                 Err(std::io::Error::last_os_error())
             } else {
@@ -7634,6 +8533,37 @@ fn configure_killable_process_command(command: &mut ProcessCommand) {
             }
         });
     }
+}
+
+fn configure_no_core_dump_process_command(command: &mut ProcessCommand) {
+    #[cfg(unix)]
+    unsafe {
+        command.pre_exec(|| disable_core_dumps());
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn disable_core_dumps() -> std::io::Result<()> {
+    let limit = RLimit {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
+    unsafe {
+        if setrlimit(RLIMIT_CORE, &limit) < 0 {
+            Err(std::io::Error::last_os_error())
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn disable_core_dumps() -> std::io::Result<()> {
+    Ok(())
+}
+
+fn parse_process_memory_limit_mb(value: *mut ClaspRtHeader) -> Result<i64, String> {
+    unsafe { clasp_rt_int_arg(value) }.map(|limit| limit.max(0))
 }
 
 #[cfg(unix)]
@@ -7665,6 +8595,55 @@ fn terminate_child_tree(child: &mut Child, child_id: u32) {
 fn create_truncated_output_file(path: &str) -> Result<File, String> {
     ensure_parent_dir(path)?;
     File::create(path).map_err(|err| err.to_string())
+}
+
+fn watched_process_output_limit_bytes() -> u64 {
+    env::var("CLASP_RT_WATCH_OUTPUT_LIMIT_BYTES")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0)
+        .map(|value| value.min(DEFAULT_WATCHED_PROCESS_OUTPUT_LIMIT_BYTES))
+        .unwrap_or(DEFAULT_WATCHED_PROCESS_OUTPUT_LIMIT_BYTES)
+}
+
+fn watched_process_output_limit_exceeded(path: &str, output_limit_bytes: u64) -> bool {
+    fs::metadata(path)
+        .map(|metadata| metadata.len() > output_limit_bytes)
+        .unwrap_or(false)
+}
+
+fn watched_process_any_output_limit_exceeded(
+    stdout_path: &str,
+    stderr_path: &str,
+    output_limit_bytes: u64,
+) -> bool {
+    watched_process_output_limit_exceeded(stdout_path, output_limit_bytes)
+        || watched_process_output_limit_exceeded(stderr_path, output_limit_bytes)
+}
+
+fn truncate_watched_process_output_file_to_limit(path: &str, output_limit_bytes: u64) {
+    if !watched_process_output_limit_exceeded(path, output_limit_bytes) {
+        return;
+    }
+
+    let tmp_path = format!("{path}.tmp.limit.{}", std::process::id());
+    let result = (|| -> Result<(), String> {
+        let source = File::open(path).map_err(|err| err.to_string())?;
+        let mut limited_source = source.take(output_limit_bytes);
+        let mut target = File::create(&tmp_path).map_err(|err| err.to_string())?;
+        std::io::copy(&mut limited_source, &mut target).map_err(|err| err.to_string())?;
+        target.flush().map_err(|err| err.to_string())?;
+        fs::rename(&tmp_path, path).map_err(|err| err.to_string())
+    })();
+
+    if result.is_err() {
+        let _ = fs::remove_file(&tmp_path);
+    }
+}
+
+fn truncate_watched_process_outputs_to_limit(stdout_path: &str, stderr_path: &str, output_limit_bytes: u64) {
+    truncate_watched_process_output_file_to_limit(stdout_path, output_limit_bytes);
+    truncate_watched_process_output_file_to_limit(stderr_path, output_limit_bytes);
 }
 
 fn resolve_process_program(program: &str, child_cwd: &str) -> String {
@@ -7703,6 +8682,9 @@ fn watched_process_status_json(
     started_at_ms: i64,
     timed_out: bool,
     error: &str,
+    output_limit_bytes: u64,
+    stdout_truncated: bool,
+    stderr_truncated: bool,
 ) -> String {
     let updated_at_ms = runtime_time_unix_ms();
     let ended_at_ms = if completed { updated_at_ms } else { 0 };
@@ -7711,7 +8693,9 @@ fn watched_process_status_json(
     } else {
         0
     };
-    let status = if timed_out {
+    let status = if error == "output-limit" {
+        "output-limit"
+    } else if timed_out {
         "timeout"
     } else if completed && exit_code == 0 {
         "completed-pass"
@@ -7731,6 +8715,9 @@ fn watched_process_status_json(
         "exitCode": exit_code,
         "timedOut": timed_out,
         "error": error,
+        "outputLimitBytes": output_limit_bytes,
+        "stdoutTruncated": stdout_truncated,
+        "stderrTruncated": stderr_truncated,
         "command": command,
         "stdoutPath": stdout_path,
         "stderrPath": stderr_path,
@@ -7768,20 +8755,33 @@ fn run_watched_process_json(cwd: &str, args: &[String]) -> Result<(i32, String),
     let stdout_file = create_truncated_output_file(stdout_path)?;
     let stderr_file = create_truncated_output_file(stderr_path)?;
     let resolved_program = resolve_process_program(&watched_command[0], cwd);
-    let mut child = ProcessCommand::new(&resolved_program)
+    let output_limit_bytes = watched_process_output_limit_bytes();
+    let mut output_limit_exceeded = false;
+    let mut command = ProcessCommand::new(&resolved_program);
+    command
         .args(&watched_command[1..])
         .current_dir(cwd)
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout_file))
-        .stderr(Stdio::from(stderr_file))
-        .spawn()
-        .map_err(|err| err.to_string())?;
+        .stderr(Stdio::from(stderr_file));
+    configure_killable_process_command(&mut command);
+    let mut child = command.spawn().map_err(|err| err.to_string())?;
     let pid = child.id();
 
     loop {
         match child.try_wait() {
             Ok(Some(status)) => {
-                let exit_code = status.code().unwrap_or(-1);
+                let stdout_truncated = watched_process_output_limit_exceeded(stdout_path, output_limit_bytes);
+                let stderr_truncated = watched_process_output_limit_exceeded(stderr_path, output_limit_bytes);
+                let exceeded = output_limit_exceeded || stdout_truncated || stderr_truncated;
+                if exceeded {
+                    truncate_watched_process_outputs_to_limit(stdout_path, stderr_path, output_limit_bytes);
+                }
+                let exit_code = if exceeded {
+                    125
+                } else {
+                    status.code().unwrap_or(-1)
+                };
                 let payload = watched_process_status_json(
                     pid,
                     false,
@@ -7793,12 +8793,24 @@ fn run_watched_process_json(cwd: &str, args: &[String]) -> Result<(i32, String),
                     watched_command,
                     started_at_ms,
                     false,
-                    "",
+                    if exceeded { "output-limit" } else { "" },
+                    output_limit_bytes,
+                    stdout_truncated,
+                    stderr_truncated,
                 );
                 write_watched_process_heartbeat(heartbeat_path, &payload)?;
                 return Ok((exit_code, payload));
             }
             Ok(None) => {
+                if watched_process_any_output_limit_exceeded(
+                    stdout_path,
+                    stderr_path,
+                    output_limit_bytes,
+                ) {
+                    output_limit_exceeded = true;
+                    terminate_child_tree(&mut child, pid);
+                    continue;
+                }
                 let payload = watched_process_status_json(
                     pid,
                     true,
@@ -7811,6 +8823,9 @@ fn run_watched_process_json(cwd: &str, args: &[String]) -> Result<(i32, String),
                     started_at_ms,
                     false,
                     "",
+                    output_limit_bytes,
+                    false,
+                    false,
                 );
                 write_watched_process_heartbeat(heartbeat_path, &payload)?;
                 thread::sleep(Duration::from_millis(poll_ms));
@@ -7862,7 +8877,36 @@ started_at_ms="$(now_ms)"
 command_json="$(json_command_array "$@")"
 cancel_path="${heartbeat_path}.cancel"
 watch_token="${CLASP_RT_WATCH_TOKEN:-}"
+memory_limit_mb="${CLASP_RT_WATCH_MEMORY_MB:-0}"
+watch_output_limit_bytes="${CLASP_RT_WATCH_OUTPUT_LIMIT_BYTES:-4194304}"
+memory_limit_kb=0
 process_group_id=0
+output_limit_exceeded=false
+stdout_truncated=false
+stderr_truncated=false
+
+case "$memory_limit_mb" in
+  ""|0)
+    memory_limit_kb=0
+    ;;
+  *[!0-9]*)
+    printf 'invalid_memory_limit_mb\n' >&2
+    exit 125
+    ;;
+  *)
+    memory_limit_kb=$((memory_limit_mb * 1024))
+    ;;
+esac
+
+case "$watch_output_limit_bytes" in
+  ""|0)
+    watch_output_limit_bytes=4194304
+    ;;
+  *[!0-9]*)
+    printf 'invalid_watch_output_limit_bytes\n' >&2
+    exit 125
+    ;;
+esac
 
 write_heartbeat() {
   local running="$1"
@@ -7884,7 +8928,13 @@ write_heartbeat() {
   if [ "$duration_ms" -lt 0 ]; then
     duration_ms=0
   fi
-  if [ -f "$cancel_path" ]; then
+  if [ "$output_limit_exceeded" = true ]; then
+    error="output-limit"
+    status="output-limit"
+    if [ "$completed" = true ]; then
+      exit_code=125
+    fi
+  elif [ -f "$cancel_path" ]; then
     timed_out=true
     error="timeout"
     status="timeout"
@@ -7900,7 +8950,7 @@ write_heartbeat() {
   else
     status="stopped"
   fi
-  printf '{"pid":%s,"processGroupId":%s,"watchToken":"%s","status":"%s","running":%s,"completed":%s,"exitCode":%s,"timedOut":%s,"error":"%s","command":%s,"stdoutPath":"%s","stderrPath":"%s","heartbeatPath":"%s","startedAtMs":%s,"endedAtMs":%s,"durationMs":%s,"updatedAtMs":%s}' \
+  printf '{"pid":%s,"processGroupId":%s,"watchToken":"%s","status":"%s","running":%s,"completed":%s,"exitCode":%s,"timedOut":%s,"error":"%s","outputLimitBytes":%s,"stdoutTruncated":%s,"stderrTruncated":%s,"command":%s,"stdoutPath":"%s","stderrPath":"%s","heartbeatPath":"%s","startedAtMs":%s,"endedAtMs":%s,"durationMs":%s,"updatedAtMs":%s}' \
     "$child_pid" \
     "$process_group_id" \
     "$(json_escape "$watch_token")" \
@@ -7910,6 +8960,9 @@ write_heartbeat() {
     "$exit_code" \
     "$timed_out" \
     "$error" \
+    "$watch_output_limit_bytes" \
+    "$stdout_truncated" \
+    "$stderr_truncated" \
     "$command_json" \
     "$(json_escape "$stdout_path")" \
     "$(json_escape "$stderr_path")" \
@@ -7924,23 +8977,107 @@ mkdir -p "$(dirname "$stdout_path")" "$(dirname "$stderr_path")" "$(dirname "$he
 : >"$stdout_path" || exit 125
 : >"$stderr_path" || exit 125
 
+file_size_bytes() {
+  wc -c <"$1" 2>/dev/null | tr -d ' ' || printf '0'
+}
+
+output_file_over_limit() {
+  local path="$1"
+  local size
+  if [ ! -f "$path" ]; then
+    return 1
+  fi
+  size="$(file_size_bytes "$path")"
+  case "$size" in
+    ""|*[!0-9]*)
+      size=0
+      ;;
+  esac
+  [ "$size" -gt "$watch_output_limit_bytes" ]
+}
+
+truncate_output_file_to_limit() {
+  local path="$1"
+  local tmp_path
+  if ! output_file_over_limit "$path"; then
+    return 0
+  fi
+  tmp_path="${path}.tmp.limit.${BASHPID}"
+  if head -c "$watch_output_limit_bytes" "$path" >"$tmp_path" 2>/dev/null; then
+    mv "$tmp_path" "$path" || rm -f "$tmp_path"
+  else
+    rm -f "$tmp_path"
+  fi
+}
+
+terminate_child_for_output_limit() {
+  output_limit_exceeded=true
+  if [ "$process_group_id" -gt 0 ]; then
+    kill -TERM "-$process_group_id" >/dev/null 2>&1 || true
+  fi
+  kill -TERM "$child_pid" >/dev/null 2>&1 || true
+  sleep 0.05 2>/dev/null || sleep 1
+  if [ "$process_group_id" -gt 0 ]; then
+    kill -KILL "-$process_group_id" >/dev/null 2>&1 || true
+  fi
+  kill -KILL "$child_pid" >/dev/null 2>&1 || true
+}
+
+check_output_limit() {
+  if output_file_over_limit "$stdout_path"; then
+    stdout_truncated=true
+    terminate_child_for_output_limit "$stdout_path"
+    return 0
+  fi
+  if output_file_over_limit "$stderr_path"; then
+    stderr_truncated=true
+    terminate_child_for_output_limit "$stderr_path"
+    return 0
+  fi
+  return 1
+}
+
+truncate_outputs_to_limit() {
+  truncate_output_file_to_limit "$stdout_path"
+  truncate_output_file_to_limit "$stderr_path"
+}
+
 poll_sleep="0.050"
 if command -v awk >/dev/null 2>&1; then
   poll_sleep="$(awk -v ms="$poll_ms" 'BEGIN { if (ms < 50) ms = 50; printf "%.3f", ms / 1000 }')"
 fi
 
 if command -v setsid >/dev/null 2>&1; then
-  CLASP_RT_WATCH_HEARTBEAT="$heartbeat_path" CLASP_RT_WATCH_TOKEN="$watch_token" setsid "$@" </dev/null >"$stdout_path" 2>"$stderr_path" &
+  CLASP_RT_WATCH_HEARTBEAT="$heartbeat_path" CLASP_RT_WATCH_TOKEN="$watch_token" setsid sh -c '
+    memory_limit_kb="$1"
+    shift
+    ulimit -c 0 >/dev/null 2>&1 || true
+    if [ "$memory_limit_kb" -gt 0 ]; then
+      ulimit -v "$memory_limit_kb" || exit 125
+    fi
+    exec "$@"
+  ' clasp-rt-watch-child "$memory_limit_kb" "$@" </dev/null >"$stdout_path" 2>"$stderr_path" &
   child_pid=$!
   process_group_id="$child_pid"
 else
-  CLASP_RT_WATCH_HEARTBEAT="$heartbeat_path" CLASP_RT_WATCH_TOKEN="$watch_token" "$@" </dev/null >"$stdout_path" 2>"$stderr_path" &
+  CLASP_RT_WATCH_HEARTBEAT="$heartbeat_path" CLASP_RT_WATCH_TOKEN="$watch_token" sh -c '
+    memory_limit_kb="$1"
+    shift
+    ulimit -c 0 >/dev/null 2>&1 || true
+    if [ "$memory_limit_kb" -gt 0 ]; then
+      ulimit -v "$memory_limit_kb" || exit 125
+    fi
+    exec "$@"
+  ' clasp-rt-watch-child "$memory_limit_kb" "$@" </dev/null >"$stdout_path" 2>"$stderr_path" &
   child_pid=$!
 fi
 write_heartbeat true false -1
 
 (
   while kill -0 "$child_pid" >/dev/null 2>&1; do
+    if check_output_limit; then
+      break
+    fi
     write_heartbeat true false -1
     sleep "$poll_sleep"
   done
@@ -7951,6 +9088,18 @@ wait "$child_pid"
 exit_code=$?
 kill "$heartbeat_loop_pid" >/dev/null 2>&1 || true
 wait "$heartbeat_loop_pid" >/dev/null 2>&1 || true
+if output_file_over_limit "$stdout_path"; then
+  stdout_truncated=true
+  output_limit_exceeded=true
+fi
+if output_file_over_limit "$stderr_path"; then
+  stderr_truncated=true
+  output_limit_exceeded=true
+fi
+if [ "$output_limit_exceeded" = true ]; then
+  output_limit_exceeded=true
+  truncate_outputs_to_limit
+fi
 write_heartbeat false true "$exit_code"
 exit "$exit_code"
 "#;
@@ -7961,6 +9110,7 @@ fn spawn_watched_process_monitor_json(
     stderr_path: &str,
     heartbeat_path: &str,
     poll_ms: u64,
+    memory_limit_mb: Option<i64>,
     extra_env: &[(String, String)],
     watched_command: &[String],
 ) -> Result<String, String> {
@@ -7995,9 +9145,17 @@ fn spawn_watched_process_monitor_json(
     for (key, value) in extra_env {
         command.env(key, value);
     }
+    if let Some(limit_mb) = memory_limit_mb.filter(|limit| *limit > 0) {
+        command.env("CLASP_RT_WATCH_MEMORY_MB", limit_mb.to_string());
+    }
     command
         .env("CLASP_RT_WATCH_HEARTBEAT", heartbeat_path)
-        .env("CLASP_RT_WATCH_TOKEN", &watch_token);
+        .env("CLASP_RT_WATCH_TOKEN", &watch_token)
+        .env(
+            "CLASP_RT_WATCH_OUTPUT_LIMIT_BYTES",
+            watched_process_output_limit_bytes().to_string(),
+        );
+    configure_no_core_dump_process_command(&mut command);
 
     let mut monitor = command.spawn().map_err(|err| err.to_string())?;
     let monitor_pid = monitor.id();
@@ -8024,6 +9182,9 @@ fn spawn_watched_process_monitor_json(
         runtime_time_unix_ms(),
         false,
         "",
+        watched_process_output_limit_bytes(),
+        false,
+        false,
     );
     write_watched_process_heartbeat(heartbeat_path, &fallback)?;
     Ok(fallback)
@@ -8038,7 +9199,67 @@ fn spawn_watched_process_json(cwd: &str, args: &[String]) -> Result<String, Stri
         .parse::<u64>()
         .map_err(|_| "invalid_watch_poll_ms".to_owned())?
         .max(50);
-    spawn_watched_process_monitor_json(cwd, &args[0], &args[1], &args[2], poll_ms, &[], &args[4..])
+    spawn_watched_process_monitor_json(cwd, &args[0], &args[1], &args[2], poll_ms, None, &[], &args[4..])
+}
+
+fn spawn_watched_process_with_limits_json(cwd: &str, args: &[String]) -> Result<String, String> {
+    if args.len() < 6 {
+        return Err("invalid_spawn_command".to_owned());
+    }
+
+    let poll_ms = args[3]
+        .parse::<u64>()
+        .map_err(|_| "invalid_watch_poll_ms".to_owned())?
+        .max(50);
+    let memory_limit_mb = args[4]
+        .parse::<i64>()
+        .map_err(|_| "invalid_memory_limit_mb".to_owned())?
+        .max(0);
+    spawn_watched_process_monitor_json(
+        cwd,
+        &args[0],
+        &args[1],
+        &args[2],
+        poll_ms,
+        Some(memory_limit_mb),
+        &[],
+        &args[5..],
+    )
+}
+
+fn watched_process_exit_code(payload: &str) -> i32 {
+    serde_json::from_str::<serde_json::Value>(payload)
+        .ok()
+        .and_then(|decoded| decoded.get("exitCode").and_then(serde_json::Value::as_i64))
+        .unwrap_or(-1) as i32
+}
+
+fn watch_watched_process_with_limits_json(cwd: &str, args: &[String]) -> Result<(i32, String), String> {
+    if args.len() < 6 {
+        return Err("invalid_watch_command".to_owned());
+    }
+
+    let poll_ms = args[3]
+        .parse::<u64>()
+        .map_err(|_| "invalid_watch_poll_ms".to_owned())?
+        .max(50);
+    let memory_limit_mb = args[4]
+        .parse::<i64>()
+        .map_err(|_| "invalid_memory_limit_mb".to_owned())?
+        .max(0);
+    let heartbeat_path = args[2].clone();
+    spawn_watched_process_monitor_json(
+        cwd,
+        &args[0],
+        &args[1],
+        &args[2],
+        poll_ms,
+        Some(memory_limit_mb),
+        &[],
+        &args[5..],
+    )?;
+    let payload = await_watched_process_json(&heartbeat_path, poll_ms)?;
+    Ok((watched_process_exit_code(&payload), payload))
 }
 
 fn spawn_watched_process_with_env_json(
@@ -8056,6 +9277,7 @@ fn spawn_watched_process_with_env_json(
         stderr_path,
         heartbeat_path,
         poll_ms.max(50),
+        None,
         extra_env,
         watched_command,
     )
@@ -8125,18 +9347,19 @@ fn terminate_watched_process_tree(
 ) {
     let has_marker = !watch_token.is_empty()
         && watched_process_has_marker(pid, heartbeat_path, watch_token);
+    if !has_marker {
+        return;
+    }
     #[cfg(unix)]
     {
-        if process_group_id > 0 && process_group_id == pid && has_marker {
+        if process_group_id > 0 && process_group_id == pid {
             signal_process_group(process_group_id, SIGTERM);
             thread::sleep(Duration::from_millis(50));
             signal_process_group(process_group_id, SIGKILL);
         }
     }
 
-    if watch_token.is_empty() || has_marker {
-        terminate_watched_process_pid(pid);
-    }
+    terminate_watched_process_pid(pid);
 }
 
 fn mark_watched_process_timeout(payload: &mut serde_json::Value) {
@@ -10302,6 +11525,322 @@ pub unsafe extern "C" fn clasp_rt_list_dir(path: *mut ClaspRtString) -> *mut Cla
     runtime_result_ok(clasp_rt_build_list_header(items))
 }
 
+#[cfg(unix)]
+fn runtime_host_available_disk_mb(path: &str) -> Result<i64, String> {
+    let c_path = CString::new(path).map_err(|_| "invalid_path".to_owned())?;
+    let mut stat = MaybeUninit::<Statvfs>::zeroed();
+    let status = unsafe { statvfs(c_path.as_ptr(), stat.as_mut_ptr()) };
+    if status != 0 {
+        return Err("io_error".to_owned());
+    }
+
+    let stat = unsafe { stat.assume_init() };
+    let fragment_size = if stat.f_frsize == 0 {
+        stat.f_bsize
+    } else {
+        stat.f_frsize
+    };
+    let available_bytes = u128::from(stat.f_bavail) * u128::from(fragment_size);
+    let available_mb = available_bytes / (1024 * 1024);
+    if available_mb > i64::MAX as u128 {
+        Ok(i64::MAX)
+    } else {
+        Ok(available_mb as i64)
+    }
+}
+
+#[cfg(not(unix))]
+fn runtime_host_available_disk_mb(_path: &str) -> Result<i64, String> {
+    Err("unsupported_platform".to_owned())
+}
+
+#[cfg(target_os = "linux")]
+fn runtime_host_available_memory_mb() -> Result<i64, String> {
+    let contents = fs::read_to_string("/proc/meminfo").map_err(|_| "io_error".to_owned())?;
+    for line in contents.lines() {
+        let Some(rest) = line.strip_prefix("MemAvailable:") else {
+            continue;
+        };
+        let Some(kb_text) = rest.split_whitespace().next() else {
+            return Err("invalid_mem_available".to_owned());
+        };
+        let available_kb = kb_text
+            .parse::<u128>()
+            .map_err(|_| "invalid_mem_available".to_owned())?;
+        let available_mb = available_kb / 1024;
+        return if available_mb > i64::MAX as u128 {
+            Ok(i64::MAX)
+        } else {
+            Ok(available_mb as i64)
+        };
+    }
+
+    Err("missing_mem_available".to_owned())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn runtime_host_available_memory_mb() -> Result<i64, String> {
+    Err("unsupported_platform".to_owned())
+}
+
+#[cfg(unix)]
+fn runtime_host_process_alive(pid_text: &str) -> Result<bool, String> {
+    let trimmed = pid_text.trim();
+    let pid = trimmed
+        .parse::<i64>()
+        .map_err(|_| "invalid_pid".to_owned())?;
+    if pid <= 0 || pid > i64::from(i32::MAX) {
+        return Err("invalid_pid".to_owned());
+    }
+
+    let status = unsafe { kill(pid as c_int, 0) };
+    if status == 0 {
+        return Ok(true);
+    }
+
+    match std::io::Error::last_os_error().raw_os_error() {
+        Some(1) => Ok(true),
+        Some(3) => Ok(false),
+        _ => Ok(false),
+    }
+}
+
+#[cfg(not(unix))]
+fn runtime_host_process_alive(_pid_text: &str) -> Result<bool, String> {
+    Err("unsupported_platform".to_owned())
+}
+
+#[cfg(target_os = "linux")]
+fn runtime_proc_has_managed_job_marker(pid_path: &Path) -> bool {
+    let Ok(environ) = fs::read(pid_path.join("environ")) else {
+        return false;
+    };
+    let mut has_id = false;
+    let mut has_root = false;
+    let mut has_token = false;
+
+    for item in environ.split(|byte| *byte == 0) {
+        if item.starts_with(b"CLASP_MANAGED_JOB_ID=") && item.len() > b"CLASP_MANAGED_JOB_ID=".len() {
+            has_id = true;
+        } else if item.starts_with(b"CLASP_MANAGED_JOB_ROOT=")
+            && item.len() > b"CLASP_MANAGED_JOB_ROOT=".len()
+        {
+            has_root = true;
+        } else if item.starts_with(b"CLASP_MANAGED_JOB_TOKEN=")
+            && item.len() > b"CLASP_MANAGED_JOB_TOKEN=".len()
+        {
+            has_token = true;
+        }
+    }
+
+    has_id && has_root && has_token
+}
+
+#[cfg(target_os = "linux")]
+fn runtime_host_process_count_by_name(names: &[String], exclude_managed: bool) -> Result<i64, String> {
+    let wanted: Vec<&str> = names
+        .iter()
+        .map(|name| name.trim())
+        .filter(|name| !name.is_empty())
+        .collect();
+    if wanted.is_empty() {
+        return Ok(0);
+    }
+
+    let entries = fs::read_dir("/proc").map_err(|_| "io_error".to_owned())?;
+    let mut count: i64 = 0;
+    for entry in entries {
+        let Ok(entry) = entry else {
+            continue;
+        };
+        let file_name = entry.file_name();
+        let Some(file_name) = file_name.to_str() else {
+            continue;
+        };
+        if !file_name.bytes().all(|byte| byte.is_ascii_digit()) {
+            continue;
+        }
+
+        let pid_path = entry.path();
+        if exclude_managed && runtime_proc_has_managed_job_marker(&pid_path) {
+            continue;
+        }
+
+        let Ok(comm) = fs::read_to_string(pid_path.join("comm")) else {
+            continue;
+        };
+        let process_name = comm.trim();
+        if wanted.iter().any(|wanted_name| *wanted_name == process_name) {
+            count = count.saturating_add(1);
+        }
+    }
+
+    Ok(count)
+}
+
+#[cfg(target_os = "linux")]
+fn runtime_proc_rss_mb(pid_path: &Path) -> i64 {
+    let Ok(status) = fs::read_to_string(pid_path.join("status")) else {
+        return 0;
+    };
+    for line in status.lines() {
+        let Some(rest) = line.strip_prefix("VmRSS:") else {
+            continue;
+        };
+        let kb_text = rest.split_whitespace().next().unwrap_or("0");
+        let Ok(kb) = kb_text.parse::<i64>() else {
+            return 0;
+        };
+        return (kb + 1023) / 1024;
+    }
+    0
+}
+
+#[cfg(target_os = "linux")]
+fn runtime_host_process_rss_mb_by_name(names: &[String], exclude_managed: bool) -> Result<i64, String> {
+    let wanted: Vec<&str> = names
+        .iter()
+        .map(|name| name.trim())
+        .filter(|name| !name.is_empty())
+        .collect();
+    if wanted.is_empty() {
+        return Ok(0);
+    }
+
+    let entries = fs::read_dir("/proc").map_err(|_| "io_error".to_owned())?;
+    let mut rss_mb: i64 = 0;
+    for entry in entries {
+        let Ok(entry) = entry else {
+            continue;
+        };
+        let file_name = entry.file_name();
+        let Some(file_name) = file_name.to_str() else {
+            continue;
+        };
+        if !file_name.bytes().all(|byte| byte.is_ascii_digit()) {
+            continue;
+        }
+
+        let pid_path = entry.path();
+        if exclude_managed && runtime_proc_has_managed_job_marker(&pid_path) {
+            continue;
+        }
+
+        let Ok(comm) = fs::read_to_string(pid_path.join("comm")) else {
+            continue;
+        };
+        let process_name = comm.trim();
+        if wanted.iter().any(|wanted_name| *wanted_name == process_name) {
+            rss_mb = rss_mb.saturating_add(runtime_proc_rss_mb(&pid_path));
+        }
+    }
+
+    Ok(rss_mb)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn runtime_host_process_count_by_name(_names: &[String], _exclude_managed: bool) -> Result<i64, String> {
+    Err("unsupported_platform".to_owned())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn runtime_host_process_rss_mb_by_name(_names: &[String], _exclude_managed: bool) -> Result<i64, String> {
+    Err("unsupported_platform".to_owned())
+}
+
+unsafe fn runtime_string_list_values(names: *mut ClaspRtStringList) -> Vec<String> {
+    if names.is_null() {
+        return Vec::new();
+    }
+    string_list_items_mut(names)
+        .iter()
+        .map(|name| String::from_utf8_lossy(string_bytes(*name)).into_owned())
+        .collect()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_host_available_disk_mb(path: *mut ClaspRtString) -> *mut ClaspRtHeader {
+    let path_string = String::from_utf8_lossy(string_bytes(path)).into_owned();
+    match runtime_host_available_disk_mb(&path_string) {
+        Ok(available_mb) => runtime_result_ok(build_runtime_int(available_mb) as *mut ClaspRtHeader),
+        Err(message) => runtime_result_err(&message),
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_host_file_size_mb(path: *mut ClaspRtString) -> *mut ClaspRtHeader {
+    let path_string = String::from_utf8_lossy(string_bytes(path)).into_owned();
+    match host_file_size_mb(&path_string) {
+        Ok(size_mb) => runtime_result_ok(build_runtime_int(size_mb) as *mut ClaspRtHeader),
+        Err(message) => runtime_result_err(&message),
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_host_cap_file_tail_mb(
+    path: *mut ClaspRtString,
+    max_mb: *mut ClaspRtHeader,
+) -> *mut ClaspRtHeader {
+    let Some(max_mb_value) = header_int_value(max_mb) else {
+        return runtime_result_err("host_file_invalid_limit: maxMb must be an Int");
+    };
+    let path_string = String::from_utf8_lossy(string_bytes(path)).into_owned();
+    match cap_host_file_tail_mb(&path_string, max_mb_value) {
+        Ok(size_mb) => runtime_result_ok(build_runtime_int(size_mb) as *mut ClaspRtHeader),
+        Err(message) => runtime_result_err(&message),
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_host_available_memory_mb() -> *mut ClaspRtHeader {
+    match runtime_host_available_memory_mb() {
+        Ok(available_mb) => runtime_result_ok(build_runtime_int(available_mb) as *mut ClaspRtHeader),
+        Err(message) => runtime_result_err(&message),
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_host_process_alive(pid: *mut ClaspRtString) -> *mut ClaspRtHeader {
+    let pid_string = String::from_utf8_lossy(string_bytes(pid)).into_owned();
+    match runtime_host_process_alive(&pid_string) {
+        Ok(alive) => runtime_result_ok(build_runtime_bool(alive) as *mut ClaspRtHeader),
+        Err(message) => runtime_result_err(&message),
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_host_process_count_by_name(
+    names: *mut ClaspRtStringList,
+) -> *mut ClaspRtHeader {
+    let name_values = runtime_string_list_values(names);
+    match runtime_host_process_count_by_name(&name_values, false) {
+        Ok(count) => runtime_result_ok(build_runtime_int(count) as *mut ClaspRtHeader),
+        Err(message) => runtime_result_err(&message),
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_host_unmanaged_process_count_by_name(
+    names: *mut ClaspRtStringList,
+) -> *mut ClaspRtHeader {
+    let name_values = runtime_string_list_values(names);
+    match runtime_host_process_count_by_name(&name_values, true) {
+        Ok(count) => runtime_result_ok(build_runtime_int(count) as *mut ClaspRtHeader),
+        Err(message) => runtime_result_err(&message),
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_host_unmanaged_process_rss_mb_by_name(
+    names: *mut ClaspRtStringList,
+) -> *mut ClaspRtHeader {
+    let name_values = runtime_string_list_values(names);
+    match runtime_host_process_rss_mb_by_name(&name_values, true) {
+        Ok(rss_mb) => runtime_result_ok(build_runtime_int(rss_mb) as *mut ClaspRtHeader),
+        Err(message) => runtime_result_err(&message),
+    }
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn clasp_rt_write_file(
     path: *mut ClaspRtString,
@@ -10578,6 +12117,164 @@ pub unsafe extern "C" fn clasp_rt_workspace_list_dir(
         .map(|name| build_runtime_string(name.as_bytes()) as *mut ClaspRtHeader)
         .collect();
     runtime_result_ok(clasp_rt_build_list_header(items))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_workspace_list_tree(
+    root: *mut ClaspRtString,
+    relative: *mut ClaspRtString,
+    max_entries: *mut ClaspRtHeader,
+    max_depth: *mut ClaspRtHeader,
+) -> *mut ClaspRtHeader {
+    let Some(max_entries_value) = header_int_value(max_entries) else {
+        return runtime_result_err("workspace_invalid_limit: maxEntries must be an Int");
+    };
+    let Some(max_depth_value) = header_int_value(max_depth) else {
+        return runtime_result_err("workspace_invalid_limit: maxDepth must be an Int");
+    };
+    let root_string = String::from_utf8_lossy(string_bytes(root)).into_owned();
+    let relative_string = String::from_utf8_lossy(string_bytes(relative)).into_owned();
+    match workspace_list_tree(&root_string, &relative_string, max_entries_value, max_depth_value) {
+        Ok(paths) => {
+            let items = paths
+                .iter()
+                .map(|path| build_runtime_string(path.as_bytes()) as *mut ClaspRtHeader)
+                .collect();
+            runtime_result_ok(clasp_rt_build_list_header(items))
+        }
+        Err(message) => runtime_result_err(&message),
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_workspace_search_text(
+    root: *mut ClaspRtString,
+    relative: *mut ClaspRtString,
+    needle: *mut ClaspRtString,
+    max_matches: *mut ClaspRtHeader,
+    max_files: *mut ClaspRtHeader,
+    max_file_bytes: *mut ClaspRtHeader,
+    max_depth: *mut ClaspRtHeader,
+) -> *mut ClaspRtHeader {
+    let Some(max_matches_value) = header_int_value(max_matches) else {
+        return runtime_result_err("workspace_invalid_limit: maxMatches must be an Int");
+    };
+    let Some(max_files_value) = header_int_value(max_files) else {
+        return runtime_result_err("workspace_invalid_limit: maxFiles must be an Int");
+    };
+    let Some(max_file_bytes_value) = header_int_value(max_file_bytes) else {
+        return runtime_result_err("workspace_invalid_limit: maxFileBytes must be an Int");
+    };
+    let Some(max_depth_value) = header_int_value(max_depth) else {
+        return runtime_result_err("workspace_invalid_limit: maxDepth must be an Int");
+    };
+    let root_string = String::from_utf8_lossy(string_bytes(root)).into_owned();
+    let relative_string = String::from_utf8_lossy(string_bytes(relative)).into_owned();
+    let needle_string = String::from_utf8_lossy(string_bytes(needle)).into_owned();
+    match workspace_search_text(
+        &root_string,
+        &relative_string,
+        &needle_string,
+        max_matches_value,
+        max_files_value,
+        max_file_bytes_value,
+        max_depth_value,
+    ) {
+        Ok(paths) => {
+            let items = paths
+                .iter()
+                .map(|path| build_runtime_string(path.as_bytes()) as *mut ClaspRtHeader)
+                .collect();
+            runtime_result_ok(clasp_rt_build_list_header(items))
+        }
+        Err(message) => runtime_result_err(&message),
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_workspace_replace_text(
+    root: *mut ClaspRtString,
+    relative: *mut ClaspRtString,
+    find_text: *mut ClaspRtString,
+    replace_text: *mut ClaspRtString,
+    max_replacements: *mut ClaspRtHeader,
+    max_file_bytes: *mut ClaspRtHeader,
+) -> *mut ClaspRtHeader {
+    let Some(max_replacements_value) = header_int_value(max_replacements) else {
+        return runtime_result_err("workspace_invalid_limit: maxReplacements must be an Int");
+    };
+    let Some(max_file_bytes_value) = header_int_value(max_file_bytes) else {
+        return runtime_result_err("workspace_invalid_limit: maxFileBytes must be an Int");
+    };
+    let root_string = String::from_utf8_lossy(string_bytes(root)).into_owned();
+    let relative_string = String::from_utf8_lossy(string_bytes(relative)).into_owned();
+    let find_string = String::from_utf8_lossy(string_bytes(find_text)).into_owned();
+    let replace_string = String::from_utf8_lossy(string_bytes(replace_text)).into_owned();
+    match workspace_replace_text(
+        &root_string,
+        &relative_string,
+        &find_string,
+        &replace_string,
+        max_replacements_value,
+        max_file_bytes_value,
+    ) {
+        Ok(count) => runtime_result_ok(build_runtime_int(count) as *mut ClaspRtHeader),
+        Err(message) => runtime_result_err(&message),
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_workspace_path_size_mb(
+    root: *mut ClaspRtString,
+    relative: *mut ClaspRtString,
+) -> *mut ClaspRtHeader {
+    let root_string = String::from_utf8_lossy(string_bytes(root)).into_owned();
+    let relative_string = String::from_utf8_lossy(string_bytes(relative)).into_owned();
+    match workspace_path_size_mb(&root_string, &relative_string) {
+        Ok(size_mb) => runtime_result_ok(build_runtime_int(size_mb) as *mut ClaspRtHeader),
+        Err(message) => runtime_result_err(&message),
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_workspace_remove_path(
+    root: *mut ClaspRtString,
+    relative: *mut ClaspRtString,
+) -> *mut ClaspRtResultString {
+    let root_string = String::from_utf8_lossy(string_bytes(root)).into_owned();
+    let relative_string = String::from_utf8_lossy(string_bytes(relative)).into_owned();
+    let path = match resolve_existing_workspace_removal_path(&root_string, &relative_string) {
+        Ok(path) => path,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let metadata = match fs::symlink_metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(err) => {
+            let message = format!(
+                "workspace_io_error: failed to inspect workspace path `{}`: {err}",
+                path.display()
+            );
+            return clasp_rt_result_err_string(build_runtime_string(message.as_bytes()));
+        }
+    };
+    let removed = if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() {
+        fs::remove_dir_all(&path)
+    } else {
+        fs::remove_file(&path)
+    };
+    match removed {
+        Ok(_) => {
+            let path_text = display_path(&path);
+            clasp_rt_result_ok_string(build_runtime_string(path_text.as_bytes()))
+        }
+        Err(err) => {
+            let message = format!(
+                "workspace_io_error: failed to remove workspace path `{}`: {err}",
+                path.display()
+            );
+            clasp_rt_result_err_string(build_runtime_string(message.as_bytes()))
+        }
+    }
 }
 
 unsafe fn clasp_rt_result_string_from_owned(value: Result<String, String>) -> *mut ClaspRtResultString {
@@ -10939,6 +12636,182 @@ pub unsafe extern "C" fn clasp_rt_swarm_task_create_with_deadline_json(
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn clasp_rt_swarm_task_create_with_deadline_and_priority_json(
+    root: *mut ClaspRtString,
+    objective_id: *mut ClaspRtString,
+    task_id: *mut ClaspRtString,
+    detail: *mut ClaspRtString,
+    dependencies: *mut ClaspRtHeader,
+    max_runs: *mut ClaspRtHeader,
+    deadline_at_ms: *mut ClaspRtHeader,
+    priority: *mut ClaspRtHeader,
+    lease_timeout_ms: *mut ClaspRtHeader,
+) -> *mut ClaspRtResultString {
+    let dependencies_value = match clasp_rt_string_list_arg(dependencies) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let max_runs_value = match clasp_rt_int_arg(max_runs) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let deadline_value = match clasp_rt_int_arg(deadline_at_ms) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let priority_value = match clasp_rt_int_arg(priority) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let lease_timeout_value = match clasp_rt_int_arg(lease_timeout_ms) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    clasp_rt_result_string_from_owned(swarm::builtin_swarm_task_create_with_deadline_and_priority(
+        &String::from_utf8_lossy(string_bytes(root)).into_owned(),
+        &String::from_utf8_lossy(string_bytes(objective_id)).into_owned(),
+        &String::from_utf8_lossy(string_bytes(task_id)).into_owned(),
+        &String::from_utf8_lossy(string_bytes(detail)).into_owned(),
+        &dependencies_value,
+        max_runs_value,
+        deadline_value,
+        priority_value,
+        lease_timeout_value,
+    ))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_swarm_task_create_child_with_deadline_and_priority_json(
+    root: *mut ClaspRtString,
+    objective_id: *mut ClaspRtString,
+    parent_task_id: *mut ClaspRtString,
+    task_id: *mut ClaspRtString,
+    detail: *mut ClaspRtString,
+    dependencies: *mut ClaspRtHeader,
+    max_runs: *mut ClaspRtHeader,
+    deadline_at_ms: *mut ClaspRtHeader,
+    priority: *mut ClaspRtHeader,
+    max_spawn_depth: *mut ClaspRtHeader,
+    lease_timeout_ms: *mut ClaspRtHeader,
+) -> *mut ClaspRtResultString {
+    let dependencies_value = match clasp_rt_string_list_arg(dependencies) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let max_runs_value = match clasp_rt_int_arg(max_runs) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let deadline_value = match clasp_rt_int_arg(deadline_at_ms) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let priority_value = match clasp_rt_int_arg(priority) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let max_spawn_depth_value = match clasp_rt_int_arg(max_spawn_depth) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let lease_timeout_value = match clasp_rt_int_arg(lease_timeout_ms) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    clasp_rt_result_string_from_owned(swarm::builtin_swarm_task_create_child_with_deadline_and_priority(
+        &String::from_utf8_lossy(string_bytes(root)).into_owned(),
+        &String::from_utf8_lossy(string_bytes(objective_id)).into_owned(),
+        &String::from_utf8_lossy(string_bytes(parent_task_id)).into_owned(),
+        &String::from_utf8_lossy(string_bytes(task_id)).into_owned(),
+        &String::from_utf8_lossy(string_bytes(detail)).into_owned(),
+        &dependencies_value,
+        max_runs_value,
+        deadline_value,
+        priority_value,
+        max_spawn_depth_value,
+        lease_timeout_value,
+    ))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_swarm_task_create_child_with_policy_json(
+    root: *mut ClaspRtString,
+    objective_id: *mut ClaspRtString,
+    parent_task_id: *mut ClaspRtString,
+    task_id: *mut ClaspRtString,
+    detail: *mut ClaspRtString,
+    dependencies: *mut ClaspRtHeader,
+    max_runs: *mut ClaspRtHeader,
+    deadline_at_ms: *mut ClaspRtHeader,
+    priority: *mut ClaspRtHeader,
+    max_spawn_depth: *mut ClaspRtHeader,
+    max_child_tasks: *mut ClaspRtHeader,
+    lease_timeout_ms: *mut ClaspRtHeader,
+) -> *mut ClaspRtResultString {
+    let dependencies_value = match clasp_rt_string_list_arg(dependencies) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let max_runs_value = match clasp_rt_int_arg(max_runs) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let deadline_value = match clasp_rt_int_arg(deadline_at_ms) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let priority_value = match clasp_rt_int_arg(priority) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let max_spawn_depth_value = match clasp_rt_int_arg(max_spawn_depth) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let max_child_tasks_value = match clasp_rt_int_arg(max_child_tasks) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let lease_timeout_value = match clasp_rt_int_arg(lease_timeout_ms) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    clasp_rt_result_string_from_owned(swarm::builtin_swarm_task_create_child_with_policy(
+        &String::from_utf8_lossy(string_bytes(root)).into_owned(),
+        &String::from_utf8_lossy(string_bytes(objective_id)).into_owned(),
+        &String::from_utf8_lossy(string_bytes(parent_task_id)).into_owned(),
+        &String::from_utf8_lossy(string_bytes(task_id)).into_owned(),
+        &String::from_utf8_lossy(string_bytes(detail)).into_owned(),
+        &dependencies_value,
+        max_runs_value,
+        deadline_value,
+        priority_value,
+        max_spawn_depth_value,
+        max_child_tasks_value,
+        lease_timeout_value,
+    ))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_swarm_task_reprioritize_json(
+    root: *mut ClaspRtString,
+    task_id: *mut ClaspRtString,
+    actor: *mut ClaspRtString,
+    priority: *mut ClaspRtHeader,
+) -> *mut ClaspRtResultString {
+    let priority_value = match clasp_rt_int_arg(priority) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    clasp_rt_result_string_from_owned(swarm::builtin_swarm_task_reprioritize(
+        &String::from_utf8_lossy(string_bytes(root)).into_owned(),
+        &String::from_utf8_lossy(string_bytes(task_id)).into_owned(),
+        &String::from_utf8_lossy(string_bytes(actor)).into_owned(),
+        priority_value,
+    ))
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn clasp_rt_swarm_policy_set_json(
     root: *mut ClaspRtString,
     task_id: *mut ClaspRtString,
@@ -11067,6 +12940,102 @@ pub unsafe extern "C" fn clasp_rt_swarm_policy_set_with_capabilities_json(
         &processes,
         &workspaces,
         &String::from_utf8_lossy(string_bytes(network_access)).into_owned(),
+    ))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_swarm_policy_set_with_network_access_json(
+    root: *mut ClaspRtString,
+    task_id: *mut ClaspRtString,
+    mergegate_name: *mut ClaspRtString,
+    required_approvals: *mut ClaspRtHeader,
+    required_verifiers: *mut ClaspRtHeader,
+    allowed_processes: *mut ClaspRtHeader,
+    allowed_workspace_roots: *mut ClaspRtHeader,
+    network_access: *mut ClaspRtString,
+    allowed_network_destinations: *mut ClaspRtHeader,
+) -> *mut ClaspRtResultString {
+    let approvals = match clasp_rt_string_list_arg(required_approvals) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let verifiers = match clasp_rt_string_list_arg(required_verifiers) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let processes = match clasp_rt_string_list_arg(allowed_processes) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let workspaces = match clasp_rt_string_list_arg(allowed_workspace_roots) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let destinations = match clasp_rt_string_list_arg(allowed_network_destinations) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    clasp_rt_result_string_from_owned(swarm::builtin_swarm_policy_set_with_network_access(
+        &String::from_utf8_lossy(string_bytes(root)).into_owned(),
+        &String::from_utf8_lossy(string_bytes(task_id)).into_owned(),
+        &String::from_utf8_lossy(string_bytes(mergegate_name)).into_owned(),
+        &approvals,
+        &verifiers,
+        &processes,
+        &workspaces,
+        &String::from_utf8_lossy(string_bytes(network_access)).into_owned(),
+        &destinations,
+    ))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_swarm_policy_set_with_filesystem_access_json(
+    root: *mut ClaspRtString,
+    task_id: *mut ClaspRtString,
+    mergegate_name: *mut ClaspRtString,
+    required_approvals: *mut ClaspRtHeader,
+    required_verifiers: *mut ClaspRtHeader,
+    allowed_processes: *mut ClaspRtHeader,
+    allowed_workspace_roots: *mut ClaspRtHeader,
+    allowed_readonly_roots: *mut ClaspRtHeader,
+    network_access: *mut ClaspRtString,
+    allowed_network_destinations: *mut ClaspRtHeader,
+) -> *mut ClaspRtResultString {
+    let approvals = match clasp_rt_string_list_arg(required_approvals) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let verifiers = match clasp_rt_string_list_arg(required_verifiers) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let processes = match clasp_rt_string_list_arg(allowed_processes) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let workspaces = match clasp_rt_string_list_arg(allowed_workspace_roots) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let readonly_roots = match clasp_rt_string_list_arg(allowed_readonly_roots) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let destinations = match clasp_rt_string_list_arg(allowed_network_destinations) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    clasp_rt_result_string_from_owned(swarm::builtin_swarm_policy_set_with_filesystem_access(
+        &String::from_utf8_lossy(string_bytes(root)).into_owned(),
+        &String::from_utf8_lossy(string_bytes(task_id)).into_owned(),
+        &String::from_utf8_lossy(string_bytes(mergegate_name)).into_owned(),
+        &approvals,
+        &verifiers,
+        &processes,
+        &workspaces,
+        &readonly_roots,
+        &String::from_utf8_lossy(string_bytes(network_access)).into_owned(),
+        &destinations,
     ))
 }
 
@@ -11552,6 +13521,7 @@ fn run_process_command_output(
     let mut command = ProcessCommand::new(&command_values[0]);
     command.args(&command_values[1..]).current_dir(cwd);
     apply_process_env(&mut command, env_values);
+    configure_no_core_dump_process_command(&mut command);
     command.output()
 }
 
@@ -11575,10 +13545,10 @@ fn run_workspace_process_command_output(
     cwd: &Path,
     command_values: &[String],
 ) -> std::io::Result<std::process::Output> {
-    ProcessCommand::new(&command_values[0])
-        .args(&command_values[1..])
-        .current_dir(cwd)
-        .output()
+    let mut command = ProcessCommand::new(&command_values[0]);
+    command.args(&command_values[1..]).current_dir(cwd);
+    configure_no_core_dump_process_command(&mut command);
+    command.output()
 }
 
 fn spawn_workspace_process_command(
@@ -11634,11 +13604,12 @@ pub unsafe extern "C" fn clasp_rt_run_command_json(
         return render_payload(exit_code, stdout.as_bytes(), stderr.as_bytes());
     }
 
-    let output = match ProcessCommand::new(&command_values[0])
+    let mut process_command = ProcessCommand::new(&command_values[0]);
+    process_command
         .args(&command_values[1..])
-        .current_dir(&cwd_string)
-        .output()
-    {
+        .current_dir(&cwd_string);
+    configure_no_core_dump_process_command(&mut process_command);
+    let output = match process_command.output() {
         Ok(output) => output,
         Err(err) => {
             return clasp_rt_result_err_string(build_runtime_string(err.to_string().as_bytes()));
@@ -11692,11 +13663,12 @@ pub unsafe extern "C" fn clasp_rt_run_command_timeout_json(
     }
 
     if timeout_ms_value == 0 {
-        let output = match ProcessCommand::new(&command_values[0])
+        let mut process_command = ProcessCommand::new(&command_values[0]);
+        process_command
             .args(&command_values[1..])
-            .current_dir(&cwd_string)
-            .output()
-        {
+            .current_dir(&cwd_string);
+        configure_no_core_dump_process_command(&mut process_command);
+        let output = match process_command.output() {
             Ok(output) => output,
             Err(err) => {
                 return clasp_rt_result_err_string(build_runtime_string(err.to_string().as_bytes()));
@@ -12050,6 +14022,90 @@ pub unsafe extern "C" fn clasp_rt_spawn_command_json(
     }
 }
 
+pub unsafe extern "C" fn clasp_rt_spawn_command_with_limits_json(
+    cwd: *mut ClaspRtString,
+    stdout_path: *mut ClaspRtString,
+    stderr_path: *mut ClaspRtString,
+    heartbeat_path: *mut ClaspRtString,
+    poll_ms: *mut ClaspRtHeader,
+    memory_limit_mb: *mut ClaspRtHeader,
+    command: *mut ClaspRtHeader,
+) -> *mut ClaspRtResultString {
+    let cwd_string = String::from_utf8_lossy(string_bytes(cwd)).into_owned();
+    let stdout_path_string = String::from_utf8_lossy(string_bytes(stdout_path)).into_owned();
+    let stderr_path_string = String::from_utf8_lossy(string_bytes(stderr_path)).into_owned();
+    let heartbeat_path_string = String::from_utf8_lossy(string_bytes(heartbeat_path)).into_owned();
+    let Some(command_items) = list_like_string_items(command) else {
+        return clasp_rt_result_err_string(build_runtime_string(b"invalid_command"));
+    };
+    let command_values: Vec<String> = command_items
+        .iter()
+        .map(|value| String::from_utf8_lossy(string_bytes(*value)).into_owned())
+        .collect();
+    let poll_ms_value = match clasp_rt_int_arg(poll_ms) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let memory_limit_mb_value = match parse_process_memory_limit_mb(memory_limit_mb) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let mut args = vec![
+        stdout_path_string,
+        stderr_path_string,
+        heartbeat_path_string,
+        poll_ms_value.to_string(),
+        memory_limit_mb_value.to_string(),
+    ];
+    args.extend(command_values);
+    match spawn_watched_process_with_limits_json(&cwd_string, &args) {
+        Ok(payload) => clasp_rt_result_ok_string(build_runtime_string(payload.as_bytes())),
+        Err(message) => clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    }
+}
+
+pub unsafe extern "C" fn clasp_rt_watch_command_with_limits_json(
+    cwd: *mut ClaspRtString,
+    stdout_path: *mut ClaspRtString,
+    stderr_path: *mut ClaspRtString,
+    heartbeat_path: *mut ClaspRtString,
+    poll_ms: *mut ClaspRtHeader,
+    memory_limit_mb: *mut ClaspRtHeader,
+    command: *mut ClaspRtHeader,
+) -> *mut ClaspRtResultString {
+    let cwd_string = String::from_utf8_lossy(string_bytes(cwd)).into_owned();
+    let stdout_path_string = String::from_utf8_lossy(string_bytes(stdout_path)).into_owned();
+    let stderr_path_string = String::from_utf8_lossy(string_bytes(stderr_path)).into_owned();
+    let heartbeat_path_string = String::from_utf8_lossy(string_bytes(heartbeat_path)).into_owned();
+    let Some(command_items) = list_like_string_items(command) else {
+        return clasp_rt_result_err_string(build_runtime_string(b"invalid_command"));
+    };
+    let command_values: Vec<String> = command_items
+        .iter()
+        .map(|value| String::from_utf8_lossy(string_bytes(*value)).into_owned())
+        .collect();
+    let poll_ms_value = match clasp_rt_int_arg(poll_ms) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let memory_limit_mb_value = match parse_process_memory_limit_mb(memory_limit_mb) {
+        Ok(value) => value,
+        Err(message) => return clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    };
+    let mut args = vec![
+        stdout_path_string,
+        stderr_path_string,
+        heartbeat_path_string,
+        poll_ms_value.to_string(),
+        memory_limit_mb_value.to_string(),
+    ];
+    args.extend(command_values);
+    match watch_watched_process_with_limits_json(&cwd_string, &args) {
+        Ok((_exit_code, payload)) => clasp_rt_result_ok_string(build_runtime_string(payload.as_bytes())),
+        Err(message) => clasp_rt_result_err_string(build_runtime_string(message.as_bytes())),
+    }
+}
+
 pub unsafe extern "C" fn clasp_rt_reconcile_watched_process_json(
     heartbeat_path: *mut ClaspRtString,
 ) -> *mut ClaspRtResultString {
@@ -12357,6 +14413,28 @@ mod tests {
         let low_only = br#""bad-\uDD1E""#;
         let low_slice = json_root_value(low_only).expect("expected string root");
         assert!(json_decode_string(low_only, low_slice).is_none());
+    }
+
+    #[test]
+    fn json_array_items_preserves_nested_values_and_string_commas() {
+        let text = br#"[1, {"text":"a,b","nested":[true,false]}, [], "tail"]"#;
+        let root = json_root_value(text).expect("expected array root");
+        let items = json_array_items(text, root).expect("expected array items");
+
+        assert_eq!(items.len(), json_array_length(text, root));
+        for (index, item) in items.iter().enumerate() {
+            let indexed = json_array_item(text, root, index).expect("expected indexed item");
+            assert_eq!(item.start, indexed.start);
+            assert_eq!(item.end, indexed.end);
+        }
+        assert_eq!(
+            &text[items[1].start..items[1].end],
+            br#"{"text":"a,b","nested":[true,false]}"#
+        );
+
+        let object = br#"{"not":"array"}"#;
+        let object_root = json_root_value(object).expect("expected object root");
+        assert!(json_array_items(object, object_root).is_none());
     }
 
     #[test]
@@ -13491,6 +15569,48 @@ mod tests {
     }
 
     #[test]
+    fn cancel_watched_process_json_does_not_signal_legacy_unmarked_payload() {
+        let temp_root = std::env::temp_dir().join(format!(
+            "clasp-cancel-watch-unmarked-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&temp_root).expect("expected unmarked cancel temp root");
+        let heartbeat_path = temp_root.join("heartbeat.json");
+        let current_pid = std::process::id();
+        let payload = serde_json::json!({
+            "pid": current_pid,
+            "processGroupId": current_pid,
+            "status": "running",
+            "running": true,
+            "completed": false,
+            "exitCode": -1,
+            "timedOut": false,
+            "error": "",
+            "command": [],
+            "stdoutPath": "",
+            "stderrPath": "",
+            "heartbeatPath": heartbeat_path.to_string_lossy(),
+            "startedAtMs": runtime_time_unix_ms(),
+            "updatedAtMs": runtime_time_unix_ms()
+        });
+        std::fs::write(&heartbeat_path, payload.to_string())
+            .expect("expected legacy heartbeat write");
+
+        let cancelled = cancel_watched_process_json(&heartbeat_path.to_string_lossy())
+            .expect("expected legacy heartbeat cancellation to fail closed");
+        let cancelled_json: serde_json::Value =
+            serde_json::from_str(&cancelled).expect("expected valid cancelled heartbeat");
+        assert_eq!(cancelled_json["status"].as_str(), Some("timeout"));
+        assert_eq!(cancelled_json["completed"].as_bool(), Some(true));
+        assert!(
+            watched_process_exists(current_pid),
+            "legacy unmarked heartbeat must not signal its recorded pid"
+        );
+
+        let _ = std::fs::remove_dir_all(temp_root);
+    }
+
+    #[test]
     fn cancel_watched_process_json_stops_nested_process_group() {
         unsafe {
             let temp_root = std::env::temp_dir().join(format!(
@@ -13953,6 +16073,65 @@ mod tests {
     }
 
     #[test]
+    fn interpreted_decls_shadow_builtin_runtime_names() {
+        let image_json = r#"{
+            "format": "clasp-native-image-v1",
+            "module": "ShadowRuntimeName",
+            "exports": ["hostAvailableMemoryMb", "main"],
+            "entrypoints": [
+                {"name": "hostAvailableMemoryMb", "symbol": "clasp_native__ShadowRuntimeName__hostAvailableMemoryMb", "kind": "function", "arity": 1},
+                {"name": "main", "symbol": "clasp_native__ShadowRuntimeName__main", "kind": "global", "arity": 0}
+            ],
+            "abi": {"recordLayouts": [], "variantLayouts": []},
+            "runtime": {"profile": "compiler_backend_minimal", "bindings": [], "boundaries": []},
+            "compatibility": {
+                "interfaceFingerprint": "native-compat:test",
+                "acceptedPreviousFingerprints": [],
+                "migration": {
+                    "strategy": "exact-interface-only",
+                    "stateType": null,
+                    "snapshotSymbol": null,
+                    "handoffSymbol": null
+                }
+            },
+            "decls": [
+                {
+                    "kind": "function",
+                    "name": "hostAvailableMemoryMb",
+                    "params": ["value"],
+                    "body": {"kind": "local", "name": "value"}
+                },
+                {
+                    "kind": "global",
+                    "name": "main",
+                    "body": {
+                        "kind": "call",
+                        "callee": {"kind": "local", "name": "hostAvailableMemoryMb"},
+                        "args": [{"kind": "string", "value": "shadowed"}]
+                    }
+                }
+            ]
+        }"#;
+
+        unsafe {
+            let image_text = build_runtime_string(image_json.as_bytes());
+            let image = clasp_rt_native_module_image_load(image_text as *mut ClaspRtJson);
+            assert!(!image.is_null(), "expected native image fixture to load");
+
+            let result = interpret_native_decl(null_mut(), image, "main", &[], 0);
+            assert!(!result.is_null(), "expected local declaration to shadow runtime builtin name");
+            assert_eq!(
+                String::from_utf8_lossy(string_bytes(result as *mut ClaspRtString)),
+                "shadowed"
+            );
+
+            release_header(null_mut(), result);
+            clasp_rt_native_module_image_free(null_mut(), image);
+            release_header(null_mut(), image_text as *mut ClaspRtHeader);
+        }
+    }
+
+    #[test]
     fn builtin_runtime_binding_lists_directory_entries() {
         let temp_root = env::temp_dir().join(format!("clasp-list-dir-{}", unique_test_suffix()));
         fs::create_dir_all(&temp_root).expect("expected temp listDir root");
@@ -14018,6 +16197,219 @@ mod tests {
     }
 
     #[test]
+    fn host_available_disk_mb_reports_free_space() {
+        unsafe {
+            let path = build_runtime_string(b"/");
+            let args = [path as *mut ClaspRtHeader];
+
+            let result = interpret_builtin_runtime_binding("hostAvailableDiskMb", &args);
+            assert_eq!(variant_tag_text(result), Some("Ok".to_owned()));
+
+            let result_items = variant_items(result as *mut ClaspRtVariantValue);
+            assert_eq!(result_items.len(), 1);
+            assert_eq!((*result_items[0].cast::<ClaspRtInt>()).value > 0, true);
+
+            let binding = ClaspRtNativeRuntimeBinding {
+                name: "hostAvailableDiskMb".to_owned(),
+                runtime_name: "hostAvailableDiskMb".to_owned(),
+                binding_type: "Str -> Result Int".to_owned(),
+            };
+            let binding_result = interpret_runtime_binding(&binding, &args);
+            assert_eq!(variant_tag_text(binding_result), Some("Ok".to_owned()));
+
+            release_header(null_mut(), path as *mut ClaspRtHeader);
+            release_header(null_mut(), result);
+            release_header(null_mut(), binding_result);
+        }
+    }
+
+    #[test]
+    fn host_file_size_mb_reports_regular_file_size_and_rejects_missing_paths() {
+        let temp_root = env::temp_dir().join(format!("clasp-host-file-size-{}", unique_test_suffix()));
+        fs::create_dir_all(&temp_root).expect("expected temp root");
+        let file_path = temp_root.join("sample.log");
+        fs::write(&file_path, vec![b'x'; 1_048_577]).expect("expected test file");
+
+        unsafe {
+            let path = build_runtime_string(file_path.to_string_lossy().as_bytes());
+            let args = [path as *mut ClaspRtHeader];
+
+            let result = interpret_builtin_runtime_binding("hostFileSizeMb", &args);
+            assert_eq!(variant_tag_text(result), Some("Ok".to_owned()));
+            let result_items = variant_items(result as *mut ClaspRtVariantValue);
+            assert_eq!(result_items.len(), 1);
+            assert_eq!((*result_items[0].cast::<ClaspRtInt>()).value, 2);
+
+            let binding = ClaspRtNativeRuntimeBinding {
+                name: "hostFileSizeMb".to_owned(),
+                runtime_name: "hostFileSizeMb".to_owned(),
+                binding_type: "Str -> Result Int".to_owned(),
+            };
+            let binding_result = interpret_runtime_binding(&binding, &args);
+            assert_eq!(variant_tag_text(binding_result), Some("Ok".to_owned()));
+
+            let missing_path = temp_root.join("missing.log");
+            let missing = build_runtime_string(missing_path.to_string_lossy().as_bytes());
+            let missing_args = [missing as *mut ClaspRtHeader];
+            let missing_result = interpret_builtin_runtime_binding("hostFileSizeMb", &missing_args);
+            assert_eq!(variant_tag_text(missing_result), Some("Err".to_owned()));
+
+            release_header(null_mut(), path as *mut ClaspRtHeader);
+            release_header(null_mut(), result);
+            release_header(null_mut(), binding_result);
+            release_header(null_mut(), missing as *mut ClaspRtHeader);
+            release_header(null_mut(), missing_result);
+        }
+
+        let _ = fs::remove_dir_all(temp_root);
+    }
+
+    #[test]
+    fn host_cap_file_tail_mb_keeps_tail_and_preserves_regular_file() {
+        let temp_root = env::temp_dir().join(format!("clasp-host-tail-cap-{}", unique_test_suffix()));
+        fs::create_dir_all(&temp_root).expect("expected temp root");
+        let file_path = temp_root.join("sample.log");
+        let mut contents = Vec::new();
+        contents.extend(vec![b'a'; 1_048_576]);
+        contents.extend(vec![b'b'; 1_048_576]);
+        fs::write(&file_path, contents).expect("expected test file");
+
+        unsafe {
+            let path = build_runtime_string(file_path.to_string_lossy().as_bytes());
+            let max_mb = build_runtime_int(1);
+            let args = [path as *mut ClaspRtHeader, max_mb as *mut ClaspRtHeader];
+
+            let result = interpret_builtin_runtime_binding("hostCapFileTailMb", &args);
+            assert_eq!(variant_tag_text(result), Some("Ok".to_owned()));
+            let result_items = variant_items(result as *mut ClaspRtVariantValue);
+            assert_eq!(result_items.len(), 1);
+            assert_eq!((*result_items[0].cast::<ClaspRtInt>()).value, 1);
+
+            let capped = fs::read(&file_path).expect("expected capped file");
+            assert_eq!(capped.len(), 1_048_576);
+            assert!(capped.iter().all(|byte| *byte == b'b'));
+
+            let binding = ClaspRtNativeRuntimeBinding {
+                name: "hostCapFileTailMb".to_owned(),
+                runtime_name: "hostCapFileTailMb".to_owned(),
+                binding_type: "Str -> Int -> Result Int".to_owned(),
+            };
+            let binding_result = interpret_runtime_binding(&binding, &args);
+            assert_eq!(variant_tag_text(binding_result), Some("Ok".to_owned()));
+
+            release_header(null_mut(), path as *mut ClaspRtHeader);
+            release_header(null_mut(), max_mb as *mut ClaspRtHeader);
+            release_header(null_mut(), result);
+            release_header(null_mut(), binding_result);
+        }
+
+        let _ = fs::remove_dir_all(temp_root);
+    }
+
+    #[test]
+    fn host_available_memory_mb_reports_free_memory() {
+        unsafe {
+            let args: [*mut ClaspRtHeader; 0] = [];
+
+            let result = interpret_builtin_runtime_binding("hostAvailableMemoryMb", &args);
+            assert_eq!(variant_tag_text(result), Some("Ok".to_owned()));
+
+            let result_items = variant_items(result as *mut ClaspRtVariantValue);
+            assert_eq!(result_items.len(), 1);
+            assert_eq!((*result_items[0].cast::<ClaspRtInt>()).value > 0, true);
+
+            let binding = ClaspRtNativeRuntimeBinding {
+                name: "hostAvailableMemoryMb".to_owned(),
+                runtime_name: "hostAvailableMemoryMb".to_owned(),
+                binding_type: "Result Int".to_owned(),
+            };
+            let binding_result = interpret_runtime_binding(&binding, &args);
+            assert_eq!(variant_tag_text(binding_result), Some("Ok".to_owned()));
+
+            release_header(null_mut(), result);
+            release_header(null_mut(), binding_result);
+        }
+    }
+
+    #[test]
+    fn host_process_alive_reports_live_process_and_rejects_invalid_pid() {
+        unsafe {
+            let pid_text = std::process::id().to_string();
+            let pid = build_runtime_string(pid_text.as_bytes());
+            let args = [pid as *mut ClaspRtHeader];
+
+            let result = interpret_builtin_runtime_binding("hostProcessAlive", &args);
+            assert_eq!(variant_tag_text(result), Some("Ok".to_owned()));
+            let result_items = variant_items(result as *mut ClaspRtVariantValue);
+            assert_eq!(result_items.len(), 1);
+            assert_eq!(header_bool_value(result_items[0]), Some(true));
+
+            let binding = ClaspRtNativeRuntimeBinding {
+                name: "hostProcessAlive".to_owned(),
+                runtime_name: "hostProcessAlive".to_owned(),
+                binding_type: "Str -> Result Bool".to_owned(),
+            };
+            let binding_result = interpret_runtime_binding(&binding, &args);
+            assert_eq!(variant_tag_text(binding_result), Some("Ok".to_owned()));
+
+            let invalid_pid = build_runtime_string(b"not-a-pid");
+            let invalid_args = [invalid_pid as *mut ClaspRtHeader];
+            let invalid_result = interpret_builtin_runtime_binding("hostProcessAlive", &invalid_args);
+            assert_eq!(variant_tag_text(invalid_result), Some("Err".to_owned()));
+
+            release_header(null_mut(), pid as *mut ClaspRtHeader);
+            release_header(null_mut(), result);
+            release_header(null_mut(), binding_result);
+            release_header(null_mut(), invalid_pid as *mut ClaspRtHeader);
+            release_header(null_mut(), invalid_result);
+        }
+    }
+
+    #[test]
+    fn host_process_count_by_name_reports_current_process() {
+        unsafe {
+            let current_name = fs::read_to_string("/proc/self/comm")
+                .unwrap_or_else(|_| "unknown-process-name".to_owned());
+            let names = build_string_list(&[current_name.trim().as_bytes()]);
+            let args = [names];
+
+            let result = interpret_builtin_runtime_binding("hostProcessCountByName", &args);
+            assert_eq!(variant_tag_text(result), Some("Ok".to_owned()));
+            let result_items = variant_items(result as *mut ClaspRtVariantValue);
+            assert_eq!(result_items.len(), 1);
+            assert_eq!((*result_items[0].cast::<ClaspRtInt>()).value > 0, true);
+
+            let binding = ClaspRtNativeRuntimeBinding {
+                name: "hostProcessCountByName".to_owned(),
+                runtime_name: "hostProcessCountByName".to_owned(),
+                binding_type: "[Str] -> Result Int".to_owned(),
+            };
+            let binding_result = interpret_runtime_binding(&binding, &args);
+            assert_eq!(variant_tag_text(binding_result), Some("Ok".to_owned()));
+
+            let unmanaged_result =
+                interpret_builtin_runtime_binding("hostUnmanagedProcessCountByName", &args);
+            assert_eq!(variant_tag_text(unmanaged_result), Some("Ok".to_owned()));
+
+            let unmanaged_rss_result =
+                interpret_builtin_runtime_binding("hostUnmanagedProcessRssMbByName", &args);
+            assert_eq!(variant_tag_text(unmanaged_rss_result), Some("Ok".to_owned()));
+            let unmanaged_rss_items = variant_items(unmanaged_rss_result as *mut ClaspRtVariantValue);
+            assert_eq!(unmanaged_rss_items.len(), 1);
+            assert!(
+                (*unmanaged_rss_items[0].cast::<ClaspRtInt>()).value > 0,
+                "expected positive unmanaged RSS for current process"
+            );
+
+            release_header(null_mut(), names);
+            release_header(null_mut(), result);
+            release_header(null_mut(), binding_result);
+            release_header(null_mut(), unmanaged_result);
+            release_header(null_mut(), unmanaged_rss_result);
+        }
+    }
+
+    #[test]
     fn workspace_file_api_reads_writes_lists_and_rejects_escapes() {
         let temp_parent = env::temp_dir().join(format!("clasp-workspace-api-{}", unique_test_suffix()));
         let workspace_root = temp_parent.join("workspace");
@@ -14032,6 +16424,9 @@ mod tests {
             let nested_path = build_runtime_string(b"nested/result.txt");
             let nested_dir = build_runtime_string(b"nested");
             let append_path = build_runtime_string(b"logs/events.jsonl");
+            let remove_file_path = build_runtime_string(b"removable/file.txt");
+            let remove_dir_path = build_runtime_string(b"removable");
+            let remove_contents = build_runtime_string(b"remove-me");
             let first_event = build_runtime_string(b"event-one\n");
             let second_event = build_runtime_string(b"event-two\n");
             let contents = build_runtime_string(b"workspace-text");
@@ -14081,6 +16476,185 @@ mod tests {
                 "result.txt"
             );
 
+            let max_entries = build_runtime_int(64);
+            let max_depth = build_runtime_int(4);
+            let tree_root = build_runtime_string(b".");
+            let tree_result = clasp_rt_workspace_list_tree(
+                root,
+                tree_root,
+                max_entries as *mut ClaspRtHeader,
+                max_depth as *mut ClaspRtHeader,
+            );
+            assert_eq!(variant_tag_text(tree_result), Some("Ok".to_owned()));
+            let tree_items = variant_items(tree_result as *mut ClaspRtVariantValue);
+            let tree_paths = list_value_items(tree_items[0] as *mut ClaspRtListValue);
+            let rendered_tree_paths: Vec<String> = tree_paths
+                .iter()
+                .map(|item| String::from_utf8_lossy(string_bytes(*item as *mut ClaspRtString)).into_owned())
+                .collect();
+            assert!(
+                rendered_tree_paths.iter().any(|path| path == "logs/"),
+                "expected recursive tree to include directories"
+            );
+            assert!(
+                rendered_tree_paths.iter().any(|path| path == "logs/events.jsonl"),
+                "expected recursive tree to include nested files"
+            );
+            assert!(
+                rendered_tree_paths.iter().any(|path| path == "nested/result.txt"),
+                "expected recursive tree to include written files"
+            );
+
+            let limit_one = build_runtime_int(1);
+            let limited_tree = clasp_rt_workspace_list_tree(
+                root,
+                tree_root,
+                limit_one as *mut ClaspRtHeader,
+                max_depth as *mut ClaspRtHeader,
+            );
+            assert_eq!(variant_tag_text(limited_tree), Some("Err".to_owned()));
+            let limited_items = variant_items(limited_tree as *mut ClaspRtVariantValue);
+            assert!(
+                String::from_utf8_lossy(string_bytes(limited_items[0] as *mut ClaspRtString))
+                    .contains("workspace_limit_exceeded"),
+                "expected bounded recursive tree listing to fail closed"
+            );
+
+            let search_needle = build_runtime_string(b"workspace-text");
+            let max_matches = build_runtime_int(8);
+            let max_files = build_runtime_int(64);
+            let max_file_bytes = build_runtime_int(1024);
+            let search_result = clasp_rt_workspace_search_text(
+                root,
+                tree_root,
+                search_needle,
+                max_matches as *mut ClaspRtHeader,
+                max_files as *mut ClaspRtHeader,
+                max_file_bytes as *mut ClaspRtHeader,
+                max_depth as *mut ClaspRtHeader,
+            );
+            assert_eq!(variant_tag_text(search_result), Some("Ok".to_owned()));
+            let search_items = variant_items(search_result as *mut ClaspRtVariantValue);
+            let search_paths = list_value_items(search_items[0] as *mut ClaspRtListValue);
+            let rendered_search_paths: Vec<String> = search_paths
+                .iter()
+                .map(|item| String::from_utf8_lossy(string_bytes(*item as *mut ClaspRtString)).into_owned())
+                .collect();
+            assert!(
+                rendered_search_paths
+                    .iter()
+                    .any(|line| line == "nested/result.txt:1:workspace-text"),
+                "expected workspace text search to include file, line, and snippet"
+            );
+
+            let replace_value = build_runtime_string(b"workspace-updated");
+            let replace_limit = build_runtime_int(2);
+            let replace_result = clasp_rt_workspace_replace_text(
+                root,
+                nested_path,
+                search_needle,
+                replace_value,
+                replace_limit as *mut ClaspRtHeader,
+                max_file_bytes as *mut ClaspRtHeader,
+            );
+            assert_eq!(variant_tag_text(replace_result), Some("Ok".to_owned()));
+            let replace_items = variant_items(replace_result as *mut ClaspRtVariantValue);
+            assert_eq!(header_int_value(replace_items[0]), Some(1));
+            let replaced_read = clasp_rt_workspace_read_file(root, nested_path);
+            assert!((*replaced_read).is_ok, "expected replaced file to be readable");
+            assert_eq!(result_string_text(replaced_read), "workspace-updated");
+
+            let missing_find = build_runtime_string(b"workspace-text");
+            let missing_replace = clasp_rt_workspace_replace_text(
+                root,
+                nested_path,
+                missing_find,
+                replace_value,
+                replace_limit as *mut ClaspRtHeader,
+                max_file_bytes as *mut ClaspRtHeader,
+            );
+            assert_eq!(variant_tag_text(missing_replace), Some("Err".to_owned()));
+            let missing_replace_items = variant_items(missing_replace as *mut ClaspRtVariantValue);
+            assert!(
+                String::from_utf8_lossy(string_bytes(missing_replace_items[0] as *mut ClaspRtString))
+                    .contains("workspace_replace_missing"),
+                "expected missing replacement target to fail closed"
+            );
+
+            let empty_find = build_runtime_string(b"");
+            let empty_replace = clasp_rt_workspace_replace_text(
+                root,
+                nested_path,
+                empty_find,
+                replace_value,
+                replace_limit as *mut ClaspRtHeader,
+                max_file_bytes as *mut ClaspRtHeader,
+            );
+            assert_eq!(variant_tag_text(empty_replace), Some("Err".to_owned()));
+            let empty_replace_items = variant_items(empty_replace as *mut ClaspRtVariantValue);
+            assert!(
+                String::from_utf8_lossy(string_bytes(empty_replace_items[0] as *mut ClaspRtString))
+                    .contains("workspace_invalid_replace"),
+                "expected empty replacement target to fail closed"
+            );
+
+            let repeat_path = build_runtime_string(b"nested/repeat.txt");
+            let repeat_contents = build_runtime_string(b"repeat repeat");
+            let repeat_write = clasp_rt_workspace_write_file(root, repeat_path, repeat_contents);
+            assert!((*repeat_write).is_ok, "expected repeat fixture write to succeed");
+            let repeat_find = build_runtime_string(b"repeat");
+            let repeat_value = build_runtime_string(b"done");
+            let repeat_replace = clasp_rt_workspace_replace_text(
+                root,
+                repeat_path,
+                repeat_find,
+                repeat_value,
+                limit_one as *mut ClaspRtHeader,
+                max_file_bytes as *mut ClaspRtHeader,
+            );
+            assert_eq!(variant_tag_text(repeat_replace), Some("Err".to_owned()));
+            let repeat_replace_items = variant_items(repeat_replace as *mut ClaspRtVariantValue);
+            assert!(
+                String::from_utf8_lossy(string_bytes(repeat_replace_items[0] as *mut ClaspRtString))
+                    .contains("workspace_limit_exceeded"),
+                "expected replacement count limit to fail closed"
+            );
+            let repeat_read = clasp_rt_workspace_read_file(root, repeat_path);
+            assert_eq!(result_string_text(repeat_read), "repeat repeat");
+
+            let zero_matches = build_runtime_int(0);
+            let limited_search = clasp_rt_workspace_search_text(
+                root,
+                tree_root,
+                search_needle,
+                zero_matches as *mut ClaspRtHeader,
+                max_files as *mut ClaspRtHeader,
+                max_file_bytes as *mut ClaspRtHeader,
+                max_depth as *mut ClaspRtHeader,
+            );
+            assert_eq!(variant_tag_text(limited_search), Some("Err".to_owned()));
+            let limited_search_items = variant_items(limited_search as *mut ClaspRtVariantValue);
+            assert!(
+                String::from_utf8_lossy(string_bytes(limited_search_items[0] as *mut ClaspRtString))
+                    .contains("workspace_invalid_limit"),
+                "expected invalid search limit to fail closed"
+            );
+
+            let removable_write = clasp_rt_workspace_write_file(root, remove_file_path, remove_contents);
+            assert!((*removable_write).is_ok, "expected removable fixture write to succeed");
+            let remove_file_result = clasp_rt_workspace_remove_path(root, remove_file_path);
+            assert!((*remove_file_result).is_ok, "expected workspace file removal to succeed");
+            assert!(
+                !workspace_root.join("removable").join("file.txt").exists(),
+                "expected workspace file removal to delete the file"
+            );
+            let remove_dir_result = clasp_rt_workspace_remove_path(root, remove_dir_path);
+            assert!((*remove_dir_result).is_ok, "expected workspace directory removal to succeed");
+            assert!(
+                !workspace_root.join("removable").exists(),
+                "expected workspace directory removal to delete the directory"
+            );
+
             let parent_escape = build_runtime_string(b"../outside.txt");
             let escape_result = clasp_rt_workspace_write_file(root, parent_escape, contents);
             assert!(!(*escape_result).is_ok, "expected parent escape to fail");
@@ -14101,6 +16675,9 @@ mod tests {
             release_header(null_mut(), nested_path as *mut ClaspRtHeader);
             release_header(null_mut(), nested_dir as *mut ClaspRtHeader);
             release_header(null_mut(), append_path as *mut ClaspRtHeader);
+            release_header(null_mut(), remove_file_path as *mut ClaspRtHeader);
+            release_header(null_mut(), remove_dir_path as *mut ClaspRtHeader);
+            release_header(null_mut(), remove_contents as *mut ClaspRtHeader);
             release_header(null_mut(), first_event as *mut ClaspRtHeader);
             release_header(null_mut(), second_event as *mut ClaspRtHeader);
             release_header(null_mut(), third_event as *mut ClaspRtHeader);
@@ -14113,6 +16690,37 @@ mod tests {
             release_header(null_mut(), binding_result);
             release_header(null_mut(), appended_again as *mut ClaspRtHeader);
             release_header(null_mut(), list_result);
+            release_header(null_mut(), max_entries as *mut ClaspRtHeader);
+            release_header(null_mut(), max_depth as *mut ClaspRtHeader);
+            release_header(null_mut(), tree_root as *mut ClaspRtHeader);
+            release_header(null_mut(), tree_result);
+            release_header(null_mut(), limit_one as *mut ClaspRtHeader);
+            release_header(null_mut(), limited_tree);
+            release_header(null_mut(), search_needle as *mut ClaspRtHeader);
+            release_header(null_mut(), max_matches as *mut ClaspRtHeader);
+            release_header(null_mut(), max_files as *mut ClaspRtHeader);
+            release_header(null_mut(), max_file_bytes as *mut ClaspRtHeader);
+            release_header(null_mut(), search_result);
+            release_header(null_mut(), replace_value as *mut ClaspRtHeader);
+            release_header(null_mut(), replace_limit as *mut ClaspRtHeader);
+            release_header(null_mut(), replace_result);
+            release_header(null_mut(), replaced_read as *mut ClaspRtHeader);
+            release_header(null_mut(), missing_find as *mut ClaspRtHeader);
+            release_header(null_mut(), missing_replace);
+            release_header(null_mut(), empty_find as *mut ClaspRtHeader);
+            release_header(null_mut(), empty_replace);
+            release_header(null_mut(), repeat_path as *mut ClaspRtHeader);
+            release_header(null_mut(), repeat_contents as *mut ClaspRtHeader);
+            release_header(null_mut(), repeat_write as *mut ClaspRtHeader);
+            release_header(null_mut(), repeat_find as *mut ClaspRtHeader);
+            release_header(null_mut(), repeat_value as *mut ClaspRtHeader);
+            release_header(null_mut(), repeat_replace);
+            release_header(null_mut(), repeat_read as *mut ClaspRtHeader);
+            release_header(null_mut(), zero_matches as *mut ClaspRtHeader);
+            release_header(null_mut(), limited_search);
+            release_header(null_mut(), removable_write as *mut ClaspRtHeader);
+            release_header(null_mut(), remove_file_result as *mut ClaspRtHeader);
+            release_header(null_mut(), remove_dir_result as *mut ClaspRtHeader);
             release_header(null_mut(), parent_escape as *mut ClaspRtHeader);
             release_header(null_mut(), escape_result as *mut ClaspRtHeader);
             release_header(null_mut(), absolute_escape as *mut ClaspRtHeader);

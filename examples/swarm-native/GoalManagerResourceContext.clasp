@@ -1,0 +1,270 @@
+module GoalManagerResourceContext
+
+foreign runCommandRaw : Str -> [Str] -> Result Str = "runCommandJson"
+
+record ProcessResult = {
+  exitCode : Int,
+  stdout : Str,
+  stderr : Str
+}
+
+processResultError : Str -> Result ProcessResult
+processResultError message = Err message
+
+processResult : Result Str -> Result ProcessResult
+processResult value = match value {
+  Ok raw -> Ok (decode ProcessResult raw),
+  Err message -> processResultError message
+}
+
+runCommand : Str -> [Str] -> Result ProcessResult
+runCommand cwd command = processResult (runCommandRaw cwd command)
+
+readEnvText : Str -> Str -> Str
+readEnvText name fallback = match envVar name {
+  Ok raw -> if raw == "" then fallback else decode Str raw,
+  Err message -> fallback
+}
+
+readEnvTextList : Str -> [Str] -> [Str]
+readEnvTextList name fallback = match envVar name {
+  Ok raw -> if raw == "" then fallback else decode [Str] raw,
+  Err message -> fallback
+}
+
+readEnvBool : Str -> Bool -> Bool
+readEnvBool name fallback = match envVar name {
+  Ok raw -> if raw == "" then fallback else decode Bool raw,
+  Err message -> fallback
+}
+
+readEnvInt : Str -> Int -> Int
+readEnvInt name fallback = match envVar name {
+  Ok raw -> if raw == "" then fallback else decode Int raw,
+  Err message -> fallback
+}
+
+firstTextOrEmpty : [Str] -> Str
+firstTextOrEmpty values = {
+  let mut first = "";
+  let mut found = false;
+  for value in values {
+    if found then
+      found
+    else {
+      first = value;
+      found = true;
+      found
+    }
+  };
+  first
+}
+
+readTextOrEmpty : Str -> Str
+readTextOrEmpty path = match readFile path {
+  Ok raw -> raw,
+  Err message -> ""
+}
+
+stateRootPath : Str
+stateRootPath =
+  if textJoin "" argv == "" then
+    "swarm-native-goal-manager-state"
+  else
+    pathJoin argv
+
+workspaceRoot : Str
+workspaceRoot = readEnvText "CLASP_LOOP_WORKSPACE_JSON" "."
+
+serviceRootRecordPath : Str
+serviceRootRecordPath = pathJoin [stateRootPath, "service-root.txt"]
+
+serviceIdRecordPath : Str
+serviceIdRecordPath = pathJoin [stateRootPath, "service-id.txt"]
+
+projectRootRecordPath : Str
+projectRootRecordPath = pathJoin [stateRootPath, "project-root.txt"]
+
+recordedProjectRoot : Str
+recordedProjectRoot = readTextOrEmpty projectRootRecordPath
+
+currentWorkingDir : Str
+currentWorkingDir = match runCommand "." ["pwd", "-P"] {
+  Ok process -> firstTextOrEmpty (textSplit process.stdout "\n"),
+  Err message -> "."
+}
+
+canonicalizePathScript : Str
+canonicalizePathScript = textJoin "\n" [
+  "set -euo pipefail",
+  "path=\"$1\"",
+  "if [ -z \"$path\" ]; then",
+  "  exit 2",
+  "fi",
+  "if command -v realpath >/dev/null 2>&1; then",
+  "  realpath -m -- \"$path\"",
+  "else",
+  "  if [ -d \"$path\" ]; then",
+  "    (cd \"$path\" && pwd -P)",
+  "  else",
+  "    parent=\"$(dirname -- \"$path\")\"",
+  "    name=\"$(basename -- \"$path\")\"",
+  "    mkdir -p \"$parent\"",
+  "    parent_abs=\"$(cd \"$parent\" && pwd -P)\"",
+  "    printf '%s/%s\n' \"$parent_abs\" \"$name\"",
+  "  fi",
+  "fi"
+]
+
+canonicalizePath : Str -> Str
+canonicalizePath value =
+  if value == "" then
+    ""
+  else
+    match runCommand "." ["bash", "-c", canonicalizePathScript, "canonicalize-path", value] {
+      Ok process ->
+        if process.exitCode == 0 then
+          firstTextOrEmpty (textSplit process.stdout "\n")
+        else
+          value,
+      Err message -> value
+    }
+
+managerProjectRootRaw : Str
+managerProjectRootRaw = {
+  let configured = readEnvText "CLASP_MANAGER_PROJECT_ROOT_JSON" "" in
+  if configured != "" then
+    configured
+  else if recordedProjectRoot != "" then
+    recordedProjectRoot
+  else
+    currentWorkingDir
+}
+
+managerProjectRoot : Str
+managerProjectRoot = canonicalizePath managerProjectRootRaw
+
+isAbsolutePath : Str -> Bool
+isAbsolutePath value = match textPrefix value "/" {
+  Ok remainder -> true,
+  Err message -> false
+}
+
+resolveWorkspacePath : Str -> Str
+resolveWorkspacePath value =
+  if value == "" then
+    ""
+  else if isAbsolutePath value then
+    value
+  else
+    pathJoin [currentWorkingDir, value]
+
+requestedWorkspaceRoot : Str
+requestedWorkspaceRoot = resolveWorkspacePath workspaceRoot
+
+canonicalRequestedWorkspaceRoot : Str
+canonicalRequestedWorkspaceRoot = canonicalizePath requestedWorkspaceRoot
+
+canonicalManagerProjectRoot : Str
+canonicalManagerProjectRoot = canonicalizePath managerProjectRoot
+
+managerWorkspaceFallbackRoot : Str
+managerWorkspaceFallbackRoot = canonicalizePath (pathJoin [stateRootPath, "manager-workspace"])
+
+workspaceRootNeedsManagerFallback : Bool
+workspaceRootNeedsManagerFallback =
+  if canonicalRequestedWorkspaceRoot == "" then
+    false
+  else if canonicalRequestedWorkspaceRoot == "/" then
+    true
+  else
+    canonicalRequestedWorkspaceRoot == canonicalManagerProjectRoot
+
+resolvedWorkspaceRoot : Str
+resolvedWorkspaceRoot =
+  if workspaceRootNeedsManagerFallback then
+    managerWorkspaceFallbackRoot
+  else
+    canonicalRequestedWorkspaceRoot
+
+agentMemoryLimitMb : Int
+agentMemoryLimitMb = readEnvInt "CLASP_LOOP_AGENT_MEMORY_MB_JSON" 8192
+
+managerPlannerMemoryReserveMb : Int
+managerPlannerMemoryReserveMb =
+  readEnvInt "CLASP_MANAGER_PLANNER_MEMORY_MB_JSON" agentMemoryLimitMb
+
+managerBenchmarkMemoryReserveMb : Int
+managerBenchmarkMemoryReserveMb =
+  readEnvInt "CLASP_MANAGER_BENCHMARK_MEMORY_MB_JSON" agentMemoryLimitMb
+
+managerServiceMemoryReserveMb : Int
+managerServiceMemoryReserveMb =
+  readEnvInt "CLASP_MANAGER_SERVICE_MEMORY_RESERVE_MB_JSON" agentMemoryLimitMb
+
+managerUpgradeMemoryReserveMb : Int
+managerUpgradeMemoryReserveMb =
+  readEnvInt "CLASP_MANAGER_UPGRADE_MEMORY_RESERVE_MB_JSON" agentMemoryLimitMb
+
+managerChildMemoryReserveMb : Int
+managerChildMemoryReserveMb =
+  readEnvInt "CLASP_MANAGER_CHILD_MEMORY_RESERVE_MB_JSON" agentMemoryLimitMb
+
+managerConfiguredMaxConcurrentChildren : Int
+managerConfiguredMaxConcurrentChildren =
+  readEnvInt "CLASP_MANAGER_MAX_CONCURRENT_CHILDREN_JSON" 2
+
+managerExternalAgentReserveMb : Int
+managerExternalAgentReserveMb =
+  readEnvInt
+    "CLASP_MANAGER_EXTERNAL_AGENT_RESERVE_MB_JSON"
+    (readEnvInt "CLASP_MANAGED_JOB_EXTERNAL_AGENT_RESERVE_MB" 1024)
+
+managerExternalAgentProcessNames : [Str]
+managerExternalAgentProcessNames =
+  readEnvTextList "CLASP_MANAGER_EXTERNAL_AGENT_PROCESS_NAMES_JSON" ["codex"]
+
+managerResourceGuardEnabled : Bool
+managerResourceGuardEnabled = readEnvBool "CLASP_MANAGER_RESOURCE_GUARD_JSON" true
+
+managerDiskReservePath : Str
+managerDiskReservePath = readEnvText "CLASP_MANAGER_DISK_RESERVE_PATH_JSON" ""
+
+managerMinAvailableDiskMb : Int
+managerMinAvailableDiskMb =
+  readEnvInt
+    "CLASP_MANAGER_MIN_AVAILABLE_DISK_MB_JSON"
+    (readEnvInt "CLASP_VERIFY_MANAGED_MIN_AVAILABLE_DISK_MB" 16384)
+
+managerMinDiskHeadroomMb : Int
+managerMinDiskHeadroomMb =
+  readEnvInt
+    "CLASP_MANAGER_MIN_DISK_HEADROOM_MB_JSON"
+    (readEnvInt
+      "CLASP_VERIFY_MANAGED_MIN_DISK_HEADROOM_MB"
+      (readEnvInt "CLASP_GENERATED_STATE_MIN_HEADROOM_MB" 1024))
+
+managerMinAvailableMemoryMb : Int
+managerMinAvailableMemoryMb =
+  readEnvInt
+    "CLASP_MANAGER_MIN_AVAILABLE_MEMORY_MB_JSON"
+    (readEnvInt "CLASP_VERIFY_MANAGED_MIN_AVAILABLE_MEMORY_MB" 45056)
+
+traceEnabled : Bool
+traceEnabled = match envVar "CLASP_MANAGER_TRACE_JSON" {
+  Ok raw -> true,
+  Err message -> false
+}
+
+tracePath : Str
+tracePath = pathJoin [stateRootPath, "trace.log"]
+
+appendManagerTrace : Str -> Str
+appendManagerTrace label =
+  if traceEnabled then
+    match appendFile tracePath (textConcat [label, "\n"]) {
+      Ok written -> "",
+      Err message -> message
+    }
+  else
+    ""

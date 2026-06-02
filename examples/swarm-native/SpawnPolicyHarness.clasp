@@ -1,0 +1,193 @@
+module Main
+
+foreign swarmObjectiveCreateRaw : Str -> Str -> Str -> Int -> Int -> Result Str = "swarmObjectiveCreateJson"
+foreign swarmTaskCreateChildWithDeadlineAndPriorityRaw : Str -> Str -> Str -> Str -> Str -> [Str] -> Int -> Int -> Int -> Int -> Int -> Result Str = "swarmTaskCreateChildWithDeadlineAndPriorityJson"
+foreign swarmTaskCreateChildWithPolicyRaw : Str -> Str -> Str -> Str -> Str -> [Str] -> Int -> Int -> Int -> Int -> Int -> Int -> Result Str = "swarmTaskCreateChildWithPolicyJson"
+foreign swarmStatusRaw : Str -> Str -> Result Str = "swarmStatusJson"
+
+record SwarmObjective = {
+  createdAtMs : Int,
+  deadlineAtMs : Int,
+  objectiveId : Str,
+  detail : Str,
+  maxRuns : Int,
+  maxTasks : Int,
+  projectedStatus : Str,
+  status : Str,
+  taskCount : Int,
+  runCount : Int,
+  updatedAtMs : Int
+}
+
+record SwarmTask = {
+  attempts : Int,
+  taskId : Str,
+  status : Str,
+  objectiveId : Str,
+  detail : Str,
+  dependencies : [Str],
+  ready : Bool,
+  blockedBy : [Str],
+  createdAtMs : Int,
+  deadlineAtMs : Int,
+  heartbeatSeen : Bool,
+  lastError : Str,
+  lastHeartbeatAtMs : Int,
+  leaseActor : Str,
+  leaseExpired : Bool,
+  leaseTimeoutMs : Int,
+  maxRuns : Int,
+  parentTaskId : Str,
+  priority : Int,
+  spawnDepth : Int,
+  maxSpawnDepth : Int,
+  maxChildTasks : Int,
+  childTaskIds : [Str],
+  childTaskCount : Int,
+  remainingChildTaskBudget : Int,
+  objectiveDeadlineAtMs : Int,
+  updatedAtMs : Int
+}
+
+record SpawnPolicyReport = {
+  rootTaskId : Str,
+  rootParentTaskId : Str,
+  rootSpawnDepth : Int,
+  rootMaxSpawnDepth : Int,
+  rootMaxChildTasks : Int,
+  rootStatusChildTaskIds : [Str],
+  rootStatusChildTaskCount : Int,
+  rootStatusRemainingChildTaskBudget : Int,
+  childTaskId : Str,
+  childParentTaskId : Str,
+  childSpawnDepth : Int,
+  childMaxSpawnDepth : Int,
+  childMaxChildTasks : Int,
+  childStatusParentTaskId : Str,
+  childStatusChildTaskIds : [Str],
+  childStatusChildTaskCount : Int,
+  childStatusRemainingChildTaskBudget : Int,
+  blockedGrandchild : Bool,
+  blockedGrandchildMessage : Str,
+  blockedSibling : Bool,
+  blockedSiblingMessage : Str
+}
+
+emptyDependencies : [Str]
+emptyDependencies = []
+
+stateRootPath : Str
+stateRootPath =
+  if textJoin "" argv == "" then
+    "swarm-native-spawn-policy-state"
+  else
+    pathJoin argv
+
+objectiveId : Str
+objectiveId = "spawn-policy-objective"
+
+noDeadlineAtMs : Int
+noDeadlineAtMs = 0
+
+leaseTimeoutMs : Int
+leaseTimeoutMs = 60000
+
+errorText : Str -> Str
+errorText message = textConcat ["error:", message]
+
+objectiveResult : Result Str -> Result SwarmObjective
+objectiveResult value = match value {
+  Ok raw -> Ok (decode SwarmObjective raw),
+  Err message -> Err message
+}
+
+taskResult : Result Str -> Result SwarmTask
+taskResult value = match value {
+  Ok raw -> Ok (decode SwarmTask raw),
+  Err message -> Err message
+}
+
+textIncludes : Str -> Str -> Bool
+textIncludes value needle =
+  length (textSplit value needle) > 1
+
+taskCreateWithSpawnPolicy : Str -> Str -> Int -> Int -> Result SwarmTask
+taskCreateWithSpawnPolicy parentTaskId taskId maxSpawnDepth maxChildTasks =
+  taskResult
+    (swarmTaskCreateChildWithPolicyRaw
+      stateRootPath
+      objectiveId
+      parentTaskId
+      taskId
+      (textConcat ["spawn task ", taskId])
+      emptyDependencies
+      4
+      noDeadlineAtMs
+      0
+      maxSpawnDepth
+      maxChildTasks
+      leaseTimeoutMs)
+
+taskStatus : Str -> Result SwarmTask
+taskStatus taskId = taskResult (swarmStatusRaw stateRootPath taskId)
+
+reportFrom : SwarmTask -> SwarmTask -> SwarmTask -> SwarmTask -> Str -> Str -> SpawnPolicyReport
+reportFrom rootTask childTask rootStatus childStatus blockedGrandchildMessage blockedSiblingMessage =
+  SpawnPolicyReport {
+    rootTaskId = rootTask.taskId,
+    rootParentTaskId = rootTask.parentTaskId,
+    rootSpawnDepth = rootTask.spawnDepth,
+    rootMaxSpawnDepth = rootTask.maxSpawnDepth,
+    rootMaxChildTasks = rootTask.maxChildTasks,
+    rootStatusChildTaskIds = rootStatus.childTaskIds,
+    rootStatusChildTaskCount = rootStatus.childTaskCount,
+    rootStatusRemainingChildTaskBudget = rootStatus.remainingChildTaskBudget,
+    childTaskId = childTask.taskId,
+    childParentTaskId = childTask.parentTaskId,
+    childSpawnDepth = childTask.spawnDepth,
+    childMaxSpawnDepth = childTask.maxSpawnDepth,
+    childMaxChildTasks = childTask.maxChildTasks,
+    childStatusParentTaskId = childStatus.parentTaskId,
+    childStatusChildTaskIds = childStatus.childTaskIds,
+    childStatusChildTaskCount = childStatus.childTaskCount,
+    childStatusRemainingChildTaskBudget = childStatus.remainingChildTaskBudget,
+    blockedGrandchild = textIncludes blockedGrandchildMessage "exhausted its spawn depth budget",
+    blockedGrandchildMessage = blockedGrandchildMessage,
+    blockedSibling = textIncludes blockedSiblingMessage "exhausted its child task budget",
+    blockedSiblingMessage = blockedSiblingMessage
+  }
+
+main : Str
+main =
+  match mkdirAll stateRootPath {
+    Ok rootCreated ->
+      match objectiveResult (swarmObjectiveCreateRaw stateRootPath objectiveId "Bound child spawning from ordinary Clasp." 6 10) {
+        Ok objectiveValue ->
+          match taskCreateWithSpawnPolicy "" "root" 1 1 {
+            Ok rootTask ->
+              match taskCreateWithSpawnPolicy rootTask.taskId "child" 0 0 {
+                Ok childTask ->
+                  match taskCreateWithSpawnPolicy rootTask.taskId "sibling" 0 0 {
+                    Ok unexpected -> errorText "sibling create unexpectedly passed",
+                    Err blockedSiblingMessage ->
+                      match taskCreateWithSpawnPolicy childTask.taskId "grandchild" 0 0 {
+                        Ok unexpected -> errorText "grandchild create unexpectedly passed",
+                        Err blockedGrandchildMessage ->
+                          match taskStatus rootTask.taskId {
+                            Ok rootStatus ->
+                              match taskStatus childTask.taskId {
+                                Ok childStatus -> encode (reportFrom rootTask childTask rootStatus childStatus blockedGrandchildMessage blockedSiblingMessage),
+                                Err message -> errorText message
+                              },
+                            Err message -> errorText message
+                          }
+                      }
+                  },
+                Err message -> errorText message
+              },
+            Err message -> errorText message
+          },
+        Err message -> errorText message
+      },
+    Err message -> errorText message
+  }

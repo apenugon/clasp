@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ulimit -c 0 >/dev/null 2>&1 || true
+
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 verify_tmp_root="${CLASP_VERIFY_TMPDIR:-${TMPDIR:-/tmp}}"
 nix_config_features='experimental-features = nix-command flakes'
@@ -26,13 +28,39 @@ verify_report_first_failed_phase=""
 verify_report_first_failed_group=""
 verify_report_first_failed_command=""
 verify_report_first_failed_exit_status=""
+verify_report_last_completed_command=""
+verify_report_last_successful_command=""
+verify_report_current_phase=""
+verify_report_current_group=""
+verify_report_current_command=""
+verify_report_current_parallel_group=""
+verify_report_current_max_jobs=1
+verify_managed_job_dir=""
+verify_managed_job_terminal=0
 declare -a verify_report_commands=()
 streamed_log_offset=0
+export CLASP_BENCHMARK_PREP_COMPILER_FINGERPRINT_CACHE="${CLASP_BENCHMARK_PREP_COMPILER_FINGERPRINT_CACHE:-$project_root/.clasp-verify/cache/benchmark-prep-compiler-fingerprint-v1.json}"
+export CLASP_BENCHMARK_PREP_CACHE_MODE="${CLASP_BENCHMARK_PREP_CACHE_MODE:-link}"
 verify_managed_mode="${CLASP_VERIFY_MANAGED:-auto}"
-verify_managed_memory_mb="${CLASP_VERIFY_MANAGED_MEMORY_MB:-16384}"
-verify_managed_min_available_memory_mb="${CLASP_VERIFY_MANAGED_MIN_AVAILABLE_MEMORY_MB:-40960}"
+verify_managed_memory_mb="${CLASP_VERIFY_MANAGED_MEMORY_MB:-8192}"
+verify_managed_min_available_memory_mb="${CLASP_VERIFY_MANAGED_MIN_AVAILABLE_MEMORY_MB:-45056}"
+verify_managed_min_available_disk_mb="${CLASP_VERIFY_MANAGED_MIN_AVAILABLE_DISK_MB:-16384}"
+verify_managed_min_disk_headroom_mb="${CLASP_VERIFY_MANAGED_MIN_DISK_HEADROOM_MB:-${CLASP_GENERATED_STATE_MIN_HEADROOM_MB:-1024}}"
 verify_managed_poll_secs="${CLASP_VERIFY_MANAGED_POLL_SECS:-1}"
+verify_direct_memory_limit="${CLASP_VERIFY_DIRECT_MEMORY_LIMIT:-auto}"
+verify_direct_memory_limit_mb="${CLASP_VERIFY_DIRECT_MEMORY_LIMIT_MB:-$verify_managed_memory_mb}"
+verify_direct_host_reserve="${CLASP_VERIFY_DIRECT_HOST_RESERVE:-auto}"
 verify_max_parallel_jobs="${CLASP_VERIFY_MAX_PARALLEL_JOBS:-1}"
+verify_temp_cleanup_mode="${CLASP_VERIFY_TEMP_CLEANUP:-auto}"
+verify_temp_cleanup_margin_mb="${CLASP_VERIFY_TEMP_CLEANUP_MARGIN_MB:-2048}"
+verify_resume_report_json="${CLASP_VERIFY_RESUME_REPORT_JSON:-}"
+verify_resume_report_mode="${CLASP_VERIFY_RESUME_REPORT_MODE:-auto}"
+verify_resume_start_at="${CLASP_VERIFY_START_AT:-}"
+verify_resume_start_after="${CLASP_VERIFY_START_AFTER:-}"
+verify_resume_started=1
+if [[ -n "$verify_resume_report_json" && "$verify_resume_report_json" != /* ]]; then
+  verify_resume_report_json="$PWD/$verify_resume_report_json"
+fi
 if ! [[ "$verify_lock_timeout_secs" =~ ^[0-9]+$ ]]; then
   verify_lock_timeout_secs=0
 fi
@@ -44,54 +72,177 @@ if ! [[ "$verify_managed_min_available_memory_mb" =~ ^[0-9]+$ ]]; then
   printf '%s: CLASP_VERIFY_MANAGED_MIN_AVAILABLE_MEMORY_MB must be a non-negative integer; got %s\n' "$verify_label" "$verify_managed_min_available_memory_mb" >&2
   exit 2
 fi
+if ! [[ "$verify_managed_min_available_disk_mb" =~ ^[0-9]+$ ]]; then
+  printf '%s: CLASP_VERIFY_MANAGED_MIN_AVAILABLE_DISK_MB must be a non-negative integer; got %s\n' "$verify_label" "$verify_managed_min_available_disk_mb" >&2
+  exit 2
+fi
+if ! [[ "$verify_managed_min_disk_headroom_mb" =~ ^[0-9]+$ ]]; then
+  printf '%s: CLASP_VERIFY_MANAGED_MIN_DISK_HEADROOM_MB must be a non-negative integer; got %s\n' "$verify_label" "$verify_managed_min_disk_headroom_mb" >&2
+  exit 2
+fi
 if ! [[ "$verify_managed_poll_secs" =~ ^[0-9]+$ && "$verify_managed_poll_secs" -gt 0 ]]; then
   verify_managed_poll_secs=1
 fi
+if ! [[ "$verify_direct_memory_limit_mb" =~ ^[0-9]+$ ]]; then
+  printf '%s: CLASP_VERIFY_DIRECT_MEMORY_LIMIT_MB must be a non-negative integer; got %s\n' "$verify_label" "$verify_direct_memory_limit_mb" >&2
+  exit 2
+fi
 if ! [[ "$verify_max_parallel_jobs" =~ ^[0-9]+$ ]] || (( verify_max_parallel_jobs < 1 )); then
   verify_max_parallel_jobs=1
+fi
+if ! [[ "$verify_temp_cleanup_margin_mb" =~ ^[0-9]+$ ]]; then
+  printf '%s: CLASP_VERIFY_TEMP_CLEANUP_MARGIN_MB must be a non-negative integer; got %s\n' "$verify_label" "$verify_temp_cleanup_margin_mb" >&2
+  exit 2
+fi
+case "$verify_resume_report_mode" in
+  auto|start-at|start-after)
+    ;;
+  *)
+    printf '%s: CLASP_VERIFY_RESUME_REPORT_MODE must be auto, start-at, or start-after; got %s\n' "$verify_label" "$verify_resume_report_mode" >&2
+    exit 2
+    ;;
+esac
+if [[ -n "$verify_resume_report_json" ]] && { [[ -n "$verify_resume_start_at" ]] || [[ -n "$verify_resume_start_after" ]]; }; then
+  printf '%s: set CLASP_VERIFY_RESUME_REPORT_JSON or explicit CLASP_VERIFY_START_AT/CLASP_VERIFY_START_AFTER, not both\n' "$verify_label" >&2
+  exit 2
+fi
+if [[ -n "$verify_resume_report_json" ]]; then
+  if ! command -v node >/dev/null 2>&1; then
+    printf '%s: CLASP_VERIFY_RESUME_REPORT_JSON requires node to parse %s\n' "$verify_label" "$verify_resume_report_json" >&2
+    exit 2
+  fi
+  verify_resume_report_selection="$(
+    node - "$verify_resume_report_json" "$verify_resume_report_mode" <<'NODE'
+const fs = require("node:fs");
+
+const [reportPath, mode] = process.argv.slice(2);
+let report;
+
+try {
+  report = JSON.parse(fs.readFileSync(reportPath, "utf8"));
+} catch (error) {
+  console.error(`failed to read verify resume report ${reportPath}: ${error.message}`);
+  process.exit(2);
+}
+
+function nonEmptyString(value) {
+  return typeof value === "string" && value.length > 0;
+}
+
+let kind = "";
+let command = "";
+
+if (mode === "start-at") {
+  if (nonEmptyString(report.resumeStartAtCommand)) {
+    kind = "start-at";
+    command = report.resumeStartAtCommand;
+  }
+} else if (mode === "start-after") {
+  if (nonEmptyString(report.resumeStartAfterCommand)) {
+    kind = "start-after";
+    command = report.resumeStartAfterCommand;
+  }
+} else if (nonEmptyString(report.resumeStartAtCommand)) {
+  kind = "start-at";
+  command = report.resumeStartAtCommand;
+} else if (nonEmptyString(report.resumeStartAfterCommand)) {
+  kind = "start-after";
+  command = report.resumeStartAfterCommand;
+}
+
+if (!kind) {
+  console.error(`verify resume report has no ${mode} resume command: ${reportPath}`);
+  process.exit(76);
+}
+
+process.stdout.write(JSON.stringify({ kind, command }));
+NODE
+  )" || exit $?
+  verify_resume_report_kind="$(
+    node -e 'const value = JSON.parse(process.argv[1]); process.stdout.write(value.kind);' "$verify_resume_report_selection"
+  )"
+  verify_resume_report_command="$(
+    node -e 'const value = JSON.parse(process.argv[1]); process.stdout.write(value.command);' "$verify_resume_report_selection"
+  )"
+  if [[ "$verify_resume_report_kind" == "start-at" ]]; then
+    verify_resume_start_at="$verify_resume_report_command"
+  else
+    verify_resume_start_after="$verify_resume_report_command"
+  fi
+fi
+if [[ -n "$verify_resume_start_at" && -n "$verify_resume_start_after" ]]; then
+  printf '%s: set only one of CLASP_VERIFY_START_AT or CLASP_VERIFY_START_AFTER\n' "$verify_label" >&2
+  exit 2
+fi
+if [[ -n "$verify_resume_start_at" || -n "$verify_resume_start_after" ]]; then
+  verify_resume_started=0
 fi
 full_parallel_verify_commands=$'
 bash scripts/test-codex-loop.sh
 node benchmarks/run-benchmark.mjs list >/dev/null
 '
 full_sequential_verify_commands=$'
-bash scripts/test-selfhost.sh
+CLASP_TEST_SELFHOST_SHARED_CACHE_HOME=.clasp-verify/cache/selfhost bash scripts/test-selfhost.sh
 bash scripts/test-source-run-cache.sh
 bash scripts/test-promoted-source-export-cache.sh
+bash scripts/test-promote-selfhost-managed.sh
 bash scripts/test-int-builtins.sh
 bash scripts/test-dict-builtins.sh
+bash scripts/test-try-decode.sh
+bash scripts/test-model-boundary.sh
+bash scripts/test-service-decode.sh
 bash scripts/test-native-claspc.sh
+bash scripts/test-native-export-host-content-scope.sh
 bash scripts/test-record-update-parity.sh
 bash scripts/test-swarm-ready-gate.sh
-bash scripts/test-swarm-ready-benchmark.sh
+bash scripts/test-standalone-swarm-surfaces.sh
+bash scripts/test-local-source-edit-workspace.sh
+CLASP_SWARM_READY_BENCHMARK_TIMEOUT_SECS=700 bash scripts/test-swarm-ready-benchmark.sh
+bash scripts/test-swarm-policy-helpers.sh
+bash scripts/test-swarm-destructive-policy.sh
+bash scripts/test-swarm-filesystem-kernel-policy.sh
 bash scripts/test-swarm-memory.sh
+bash scripts/test-swarm-priority.sh
+bash scripts/test-swarm-spawn-policy.sh
 bash scripts/test-swarm-context-pack.sh
 bash scripts/test-swarm-semantic-summary-index.sh
 bash scripts/test-swarm-native-managed-loop.sh
-bash scripts/test-swarm-native-feedback-loop.sh
+CLASP_SWARM_FEEDBACK_LOOP_TIMEOUT_SECS=700 bash scripts/test-swarm-native-feedback-loop.sh
 bash scripts/test-monitored-loop.sh
 bash scripts/test-monitored-step.sh
 bash scripts/test-monitored-run-log.sh
 bash scripts/test-safe-subprocess.sh
 bash scripts/test-managed-job.sh
+bash scripts/test-resolve-claspc.sh
+bash scripts/test-resource-guard-policy.sh
+bash scripts/test-resource-recovery-policy.sh
+bash scripts/test-goal-manager-resource-health.sh
+bash scripts/test-goal-manager-generated-cleanup-health.sh
+bash scripts/test-generated-state-cleanup.sh
+bash scripts/test-generated-state-cleanup-plan-static.sh
 bash scripts/test-monitored-workflow.sh
 bash scripts/test-codex-loop-program.sh
 bash examples/agent-loop-scenario/scripts/verify.sh
 bash scripts/test-agent-command-template.sh
-CLASP_AGENT_COMMAND_TEMPLATE_FEEDBACK=0 CLASP_AGENT_COMMAND_TEMPLATE_NATIVE=1 bash scripts/test-agent-command-template.sh
+bash scripts/test-agent-backend-static.sh
+bash scripts/test-agent-ergonomics-helpers.sh
+CLASP_AGENT_COMMAND_TEMPLATE_COMMON=0 CLASP_AGENT_COMMAND_TEMPLATE_FEEDBACK=0 CLASP_AGENT_COMMAND_TEMPLATE_NATIVE=1 bash scripts/test-agent-command-template.sh
 bash scripts/test-goal-manager-agent-command-template.sh
 bash scripts/test-goal-manager-default-planner-command.sh
 bash scripts/test-js-process-runtime.sh
 bash scripts/test-js-emitter-determinism.sh
 bash examples/browser-counter/scripts/verify.sh
 bash scripts/test-host-runtime.sh
+bash scripts/test-safe-workspace-static.sh
 bash scripts/test-safe-workspace.sh
 bash scripts/test-goal-manager-child-loop-monitor.sh
+bash scripts/test-goal-manager-mailbox-capability-details.sh
 bash scripts/test-feedback-loop-resume.sh
 bash scripts/test-unsafe-quarantine.sh
 bash scripts/test-native-runtime.sh
 bash src/scripts/verify.sh
 bash scripts/test-swarm-control.sh
+bash scripts/test-swarm-preflight.sh
 bash examples/agent-metadata/scripts/verify.sh
 bash examples/agent-task-scenario/scripts/verify.sh
 bash scripts/test-verify-all.sh
@@ -119,9 +270,22 @@ bash scripts/test-verify-affected.sh
 bash scripts/test-verify-compiler-slice.sh
 bash scripts/test-verify-runtime-slice.sh
 bash scripts/test-promoted-source-export-cache.sh
+bash scripts/test-promote-selfhost-managed.sh
 bash scripts/test-record-update-parity.sh
 bash scripts/test-managed-job.sh
+bash scripts/test-resolve-claspc.sh
+bash scripts/test-resource-guard-policy.sh
+bash scripts/test-resource-recovery-policy.sh
+bash scripts/test-goal-manager-resource-health.sh
+bash scripts/test-goal-manager-generated-cleanup-health.sh
+bash scripts/test-generated-state-cleanup.sh
+bash scripts/test-generated-state-cleanup-plan-static.sh
 bash scripts/test-dict-builtins.sh
+bash scripts/test-try-decode.sh
+bash scripts/test-model-boundary.sh
+bash scripts/test-swarm-policy-helpers.sh
+bash scripts/test-swarm-destructive-policy.sh
+bash scripts/test-swarm-filesystem-kernel-policy.sh
 bash scripts/test-swarm-semantic-summary-index.sh
 bash examples/agent-metadata/scripts/verify.sh
 bash examples/agent-task-scenario/scripts/verify.sh
@@ -167,6 +331,127 @@ stream_managed_log_growth() {
   streamed_log_offset="$offset"
 }
 
+verify_disk_available_mb() {
+  local path="$1"
+
+  df -Pm "$path" 2>/dev/null |
+    awk 'NR == 2 { printf "%d\n", $4; found = 1 } END { if (!found) print 0 }' ||
+    printf '0\n'
+}
+
+verify_memory_available_mb() {
+  awk '/MemAvailable:/ { printf "%d\n", int($2 / 1024); found = 1 } END { if (!found) print 0 }' /proc/meminfo 2>/dev/null ||
+    printf '0\n'
+}
+
+direct_host_reserve_enabled() {
+  case "$verify_direct_host_reserve" in
+    0|false|FALSE|False|no|NO|No|off|OFF|Off|never|NEVER|Never)
+      return 1
+      ;;
+  esac
+
+  [[ "${CLASP_VERIFY_MANAGED_REENTRY:-0}" != "1" ]] || return 1
+  [[ -z "${CLASP_MANAGED_JOB_ID:-}" ]] || return 1
+  return 0
+}
+
+preflight_direct_host_resources() {
+  local available_memory_mb=0
+  local available_disk_mb=0
+  local disk_headroom_mb=0
+
+  direct_host_reserve_enabled || return 0
+
+  if (( verify_managed_min_available_memory_mb > 0 )); then
+    available_memory_mb="$(verify_memory_available_mb)"
+    if ! [[ "$available_memory_mb" =~ ^[0-9]+$ ]]; then
+      available_memory_mb=0
+    fi
+    if (( available_memory_mb < verify_managed_min_available_memory_mb )); then
+      verify_report_begin "host-reserve"
+      printf '%s: direct verification memory guard tripped: available_memory_mb=%s min_available_memory_mb=%s\n' \
+        "$verify_label" "$available_memory_mb" "$verify_managed_min_available_memory_mb" >&2
+      exit 75
+    fi
+  fi
+
+  if (( verify_managed_min_available_disk_mb > 0 || verify_managed_min_disk_headroom_mb > 0 )); then
+    available_disk_mb="$(verify_disk_available_mb "$project_root")"
+    if ! [[ "$available_disk_mb" =~ ^[0-9]+$ ]]; then
+      available_disk_mb=0
+    fi
+    if (( verify_managed_min_available_disk_mb > 0 && available_disk_mb < verify_managed_min_available_disk_mb )); then
+      verify_report_begin "host-reserve"
+      printf '%s: direct verification disk guard tripped: available_disk_mb=%s min_available_disk_mb=%s\n' \
+        "$verify_label" "$available_disk_mb" "$verify_managed_min_available_disk_mb" >&2
+      exit 75
+    fi
+    if (( verify_managed_min_disk_headroom_mb > 0 )); then
+      disk_headroom_mb=$((available_disk_mb - verify_managed_min_available_disk_mb))
+      if (( disk_headroom_mb < verify_managed_min_disk_headroom_mb )); then
+        verify_report_begin "host-reserve"
+        printf '%s: direct verification disk guard tripped: available_disk_mb=%s min_available_disk_mb=%s disk_headroom_mb=%s min_disk_headroom_mb=%s\n' \
+          "$verify_label" "$available_disk_mb" "$verify_managed_min_available_disk_mb" "$disk_headroom_mb" "$verify_managed_min_disk_headroom_mb" >&2
+        exit 75
+      fi
+    fi
+  fi
+}
+
+verify_cleanup_enabled() {
+  case "$verify_temp_cleanup_mode" in
+    0|false|FALSE|False|no|NO|No|off|OFF|Off|never|NEVER|Never)
+      return 1
+      ;;
+  esac
+  [[ -x "$project_root/scripts/clasp-clean-generated-state.sh" ]] || return 1
+  return 0
+}
+
+verify_cleanup_temp_state() {
+  local reason="$1"
+  local mode="${2:-auto}"
+  local cache_mode="${3:-test-tmpdirs-only}"
+  local available_disk_mb=0
+  local cleanup_threshold_mb=0
+  local cleanup_args=()
+
+  verify_cleanup_enabled || return 0
+
+  if ps -C claspc >/dev/null 2>&1; then
+    return 0
+  fi
+
+  cleanup_threshold_mb=$((verify_managed_min_available_disk_mb + verify_managed_min_disk_headroom_mb + verify_temp_cleanup_margin_mb))
+  available_disk_mb="$(verify_disk_available_mb "$project_root")"
+  if ! [[ "$available_disk_mb" =~ ^[0-9]+$ ]]; then
+    available_disk_mb=0
+  fi
+
+  if [[ "$mode" != "force" ]]; then
+    case "$verify_temp_cleanup_mode" in
+      always|ALWAYS|Always)
+        ;;
+      *)
+        if (( available_disk_mb >= cleanup_threshold_mb )); then
+          return 0
+        fi
+        ;;
+    esac
+  fi
+
+  cleanup_args=(--apply --json --temp-only --include-test-tmpdirs --min-available-disk-mb 0 --min-disk-headroom-mb 0 --disk-reserve-path "$project_root")
+  if [[ "$cache_mode" == "include-caches" ]]; then
+    cleanup_args+=(--include-temp-caches)
+  fi
+
+  CLASP_PROJECT_ROOT="$project_root" \
+  CLASP_GENERATED_STATE_TMPDIR="$verify_tmp_root" \
+  CLASP_GENERATED_STATE_GLOBAL_CACHE_DIR="$readonly_nix_cache_root" \
+    "$project_root/scripts/clasp-clean-generated-state.sh" "${cleanup_args[@]}" >/dev/null 2>&1 || true
+}
+
 run_managed_verification() {
   local jobs_root="$project_root/.clasp-verify/jobs"
   local job_dir=""
@@ -182,6 +467,12 @@ run_managed_verification() {
   if (( verify_managed_min_available_memory_mb > 0 )); then
     managed_args+=(--min-available-memory-mb "$verify_managed_min_available_memory_mb")
   fi
+  if (( verify_managed_min_available_disk_mb > 0 )); then
+    managed_args+=(--min-available-disk-mb "$verify_managed_min_available_disk_mb" --disk-reserve-path "$project_root")
+  fi
+  if (( verify_managed_min_disk_headroom_mb > 0 )); then
+    managed_args+=(--min-disk-headroom-mb "$verify_managed_min_disk_headroom_mb" --disk-reserve-path "$project_root")
+  fi
 
   job_dir="$(
     "${managed_args[@]}" \
@@ -192,12 +483,15 @@ run_managed_verification() {
         CLASP_NATIVE_IMAGE_SECTION_JOBS="${CLASP_NATIVE_IMAGE_SECTION_JOBS:-1}" \
         CLASP_NATIVE_IMAGE_SECTION_JOBS_MAX="${CLASP_NATIVE_IMAGE_SECTION_JOBS_MAX:-1}" \
         CLASP_NATIVE_IMAGE_MODULE_DECL_FRESH_PROCESS="${CLASP_NATIVE_IMAGE_MODULE_DECL_FRESH_PROCESS:-1}" \
-        CLASP_NATIVE_EXPORT_HOST_IDLE_TIMEOUT_SECS="${CLASP_NATIVE_EXPORT_HOST_IDLE_TIMEOUT_SECS:-30}" \
+        CLASP_NATIVE_IMAGE_MODULE_DECL_CHUNK_SIZE="${CLASP_NATIVE_IMAGE_MODULE_DECL_CHUNK_SIZE:-8}" \
+        CLASP_NATIVE_EXPORT_HOST_IDLE_TIMEOUT_SECS="${CLASP_NATIVE_EXPORT_HOST_IDLE_TIMEOUT_SECS:-5}" \
         CLASP_VERIFY_PARALLEL_JOBS="${CLASP_VERIFY_PARALLEL_JOBS:-1}" \
-        bash "$project_root/scripts/verify-all.sh"
+      bash "$project_root/scripts/verify-all.sh"
   )"
-  printf '%s: managed verification job: %s memory_mb=%s min_available_memory_mb=%s\n' \
-    "$verify_label" "$job_dir" "$verify_managed_memory_mb" "$verify_managed_min_available_memory_mb" >&2
+  verify_managed_job_dir="$job_dir"
+  verify_managed_job_terminal=0
+  printf '%s: managed verification job: %s memory_mb=%s min_available_memory_mb=%s min_available_disk_mb=%s min_disk_headroom_mb=%s\n' \
+    "$verify_label" "$job_dir" "$verify_managed_memory_mb" "$verify_managed_min_available_memory_mb" "$verify_managed_min_available_disk_mb" "$verify_managed_min_disk_headroom_mb" >&2
 
   while true; do
     stream_managed_log_growth "$job_dir/stdout.log" "$stdout_offset" 1
@@ -206,7 +500,8 @@ run_managed_verification() {
     stderr_offset="$streamed_log_offset"
     status="$(sed -n '1p' "$job_dir/status" 2>/dev/null || printf 'missing')"
     case "$status" in
-      completed|failed|stopped)
+      completed|failed|stopped|memory-exceeded|disk-exceeded)
+        verify_managed_job_terminal=1
         break
         ;;
     esac
@@ -231,13 +526,77 @@ run_managed_verification() {
     printf '%s: managed verification memory guard tripped:\n' "$verify_label" >&2
     sed 's/^/  /' "$job_dir/memory-exceeded" >&2 || true
   fi
+  if [[ -f "$job_dir/disk-exceeded" ]]; then
+    printf '%s: managed verification disk guard tripped:\n' "$verify_label" >&2
+    sed 's/^/  /' "$job_dir/disk-exceeded" >&2 || true
+  fi
+
+  verify_cleanup_temp_state "managed-terminal" "force" "include-caches"
 
   exit "$exit_status"
+}
+
+cleanup_managed_verification() {
+  local jobs_root="$project_root/.clasp-verify/jobs"
+  local status=""
+
+  if [[ "${CLASP_VERIFY_MANAGED_REENTRY:-0}" == "1" ]]; then
+    return 0
+  fi
+  if [[ -z "$verify_managed_job_dir" || "$verify_managed_job_terminal" == "1" ]]; then
+    return 0
+  fi
+
+  status="$(sed -n '1p' "$verify_managed_job_dir/status" 2>/dev/null || printf 'missing')"
+  case "$status" in
+    completed|failed|stopped|memory-exceeded|disk-exceeded)
+      verify_managed_job_terminal=1
+      return 0
+      ;;
+  esac
+
+  if [[ -x "$project_root/scripts/stop-managed-job.sh" ]]; then
+    "$project_root/scripts/stop-managed-job.sh" --jobs-root "$jobs_root" "$verify_managed_job_dir" >/dev/null 2>&1 || true
+  fi
 }
 
 if managed_verification_enabled; then
   run_managed_verification
 fi
+
+direct_memory_limit_enabled() {
+  case "$verify_direct_memory_limit" in
+    0|false|FALSE|False|no|NO|No|off|OFF|Off|never|NEVER|Never)
+      return 1
+      ;;
+  esac
+
+  (( verify_direct_memory_limit_mb > 0 )) || return 1
+  [[ "${CLASP_VERIFY_MANAGED_REENTRY:-0}" != "1" ]] || return 1
+  [[ -z "${CLASP_MANAGED_JOB_ID:-}" ]] || return 1
+  return 0
+}
+
+apply_direct_memory_limit() {
+  local requested_kb=0
+  local current_limit=""
+
+  direct_memory_limit_enabled || return 0
+
+  requested_kb=$((verify_direct_memory_limit_mb * 1024))
+  current_limit="$(ulimit -v 2>/dev/null || printf 'unlimited')"
+
+  if [[ "$current_limit" =~ ^[0-9]+$ ]] && (( current_limit <= requested_kb )); then
+    return 0
+  fi
+
+  if ! ulimit -v "$requested_kb" >/dev/null 2>&1; then
+    printf '%s: failed to apply direct verification memory limit: %s MB\n' "$verify_label" "$verify_direct_memory_limit_mb" >&2
+    exit 2
+  fi
+}
+
+apply_direct_memory_limit
 
 default_verify_lock_file() {
   local git_common_dir=""
@@ -397,6 +756,10 @@ verify_report_record_command() {
   entry+=',"elapsedMs":'"$elapsed_ms"
   entry+='}'
   verify_report_commands+=("$entry")
+  verify_report_last_completed_command="$command"
+  if (( exit_status == 0 )); then
+    verify_report_last_successful_command="$command"
+  fi
 
   if (( exit_status != 0 )) && [[ -z "$verify_report_first_failed_command" ]]; then
     verify_report_first_failed_phase="$phase"
@@ -404,6 +767,32 @@ verify_report_record_command() {
     verify_report_first_failed_command="$command"
     verify_report_first_failed_exit_status="$exit_status"
   fi
+}
+
+verify_report_mark_current_command() {
+  local phase="$1"
+  local group="$2"
+  local command="$3"
+  local parallel_group="${4:-}"
+  local max_jobs="${5:-1}"
+
+  if [[ -z "$verify_report_json" || "$verify_report_should_write" != "1" ]]; then
+    return 0
+  fi
+
+  verify_report_current_phase="$phase"
+  verify_report_current_group="$group"
+  verify_report_current_command="$command"
+  verify_report_current_parallel_group="$parallel_group"
+  verify_report_current_max_jobs="$max_jobs"
+}
+
+verify_report_clear_current_command() {
+  verify_report_current_phase=""
+  verify_report_current_group=""
+  verify_report_current_command=""
+  verify_report_current_parallel_group=""
+  verify_report_current_max_jobs=1
 }
 
 verify_report_write() {
@@ -417,6 +806,9 @@ verify_report_write() {
   local lock_held=0
   local write_status=0
   local index=0
+  local interrupted_command=""
+  local resume_start_at_command=""
+  local resume_start_after_command=""
 
   if [[ -z "$verify_report_json" || "$verify_report_should_write" != "1" || "$verify_report_finalized" == "1" ]]; then
     return 0
@@ -435,6 +827,17 @@ verify_report_write() {
     lock_held=1
   fi
   command_count="${#verify_report_commands[@]}"
+  if (( exit_status != 0 )) && [[ -n "$verify_report_current_command" ]]; then
+    interrupted_command="$verify_report_current_command"
+  fi
+  if [[ -n "$verify_report_first_failed_command" ]]; then
+    resume_start_at_command="$verify_report_first_failed_command"
+  elif [[ -n "$interrupted_command" ]]; then
+    resume_start_at_command="$interrupted_command"
+  fi
+  if [[ -n "$verify_report_last_successful_command" ]]; then
+    resume_start_after_command="$verify_report_last_successful_command"
+  fi
   report_dir="$(dirname "$verify_report_json")"
   report_tmp="$verify_report_json.$$.$RANDOM.tmp"
 
@@ -463,6 +866,11 @@ verify_report_write() {
     else
       printf '  "firstFailedExitStatus": null,\n'
     fi
+    printf '  "lastCompletedCommand": %s,\n' "$(json_nullable_string "$verify_report_last_completed_command")"
+    printf '  "lastSuccessfulCommand": %s,\n' "$(json_nullable_string "$verify_report_last_successful_command")"
+    printf '  "interruptedCommand": %s,\n' "$(json_nullable_string "$interrupted_command")"
+    printf '  "resumeStartAtCommand": %s,\n' "$(json_nullable_string "$resume_start_at_command")"
+    printf '  "resumeStartAfterCommand": %s,\n' "$(json_nullable_string "$resume_start_after_command")"
     printf '  "commandCount": %s,\n' "$command_count"
     printf '  "commands": [\n'
     for ((index = 0; index < command_count; index += 1)); do
@@ -489,6 +897,7 @@ verify_report_write() {
 verify_all_exit_trap() {
   local exit_status=$?
 
+  cleanup_managed_verification
   verify_report_write "$exit_status"
   if [[ -n "${nix_failure_log:-}" ]]; then
     rm -f "$nix_failure_log"
@@ -542,10 +951,12 @@ export CLASP_NATIVE_BUNDLE_JOBS="${CLASP_NATIVE_BUNDLE_JOBS:-1}"
 export CLASP_NATIVE_IMAGE_SECTION_JOBS="${CLASP_NATIVE_IMAGE_SECTION_JOBS:-1}"
 export CLASP_NATIVE_IMAGE_SECTION_JOBS_MAX="${CLASP_NATIVE_IMAGE_SECTION_JOBS_MAX:-1}"
 export CLASP_NATIVE_IMAGE_MODULE_DECL_FRESH_PROCESS="${CLASP_NATIVE_IMAGE_MODULE_DECL_FRESH_PROCESS:-1}"
-export CLASP_NATIVE_EXPORT_HOST_IDLE_TIMEOUT_SECS="${CLASP_NATIVE_EXPORT_HOST_IDLE_TIMEOUT_SECS:-30}"
+export CLASP_NATIVE_IMAGE_MODULE_DECL_CHUNK_SIZE="${CLASP_NATIVE_IMAGE_MODULE_DECL_CHUNK_SIZE:-8}"
+export CLASP_NATIVE_EXPORT_HOST_IDLE_TIMEOUT_SECS="${CLASP_NATIVE_EXPORT_HOST_IDLE_TIMEOUT_SECS:-5}"
 
 mkdir -p "$verify_tmp_root"
 export TMPDIR="$verify_tmp_root"
+export CLASP_VERIFY_TMPDIR="$verify_tmp_root"
 
 default_parallel_jobs() {
   local cpu_count=""
@@ -572,6 +983,12 @@ bounded_parallel_jobs() {
   printf '%s\n' "$requested"
 }
 
+verify_current_shell_ready() {
+  command -v node >/dev/null 2>&1 &&
+    command -v cargo >/dev/null 2>&1 &&
+    command -v rustc >/dev/null 2>&1
+}
+
 run_project_command() {
   local command="$1"
 
@@ -579,7 +996,7 @@ run_project_command() {
     set -euo pipefail
     cd "$project_root"
     export CLASP_PROJECT_ROOT="$project_root"
-    bash -lc "$command"
+    bash -c "$command"
   )
 }
 
@@ -593,19 +1010,65 @@ run_timed_project_command() {
   local ended_ms=0
   local exit_status=0
 
+  verify_cleanup_temp_state "before-command" "auto" "include-caches"
+
   if [[ -z "$verify_report_json" || "$verify_report_should_write" != "1" ]]; then
-    run_project_command "$command"
+    if run_project_command "$command"; then
+      verify_cleanup_temp_state "after-command" "force" "test-tmpdirs-only"
+      return 0
+    fi
     return $?
   fi
 
   started_ms="$(verify_now_ms)"
+  verify_report_mark_current_command "$phase" "$group" "$command" "$parallel_group" "$max_jobs"
   set +e
   run_project_command "$command"
   exit_status=$?
   set -e
   ended_ms="$(verify_now_ms)"
   verify_report_record_command "$phase" "$group" "$command" "$exit_status" "$started_ms" "$ended_ms" "$parallel_group" "$max_jobs"
+  verify_report_clear_current_command
+  if (( exit_status == 0 )); then
+    verify_cleanup_temp_state "after-command" "force" "test-tmpdirs-only"
+  fi
   return "$exit_status"
+}
+
+verify_resume_should_run_command() {
+  local command="$1"
+
+  if [[ "$verify_resume_started" == "1" ]]; then
+    return 0
+  fi
+
+  if [[ -n "$verify_resume_start_at" && "$command" == "$verify_resume_start_at" ]]; then
+    verify_resume_started=1
+    return 0
+  fi
+
+  if [[ -n "$verify_resume_start_after" && "$command" == "$verify_resume_start_after" ]]; then
+    verify_resume_started=1
+    return 1
+  fi
+
+  return 1
+}
+
+verify_resume_finalize() {
+  if [[ -z "$verify_resume_start_at" && -z "$verify_resume_start_after" ]]; then
+    return 0
+  fi
+  if [[ "$verify_resume_started" == "1" ]]; then
+    return 0
+  fi
+
+  if [[ -n "$verify_resume_start_at" ]]; then
+    printf '%s: CLASP_VERIFY_START_AT command was not found: %s\n' "$verify_label" "$verify_resume_start_at" >&2
+  else
+    printf '%s: CLASP_VERIFY_START_AFTER command was not found: %s\n' "$verify_label" "$verify_resume_start_after" >&2
+  fi
+  return 76
 }
 
 run_command_block() {
@@ -617,6 +1080,9 @@ run_command_block() {
 
   while IFS= read -r command || [[ -n "$command" ]]; do
     [[ -z "$command" ]] && continue
+    if ! verify_resume_should_run_command "$command"; then
+      continue
+    fi
     if run_timed_project_command "$phase" "$group" "$command"; then
       command_status=0
     else
@@ -748,6 +1214,9 @@ run_parallel_commands() {
 
   while IFS= read -r next_command || [[ -n "$next_command" ]]; do
     [[ -z "$next_command" ]] && continue
+    if ! verify_resume_should_run_command "$next_command"; then
+      continue
+    fi
     while (( ${#pid_to_command[@]} >= max_jobs )); do
       finish_one_job || return $?
     done
@@ -769,6 +1238,7 @@ run_verify_commands() {
   parallel_jobs="$(bounded_parallel_jobs "$parallel_jobs")"
   run_parallel_commands "$parallel_commands" "$parallel_jobs"
   run_command_block "$sequential_commands" "sequential" "sequential"
+  verify_resume_finalize
 }
 
 fallback_commands="${CLASP_VERIFY_FALLBACK_COMMANDS-$fallback_verify_commands}"
@@ -801,7 +1271,15 @@ fi
 export CLASP_VERIFY_IN_PROGRESS=1
 export CLASP_VERIFY_ACTIVE_ROOT="$project_root"
 
-if [[ -n "${IN_NIX_SHELL:-}" || "${CLASP_VERIFY_USE_CURRENT_SHELL:-0}" == "1" ]]; then
+if [[ "${CLASP_VERIFY_USE_CURRENT_SHELL:-0}" == "1" ]]; then
+  preflight_direct_host_resources
+  verify_report_begin "normal"
+  run_verify_commands
+  exit 0
+fi
+
+if [[ "$top_level_reentry" == "1" ]] || { [[ -n "${IN_NIX_SHELL:-}" ]] && verify_current_shell_ready; }; then
+  preflight_direct_host_resources
   verify_report_begin "normal"
   run_verify_commands
   exit 0
@@ -813,6 +1291,8 @@ if nix develop -c bash -lc "
   cd \"$project_root\"
   export CLASP_PROJECT_ROOT=\"$project_root\"
   export CLASP_VERIFY_TOPLEVEL_REENTRY=1
+  export CLASP_VERIFY_IN_NIX_DEVELOP=1
+  export CLASP_NATIVE_RUNTIME_NIX_REENTRY=1
   bash scripts/verify-all.sh
 " 2>"$nix_failure_log"; then
   exit 0

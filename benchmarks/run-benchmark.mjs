@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { cp, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { readdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import os from "node:os";
@@ -522,10 +522,7 @@ async function prepareWorkspace(task, workspace, env) {
   });
 
   for (const command of task.prepare) {
-    const result = await runProcess(command, workspace, env);
-    if (result.exitCode !== 0) {
-      throw new Error(`prepare command failed: ${command.join(" ")}`);
-    }
+    await runPrepareCommand(task, command, workspace, env);
   }
 
   if (task.language === "clasp") {
@@ -534,6 +531,181 @@ async function prepareWorkspace(task, workspace, env) {
       await generateClaspBenchmarkPrep(task, workspace, env);
       await saveClaspBenchmarkPrepToCache(task, workspace, env);
     }
+  }
+}
+
+async function runPrepareCommand(task, command, workspace, env) {
+  if (isNpmInstallPrepareCommand(command)) {
+    const cacheHit = await restoreBenchmarkNpmInstallFromCache(task, workspace);
+    if (cacheHit) {
+      return;
+    }
+
+    const result = await runProcess(command, workspace, env);
+    if (result.exitCode !== 0) {
+      throw new Error(`prepare command failed: ${command.join(" ")}`);
+    }
+    await saveBenchmarkNpmInstallToCache(task, workspace);
+    return;
+  }
+
+  const result = await runProcess(command, workspace, env);
+  if (result.exitCode !== 0) {
+    throw new Error(`prepare command failed: ${command.join(" ")}`);
+  }
+}
+
+function isNpmInstallPrepareCommand(command) {
+  return Array.isArray(command) &&
+    command.length === 2 &&
+    command[0] === "npm" &&
+    command[1] === "install";
+}
+
+async function benchmarkNpmInstallCachePlan(task, workspace) {
+  const root = path.resolve(
+    process.env.CLASP_BENCHMARK_NPM_INSTALL_CACHE_ROOT ??
+      path.join("/tmp", "clasp-benchmark-npm-install-cache-v1")
+  );
+  const packageJsonPath = path.join(workspace, "package.json");
+  const taskPackageJsonPath = path.join(task.dir, task.repo, "package.json");
+  const taskPackageLockPath = path.join(task.dir, task.repo, "package-lock.json");
+  const enabled =
+    benchmarkNpmInstallCacheEnabled() &&
+    task.language === "typescript" &&
+    await fileExists(packageJsonPath);
+
+  if (!enabled) {
+    return {
+      enabled: false,
+      root,
+      key: "",
+      cacheDir: ""
+    };
+  }
+
+  const keyMaterial = {
+    version: 1,
+    command: "npm install",
+    platform: process.platform,
+    arch: process.arch,
+    node: process.versions.node,
+    packageJson: await fileFingerprint(taskPackageJsonPath),
+    packageLock: await fileFingerprint(taskPackageLockPath)
+  };
+  const key = createHash("sha256")
+    .update(JSON.stringify(keyMaterial))
+    .digest("hex");
+
+  return {
+    enabled: true,
+    root,
+    key,
+    cacheDir: path.join(root, key)
+  };
+}
+
+function benchmarkNpmInstallCacheEnabled() {
+  const value = process.env.CLASP_BENCHMARK_NPM_INSTALL_CACHE;
+  return value !== "0" && value !== "false" && value !== "never";
+}
+
+function benchmarkNpmInstallCacheMode() {
+  const value = process.env.CLASP_BENCHMARK_NPM_INSTALL_CACHE_MODE ?? "copy";
+  return value === "link" ? "link" : "copy";
+}
+
+function traceBenchmarkNpmInstallCache(status, plan) {
+  if (process.env.CLASP_BENCHMARK_NPM_INSTALL_CACHE_TRACE !== "1") {
+    return;
+  }
+
+  console.error(`[benchmark-npm-install-cache] ${status} ${plan.key}`);
+}
+
+async function restoreBenchmarkNpmInstallFromCache(task, workspace) {
+  const plan = await benchmarkNpmInstallCachePlan(task, workspace);
+  if (!plan.enabled) {
+    return false;
+  }
+
+  const manifestPath = path.join(plan.cacheDir, "manifest.json");
+  const nodeModulesSource = path.join(plan.cacheDir, "node_modules");
+  const packageLockSource = path.join(plan.cacheDir, "package-lock.json");
+
+  if (
+    !(await fileExists(manifestPath)) ||
+    !(await fileExists(nodeModulesSource))
+  ) {
+    traceBenchmarkNpmInstallCache("miss", plan);
+    return false;
+  }
+
+  try {
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    if (manifest.key !== plan.key || manifest.version !== 1) {
+      traceBenchmarkNpmInstallCache("stale", plan);
+      return false;
+    }
+
+    await rm(path.join(workspace, "node_modules"), { recursive: true, force: true });
+    if (benchmarkNpmInstallCacheMode() === "link") {
+      await symlink(nodeModulesSource, path.join(workspace, "node_modules"), "dir");
+    } else {
+      await cp(nodeModulesSource, path.join(workspace, "node_modules"), {
+        recursive: true,
+        force: true
+      });
+    }
+
+    if (await fileExists(packageLockSource)) {
+      await cp(packageLockSource, path.join(workspace, "package-lock.json"), { force: true });
+    }
+    traceBenchmarkNpmInstallCache("hit", plan);
+    return true;
+  } catch {
+    traceBenchmarkNpmInstallCache("invalid", plan);
+    return false;
+  }
+}
+
+async function saveBenchmarkNpmInstallToCache(task, workspace) {
+  const plan = await benchmarkNpmInstallCachePlan(task, workspace);
+  if (!plan.enabled) {
+    return;
+  }
+
+  const nodeModulesSource = path.join(workspace, "node_modules");
+  if (!(await fileExists(nodeModulesSource))) {
+    return;
+  }
+
+  await mkdir(plan.root, { recursive: true });
+  const tempDir = await mkdtemp(path.join(plan.root, ".write-"));
+  try {
+    await cp(nodeModulesSource, path.join(tempDir, "node_modules"), {
+      recursive: true,
+      force: true
+    });
+    if (await fileExists(path.join(workspace, "package-lock.json"))) {
+      await cp(path.join(workspace, "package-lock.json"), path.join(tempDir, "package-lock.json"), { force: true });
+    }
+    await writeFile(
+      path.join(tempDir, "manifest.json"),
+      JSON.stringify({
+        version: 1,
+        key: plan.key,
+        taskId: task.id,
+        createdAt: new Date().toISOString()
+      }, null, 2) + "\n",
+      "utf8"
+    );
+    await rm(plan.cacheDir, { recursive: true, force: true });
+    await rename(tempDir, plan.cacheDir);
+    traceBenchmarkNpmInstallCache("saved", plan);
+  } catch (error) {
+    await rm(tempDir, { recursive: true, force: true });
+    throw error;
   }
 }
 
@@ -564,10 +736,14 @@ async function restoreClaspBenchmarkPrepFromCache(task, workspace, env) {
     }
 
     await rm(path.join(workspace, "benchmark-prep"), { recursive: true, force: true });
-    await cp(prepSource, path.join(workspace, "benchmark-prep"), {
-      recursive: true,
-      force: true
-    });
+    if (claspBenchmarkPrepCacheMode() === "link") {
+      await symlink(prepSource, path.join(workspace, "benchmark-prep"), "dir");
+    } else {
+      await cp(prepSource, path.join(workspace, "benchmark-prep"), {
+        recursive: true,
+        force: true
+      });
+    }
     await cp(guideSource, path.join(workspace, "LANGUAGE_GUIDE.md"), { force: true });
     traceBenchmarkPrepCache("hit", plan);
     return true;
@@ -646,12 +822,17 @@ async function claspBenchmarkPrepCachePlan(task, workspace, env) {
 }
 
 function claspBenchmarkPrepCacheVersion() {
-  return 1;
+  return 2;
 }
 
 function claspBenchmarkPrepCacheEnabled() {
   const value = process.env.CLASP_BENCHMARK_PREP_CACHE;
   return value !== "0" && value !== "false" && value !== "never";
+}
+
+function claspBenchmarkPrepCacheMode() {
+  const value = process.env.CLASP_BENCHMARK_PREP_CACHE_MODE ?? "copy";
+  return value === "link" ? "link" : "copy";
 }
 
 function traceBenchmarkPrepCache(status, plan) {
@@ -666,10 +847,6 @@ async function claspBenchmarkPrepCacheKey(task, workspace, env) {
   const keyMaterial = {
     version: claspBenchmarkPrepCacheVersion(),
     task: await directoryFingerprint(task.dir),
-    workspace: await directoryFingerprint(workspace, {
-      excludeDirectoryNames: new Set(["benchmark-prep", "build", "dist", "node_modules"]),
-      excludeFileNames: new Set([".benchmark-prep.native.image.json", "LANGUAGE_GUIDE.md"])
-    }),
     compiler: await claspBenchmarkPrepCompilerFingerprint(env),
     generator: await fileFingerprint(path.join(benchmarkRoot, "run-benchmark.mjs"))
   };
@@ -681,18 +858,131 @@ async function claspBenchmarkPrepCacheKey(task, workspace, env) {
 
 async function claspBenchmarkPrepCompilerFingerprint(env) {
   const explicitClaspc = env.CLASP_CLASPC || env.CLASPC_BIN || "";
-  const runtimeSource = await directoryFingerprint(path.resolve("runtime"), {
+  const resolveScriptPath = path.resolve("scripts", "resolve-claspc.sh");
+  const sourceRoot = path.resolve("src");
+  const runtimeRoot = path.resolve("runtime");
+  const runtimeFingerprintOptions = {
     excludeDirectoryNames: new Set(["target"])
-  });
-
-  return {
+  };
+  const statSignature = {
+    version: 1,
     explicitClaspc: explicitClaspc.length > 0
       ? await fileStatFingerprint(explicitClaspc)
       : null,
-    resolveScript: await fileFingerprint(path.resolve("scripts", "resolve-claspc.sh")),
-    source: await directoryFingerprint(path.resolve("src")),
-    runtimeSource
+    resolveScript: await fileStatFingerprint(resolveScriptPath),
+    source: await directoryStatFingerprint(sourceRoot),
+    runtimeSource: await directoryStatFingerprint(runtimeRoot, runtimeFingerprintOptions)
   };
+  const cachePath = benchmarkPrepCompilerFingerprintCachePath();
+  const cached = await readBenchmarkPrepCompilerFingerprintCache(cachePath, statSignature);
+
+  if (cached) {
+    traceBenchmarkPrepCompilerFingerprintCache("hit", cachePath);
+    return cached;
+  }
+
+  traceBenchmarkPrepCompilerFingerprintCache(cachePath.length > 0 ? "miss" : "disabled", cachePath);
+  const fingerprint = {
+    explicitClaspc: statSignature.explicitClaspc,
+    resolveScript: await fileFingerprint(resolveScriptPath),
+    source: await directoryFingerprint(sourceRoot),
+    runtimeSource: await directoryFingerprint(runtimeRoot, runtimeFingerprintOptions)
+  };
+
+  await writeBenchmarkPrepCompilerFingerprintCache(cachePath, statSignature, fingerprint);
+  return fingerprint;
+}
+
+function benchmarkPrepCompilerFingerprintCachePath() {
+  const value = process.env.CLASP_BENCHMARK_PREP_COMPILER_FINGERPRINT_CACHE ?? "";
+  return value.length > 0 ? path.resolve(value) : "";
+}
+
+function traceBenchmarkPrepCompilerFingerprintCache(status, cachePath) {
+  if (process.env.CLASP_BENCHMARK_PREP_COMPILER_FINGERPRINT_CACHE_TRACE !== "1") {
+    return;
+  }
+
+  const suffix = cachePath.length > 0 ? ` ${cachePath}` : "";
+  console.error(`[benchmark-prep-compiler-fingerprint-cache] ${status}${suffix}`);
+}
+
+async function readBenchmarkPrepCompilerFingerprintCache(cachePath, statSignature) {
+  if (cachePath.length === 0) {
+    return null;
+  }
+
+  try {
+    const cached = JSON.parse(await readFile(cachePath, "utf8"));
+    if (
+      cached.version === 1 &&
+      jsonStableStringify(cached.statSignature) === jsonStableStringify(statSignature)
+    ) {
+      return cached.fingerprint ?? null;
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+async function writeBenchmarkPrepCompilerFingerprintCache(cachePath, statSignature, fingerprint) {
+  if (cachePath.length === 0) {
+    return;
+  }
+
+  const tempPath = `${cachePath}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    await mkdir(path.dirname(cachePath), { recursive: true });
+    await writeFile(
+      tempPath,
+      JSON.stringify({
+        version: 1,
+        statSignature,
+        fingerprint
+      }, null, 2) + "\n",
+      "utf8"
+    );
+    await rename(tempPath, cachePath);
+  } catch {
+    await rm(tempPath, { force: true });
+  }
+}
+
+function jsonStableStringify(value) {
+  return JSON.stringify(value);
+}
+
+async function directoryStatFingerprint(rootDir, options = {}) {
+  try {
+    const files = await collectFingerprintFiles(rootDir, "", options);
+    const hash = createHash("sha256");
+
+    for (const relativePath of files) {
+      const absolutePath = path.join(rootDir, relativePath);
+      const info = await stat(absolutePath);
+      hash.update(posixJoin(...relativePath.split(path.sep)));
+      hash.update("\0");
+      hash.update(String(info.size));
+      hash.update("\0");
+      hash.update(String(Math.trunc(info.mtimeMs)));
+      hash.update("\0");
+      hash.update(String(Math.trunc(info.ctimeMs)));
+      hash.update("\0");
+    }
+
+    return {
+      path: path.resolve(rootDir),
+      fileCount: files.length,
+      sha256: hash.digest("hex")
+    };
+  } catch {
+    return {
+      path: path.resolve(rootDir),
+      missing: true
+    };
+  }
 }
 
 async function generateClaspBenchmarkPrep(task, workspace, env) {

@@ -294,6 +294,14 @@ ClaspRtString *clasp_rt_path_dirname(ClaspRtString *path);
 ClaspRtString *clasp_rt_path_basename(ClaspRtString *path);
 bool clasp_rt_file_exists(ClaspRtString *path);
 ClaspRtHeader *clasp_rt_list_dir(ClaspRtString *path);
+ClaspRtHeader *clasp_rt_host_available_disk_mb(ClaspRtString *path);
+ClaspRtHeader *clasp_rt_host_file_size_mb(ClaspRtString *path);
+ClaspRtHeader *clasp_rt_host_cap_file_tail_mb(ClaspRtString *path, ClaspRtHeader *max_mb);
+ClaspRtHeader *clasp_rt_host_available_memory_mb(void);
+ClaspRtHeader *clasp_rt_host_process_alive(ClaspRtString *pid);
+ClaspRtHeader *clasp_rt_host_process_count_by_name(ClaspRtStringList *names);
+ClaspRtHeader *clasp_rt_host_unmanaged_process_count_by_name(ClaspRtStringList *names);
+ClaspRtHeader *clasp_rt_host_unmanaged_process_rss_mb_by_name(ClaspRtStringList *names);
 ClaspRtHeader *clasp_rt_time_unix_ms(void);
 ClaspRtResultString *clasp_rt_env_var(ClaspRtString *name);
 ClaspRtResultString *clasp_rt_current_working_directory(void);
@@ -315,6 +323,31 @@ ClaspRtResultString *clasp_rt_workspace_append_file(
 );
 ClaspRtResultString *clasp_rt_workspace_mkdir_all(ClaspRtString *root, ClaspRtString *relative);
 ClaspRtHeader *clasp_rt_workspace_list_dir(ClaspRtString *root, ClaspRtString *relative);
+ClaspRtHeader *clasp_rt_workspace_list_tree(
+  ClaspRtString *root,
+  ClaspRtString *relative,
+  ClaspRtHeader *max_entries,
+  ClaspRtHeader *max_depth
+);
+ClaspRtHeader *clasp_rt_workspace_search_text(
+  ClaspRtString *root,
+  ClaspRtString *relative,
+  ClaspRtString *needle,
+  ClaspRtHeader *max_matches,
+  ClaspRtHeader *max_files,
+  ClaspRtHeader *max_file_bytes,
+  ClaspRtHeader *max_depth
+);
+ClaspRtHeader *clasp_rt_workspace_replace_text(
+  ClaspRtString *root,
+  ClaspRtString *relative,
+  ClaspRtString *find_text,
+  ClaspRtString *replace_text,
+  ClaspRtHeader *max_replacements,
+  ClaspRtHeader *max_file_bytes
+);
+ClaspRtHeader *clasp_rt_workspace_path_size_mb(ClaspRtString *root, ClaspRtString *relative);
+ClaspRtResultString *clasp_rt_workspace_remove_path(ClaspRtString *root, ClaspRtString *relative);
 ClaspRtResultString *clasp_rt_run_process_json(
   ClaspRtString *cwd,
   ClaspRtHeader *env_values,

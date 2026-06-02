@@ -1,0 +1,28 @@
+module GoalManagerGeneratedCleanupHealthHarness
+
+import GoalManagerGeneratedCleanupHealth
+
+record GoalManagerGeneratedCleanupHealthHarnessReport = {
+  enabled : Bool,
+  summary : Str,
+  action : Str,
+  safeToClean : Bool,
+  cleanupCanSatisfyReserve : Bool,
+  cleanupCanSatisfyGuard : Bool,
+  projectedAvailableMb : Int,
+  guardShortfallAfterCleanupMb : Int
+}
+
+main : Str
+main =
+  let plan = managerGeneratedStateCleanupPlan in
+  encode (GoalManagerGeneratedCleanupHealthHarnessReport {
+    enabled = managerGeneratedStateCleanupPlanEnabled,
+    summary = managerGeneratedStateCleanupPlanSummary,
+    action = plan.recommendedAction,
+    safeToClean = plan.safeToClean,
+    cleanupCanSatisfyReserve = plan.cleanup.cleanupCanSatisfyReserve,
+    cleanupCanSatisfyGuard = plan.cleanup.cleanupCanSatisfyGuard,
+    projectedAvailableMb = plan.cleanup.projectedAvailableMb,
+    guardShortfallAfterCleanupMb = plan.cleanup.guardShortfallAfterCleanupMb
+  })

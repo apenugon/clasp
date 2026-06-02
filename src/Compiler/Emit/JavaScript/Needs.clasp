@@ -1,0 +1,299 @@
+module Compiler.Emit.JavaScript.Needs
+
+import Compiler.Ast
+import Compiler.Lower
+
+jsBuiltinPreludeName : Str -> Bool
+jsBuiltinPreludeName name = if name == "intAdd" then true else if name == "intSubtract" then true else if name == "textConcat" then true else if name == "textJoin" then true else if name == "textSplit" then true else if name == "textChars" then true else if name == "textFingerprint64Hex" then true else if name == "not" then true else if name == "textPrefix" then true else if name == "textSplitFirst" then true else if name == "dictEmpty" then true else if name == "dictSet" then true else if name == "dictGet" then true else if name == "dictHas" then true else if name == "dictRemove" then true else if name == "dictKeys" then true else if name == "dictValues" then true else if name == "pathJoin" then true else if name == "pathDirname" then true else if name == "pathBasename" then true else if name == "fileExists" then true else if name == "readFile" then true else if name == "swarmBootstrapJson" then true else if name == "swarmLeaseJson" then true else if name == "swarmCompleteJson" then true else if name == "swarmStatusJson" then true else if name == "swarmSummaryJson" then true else if name == "swarmReadyJson" then true else if name == "swarmManagerNextJson" then true else if name == "swarmObjectiveCreateJson" then true else if name == "swarmObjectiveStatusJson" then true else if name == "swarmTaskCreateJson" then true else if name == "swarmPolicySetJson" then true else if name == "swarmToolRunJson" then true else if name == "swarmVerifierRunJson" then true else if name == "swarmApproveJson" then true else if name == "swarmMergegateDecideJson" then true else if name == "swarmRunsJson" then true else if name == "swarmArtifactsJson" then true else if name == "runCommandJson" then true else if name == "runCommandTimeoutJson" then true else if name == "spawnCommandJson" then true else if name == "spawnCommandWithLimitsJson" then true else if name == "watchCommandJson" then true else if name == "watchCommandWithLimitsJson" then true else if name == "handoffCommandJson" then true else if name == "upgradeCommandJson" then true else if name == "superviseCommandJson" then true else false
+
+jsNodeProcessBuiltinPreludeName : Str -> Bool
+jsNodeProcessBuiltinPreludeName name = if name == "runCommandJson" then true else if name == "runCommandTimeoutJson" then true else false
+
+jsSwarmDeadlineBuiltinPreludeName : Str -> Bool
+jsSwarmDeadlineBuiltinPreludeName name =
+  if name == "swarmObjectiveCreateWithDeadlineJson" then true else if name == "swarmTaskCreateWithDeadlineJson" then true else false
+
+exprsNeedBuiltinPrelude : [LowerExprText] -> Bool
+exprsNeedBuiltinPrelude exprs = {
+  for expr in exprs {
+    if exprNeedsBuiltinPrelude expr then return true else false
+  };
+  false
+}
+
+recordFieldsNeedBuiltinPrelude : [LowerRecordFieldText] -> Bool
+recordFieldsNeedBuiltinPrelude fields = {
+  for field in fields {
+    match field {
+      LowerRecordFieldText name value ->
+        if exprNeedsBuiltinPrelude value then return true else false
+    }
+  };
+  false
+}
+
+branchesNeedBuiltinPrelude : [LowerMatchBranchText] -> Bool
+branchesNeedBuiltinPrelude branches = {
+  for branch in branches {
+    match branch {
+      LowerMatchBranchText constructorName binders body ->
+        if exprNeedsBuiltinPrelude body then return true else false
+    }
+  };
+  false
+}
+
+exprNeedsBuiltinPrelude : LowerExprText -> Bool
+exprNeedsBuiltinPrelude expr = match expr {
+  LowerName name ->
+    false,
+  LowerLiteral value ->
+    false,
+  LowerInt value ->
+    false,
+  LowerBool value ->
+    false,
+  LowerArray values ->
+    exprsNeedBuiltinPrelude values,
+  LowerListAppend left right ->
+    if exprNeedsBuiltinPrelude left then true else exprNeedsBuiltinPrelude right,
+  LowerListPrepend value values ->
+    if exprNeedsBuiltinPrelude value then true else exprNeedsBuiltinPrelude values,
+  LowerListReverse values ->
+    exprNeedsBuiltinPrelude values,
+  LowerLength value ->
+    exprNeedsBuiltinPrelude value,
+  LowerListMap callee values ->
+    exprNeedsBuiltinPrelude values,
+  LowerListFilter callee values ->
+    exprNeedsBuiltinPrelude values,
+  LowerListFind callee values ->
+    exprNeedsBuiltinPrelude values,
+  LowerListAny callee values ->
+    exprNeedsBuiltinPrelude values,
+  LowerListAll callee values ->
+    exprNeedsBuiltinPrelude values,
+  LowerListFold callee initial values ->
+    if exprNeedsBuiltinPrelude initial then true else exprNeedsBuiltinPrelude values,
+  LowerViewAppend left right ->
+    if exprNeedsBuiltinPrelude left then true else exprNeedsBuiltinPrelude right,
+  LowerEncode value ->
+    exprNeedsBuiltinPrelude value,
+  LowerDecode targetType value ->
+    exprNeedsBuiltinPrelude value,
+  LowerTryDecode targetType value ->
+    exprNeedsBuiltinPrelude value,
+  LowerInvoke callee args ->
+    if jsBuiltinPreludeName callee then true else if jsSwarmDeadlineBuiltinPreludeName callee then true else exprsNeedBuiltinPrelude args,
+  LowerConstructor constructorName args ->
+    exprsNeedBuiltinPrelude args,
+  LowerMatch subject branches ->
+    if exprNeedsBuiltinPrelude subject then true else branchesNeedBuiltinPrelude branches,
+  LowerRecord recordName fields ->
+    recordFieldsNeedBuiltinPrelude fields,
+  LowerFieldAccess recordName subject fieldName ->
+    exprNeedsBuiltinPrelude subject,
+  LowerLet binder value body ->
+    if exprNeedsBuiltinPrelude value then true else exprNeedsBuiltinPrelude body,
+  LowerMutableLet binder value body ->
+    if exprNeedsBuiltinPrelude value then true else exprNeedsBuiltinPrelude body,
+  LowerAssign binder value body ->
+    if exprNeedsBuiltinPrelude value then true else exprNeedsBuiltinPrelude body,
+  LowerFor binder iterable loopBody body ->
+    if exprNeedsBuiltinPrelude iterable then true else if exprNeedsBuiltinPrelude loopBody then true else exprNeedsBuiltinPrelude body,
+  LowerReturn value ->
+    exprNeedsBuiltinPrelude value,
+  LowerIf condition thenBranch elseBranch ->
+    if exprNeedsBuiltinPrelude condition then true else if exprNeedsBuiltinPrelude thenBranch then true else exprNeedsBuiltinPrelude elseBranch,
+  LowerEqual left right ->
+    if exprNeedsBuiltinPrelude left then true else exprNeedsBuiltinPrelude right,
+  LowerNotEqual left right ->
+    if exprNeedsBuiltinPrelude left then true else exprNeedsBuiltinPrelude right,
+  LowerLessThan left right ->
+    if exprNeedsBuiltinPrelude left then true else exprNeedsBuiltinPrelude right,
+  LowerLessThanOrEqual left right ->
+    if exprNeedsBuiltinPrelude left then true else exprNeedsBuiltinPrelude right,
+  LowerGreaterThan left right ->
+    if exprNeedsBuiltinPrelude left then true else exprNeedsBuiltinPrelude right,
+  LowerGreaterThanOrEqual left right ->
+    if exprNeedsBuiltinPrelude left then true else exprNeedsBuiltinPrelude right
+}
+
+exprsNeedNodeProcessPrelude : [LowerExprText] -> Bool
+exprsNeedNodeProcessPrelude exprs = {
+  for expr in exprs {
+    if exprNeedsNodeProcessPrelude expr then return true else false
+  };
+  false
+}
+
+recordFieldsNeedNodeProcessPrelude : [LowerRecordFieldText] -> Bool
+recordFieldsNeedNodeProcessPrelude fields = {
+  for field in fields {
+    match field {
+      LowerRecordFieldText name value ->
+        if exprNeedsNodeProcessPrelude value then return true else false
+    }
+  };
+  false
+}
+
+branchesNeedNodeProcessPrelude : [LowerMatchBranchText] -> Bool
+branchesNeedNodeProcessPrelude branches = {
+  for branch in branches {
+    match branch {
+      LowerMatchBranchText constructorName binders body ->
+        if exprNeedsNodeProcessPrelude body then return true else false
+    }
+  };
+  false
+}
+
+exprNeedsNodeProcessPrelude : LowerExprText -> Bool
+exprNeedsNodeProcessPrelude expr = match expr {
+  LowerName name ->
+    false,
+  LowerLiteral value ->
+    false,
+  LowerInt value ->
+    false,
+  LowerBool value ->
+    false,
+  LowerArray values ->
+    exprsNeedNodeProcessPrelude values,
+  LowerListAppend left right ->
+    if exprNeedsNodeProcessPrelude left then true else exprNeedsNodeProcessPrelude right,
+  LowerListPrepend value values ->
+    if exprNeedsNodeProcessPrelude value then true else exprNeedsNodeProcessPrelude values,
+  LowerListReverse values ->
+    exprNeedsNodeProcessPrelude values,
+  LowerLength value ->
+    exprNeedsNodeProcessPrelude value,
+  LowerListMap callee values ->
+    exprNeedsNodeProcessPrelude values,
+  LowerListFilter callee values ->
+    exprNeedsNodeProcessPrelude values,
+  LowerListFind callee values ->
+    exprNeedsNodeProcessPrelude values,
+  LowerListAny callee values ->
+    exprNeedsNodeProcessPrelude values,
+  LowerListAll callee values ->
+    exprNeedsNodeProcessPrelude values,
+  LowerListFold callee initial values ->
+    if exprNeedsNodeProcessPrelude initial then true else exprNeedsNodeProcessPrelude values,
+  LowerViewAppend left right ->
+    if exprNeedsNodeProcessPrelude left then true else exprNeedsNodeProcessPrelude right,
+  LowerEncode value ->
+    exprNeedsNodeProcessPrelude value,
+  LowerDecode targetType value ->
+    exprNeedsNodeProcessPrelude value,
+  LowerTryDecode targetType value ->
+    exprNeedsNodeProcessPrelude value,
+  LowerInvoke callee args ->
+    if jsNodeProcessBuiltinPreludeName callee then true else exprsNeedNodeProcessPrelude args,
+  LowerConstructor constructorName args ->
+    exprsNeedNodeProcessPrelude args,
+  LowerMatch subject branches ->
+    if exprNeedsNodeProcessPrelude subject then true else branchesNeedNodeProcessPrelude branches,
+  LowerRecord recordName fields ->
+    recordFieldsNeedNodeProcessPrelude fields,
+  LowerFieldAccess recordName subject fieldName ->
+    exprNeedsNodeProcessPrelude subject,
+  LowerLet binder value body ->
+    if exprNeedsNodeProcessPrelude value then true else exprNeedsNodeProcessPrelude body,
+  LowerMutableLet binder value body ->
+    if exprNeedsNodeProcessPrelude value then true else exprNeedsNodeProcessPrelude body,
+  LowerAssign binder value body ->
+    if exprNeedsNodeProcessPrelude value then true else exprNeedsNodeProcessPrelude body,
+  LowerFor binder iterable loopBody body ->
+    if exprNeedsNodeProcessPrelude iterable then true else if exprNeedsNodeProcessPrelude loopBody then true else exprNeedsNodeProcessPrelude body,
+  LowerReturn value ->
+    exprNeedsNodeProcessPrelude value,
+  LowerIf condition thenBranch elseBranch ->
+    if exprNeedsNodeProcessPrelude condition then true else if exprNeedsNodeProcessPrelude thenBranch then true else exprNeedsNodeProcessPrelude elseBranch,
+  LowerEqual left right ->
+    if exprNeedsNodeProcessPrelude left then true else exprNeedsNodeProcessPrelude right,
+  LowerNotEqual left right ->
+    if exprNeedsNodeProcessPrelude left then true else exprNeedsNodeProcessPrelude right,
+  LowerLessThan left right ->
+    if exprNeedsNodeProcessPrelude left then true else exprNeedsNodeProcessPrelude right,
+  LowerLessThanOrEqual left right ->
+    if exprNeedsNodeProcessPrelude left then true else exprNeedsNodeProcessPrelude right,
+  LowerGreaterThan left right ->
+    if exprNeedsNodeProcessPrelude left then true else exprNeedsNodeProcessPrelude right,
+  LowerGreaterThanOrEqual left right ->
+    if exprNeedsNodeProcessPrelude left then true else exprNeedsNodeProcessPrelude right
+}
+
+moduleNeedsBuiltinPrelude : [LowerDeclText] -> Bool
+moduleNeedsBuiltinPrelude decls = {
+  for decl in decls {
+    match decl {
+      LowerConst name body ->
+        if exprNeedsBuiltinPrelude body then return true else false,
+      LowerFn name params body ->
+        if exprNeedsBuiltinPrelude body then return true else false
+    }
+  };
+  false
+}
+
+declNeedsNodeProcessPrelude : LowerDeclText -> Bool
+declNeedsNodeProcessPrelude decl = match decl {
+  LowerConst name body ->
+    exprNeedsNodeProcessPrelude body,
+  LowerFn name params body ->
+    exprNeedsNodeProcessPrelude body
+}
+
+moduleNeedsNodeProcessPrelude : [LowerDeclText] -> Bool
+moduleNeedsNodeProcessPrelude decls = {
+  for decl in decls {
+    if declNeedsNodeProcessPrelude decl then return true else false
+  };
+  false
+}
+
+foreignDeclNeedsBuiltinPrelude : HostedForeignDeclAst -> Bool
+foreignDeclNeedsBuiltinPrelude foreignDecl = match foreignDeclSource foreignDecl {
+  HostedForeignPackageImport kind specifier declarationPath ->
+    false,
+  HostedForeignRuntime ->
+    jsBuiltinPreludeName (foreignDeclRuntimeName foreignDecl)
+}
+
+foreignDeclsNeedBuiltinPrelude : [HostedForeignDeclAst] -> Bool
+foreignDeclsNeedBuiltinPrelude foreignDecls = {
+  for foreignDecl in foreignDecls {
+    if foreignDeclNeedsBuiltinPrelude foreignDecl then return true else false
+  };
+  false
+}
+
+moduleNeedsBuiltinPreludeWithForeigns : [LowerDeclText] -> [HostedForeignDeclAst] -> Bool
+moduleNeedsBuiltinPreludeWithForeigns decls foreignDecls =
+  if moduleNeedsBuiltinPrelude decls then true else foreignDeclsNeedBuiltinPrelude foreignDecls
+
+foreignDeclNeedsNodeProcessPrelude : HostedForeignDeclAst -> Bool
+foreignDeclNeedsNodeProcessPrelude foreignDecl = match foreignDeclSource foreignDecl {
+  HostedForeignPackageImport kind specifier declarationPath ->
+    false,
+  HostedForeignRuntime ->
+    jsNodeProcessBuiltinPreludeName (foreignDeclRuntimeName foreignDecl)
+}
+
+foreignDeclsNeedNodeProcessPrelude : [HostedForeignDeclAst] -> Bool
+foreignDeclsNeedNodeProcessPrelude foreignDecls = {
+  for foreignDecl in foreignDecls {
+    if foreignDeclNeedsNodeProcessPrelude foreignDecl then return true else false
+  };
+  false
+}
+
+moduleNeedsNodeProcessPreludeWithForeigns : [LowerDeclText] -> [HostedForeignDeclAst] -> Bool
+moduleNeedsNodeProcessPreludeWithForeigns decls foreignDecls =
+  if moduleNeedsNodeProcessPrelude decls then true else foreignDeclsNeedNodeProcessPrelude foreignDecls
+
+emitNodeProcessPrelude : [LowerDeclText] -> [HostedForeignDeclAst] -> [Str]
+emitNodeProcessPrelude decls foreignDecls =
+  if moduleNeedsNodeProcessPreludeWithForeigns decls foreignDecls then ["import { spawnSync as $claspNodeSpawnSync } from \"node:child_process\";"] else emptyRenderedTexts

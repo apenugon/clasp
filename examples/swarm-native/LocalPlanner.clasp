@@ -1,5 +1,10 @@
 module Main
 
+import AgentErgonomics
+import LocalRouting
+import LocalSourceEdit
+import StandaloneSwarmClosureReport
+
 record PlannedTask = {
   taskId : Str,
   role : Str,
@@ -26,11 +31,48 @@ record PlannerInvocation = {
   workspaceRoot : Str
 }
 
+record LocalPlannerRoutePlan = {
+  route : Str,
+  objectiveSummary : Str,
+  strategy : Str,
+  tasks : [PlannedTask],
+  testsRun : [Str],
+  residualRisks : [Str]
+}
+
+record LocalPlannerCatalogReadResult = {
+  plans : [LocalPlannerRoutePlan],
+  issues : [Str]
+}
+
+record LocalPlannerCatalogCyclePartition = {
+  remaining : [PlannedTask],
+  resolvedTaskIds : [Str],
+  progressed : Bool
+}
+
 emptyTexts : [Str]
 emptyTexts = []
 
+emptyPlannedTasks : [PlannedTask]
+emptyPlannedTasks = []
+
+emptyLocalPlannerRoutePlans : [LocalPlannerRoutePlan]
+emptyLocalPlannerRoutePlans = []
+
+emptyLocalPlannerCatalogReadResult : LocalPlannerCatalogReadResult
+emptyLocalPlannerCatalogReadResult =
+  LocalPlannerCatalogReadResult {
+    plans = emptyLocalPlannerRoutePlans,
+    issues = emptyTexts
+  }
+
 textIncludes : Str -> Str -> Bool
 textIncludes value needle = length (textSplit value needle) > 1
+
+textMissing : Str -> Bool
+textMissing value =
+  value == ""
 
 argValue : Str -> Str -> Str
 argValue flag fallback = {
@@ -58,6 +100,26 @@ readTextOr path fallback =
     Ok raw -> raw,
     Err message -> fallback
   }
+
+promptAffectedVerificationPlanPath : Str -> Str
+promptAffectedVerificationPlanPath prompt =
+  agentAffectedVerificationPlanPathFromPrompt prompt
+
+promptAffectedVerificationLaunchPolicyPath : Str -> Str
+promptAffectedVerificationLaunchPolicyPath prompt =
+  agentAffectedVerificationLaunchPolicyPathFromPrompt prompt
+
+promptAffectedVerificationPlanJsonBlockFromPath : Str -> Str
+promptAffectedVerificationPlanJsonBlockFromPath path =
+  agentAffectedVerificationPlanJsonBlockFromPath path
+
+promptAffectedVerificationLaunchPolicyJsonBlockFromPath : Str -> Str
+promptAffectedVerificationLaunchPolicyJsonBlockFromPath path =
+  agentAffectedVerificationLaunchPolicyJsonBlockFromPath path
+
+promptWithAffectedVerificationPathContext : Str -> Str
+promptWithAffectedVerificationPathContext prompt =
+  agentPromptWithAffectedVerificationPathContext prompt
 
 writeTextOrMessage : Str -> Str -> Str
 writeTextOrMessage path value =
@@ -95,10 +157,10 @@ logPlannerInvocation fallbackLogPath invocation =
         appendTextOrMessage fallbackLogPath (textConcat [encode invocation, "\n"])
   }
 
-plannerTask : PlannedTask
-plannerTask =
+providerNeutralTask : PlannedTask
+providerNeutralTask =
   PlannedTask {
-    taskId = "provider-neutral-child",
+    taskId = agentPlannerTaskIdProviderNeutral,
     role = "generic-agent-proof",
     detail = "Run a child loop without requiring Codex as the swarm agent backend.",
     dependencies = emptyTexts,
@@ -106,29 +168,1058 @@ plannerTask =
     coordinationFocus = ["provider-neutral-agent", "child-loop-env", "native-context-pack"]
   }
 
-plannerReport : PlannerReport
-plannerReport =
-  PlannerReport {
-    objectiveSummary = "Prove the manager can plan with a Clasp-native non-Codex backend.",
-    strategy = "Use the native planner context pack plus one child loop task while preserving provider-neutral child agent command configuration.",
-    tasks = [plannerTask],
-    testsRun = ["clasp-local-planner-template", "clasp-local-planner-context-pack"],
+iterationSpeedTask : PlannedTask
+iterationSpeedTask =
+  PlannedTask {
+    taskId = agentPlannerTaskIdIterationSpeed,
+    role = "compiler-speed-worker",
+    detail = "Reduce self-improvement iteration time by improving focused compiler verification.",
+    dependencies = emptyTexts,
+    taskPrompt = "Inspect the edited compiler modules, prefer verify-affected or compiler-slice check-only coverage, and make one bounded change that cuts Clasp self-improvement iteration time without broad native-image rebuilds.",
+    coordinationFocus = ["iteration-speed", "focused-verification", "compiler-checker"]
+  }
+
+semanticContextTask : PlannedTask
+semanticContextTask =
+  PlannedTask {
+    taskId = agentPlannerTaskIdSemanticContext,
+    role = "context-pack-worker",
+    detail = "Improve semantic-index evidence routing for standalone Clasp agents.",
+    dependencies = emptyTexts,
+    taskPrompt = "Use the native planner context pack and semantic index projections to improve one bounded standalone-agent routing surface, then verify it with focused context-pack or ready-gate coverage.",
+    coordinationFocus = ["semantic-index", "context-pack", "standalone-agent-routing"]
+  }
+
+resourcePressureTask : PlannedTask
+resourcePressureTask =
+  PlannedTask {
+    taskId = agentPlannerTaskIdDiskResourcePressure,
+    role = "resource-guard-worker",
+    detail = "Recover enough disk headroom for the manager to continue safely.",
+    dependencies = emptyTexts,
+    taskPrompt = "Use the planner resource health section to recover disk headroom without broad builds, broad verification, swarm restarts, or broad process kills. Start with the ordinary Clasp GeneratedStateCleanupPlan helper in plan mode, preserve manager health lines such as generated-state-cleanup-action=, generated-state-cleanup-safe-to-clean=, generated-state-cleanup-total-reclaimable-mb=, generated-state-cleanup-projected-available-mb=, generated-state-cleanup-can-satisfy-reserve=, generated-state-cleanup-can-satisfy-guard=, generated-state-cleanup-guard-shortfall-after-cleanup-mb=, and generated-state-cleanup-apply-requires=, inspect its cleanup projection fields such as repoReclaimableMb, projectedAvailableMb, cleanupCanSatisfyReserve, cleanupCanSatisfyGuard, and guardShortfallAfterCleanupMb, optionally steer it with CLASP_GENERATED_STATE_CLEANUP_TARGETS_JSON, CLASP_GENERATED_STATE_CLEANUP_TARGETS_PATH, or workspace .clasp-generated-state/cleanup-targets.json, rerun it with CLASP_GENERATED_STATE_APPLY_JSON=true only when safeToClean is true and the projection shows cleanup can help, use scripts/clasp-clean-generated-state.sh --health --json only as an operator fallback for external cache scans, and otherwise report the exact external disk shortfall.",
+    coordinationFocus = ["resource-pressure", "generated-state-cleanup", "workspaceRemovePath", "bounded-verification"]
+  }
+
+memoryResourcePressureTask : PlannedTask
+memoryResourcePressureTask =
+  PlannedTask {
+    taskId = agentPlannerTaskIdMemoryResourcePressure,
+    role = "resource-memory-guard-worker",
+    detail = "Reduce launch pressure from memory and unmanaged external-agent RSS before the manager launches more children.",
+    dependencies = emptyTexts,
+    taskPrompt = "Use the planner resource health memory-admission and memory-concurrency-admission lines, the older memory summary fields, or managed-job memory-exceeded facts to recover memory admission headroom without broad builds, broad verification, swarm restarts, or broad process kills. Preserve and report memory-admission status=, reason=, action=, requiredMb=, headroomMb=, projectedActiveChildren=, externalAgentReservedMb=, plus memory-concurrency-admission configuredMaxChildren=, capacityLimit=, admittedChildCapacity=, effectiveMaxChildren=, and action= when present. Do not use generated-state cleanup as the primary fix for memory or external-agent RSS pressure. First reduce ordinary Clasp manager demand by lowering CLASP_MANAGER_MAX_CONCURRENT_CHILDREN_JSON to the admittedChildCapacity or effectiveMaxChildren from memory-concurrency-admission, lowering CLASP_MANAGER_MAX_TASKS_JSON or the prompt Plan 1-N budget, or editing CLASP_LOCAL_PLANNER_TASK_CATALOG_JSON, CLASP_LOCAL_PLANNER_TASK_CATALOG_PATH, or workspace .clasp-local-planner/task-catalog.json so the next wave emits fewer serialized tasks. Then lower role-specific caps or reserves when safe: CLASP_LOOP_AGENT_MEMORY_MB_JSON, CLASP_LOOP_BUILDER_MEMORY_MB_JSON, CLASP_LOOP_VERIFIER_MEMORY_MB_JSON, CLASP_MANAGER_PLANNER_MEMORY_MB_JSON, CLASP_MANAGER_CHILD_MEMORY_RESERVE_MB_JSON, and CLASP_MANAGER_MIN_AVAILABLE_MEMORY_MB_JSON. If a forced current-shell verifier path is the blocker, lower CLASP_VERIFY_DIRECT_MEMORY_LIMIT_MB or CLASP_VERIFY_AFFECTED_DIRECT_MEMORY_LIMIT_MB before rerunning focused verification, and do not disable CLASP_VERIFY_DIRECT_MEMORY_LIMIT or CLASP_VERIFY_AFFECTED_DIRECT_MEMORY_LIMIT except inside tiny harness fixtures. If unmanaged agent RSS is the blocker, inspect CLASP_MANAGER_EXTERNAL_AGENT_PROCESS_NAMES_JSON and CLASP_MANAGER_EXTERNAL_AGENT_RESERVE_MB_JSON, wait for live external agents to finish, or stop only exact managed jobs identified by metadata when the manager owns them. Use CLASP_MANAGER_RESOURCE_RECOVERY_EXTRA_WAVES_JSON only to allow a bounded recovery replan after reducing demand. Report the exact available_memory_mb, required_available_memory_mb, configuredMaxChildren=, capacityLimit=, admittedChildCapacity=, effectiveMaxChildren=, externalAgentRssMb=, externalAgentReservedMb=, unmanagedRssMb=, directVerifyLimitMb=, or affectedDirectVerifyLimitMb= shortfall when no safe local action exists.",
+    coordinationFocus = ["resource-pressure", "memory-pressure", "external-agent-rss", "managed-job-admission", "direct-verifier-memory-cap", "bounded-verification"]
+  }
+
+affectedVerificationLaunchTask : PlannedTask
+affectedVerificationLaunchTask =
+  PlannedTask {
+    taskId = agentPlannerTaskIdAffectedVerifierLaunch,
+    role = "verifier-launch-worker",
+    detail = "Close affected-verifier launch-policy gaps before spawning follow-up verifier work.",
+    dependencies = emptyTexts,
+    taskPrompt = "Use the affectedVerificationLaunchPolicy, affected-launch-* evidence, focused_verification_plan capability evidence, AgentFocusedVerificationLaunchPolicy evidence, or a Focused verification launch policy JSON block from the context pack to decide the next verifier step before launching more work. Preserve and report affected-launch-mode=, affected-launch-ready=, affected-launch-can-run-direct=, affected-launch-can-run-without-compiler-state=, affected-launch-requires-managed=, affected-launch-recommendation=, focused-verification-plan-command=, focused-verification-plan-safe-direct=, focused-verification-plan-managed-required=, focused-verification-launch-mode=, focused-verification-launch-ready=, focused-verification-launch-recommendation=, focused-verification-launch-policy-mode:, focused-verification-launch-policy-recommendation:, Focused verification launch policy JSON, blockingGaps, and requiredClosure. If mode is direct-compiler-state-access, do not treat the plan as OOM-free: rerun verify-affected --plan-only first, isolate or reset temporary compiler/cache probes where possible, and run only the named safe-direct commands after confirming no broader compiler build is selected. If mode is focused-managed or heavy-managed, or focused_verification_plan launch policy reports managed-required, safe-direct=false, managed-required=true, or JSON mode=managed-required, run the affected or focused verifier only through scripts/verify-affected.sh or scripts/run-managed-job.sh with explicit memory, disk, and low-parallelism admission; never run full verify-all, promotion, broad native-image rebuilds, or unmanaged compiler work from this task. If the affected policy is invalid-plan or the focused_verification_plan launch policy reports invalid-plan or JSON mode=invalid-plan, repair the changed-file list, plan JSON, or Focused verification plan section before any verifier process starts.",
+    coordinationFocus = ["affected-verification", "launch-policy", "compiler-cache-state", "managed-verifier-admission", "bounded-verification"]
+  }
+
+resourcePressureTaskForPrompt : Str -> PlannedTask
+resourcePressureTaskForPrompt prompt =
+  if localRouteSelectsMemoryResourcePressure prompt then
+    memoryResourcePressureTask
+  else
+    resourcePressureTask
+
+capabilityAuditPromptHasVerifyAllGap : Str -> Bool
+capabilityAuditPromptHasVerifyAllGap prompt =
+  agentPromptHasCapabilityAuditVerifyAllGap prompt
+
+capabilityAuditPromptHasSwarmProofGap : Str -> Bool
+capabilityAuditPromptHasSwarmProofGap prompt =
+  agentPromptHasCapabilityAuditSwarmProofGap prompt
+
+capabilityAuditPromptHasNativeRuntimeGap : Str -> Bool
+capabilityAuditPromptHasNativeRuntimeGap prompt =
+  agentPromptHasCapabilityAuditNativeRuntimeGap prompt
+
+capabilityAuditPromptHasBackendSurfaceGap : Str -> Bool
+capabilityAuditPromptHasBackendSurfaceGap prompt =
+  agentPromptHasCapabilityAuditBackendSurfaceGap prompt
+
+capabilityAuditPromptHasCompilerSpeedGap : Str -> Bool
+capabilityAuditPromptHasCompilerSpeedGap prompt =
+  agentPromptHasCapabilityAuditCompilerSpeedGap prompt
+
+capabilityAuditPromptHasEmbeddingGap : Str -> Bool
+capabilityAuditPromptHasEmbeddingGap prompt =
+  agentPromptHasCapabilityAuditEmbeddingGap prompt
+
+capabilityAuditPromptHasSafetyGap : Str -> Bool
+capabilityAuditPromptHasSafetyGap prompt =
+  agentPromptHasCapabilityAuditSafetyGap prompt
+
+capabilityAuditPromptHasErgonomicsGap : Str -> Bool
+capabilityAuditPromptHasErgonomicsGap prompt =
+  agentPromptHasCapabilityAuditErgonomicsGap prompt
+
+capabilityAuditPromptHasContextGap : Str -> Bool
+capabilityAuditPromptHasContextGap prompt =
+  agentPromptHasCapabilityAuditContextGap prompt
+
+capabilityAuditClosureDetailForPrompt : Str -> Str
+capabilityAuditClosureDetailForPrompt prompt =
+  agentCapabilityAuditClosureDetailFromPrompt prompt
+
+capabilityAuditClosurePromptForPrompt : Str -> Str
+capabilityAuditClosurePromptForPrompt prompt =
+  agentCapabilityAuditClosurePromptFromPrompt prompt
+
+capabilityAuditCoordinationFocusForPrompt : Str -> [Str]
+capabilityAuditCoordinationFocusForPrompt prompt =
+  agentCapabilityAuditCoordinationFocusFromPrompt prompt
+
+capabilityAuditClosureDecisionForPrompt : Str -> AgentCapabilityAuditClosureDecision
+capabilityAuditClosureDecisionForPrompt prompt =
+  agentCapabilityAuditClosureDecisionFromPromptOrJson prompt
+
+capabilityAuditClosureDecisionForEntries : [Str] -> [Str] -> AgentCapabilityAuditClosureDecision
+capabilityAuditClosureDecisionForEntries blockingGaps requiredClosure =
+  agentCapabilityAuditClosureDecisionFromEntries blockingGaps requiredClosure
+
+capabilityAuditClosureDecisionForJson : Str -> AgentCapabilityAuditClosureDecision
+capabilityAuditClosureDecisionForJson raw =
+  agentCapabilityAuditClosureDecisionFromJson raw
+
+capabilityAuditClosureDecisionForDecisionJson : Str -> AgentCapabilityAuditClosureDecision
+capabilityAuditClosureDecisionForDecisionJson raw =
+  agentCapabilityAuditClosureDecisionFromDecisionJson raw
+
+capabilityAuditTaskFromDecision : AgentCapabilityAuditClosureDecision -> PlannedTask
+capabilityAuditTaskFromDecision decision =
+  PlannedTask {
+    taskId = agentPlannerTaskIdCapabilityAuditClosure,
+    role = agentCapabilityAuditClosureRoleForKind decision.kind,
+    detail = decision.detail,
+    dependencies = emptyTexts,
+    taskPrompt = decision.taskPrompt,
+    coordinationFocus = decision.coordinationFocus
+  }
+
+capabilityAuditTaskForPrompt : Str -> PlannedTask
+capabilityAuditTaskForPrompt prompt = {
+  let decision = capabilityAuditClosureDecisionForPrompt prompt in
+  capabilityAuditTaskFromDecision decision
+}
+
+capabilityAuditTaskForJson : Str -> PlannedTask
+capabilityAuditTaskForJson raw = {
+  let decision = capabilityAuditClosureDecisionForJson raw in
+  capabilityAuditTaskFromDecision decision
+}
+
+capabilityAuditTaskForDecisionJson : Str -> PlannedTask
+capabilityAuditTaskForDecisionJson raw = {
+  let decision = capabilityAuditClosureDecisionForDecisionJson raw in
+  capabilityAuditTaskFromDecision decision
+}
+
+managedSwarmProofTaskFromDecision : AgentManagedSwarmProofDecision -> PlannedTask
+managedSwarmProofTaskFromDecision decision =
+  if decision.passed then
+    iterationSpeedTask
+  else
+    PlannedTask {
+      taskId = agentPlannerTaskIdCapabilityAuditClosure,
+      role = "managed-swarm-proof-repair-worker",
+      detail = textConcat ["Repair the managed swarm proof handoff before broad swarm work: ", textJoin "; " decision.issueTexts],
+      dependencies = emptyTexts,
+      taskPrompt = "Repair the managed swarm proof handoff. Provide a passing clasp-managed-swarm-proof JSON artifact from a GoalManager local planner/child-loop run with prompt-path template backend, no Codex fallback, dependency-ordered child tasks, propagated local child-agent commands, source-edit/source-patch plans, and dependency completion evidence. Do not launch an unbounded swarm or full verification from this task.",
+      coordinationFocus = ["capability-audit", "managed-swarm-proof", "goal-manager", "non-codex-backend", "bounded-child-loop"]
+    }
+
+managedSwarmProofTaskForJson : Str -> PlannedTask
+managedSwarmProofTaskForJson raw =
+  managedSwarmProofTaskFromDecision (agentManagedSwarmProofDecisionFromJson raw)
+
+managedSwarmProofTaskForPrompt : Str -> PlannedTask
+managedSwarmProofTaskForPrompt prompt =
+  managedSwarmProofTaskFromDecision (agentManagedSwarmProofDecisionFromPromptOrJson prompt)
+
+capabilityAuditTask : PlannedTask
+capabilityAuditTask = capabilityAuditTaskForPrompt ""
+
+standaloneSwarmTask : PlannedTask
+standaloneSwarmTask =
+  PlannedTask {
+    taskId = agentPlannerTaskIdStandaloneSwarmReadiness,
+    role = "swarm-runtime-worker",
+    detail = "Close one bounded launch/readiness gap so a Clasp-native swarm can improve Clasp without Codex-specific control flow.",
+    dependencies = emptyTexts,
+    taskPrompt =
+      textJoin
+        "\n"
+        [
+          "Close one bounded standalone-swarm readiness gap. If the prompt carries Autonomous launch gate JSON, preserve autonomous-launch-mode=, autonomous-launch-ready=, autonomous-launch-gate-mode:, autonomous-launch-gate-recommendation:, blockingGaps, and requiredClosure. If the prompt carries retryRecordRecoveryTask=standalone-swarm-autonomous-launch-gate-repair, retryRecordRecoveryKind=autonomous-launch-gate, retryRecordLatest=phase=autonomous-launch-gate, manager-replan-blocker=autonomous-launch-gate, or autonomous-launch-gate-blocker, preserve those retry-record markers too, then repair the specific launch blocker before spawning agents. Prefer checkpoint, resource-admission, managed-supervisor, focused-verification-policy, or bounded-task fixes over broad source edits. For direct source-edit tasks, edit existing Clasp, script, doc, and runtime source files, apply targeted replacements from the source patch plan, record verifier-required direct-source-edit proof, avoid new compiler subcommands or Codex-specific control flow, and verify it through scripts/standalone-swarm-verify.sh --closure --json, local-agent direct-source-edit coverage, the readiness gate, or focused runtime tests. Do not run full verify-all, promotion, broad native-image rebuilds, or unmanaged compiler work from this task.",
+          standaloneSwarmSourceEditPromptSection
+        ],
+    coordinationFocus = ["standalone-swarm", "autonomous-launch-gate", "ordinary-clasp-program", "agent-ergonomics", "managed-supervisor", "focused-verification-policy", "direct-source-edit", "multi-file-source-edit", "source-patch-plan", "multi-surface-source-patch", "repo-scale-source-patch"]
+  }
+
+standaloneSwarmSourceEditRepairKindForPrompt : Str -> Str
+standaloneSwarmSourceEditRepairKindForPrompt prompt =
+  if textIncludes prompt "standalone-source-edit-repair:apply-planned-patch-replacements" then
+    "apply-planned-patch-replacements"
+  else if textIncludes prompt "standalone-source-edit-repair:regenerate-direct-source-edit-manifest" then
+    "regenerate-direct-source-edit-manifest"
+  else if textIncludes prompt "standalone-source-edit-repair:rerun-target-postchecks-and-proof-lines" then
+    "rerun-target-postchecks-and-proof-lines"
+  else if textIncludes prompt "standalone-source-edit-repair:restore-patch-fingerprint-proof-lines" then
+    "restore-patch-fingerprint-proof-lines"
+  else if textIncludes prompt "standalone-source-edit-repair:restore-direct-source-edit-proof-metadata" then
+    "restore-direct-source-edit-proof-metadata"
+  else if textIncludes prompt "standalone-source-edit-repair:write-direct-source-edit-proof" then
+    "write-direct-source-edit-proof"
+  else if textIncludes prompt "standalone-source-edit-repair:restore-multi-target-source-edit-plan" then
+    "restore-multi-target-source-edit-plan"
+  else if textIncludes prompt "standalone-source-edit-repair:inspect-direct-source-edit-proof" then
+    "inspect-direct-source-edit-proof"
+  else
+    ""
+
+standaloneSwarmPromptHasSourceEditRepairHint : Str -> Bool
+standaloneSwarmPromptHasSourceEditRepairHint prompt =
+  standaloneSwarmSourceEditRepairKindForPrompt prompt != ""
+
+standaloneSwarmSourceEditRepairRoleForKind : Str -> Str
+standaloneSwarmSourceEditRepairRoleForKind repairKind =
+  if repairKind == "apply-planned-patch-replacements" then
+    "swarm-source-patch-repair-worker"
+  else if repairKind == "regenerate-direct-source-edit-manifest" then
+    "swarm-manifest-repair-worker"
+  else if repairKind == "rerun-target-postchecks-and-proof-lines" then
+    "swarm-postcheck-repair-worker"
+  else if repairKind == "restore-patch-fingerprint-proof-lines" then
+    "swarm-patch-proof-repair-worker"
+  else if repairKind == "restore-direct-source-edit-proof-metadata" then
+    "swarm-proof-metadata-repair-worker"
+  else if repairKind == "write-direct-source-edit-proof" then
+    "swarm-proof-repair-worker"
+  else if repairKind == "restore-multi-target-source-edit-plan" then
+    "swarm-source-plan-repair-worker"
+  else
+    "swarm-source-edit-repair-worker"
+
+standaloneSwarmSourceEditRepairPromptForKind : Str -> Str
+standaloneSwarmSourceEditRepairPromptForKind repairKind =
+  if repairKind == "apply-planned-patch-replacements" then
+    "Repair only the missing standalone-swarm planned patch replacements. Re-read the Source edit patches section, apply the targeted workspaceReplaceText replacements that are absent, preserve existing valid proof lines, then refresh notes/direct-source-edit.txt and notes/direct-source-edit-manifest.json. Do not redo unrelated source edits, promotion, full verification, or broad swarm work."
+  else if repairKind == "regenerate-direct-source-edit-manifest" then
+    "Repair only the standalone-swarm workspace fingerprint manifest. Regenerate notes/direct-source-edit-manifest.json from current candidate workspace bytes, keep workspaceFingerprintManifest=notes/direct-source-edit-manifest.json and workspaceFingerprintAlgorithm=textFingerprint64Hex in notes/direct-source-edit.txt, then rerun the focused standalone-swarm closure verifier if needed."
+  else if repairKind == "rerun-target-postchecks-and-proof-lines" then
+    "Repair only the standalone-swarm target postcheck evidence. Re-read each Source edit plan target, verify the edited bytes in the candidate workspace, restore targetStatus=postwrite-present proof lines and targetFingerprint64Hex entries, then refresh the manifest. Do not apply unrelated edits."
+  else if repairKind == "restore-patch-fingerprint-proof-lines" then
+    "Repair only the standalone-swarm patch fingerprint proof. Preserve the applied source edits, restore patchFindFingerprint and patchReplacementFingerprint proof lines for every Source edit patches entry, then rerun focused verifier coverage."
+  else if repairKind == "restore-direct-source-edit-proof-metadata" then
+    "Repair only the standalone-swarm direct-source-edit proof metadata. Restore sourceEditTargetCount, sourceEditPatchCount, workspaceFingerprintManifest, workspaceFingerprintAlgorithm, workspaceConfinedWrite, sourceEditPrimitive, and workspaceApi proof fields without changing unrelated files."
+  else if repairKind == "write-direct-source-edit-proof" then
+    "Repair only the missing standalone-swarm direct-source-edit proof file. Write notes/direct-source-edit.txt with fixed markers, target postchecks, patch fingerprints, manifest metadata, and local-agent direct-source-edit evidence for the already edited candidate workspace."
+  else if repairKind == "restore-multi-target-source-edit-plan" then
+    "Repair only the standalone-swarm multi-target source edit plan handoff. Restore the Source edit plan section with more than one safe repo source target and keep the Source edit patches section aligned with those targets before rerunning focused verifier coverage."
+  else
+    "Inspect and repair the standalone-swarm direct-source-edit proof handoff using the verifier source-edit issue categories. Keep the task bounded to proof, manifest, postcheck, or planned patch replacement repair."
+
+standaloneSwarmSourceEditRepairTaskForPrompt : Str -> PlannedTask
+standaloneSwarmSourceEditRepairTaskForPrompt prompt = {
+  let repairKind = standaloneSwarmSourceEditRepairKindForPrompt prompt in
+  PlannedTask {
+    taskId = agentPlannerTaskIdStandaloneSwarmReadiness,
+    role = standaloneSwarmSourceEditRepairRoleForKind repairKind,
+    detail = textConcat ["Repair the standalone-swarm direct-source-edit handoff from local verifier feedback: ", repairKind],
+    dependencies = emptyTexts,
+    taskPrompt = standaloneSwarmSourceEditRepairPromptForKind repairKind,
+    coordinationFocus = ["standalone-swarm", "source-edit-repair", repairKind, "direct-source-edit-proof", "bounded-verification"]
+  }
+}
+
+standaloneSwarmClosureTaskFromDecision : StandaloneSwarmClosureDecision -> PlannedTask
+standaloneSwarmClosureTaskFromDecision decision = {
+  let repairKind = standaloneSwarmClosureRepairKindForDecision decision in
+  PlannedTask {
+    taskId = agentPlannerTaskIdStandaloneSwarmReadiness,
+    role =
+      if decision.closed then
+        "swarm-closure-recorder"
+      else if repairKind == "repair-workspace-fingerprint-manifest" then
+        "swarm-manifest-repair-worker"
+      else if repairKind == "repair-direct-source-edit-proof" then
+        "swarm-proof-repair-worker"
+      else if repairKind == "repair-builder-verifier-reports" then
+        "swarm-report-repair-worker"
+      else if repairKind == "repair-local-verifier-gate" then
+        "swarm-verifier-gate-repair-worker"
+      else
+        "swarm-closure-repair-worker",
+    detail =
+      if decision.closed then
+        "Record the accepted standalone-swarm closure report and move broader planning to the remaining capability-audit or iteration-speed gaps."
+      else
+        textConcat ["Repair the standalone-swarm closure report handoff before redoing source edits (", repairKind, "): ", textJoin "; " decision.issueTexts],
+    dependencies = emptyTexts,
+    taskPrompt = standaloneSwarmClosureRepairPromptForDecision decision,
+    coordinationFocus = ["standalone-swarm", "closure-report", repairKind, "typed-verifier-gate", "bounded-verification"]
+  }
+}
+
+standaloneSwarmTaskForPrompt : Str -> PlannedTask
+standaloneSwarmTaskForPrompt prompt =
+  if standaloneSwarmHasClosureReportJson prompt then
+    standaloneSwarmClosureTaskFromDecision (standaloneSwarmClosureDecisionFromPromptOrRaw prompt)
+  else if standaloneSwarmPromptHasSourceEditRepairHint prompt then
+    standaloneSwarmSourceEditRepairTaskForPrompt prompt
+  else
+    standaloneSwarmTask
+
+standaloneSwarmTaskForClosureReportJson : Str -> PlannedTask
+standaloneSwarmTaskForClosureReportJson raw =
+  standaloneSwarmClosureTaskFromDecision (standaloneSwarmClosureDecisionFromJson raw)
+
+standaloneSwarmTaskForClosureReportPath : Str -> PlannedTask
+standaloneSwarmTaskForClosureReportPath path =
+  standaloneSwarmClosureTaskFromDecision (standaloneSwarmClosureDecisionFromPath path)
+
+plannedTaskWithDependencies : PlannedTask -> [Str] -> PlannedTask
+plannedTaskWithDependencies task dependencies =
+  PlannedTask {
+    taskId = task.taskId,
+    role = task.role,
+    detail = task.detail,
+    dependencies = dependencies,
+    taskPrompt = task.taskPrompt,
+    coordinationFocus = task.coordinationFocus
+  }
+
+standaloneSwarmTaskAfter : [Str] -> PlannedTask
+standaloneSwarmTaskAfter dependencies =
+  plannedTaskWithDependencies standaloneSwarmTask dependencies
+
+promptSelectsProviderNeutral : Str -> Bool
+promptSelectsProviderNeutral prompt =
+  localRouteSelectsProviderNeutral prompt
+
+promptSelectsIterationSpeed : Str -> Bool
+promptSelectsIterationSpeed prompt = localRouteSelectsIterationSpeed prompt
+
+promptSelectsResourcePressure : Str -> Bool
+promptSelectsResourcePressure prompt = localRouteSelectsResourcePressure prompt
+
+promptSelectsAffectedVerification : Str -> Bool
+promptSelectsAffectedVerification prompt = localRouteSelectsAffectedVerification prompt
+
+promptSelectsCapabilityAudit : Str -> Bool
+promptSelectsCapabilityAudit prompt = localRouteSelectsCapabilityAudit prompt
+
+promptSelectsStandaloneSwarm : Str -> Bool
+promptSelectsStandaloneSwarm prompt = localRouteSelectsStandaloneSwarm prompt
+
+promptSelectsSemanticContext : Str -> Bool
+promptSelectsSemanticContext prompt = localRouteSelectsSemanticContext prompt
+
+plannerTaskForPrompt : Str -> PlannedTask
+plannerTaskForPrompt prompt =
+  if promptSelectsProviderNeutral prompt then
+    providerNeutralTask
+  else if promptSelectsResourcePressure prompt then
+    resourcePressureTaskForPrompt prompt
+  else if promptSelectsAffectedVerification prompt then
+    affectedVerificationLaunchTask
+  else if promptSelectsCapabilityAudit prompt then
+    if agentHasManagedSwarmProofJson prompt then
+      managedSwarmProofTaskForPrompt prompt
+    else
+      capabilityAuditTaskForPrompt prompt
+  else if promptSelectsIterationSpeed prompt then
+    iterationSpeedTask
+  else if promptSelectsStandaloneSwarm prompt then
+    standaloneSwarmTaskForPrompt prompt
+  else if promptSelectsSemanticContext prompt then
+    semanticContextTask
+  else
+    standaloneSwarmTaskForPrompt prompt
+
+plannerTaskBudgetContractLine : Int -> Str
+plannerTaskBudgetContractLine budget =
+  agentPlannerTaskBudgetContractLine budget
+
+promptHasExactTaskBudget : Str -> Int -> Bool
+promptHasExactTaskBudget prompt budget =
+  agentPromptHasExactTaskBudget prompt budget
+
+promptHasTaskBudgetContract : Str -> Bool
+promptHasTaskBudgetContract prompt =
+  agentPromptHasTaskBudgetContract prompt
+
+promptHasPlannerBackendPolicyRepair : Str -> Bool
+promptHasPlannerBackendPolicyRepair prompt =
+  agentPromptHasPlannerBackendPolicyRepair prompt
+
+plannerTaskBudgetForPrompt : Str -> Int
+plannerTaskBudgetForPrompt prompt =
+  agentPromptTaskBudgetOrDefault prompt 3
+
+plannerTasksForPrompt : Str -> [PlannedTask]
+plannerTasksForPrompt prompt = {
+  let budget = plannerTaskBudgetForPrompt prompt in
+  if promptSelectsProviderNeutral prompt then
+    if budget == 1 then
+      [providerNeutralTask]
+    else
+      [providerNeutralTask, standaloneSwarmTaskAfter [agentPlannerTaskIdProviderNeutral]]
+  else if promptSelectsResourcePressure prompt then
+    [resourcePressureTaskForPrompt prompt]
+  else if promptSelectsAffectedVerification prompt then
+    [affectedVerificationLaunchTask]
+  else if promptSelectsCapabilityAudit prompt then
+    {
+      let auditTask = if agentHasManagedSwarmProofJson prompt then managedSwarmProofTaskForPrompt prompt else capabilityAuditTaskForPrompt prompt in
+      if auditTask.taskId == agentPlannerTaskIdIterationSpeed then
+        if budget == 1 then
+          [auditTask]
+        else if budget == 2 then
+          [auditTask, standaloneSwarmTaskAfter [agentPlannerTaskIdIterationSpeed]]
+        else
+          [auditTask, semanticContextTask, standaloneSwarmTaskAfter [agentPlannerTaskIdIterationSpeed, agentPlannerTaskIdSemanticContext]]
+      else
+        if budget == 1 then
+          [auditTask]
+        else if budget == 2 then
+          [auditTask, standaloneSwarmTaskAfter [agentPlannerTaskIdCapabilityAuditClosure]]
+        else
+          [auditTask, iterationSpeedTask, standaloneSwarmTaskAfter [agentPlannerTaskIdCapabilityAuditClosure, agentPlannerTaskIdIterationSpeed]]
+    }
+  else if promptSelectsIterationSpeed prompt then
+    if budget == 1 then
+      [iterationSpeedTask]
+    else if budget == 2 then
+      [iterationSpeedTask, semanticContextTask]
+    else
+      [iterationSpeedTask, semanticContextTask, standaloneSwarmTaskAfter [agentPlannerTaskIdIterationSpeed, agentPlannerTaskIdSemanticContext]]
+  else if promptSelectsStandaloneSwarm prompt then
+    if standaloneSwarmHasClosureReportJson prompt then
+      [standaloneSwarmTaskForPrompt prompt]
+    else if standaloneSwarmPromptHasSourceEditRepairHint prompt then
+      [standaloneSwarmTaskForPrompt prompt]
+    else if budget == 1 then
+      [standaloneSwarmTask]
+    else if budget == 2 then
+      [semanticContextTask, standaloneSwarmTaskAfter [agentPlannerTaskIdSemanticContext]]
+    else
+      [iterationSpeedTask, semanticContextTask, standaloneSwarmTaskAfter [agentPlannerTaskIdIterationSpeed, agentPlannerTaskIdSemanticContext]]
+  else if promptSelectsSemanticContext prompt then
+    if budget == 1 then
+      [semanticContextTask]
+    else if budget == 2 then
+      [semanticContextTask, standaloneSwarmTaskAfter [agentPlannerTaskIdSemanticContext]]
+    else
+      [semanticContextTask, iterationSpeedTask, standaloneSwarmTaskAfter [agentPlannerTaskIdSemanticContext, agentPlannerTaskIdIterationSpeed]]
+  else if budget == 1 then
+    [standaloneSwarmTask]
+  else if budget == 2 then
+    [semanticContextTask, standaloneSwarmTaskAfter [agentPlannerTaskIdSemanticContext]]
+  else
+    [iterationSpeedTask, semanticContextTask, standaloneSwarmTaskAfter [agentPlannerTaskIdIterationSpeed, agentPlannerTaskIdSemanticContext]]
+}
+
+plannerObjectiveSummaryForTask : PlannedTask -> Str
+plannerObjectiveSummaryForTask task =
+  if task.taskId == agentPlannerTaskIdProviderNeutral then
+    "Prove the manager can plan with a Clasp-native non-Codex backend."
+  else if task.taskId == agentPlannerTaskIdMemoryResourcePressure then
+    "Plan a bounded memory-pressure recovery step before launching more swarm work."
+  else if task.taskId == agentPlannerTaskIdDiskResourcePressure then
+    "Plan a bounded disk-pressure recovery step before launching more swarm work."
+  else if task.taskId == agentPlannerTaskIdAffectedVerifierLaunch then
+    "Plan a bounded affected-verifier launch preflight before spawning verifier work."
+  else if task.taskId == agentPlannerTaskIdCapabilityAuditClosure then
+    "Plan a bounded closure step from the swarm capability audit."
+  else if task.taskId == agentPlannerTaskIdIterationSpeed then
+    "Plan a focused iteration-speed improvement for Clasp self-improvement."
+  else if task.taskId == agentPlannerTaskIdSemanticContext then
+    "Plan a semantic-context routing improvement for standalone Clasp agents."
+  else
+    "Plan a bounded standalone-swarm readiness improvement."
+
+plannerStrategyForTask : PlannedTask -> Str
+plannerStrategyForTask task =
+  if task.taskId == agentPlannerTaskIdProviderNeutral then
+    "Use the native planner context pack plus one child loop task while preserving provider-neutral child agent command configuration."
+  else if task.taskId == agentPlannerTaskIdMemoryResourcePressure then
+    "Route the prompt to one memory guard worker that reduces concurrency or exact managed-job pressure before any expensive verification or rebuild."
+  else if task.taskId == agentPlannerTaskIdDiskResourcePressure then
+    "Route the prompt to one cleanup worker that uses the Clasp-native generated-state cleanup plan before any expensive verification or rebuild."
+  else if task.taskId == agentPlannerTaskIdAffectedVerifierLaunch then
+    "Route the prompt to one verifier-launch worker that consumes affected-verifier launch policy before running direct cache-touching or managed verifier work."
+  else if task.taskId == agentPlannerTaskIdCapabilityAuditClosure then
+    "Route the prompt to one audit-closure worker that turns machine-readable readiness gaps into a focused, memory-guarded implementation step."
+  else if task.taskId == agentPlannerTaskIdIterationSpeed then
+    "Route the prompt to one compiler-speed worker that uses focused verification instead of broad native-image rebuilds."
+  else if task.taskId == agentPlannerTaskIdSemanticContext then
+    "Route the prompt to one context-pack worker that improves typed semantic-index evidence for local agents."
+  else
+    "Route the prompt to one ordinary-Clasp swarm-runtime worker and keep the change independent of Codex-specific control flow."
+
+localPlannerDefaultRoutePlanForPrompt : Str -> LocalPlannerRoutePlan
+localPlannerDefaultRoutePlanForPrompt prompt = {
+  let task = plannerTaskForPrompt prompt in
+  let tasks = plannerTasksForPrompt prompt in
+  LocalPlannerRoutePlan {
+    route = localPlannerRouteKeyForPrompt prompt,
+    objectiveSummary = plannerObjectiveSummaryForTask task,
+    strategy = plannerStrategyForTask task,
+    tasks = tasks,
+    testsRun = ["clasp-local-planner-template", "clasp-local-planner-context-pack", "clasp-local-planner-heuristic-routing"],
     residualRisks = emptyTexts
   }
+}
+
+localPlannerRouteKeyForPrompt : Str -> Str
+localPlannerRouteKeyForPrompt prompt =
+  localRoutePlannerRouteKeyForPrompt prompt
+
+readLocalPlannerRoutePlans : Str -> [LocalPlannerRoutePlan]
+readLocalPlannerRoutePlans raw =
+  if raw == "" then
+    emptyLocalPlannerRoutePlans
+  else
+    match tryDecode [LocalPlannerRoutePlan] raw {
+      Ok plans -> plans,
+      Err message -> emptyLocalPlannerRoutePlans
+    }
+
+localPlannerCatalogReadIssue : Str -> Str -> Str -> Str
+localPlannerCatalogReadIssue source kind message =
+  textConcat ["planner-catalog-error:", source, ":", kind, ":", message]
+
+localPlannerCatalogTaskIdentity : LocalPlannerRoutePlan -> PlannedTask -> Str
+localPlannerCatalogTaskIdentity plan task =
+  if textMissing task.taskId then
+    if textMissing plan.route then
+      "<missing-task-id>"
+    else
+      textConcat [plan.route, ":<missing-task-id>"]
+  else
+    task.taskId
+
+localPlannerCatalogTaskIssues : Str -> LocalPlannerRoutePlan -> PlannedTask -> [Str]
+localPlannerCatalogTaskIssues source plan task = {
+  let taskName = localPlannerCatalogTaskIdentity plan task in
+  let mut issues = emptyTexts;
+  if textMissing task.taskId then
+    issues = append issues [localPlannerCatalogReadIssue source "task" (textConcat [taskName, ":missing taskId"])]
+  else if task.taskId == agentPlannerReservedTaskId then
+    issues = append issues [localPlannerCatalogReadIssue source "task" (textConcat [taskName, ":reserved taskId"])]
+  else
+    issues = issues;
+  if textMissing task.role then
+    issues = append issues [localPlannerCatalogReadIssue source "task" (textConcat [taskName, ":missing role"])]
+  else
+    issues = issues;
+  if textMissing task.detail then
+    issues = append issues [localPlannerCatalogReadIssue source "task" (textConcat [taskName, ":missing detail"])]
+  else
+    issues = issues;
+  if textMissing task.taskPrompt then
+    issues = append issues [localPlannerCatalogReadIssue source "task" (textConcat [taskName, ":missing taskPrompt"])]
+  else
+    issues = issues;
+  issues
+}
+
+localPlannerCatalogRouteIssues : Str -> LocalPlannerRoutePlan -> [Str]
+localPlannerCatalogRouteIssues source plan =
+  if textMissing plan.route then
+    [localPlannerCatalogReadIssue source "route" "missing route"]
+  else if localRoutePlannerRouteKeyKnown plan.route then
+    emptyTexts
+  else
+    [localPlannerCatalogReadIssue source "route" (textConcat ["unknown route:", plan.route])]
+
+localPlannerCatalogTaskValid : Str -> LocalPlannerRoutePlan -> PlannedTask -> Bool
+localPlannerCatalogTaskValid source plan task =
+  length (localPlannerCatalogTaskIssues source plan task) == 0
+
+localPlannerTextListHas : Str -> [Str] -> Bool
+localPlannerTextListHas wanted values = {
+  let mut found = false;
+  for value in values {
+    if found then
+      found
+    else if value == wanted then {
+      found = true;
+      found
+    } else
+      found
+  };
+  found
+}
+
+localPlannerCatalogBaseValidTaskIds : Str -> LocalPlannerRoutePlan -> [Str]
+localPlannerCatalogBaseValidTaskIds source plan = {
+  let mut taskIds = emptyTexts;
+  let mut seenTaskIds = emptyTexts;
+  for task in plan.tasks {
+    if textMissing task.taskId then
+      taskIds
+    else if localPlannerCatalogTaskValid source plan task then
+      if localPlannerTextListHas task.taskId seenTaskIds then
+        taskIds
+      else {
+        taskIds = append taskIds [task.taskId];
+        seenTaskIds = append seenTaskIds [task.taskId];
+        taskIds
+      }
+    else {
+      seenTaskIds = append seenTaskIds [task.taskId];
+      taskIds
+    }
+  };
+  taskIds
+}
+
+localPlannerCatalogTaskDependencyIssues : Str -> [Str] -> PlannedTask -> [Str]
+localPlannerCatalogTaskDependencyIssues source knownTaskIds task = {
+  let taskName =
+    if textMissing task.taskId then
+      "<missing-task-id>"
+    else
+      task.taskId in
+  let mut issues = emptyTexts;
+  for dependency in task.dependencies {
+    if textMissing dependency then {
+      issues = append issues [localPlannerCatalogReadIssue source "dependency" (textConcat [taskName, ":missing dependency"])];
+      issues
+    } else if dependency == task.taskId then {
+      issues = append issues [localPlannerCatalogReadIssue source "dependency" (textConcat [taskName, ":self dependency"])];
+      issues
+    } else if localPlannerTextListHas dependency knownTaskIds then
+      issues
+    else {
+      issues = append issues [localPlannerCatalogReadIssue source "dependency" (textConcat [taskName, ":unknown dependency:", dependency])];
+      issues
+    }
+  };
+  issues
+}
+
+localPlannerCatalogDuplicateTaskIssues : Str -> LocalPlannerRoutePlan -> [Str]
+localPlannerCatalogDuplicateTaskIssues source plan = {
+  let mut seenTaskIds = emptyTexts;
+  let mut issues = emptyTexts;
+  for task in plan.tasks {
+    if textMissing task.taskId then
+      issues
+    else if localPlannerTextListHas task.taskId seenTaskIds then {
+      issues = append issues [localPlannerCatalogReadIssue source "task" (textConcat [task.taskId, ":duplicate taskId"])];
+      issues
+    } else {
+      seenTaskIds = append seenTaskIds [task.taskId];
+      issues
+    }
+  };
+  issues
+}
+
+localPlannerCatalogValidTasksBeforeCycles : Str -> LocalPlannerRoutePlan -> [PlannedTask]
+localPlannerCatalogValidTasksBeforeCycles source plan = {
+  let knownTaskIds = localPlannerCatalogBaseValidTaskIds source plan;
+  let mut validTasks = emptyPlannedTasks;
+  let mut seenTaskIds = emptyTexts;
+  for task in plan.tasks {
+    let taskShapeValid = localPlannerCatalogTaskValid source plan task;
+    let taskDuplicate =
+      if textMissing task.taskId then
+        false
+      else
+        localPlannerTextListHas task.taskId seenTaskIds;
+    let taskDependenciesValid = length (localPlannerCatalogTaskDependencyIssues source knownTaskIds task) == 0;
+    if textMissing task.taskId then
+      validTasks
+    else if taskShapeValid then
+      if taskDuplicate then {
+        seenTaskIds = append seenTaskIds [task.taskId];
+        validTasks
+      } else if taskDependenciesValid then {
+      validTasks = append validTasks [task];
+      seenTaskIds = append seenTaskIds [task.taskId];
+      validTasks
+      } else {
+        seenTaskIds = append seenTaskIds [task.taskId];
+        validTasks
+      }
+    else {
+      seenTaskIds = append seenTaskIds [task.taskId];
+      validTasks
+    }
+  };
+  validTasks
+}
+
+localPlannerCatalogDependenciesResolved : [Str] -> [Str] -> Bool
+localPlannerCatalogDependenciesResolved resolvedTaskIds dependencies = {
+  let mut resolved = true;
+  for dependency in dependencies {
+    if resolved then {
+      resolved = localPlannerTextListHas dependency resolvedTaskIds;
+      resolved
+    } else
+      resolved
+  };
+  resolved
+}
+
+localPlannerCatalogCyclePartitionStep : LocalPlannerCatalogCyclePartition -> PlannedTask -> LocalPlannerCatalogCyclePartition
+localPlannerCatalogCyclePartitionStep state task =
+  if localPlannerCatalogDependenciesResolved state.resolvedTaskIds task.dependencies then
+    LocalPlannerCatalogCyclePartition {
+      remaining = state.remaining,
+      resolvedTaskIds = append state.resolvedTaskIds [task.taskId],
+      progressed = true
+    }
+  else
+    LocalPlannerCatalogCyclePartition {
+      remaining = append state.remaining [task],
+      resolvedTaskIds = state.resolvedTaskIds,
+      progressed = state.progressed
+    }
+
+localPlannerCatalogCycleBlockedTaskIds : [PlannedTask] -> [Str] -> [Str]
+localPlannerCatalogCycleBlockedTaskIds pendingTasks resolvedTaskIds =
+  if length pendingTasks == 0 then
+    emptyTexts
+  else {
+    let partition =
+      fold
+        localPlannerCatalogCyclePartitionStep
+        (LocalPlannerCatalogCyclePartition {
+          remaining = emptyPlannedTasks,
+          resolvedTaskIds = resolvedTaskIds,
+          progressed = false
+        })
+        pendingTasks in
+    if partition.progressed then
+      localPlannerCatalogCycleBlockedTaskIds partition.remaining partition.resolvedTaskIds
+    else
+      map plannedTaskIdOf partition.remaining
+  }
+
+plannedTaskIdOf : PlannedTask -> Str
+plannedTaskIdOf task = task.taskId
+
+localPlannerCatalogCycleBlockedTaskIdsForPlan : Str -> LocalPlannerRoutePlan -> [Str]
+localPlannerCatalogCycleBlockedTaskIdsForPlan source plan =
+  localPlannerCatalogCycleBlockedTaskIds (localPlannerCatalogValidTasksBeforeCycles source plan) emptyTexts
+
+localPlannerCatalogCycleIssues : Str -> LocalPlannerRoutePlan -> [Str]
+localPlannerCatalogCycleIssues source plan = {
+  let mut issues = emptyTexts;
+  for taskId in localPlannerCatalogCycleBlockedTaskIdsForPlan source plan {
+    issues = append issues [localPlannerCatalogReadIssue source "dependency" (textConcat [taskId, ":cycle dependency"])];
+    issues
+  };
+  issues
+}
+
+localPlannerCatalogPlanIssues : Str -> LocalPlannerRoutePlan -> [Str]
+localPlannerCatalogPlanIssues source plan = {
+  let knownTaskIds = localPlannerCatalogBaseValidTaskIds source plan in
+  let mut issues = localPlannerCatalogRouteIssues source plan;
+  for task in plan.tasks {
+    issues = append issues (localPlannerCatalogTaskIssues source plan task);
+    issues = append issues (localPlannerCatalogTaskDependencyIssues source knownTaskIds task);
+    issues
+  };
+  issues = append issues (localPlannerCatalogDuplicateTaskIssues source plan);
+  issues = append issues (localPlannerCatalogCycleIssues source plan);
+  issues
+}
+
+localPlannerCatalogValidTasks : Str -> LocalPlannerRoutePlan -> [PlannedTask]
+localPlannerCatalogValidTasks source plan = {
+  let cycleBlockedTaskIds = localPlannerCatalogCycleBlockedTaskIdsForPlan source plan;
+  let mut validTasks = emptyPlannedTasks;
+  for task in localPlannerCatalogValidTasksBeforeCycles source plan {
+    if localPlannerTextListHas task.taskId cycleBlockedTaskIds then
+      validTasks
+    else {
+      validTasks = append validTasks [task];
+      validTasks
+    }
+  };
+  validTasks
+}
+
+localPlannerCatalogValidatedPlan : Str -> LocalPlannerRoutePlan -> LocalPlannerRoutePlan
+localPlannerCatalogValidatedPlan source plan =
+  LocalPlannerRoutePlan {
+    route = plan.route,
+    objectiveSummary = plan.objectiveSummary,
+    strategy = plan.strategy,
+    tasks = localPlannerCatalogValidTasks source plan,
+    testsRun = plan.testsRun,
+    residualRisks = plan.residualRisks
+  }
+
+localPlannerCatalogValidatedPlans : Str -> [LocalPlannerRoutePlan] -> [LocalPlannerRoutePlan]
+localPlannerCatalogValidatedPlans source plans = {
+  let mut validated = emptyLocalPlannerRoutePlans;
+  for plan in plans {
+    validated = append validated [localPlannerCatalogValidatedPlan source plan];
+    validated
+  };
+  validated
+}
+
+localPlannerCatalogPlanIssuesAll : Str -> [LocalPlannerRoutePlan] -> [Str]
+localPlannerCatalogPlanIssuesAll source plans = {
+  let mut issues = emptyTexts;
+  for plan in plans {
+    issues = append issues (localPlannerCatalogPlanIssues source plan);
+    issues
+  };
+  issues
+}
+
+readLocalPlannerRoutePlansResult : Str -> Str -> LocalPlannerCatalogReadResult
+readLocalPlannerRoutePlansResult source raw =
+  if raw == "" then
+    emptyLocalPlannerCatalogReadResult
+  else
+    match tryDecode [LocalPlannerRoutePlan] raw {
+      Ok plans ->
+        LocalPlannerCatalogReadResult {
+          plans = localPlannerCatalogValidatedPlans source plans,
+          issues = localPlannerCatalogPlanIssuesAll source plans
+        },
+      Err message ->
+        LocalPlannerCatalogReadResult {
+          plans = emptyLocalPlannerRoutePlans,
+          issues = [localPlannerCatalogReadIssue source "decode" message]
+        }
+    }
+
+localPlannerRoutePlansFromEnv : [LocalPlannerRoutePlan]
+localPlannerRoutePlansFromEnv =
+  localPlannerRoutePlansFromEnvResult.plans
+
+localPlannerRoutePlansFromEnvResult : LocalPlannerCatalogReadResult
+localPlannerRoutePlansFromEnvResult =
+  match envVar "CLASP_LOCAL_PLANNER_TASK_CATALOG_JSON" {
+    Ok raw -> readLocalPlannerRoutePlansResult "env:CLASP_LOCAL_PLANNER_TASK_CATALOG_JSON" raw,
+    Err message -> emptyLocalPlannerCatalogReadResult
+  }
+
+localPlannerTaskCatalogPathFromEnv : Str
+localPlannerTaskCatalogPathFromEnv =
+  match envVar "CLASP_LOCAL_PLANNER_TASK_CATALOG_PATH" {
+    Ok raw -> raw,
+    Err message -> ""
+  }
+
+readLocalPlannerRoutePlansFromPath : Str -> [LocalPlannerRoutePlan]
+readLocalPlannerRoutePlansFromPath path = {
+  let result = readLocalPlannerRoutePlansFromPathResult "path" path false in
+  result.plans
+}
+
+readLocalPlannerRoutePlansFromPathResult : Str -> Str -> Bool -> LocalPlannerCatalogReadResult
+readLocalPlannerRoutePlansFromPathResult source path reportReadFailure =
+  if path == "" then
+    emptyLocalPlannerCatalogReadResult
+  else
+    match readFile path {
+      Ok raw -> readLocalPlannerRoutePlansResult source raw,
+      Err message ->
+        if reportReadFailure then
+          LocalPlannerCatalogReadResult {
+            plans = emptyLocalPlannerRoutePlans,
+            issues = [localPlannerCatalogReadIssue source "read" (textConcat [path, ":", message])]
+          }
+        else
+          emptyLocalPlannerCatalogReadResult
+    }
+
+localPlannerWorkspaceTaskCatalogPath : Str -> Str
+localPlannerWorkspaceTaskCatalogPath workspaceRoot =
+  if workspaceRoot == "" then
+    ""
+  else
+    pathJoin [workspaceRoot, ".clasp-local-planner", "task-catalog.json"]
+
+localPlannerRoutePlansForWorkspace : Str -> [LocalPlannerRoutePlan]
+localPlannerRoutePlansForWorkspace workspaceRoot = {
+  let result = localPlannerRoutePlansForWorkspaceResult workspaceRoot in
+  result.plans
+}
+
+localPlannerCatalogReadResultAppend : LocalPlannerCatalogReadResult -> LocalPlannerCatalogReadResult -> LocalPlannerCatalogReadResult
+localPlannerCatalogReadResultAppend left right =
+  LocalPlannerCatalogReadResult {
+    plans = append left.plans right.plans,
+    issues = append left.issues right.issues
+  }
+
+localPlannerRoutePlansForWorkspaceResult : Str -> LocalPlannerCatalogReadResult
+localPlannerRoutePlansForWorkspaceResult workspaceRoot =
+  localPlannerCatalogReadResultAppend
+    (localPlannerCatalogReadResultAppend
+      localPlannerRoutePlansFromEnvResult
+      (readLocalPlannerRoutePlansFromPathResult "env:CLASP_LOCAL_PLANNER_TASK_CATALOG_PATH" localPlannerTaskCatalogPathFromEnv true))
+    (readLocalPlannerRoutePlansFromPathResult "workspace:.clasp-local-planner/task-catalog.json" (localPlannerWorkspaceTaskCatalogPath workspaceRoot) false)
+
+localPlannerRoutePlanMatches : Str -> LocalPlannerRoutePlan -> Bool
+localPlannerRoutePlanMatches route plan =
+  if plan.route == route then
+    true
+  else
+    plan.route == localRoutePlannerRouteKeyWildcard
+
+localPlannerMergeRoutePlan : LocalPlannerRoutePlan -> LocalPlannerRoutePlan -> LocalPlannerRoutePlan
+localPlannerMergeRoutePlan fallback plan =
+  LocalPlannerRoutePlan {
+    route =
+      if plan.route == "" then
+        fallback.route
+      else
+        plan.route,
+    objectiveSummary =
+      if plan.objectiveSummary == "" then
+        fallback.objectiveSummary
+      else
+        plan.objectiveSummary,
+    strategy =
+      if plan.strategy == "" then
+        fallback.strategy
+      else
+        plan.strategy,
+    tasks =
+      if length plan.tasks == 0 then
+        fallback.tasks
+      else
+        plan.tasks,
+    testsRun = append fallback.testsRun plan.testsRun,
+    residualRisks = append fallback.residualRisks plan.residualRisks
+  }
+
+localPlannerCatalogPlanForRoute : [LocalPlannerRoutePlan] -> Str -> LocalPlannerRoutePlan -> LocalPlannerRoutePlan
+localPlannerCatalogPlanForRoute plans route fallback = {
+  let mut found = false;
+  let mut selected = fallback;
+  for plan in plans {
+    if found then
+      found
+    else if localPlannerRoutePlanMatches route plan then {
+      selected = localPlannerMergeRoutePlan fallback plan;
+      found = true;
+      found
+    } else
+      found
+  };
+  selected
+}
+
+localPlannerBoundedTasks : [PlannedTask] -> Int -> [PlannedTask]
+localPlannerBoundedTasks tasks budget = {
+  let mut selected = emptyPlannedTasks;
+  for task in tasks {
+    if length selected < budget then {
+      selected = append selected [task];
+      selected
+    } else
+      selected
+  };
+  selected
+}
+
+localPlannerRoutePlanForPromptWithCatalog : [LocalPlannerRoutePlan] -> Str -> LocalPlannerRoutePlan
+localPlannerRoutePlanForPromptWithCatalog catalog prompt = {
+  let fallback = localPlannerDefaultRoutePlanForPrompt prompt in
+  let route = localPlannerRouteKeyForPrompt prompt in
+  let configured = localPlannerCatalogPlanForRoute catalog route fallback in
+  let boundedTasks = localPlannerBoundedTasks configured.tasks (plannerTaskBudgetForPrompt prompt) in
+  if length boundedTasks == 0 then
+    fallback
+  else
+    LocalPlannerRoutePlan {
+      route = configured.route,
+      objectiveSummary = configured.objectiveSummary,
+      strategy = configured.strategy,
+      tasks = boundedTasks,
+      testsRun = configured.testsRun,
+      residualRisks = configured.residualRisks
+    }
+}
+
+localPlannerRoutePlanForPrompt : Str -> LocalPlannerRoutePlan
+localPlannerRoutePlanForPrompt prompt =
+  localPlannerRoutePlanForPromptWithCatalog localPlannerRoutePlansFromEnv prompt
+
+localPlannerTestsRunWithPromptEvidence : [Str] -> Str -> [Str]
+localPlannerTestsRunWithPromptEvidence testsRun prompt =
+  if promptHasPlannerBackendPolicyRepair prompt then
+    append testsRun ["clasp-local-planner-backend-policy-repair"]
+  else
+    testsRun
+
+localPlannerTestsRunWithCatalogIssues : [Str] -> [Str] -> [Str]
+localPlannerTestsRunWithCatalogIssues testsRun issues =
+  if length issues > 0 then
+    append testsRun ["clasp-local-planner-task-catalog-error"]
+  else
+    testsRun
+
+plannerReportWithCatalogIssues : PlannerReport -> [Str] -> PlannerReport
+plannerReportWithCatalogIssues report issues =
+  if length issues > 0 then
+    PlannerReport {
+      objectiveSummary = report.objectiveSummary,
+      strategy = report.strategy,
+      tasks = report.tasks,
+      testsRun = localPlannerTestsRunWithCatalogIssues report.testsRun issues,
+      residualRisks = append report.residualRisks issues
+    }
+  else
+    report
+
+plannerReportForPromptWithCatalog : [LocalPlannerRoutePlan] -> Str -> PlannerReport
+plannerReportForPromptWithCatalog catalog prompt = {
+  let effectivePrompt = promptWithAffectedVerificationPathContext prompt in
+  let plan = localPlannerRoutePlanForPromptWithCatalog catalog effectivePrompt in
+  PlannerReport {
+    objectiveSummary = plan.objectiveSummary,
+    strategy = plan.strategy,
+    tasks = plan.tasks,
+    testsRun = localPlannerTestsRunWithPromptEvidence plan.testsRun effectivePrompt,
+    residualRisks = plan.residualRisks
+  }
+}
+
+plannerReportForPromptWithCatalogIssues : [LocalPlannerRoutePlan] -> [Str] -> Str -> PlannerReport
+plannerReportForPromptWithCatalogIssues catalog issues prompt =
+  plannerReportWithCatalogIssues (plannerReportForPromptWithCatalog catalog prompt) issues
+
+plannerReportForPrompt : Str -> PlannerReport
+plannerReportForPrompt prompt =
+  plannerReportForPromptWithCatalog localPlannerRoutePlansFromEnv prompt
 
 promptHasPlannerContextPack : Str -> Bool
 promptHasPlannerContextPack prompt =
-  if textIncludes prompt "Planner context pack:" then
-    textIncludes prompt "task: planner-1"
-  else
-    false
+  agentPromptHasPlannerContextPack prompt
 
 runPlanner : Str -> Str -> Str -> Str -> Str -> Str
 runPlanner reportPath promptPath schemaPath workspaceRoot fallbackLogPath = {
   let prompt = readTextOr promptPath "" in
   if textIncludes prompt "planner subagent" then
     if promptHasPlannerContextPack prompt then {
-      if textIncludes prompt "Plan 1-1 bounded tasks with explicit dependencies and task prompts." then {
+      if promptHasTaskBudgetContract prompt then {
         let reportDirError = ensureDirOrMessage (pathDirname reportPath) in
         if reportDirError != "" then
           reportDirError
@@ -150,8 +1241,10 @@ runPlanner reportPath promptPath schemaPath workspaceRoot fallbackLogPath = {
                 }) in
             if logError != "" then
               logError
-            else
-              writeTextOrMessage reportPath (encode plannerReport)
+            else {
+              let catalog = localPlannerRoutePlansForWorkspaceResult workspaceRoot in
+              writeTextOrMessage reportPath (encode (plannerReportForPromptWithCatalogIssues catalog.plans catalog.issues prompt))
+            }
           }
         }
       } else

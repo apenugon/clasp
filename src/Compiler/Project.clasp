@@ -2,6 +2,7 @@ module Compiler.Project
 
 import Compiler.Ast
 import Compiler.Checker
+import Compiler.Checker.Types
 
 type HostedProjectModuleLookupResult = FoundHostedProjectModule HostedModuleAst | MissingHostedProjectModule Str
 type HostedProjectModulesResult = HostedProjectModules [HostedModuleAst] | HostedProjectModulesError Str

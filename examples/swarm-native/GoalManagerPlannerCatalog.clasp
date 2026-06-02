@@ -1,0 +1,51 @@
+module GoalManagerPlannerCatalog
+
+rawEnvTextOrEmpty : Str -> Str
+rawEnvTextOrEmpty name =
+  match envVar name {
+    Ok raw -> raw,
+    Err message -> ""
+  }
+
+readTextOrEmpty : Str -> Str
+readTextOrEmpty path = match readFile path {
+  Ok raw -> raw,
+  Err message -> ""
+}
+
+plannerTaskCatalogFileFingerprint : Str -> Str
+plannerTaskCatalogFileFingerprint path =
+  if path == "" then
+    "missing"
+  else if fileExists path then
+    textConcat [path, ":", textFingerprint64Hex (readTextOrEmpty path)]
+  else
+    textConcat [path, ":missing"]
+
+plannerTaskCatalogRawFingerprint : Str -> Str
+plannerTaskCatalogRawFingerprint raw =
+  if raw == "" then
+    "missing"
+  else
+    textFingerprint64Hex raw
+
+plannerWorkspaceTaskCatalogPathFor : Str -> Str
+plannerWorkspaceTaskCatalogPathFor workspaceRoot =
+  pathJoin [workspaceRoot, ".clasp-local-planner", "task-catalog.json"]
+
+plannerTaskCatalogFingerprintSourceFor : Str -> Str
+plannerTaskCatalogFingerprintSourceFor workspaceRoot =
+  textJoin "\n" [
+    textConcat [
+      "env-json:",
+      plannerTaskCatalogRawFingerprint (rawEnvTextOrEmpty "CLASP_LOCAL_PLANNER_TASK_CATALOG_JSON")
+    ],
+    textConcat [
+      "env-path:",
+      plannerTaskCatalogFileFingerprint (rawEnvTextOrEmpty "CLASP_LOCAL_PLANNER_TASK_CATALOG_PATH")
+    ],
+    textConcat [
+      "workspace-path:",
+      plannerTaskCatalogFileFingerprint (plannerWorkspaceTaskCatalogPathFor workspaceRoot)
+    ]
+  ]

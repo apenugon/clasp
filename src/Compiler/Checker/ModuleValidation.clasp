@@ -1,0 +1,32 @@
+module Compiler.Checker.ModuleValidation
+
+import Compiler.Ast
+import Compiler.Checker.Bindings
+
+metadataDeclarationShapeError : HostedDeclAst -> Str
+metadataDeclarationShapeError decl =
+  if declIsMetadataName decl then
+    if declIsMetadataDeclaration decl then
+      ""
+    else
+      "Reserved declaration `metadata` must use `metadata <key> = \"value\"` with exactly one key and a string literal value."
+  else
+    ""
+
+validateMetadataDeclarationList : [HostedDeclAst] -> Str
+validateMetadataDeclarationList decls = {
+  for decl in decls {
+    let shapeError = metadataDeclarationShapeError decl;
+    if shapeError == "" then "" else return shapeError
+  };
+  ""
+}
+
+validateModuleMetadataDeclarations : HostedModuleAst -> Str
+validateModuleMetadataDeclarations modl = validateMetadataDeclarationList (moduleDeclarations modl)
+
+moduleValidationError : HostedModuleAst -> Str
+moduleValidationError modl = {
+  let foreignInteropError = moduleForeignInteropValidationError modl;
+  if foreignInteropError == "" then validateModuleMetadataDeclarations modl else foreignInteropError
+}

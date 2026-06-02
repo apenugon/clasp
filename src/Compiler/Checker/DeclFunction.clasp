@@ -1,0 +1,74 @@
+module Compiler.Checker.DeclFunction
+
+import Compiler.Ast
+import Compiler.Checker.Types
+
+hasDeclParams : HostedDeclAst -> Bool
+hasDeclParams decl = {
+  for paramName in declParams decl {
+    return true
+  };
+  false
+}
+
+genericTypeVarLabels : [Str]
+genericTypeVarLabels = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "aa", "ab", "ac", "ad"]
+
+inferUnannotatedFunctionParamBindings : HostedDeclAst -> [TypeBinding]
+inferUnannotatedFunctionParamBindings decl = {
+  let mut bindings = emptyTypeBindings;
+  let mut labels = genericTypeVarLabels;
+  for paramName in declParams decl {
+    let label = if firstText labels == "" then paramName else firstText labels;
+    bindings = appendTypeBinding bindings (TypeBinding paramName (TUnknown label));
+    if firstText labels == "" then bindings else {
+      labels = remainingTexts labels;
+      bindings
+    }
+  };
+  bindings
+}
+
+buildInferredFunctionType : [Str] -> [TypeBinding] -> TypeText -> TypeText
+buildInferredFunctionType paramNames localEnv bodyType =
+  if firstText paramNames == "" then bodyType else
+    match lookupTypeBinding localEnv (firstText paramNames) {
+      FoundType paramType ->
+        TFunction paramType (buildInferredFunctionType (remainingTexts paramNames) localEnv bodyType),
+      MissingType missing ->
+        buildInferredFunctionType (remainingTexts paramNames) localEnv bodyType
+    }
+
+bindFunctionParams : HostedDeclAst -> TypeText -> BindParamsState
+bindFunctionParams decl declaredType = {
+  let mut state = BindingParams emptyTypeBindings declaredType;
+  for paramName in declParams decl {
+    state = match state {
+      BindingParamError message ->
+        BindingParamError message,
+      BindingParams localEnv currentType ->
+        match currentType {
+          TFunction inputType resultType ->
+            BindingParams (appendTypeBinding localEnv (TypeBinding paramName inputType)) resultType,
+          TInt ->
+            BindingParamError (textConcat ["Expected a function annotation for `", declName decl, "`."]),
+          TStr ->
+            BindingParamError (textConcat ["Expected a function annotation for `", declName decl, "`."]),
+          TBool ->
+            BindingParamError (textConcat ["Expected a function annotation for `", declName decl, "`."]),
+          TList itemType ->
+            BindingParamError (textConcat ["Expected a function annotation for `", declName decl, "`."]),
+          TNamed label ->
+            BindingParamError (textConcat ["Expected a function annotation for `", declName decl, "`."]),
+          TApply label args ->
+            BindingParamError (textConcat ["Expected a function annotation for `", declName decl, "`."]),
+          TVar label ->
+            BindingParamError (textConcat ["Expected a function annotation for `", declName decl, "`."]),
+          TUnknown label ->
+            BindingParamError (textConcat ["Expected a function annotation for `", declName decl, "`."])
+        }
+    };
+    state
+  };
+  state
+}

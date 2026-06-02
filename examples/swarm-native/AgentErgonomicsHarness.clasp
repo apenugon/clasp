@@ -1,0 +1,534 @@
+module Main
+
+import AgentErgonomics
+
+record HarnessTask = {
+  taskId : Str,
+  status : Str
+}
+
+record HarnessJsonItem = {
+  name : Str,
+  count : Int
+}
+
+record AgentErgonomicsReport = {
+  resultOk : Bool,
+  resultErr : Bool,
+  resultDefaultText : Str,
+  resultDefaultInt : Int,
+  resultError : Str,
+  taskListCount : Int,
+  emptyTaskListCount : Int,
+  emptySearchCount : Int,
+  nonEmptyJoined : Str,
+  workspaceMkdirStatus : Str,
+  workspaceWriteStatus : Str,
+  workspaceAppendStatus : Str,
+  workspaceReadText : Str,
+  workspaceReplaceCount : Int,
+  workspaceSearchCount : Int,
+  workspaceEscapeStatus : Str,
+  workspacePatchOk : Bool,
+  workspacePatchResultCount : Int,
+  workspacePatchIssueCount : Int,
+  workspacePatchFailureOk : Bool,
+  workspacePatchFailureIssue : Str,
+  validationOk : Bool,
+  validationIssueCount : Int,
+  validationIssueText : Str,
+  validationEvidenceCount : Int,
+  validationCombinedOk : Bool,
+  validationCombinedIssueCount : Int,
+  validationCombinedIssueText : Str,
+  validationCombinedEvidenceCount : Int,
+  validationPassingBatchOk : Bool,
+  jsonDecodeOk : Bool,
+  jsonDecodeIssueCount : Int,
+  jsonDecodeEvidenceCount : Int,
+  jsonMissingFieldIssue : Str,
+  jsonMalformedIssue : Str,
+  processValidationOk : Bool,
+  processValidationIssueCount : Int,
+  processOk : Bool,
+  processExitCode : Int,
+  processStdout : Str,
+  processSummary : Str,
+  checkedProcessOk : Bool,
+  checkedProcessStatus : Str,
+  checkedProcessStdout : Str,
+  checkedProcessEvidenceCount : Int,
+  checkedProcessPreflightOk : Bool,
+  checkedProcessPreflightStatus : Str,
+  checkedProcessPreflightIssueCount : Int,
+  checkedProcessPreflightFirstIssue : Str,
+  commandPlanOk : Bool,
+  commandPlanCompletedCount : Int,
+  commandPlanFailedCount : Int,
+  commandPlanEvidenceCount : Int,
+  commandPlanFirstStatus : Str,
+  failFastPlanOk : Bool,
+  failFastPlanCompletedCount : Int,
+  failFastPlanFailedCount : Int,
+  failFastPlanStatusText : Str,
+  verifierMemoryPolicyOk : Bool,
+  verifierMemoryPolicyIssueCount : Int,
+  verifierMemoryPolicyEvidenceCount : Int,
+  verifierMemoryPolicyRecommendation : Str,
+  unsafeVerifierMemoryPolicyOk : Bool,
+  unsafeVerifierMemoryPolicyIssueText : Str,
+  verifierGateOk : Bool,
+  verifierGateStatus : Str,
+  verifierGateIssueCount : Int,
+  verifierGateEvidenceCount : Int,
+  verifierGateRecommendation : Str,
+  failedVerifierGateOk : Bool,
+  failedVerifierGateStatus : Str,
+  failedVerifierGateRecommendation : Str,
+  unsafeVerifierGateOk : Bool,
+  unsafeVerifierGateStatus : Str,
+  unsafeVerifierGateIssueText : Str,
+  affectedStaticPlanStatus : Str,
+  affectedStaticPlanCanRunDirect : Bool,
+  affectedStaticPlanCanRunWithoutCompilerState : Bool,
+  affectedStaticPlanRecommendation : Str,
+  affectedStaticPlanIssueCount : Int,
+  affectedStaticPlanEvidenceCount : Int,
+  affectedStaticPlanSafeDirectCommandCount : Int,
+  affectedStaticPlanCompilerStateFreeCommandCount : Int,
+  affectedStaticLaunchMode : Str,
+  affectedStaticLaunchReady : Bool,
+  affectedStaticLaunchRecommendation : Str,
+  affectedCacheProbePlanStatus : Str,
+  affectedCacheProbePlanCanRunDirect : Bool,
+  affectedCacheProbePlanCanRunWithoutCompilerState : Bool,
+  affectedCacheProbePlanRecommendation : Str,
+  affectedCacheProbePlanCompilerStateTouchingCommandCount : Int,
+  affectedCacheProbeLaunchMode : Str,
+  affectedCacheProbeLaunchReady : Bool,
+  affectedCacheProbeLaunchBlockingGap : Str,
+  affectedDirectLaunchPolicyMode : Str,
+  affectedDirectLaunchPolicyReady : Bool,
+  affectedDirectLaunchPolicyPlanRecommendation : Str,
+  affectedDirectLaunchPolicyBlockingGap : Str,
+  affectedHeavyPlanStatus : Str,
+  affectedHeavyPlanCanRunDirect : Bool,
+  affectedHeavyPlanCanRunWithoutCompilerState : Bool,
+  affectedHeavyPlanRequiresManaged : Bool,
+  affectedHeavyPlanRecommendation : Str,
+  affectedHeavyPlanFocusedCommandCount : Int,
+  affectedHeavyPlanHeavyCommandCount : Int,
+  affectedHeavyPlanManagedGuardCommandCount : Int,
+  affectedHeavyPlanCompilerStateTouchingCommandCount : Int,
+  affectedHeavyLaunchMode : Str,
+  affectedHeavyLaunchReady : Bool,
+  affectedHeavyLaunchBlockingGap : Str,
+  affectedInvalidPlanStatus : Str,
+  affectedInvalidPlanIssueText : Str,
+  affectedInvalidPlanRecommendation : Str,
+  affectedInconsistentPlanStatus : Str,
+  affectedInconsistentPlanIssueText : Str,
+  affectedInconsistentPlanRecommendation : Str,
+  autonomousStaticLaunchMode : Str,
+  autonomousStaticLaunchReady : Bool,
+  autonomousStaticLaunchRecommendation : Str,
+  autonomousStaticRepairMaySpawn : Bool,
+  autonomousDirtyLaunchMode : Str,
+  autonomousDirtyLaunchReady : Bool,
+  autonomousDirtyRepairMaySpawn : Bool,
+  autonomousDirtyLaunchBlockingGap : Str,
+  autonomousDirtyLaunchRequiredClosure : Str,
+  autonomousDirtyLaunchRecommendation : Str,
+  autonomousCompilerRepairMaySpawn : Bool,
+  autonomousCompilerRepairRecommendation : Str,
+  autonomousGateJsonMode : Str,
+  autonomousGateJsonReady : Bool
+}
+
+firstTextOrDefault : [Str] -> Str -> Str
+firstTextOrDefault values fallback = {
+  let mut first = fallback;
+  let mut found = false;
+  for value in values {
+    if found then
+      found
+    else {
+      first = value;
+      found = true;
+      found
+    }
+  };
+  first
+}
+
+harnessTask : HarnessTask
+harnessTask =
+  HarnessTask {
+    taskId = "ergonomics",
+    status = "ready"
+  }
+
+harnessTaskResult : Result HarnessTask
+harnessTaskResult = Ok harnessTask
+
+harnessEmptyTaskList : [HarnessTask]
+harnessEmptyTaskList = agentResultToList (Err "missing-task")
+
+harnessEmptySearch : [Str]
+harnessEmptySearch = agentResultWithDefault [] (Err "no-search")
+
+validJsonText : Str
+validJsonText = "{\"name\":\"agent\",\"count\":2}"
+
+missingFieldJsonText : Str
+missingFieldJsonText = "{\"name\":\"agent\",\"count\":2}"
+
+malformedJsonText : Str
+malformedJsonText = "{not-json"
+
+affectedStaticPlanJson : Str
+affectedStaticPlanJson = "{\"selectedCommands\":[{\"id\":\"swarm-ready\",\"command\":\"bash scripts/test-swarm-ready-gate.sh\",\"resourceClass\":\"static\",\"oomRisk\":\"low\",\"requiresManagedGuard\":false,\"executionAdvice\":\"safe-direct\",\"compilerStateAccess\":\"none\"},{\"id\":\"swarm-capability-audit\",\"command\":\"bash scripts/test-swarm-capability-audit.sh\",\"resourceClass\":\"static\",\"oomRisk\":\"low\",\"requiresManagedGuard\":false,\"executionAdvice\":\"safe-direct\",\"compilerStateAccess\":\"none\"}],\"commandResourceSummary\":{\"commandCount\":2,\"staticCommandCount\":2,\"focusedCommandCount\":0,\"heavyCommandCount\":0,\"safeDirectCommandCount\":2,\"managedGuardCommandCount\":0,\"compilerStateFreeCommandCount\":2,\"compilerStateTouchingCommandCount\":0,\"canRunWithoutCompilerState\":true,\"requiresManagedGuard\":false,\"overallAdvice\":\"safe-direct\"},\"planOnly\":true,\"finalVerdict\":\"planned\"}"
+
+affectedCacheProbePlanJson : Str
+affectedCacheProbePlanJson = "{\"selectedCommands\":[{\"id\":\"goal-manager-fast\",\"command\":\"CLASP_GOAL_MANAGER_FAST_CACHE_PROBE_ONLY=1 bash scripts/test-goal-manager-fast.sh\",\"resourceClass\":\"static\",\"oomRisk\":\"low\",\"requiresManagedGuard\":false,\"executionAdvice\":\"safe-direct\",\"compilerStateAccess\":\"temporary-cache-probe\"}],\"commandResourceSummary\":{\"commandCount\":1,\"staticCommandCount\":1,\"focusedCommandCount\":0,\"heavyCommandCount\":0,\"safeDirectCommandCount\":1,\"managedGuardCommandCount\":0,\"compilerStateFreeCommandCount\":0,\"compilerStateTouchingCommandCount\":1,\"canRunWithoutCompilerState\":false,\"requiresManagedGuard\":false,\"overallAdvice\":\"safe-direct\"},\"planOnly\":true,\"finalVerdict\":\"planned\"}"
+
+affectedHeavyPlanJson : Str
+affectedHeavyPlanJson = "{\"selectedCommands\":[{\"id\":\"selfhost\",\"command\":\"bash scripts/test-selfhost.sh\",\"resourceClass\":\"heavy\",\"oomRisk\":\"guarded\",\"requiresManagedGuard\":true,\"executionAdvice\":\"run-under-managed-job-with-memory-and-disk-admission\",\"compilerStateAccess\":\"compiler-build-or-cache\"},{\"id\":\"try-decode\",\"command\":\"bash scripts/test-try-decode.sh\",\"resourceClass\":\"focused\",\"oomRisk\":\"moderate\",\"requiresManagedGuard\":true,\"executionAdvice\":\"prefer-managed-job-for-agent-runs\",\"compilerStateAccess\":\"unknown\"}],\"commandResourceSummary\":{\"commandCount\":2,\"staticCommandCount\":0,\"focusedCommandCount\":1,\"heavyCommandCount\":1,\"safeDirectCommandCount\":0,\"managedGuardCommandCount\":2,\"compilerStateFreeCommandCount\":0,\"compilerStateTouchingCommandCount\":2,\"canRunWithoutCompilerState\":false,\"requiresManagedGuard\":true,\"overallAdvice\":\"run-under-managed-job-with-memory-and-disk-admission\"},\"planOnly\":true,\"finalVerdict\":\"planned\"}"
+
+affectedInvalidPlanJson : Str
+affectedInvalidPlanJson = "{\"selectedCommands\":[{\"id\":\"swarm-ready\",\"command\":\"bash scripts/test-swarm-ready-gate.sh\",\"resourceClass\":\"static\",\"oomRisk\":\"low\",\"requiresManagedGuard\":false,\"executionAdvice\":\"safe-direct\",\"compilerStateAccess\":\"none\"}],\"commandResourceSummary\":{\"commandCount\":2,\"staticCommandCount\":1,\"focusedCommandCount\":0,\"heavyCommandCount\":0,\"safeDirectCommandCount\":1,\"managedGuardCommandCount\":0,\"compilerStateFreeCommandCount\":1,\"compilerStateTouchingCommandCount\":0,\"canRunWithoutCompilerState\":true,\"requiresManagedGuard\":false,\"overallAdvice\":\"safe-direct\"},\"planOnly\":true,\"finalVerdict\":\"planned\"}"
+
+affectedInconsistentPlanJson : Str
+affectedInconsistentPlanJson = "{\"selectedCommands\":[{\"id\":\"unsafe-direct\",\"command\":\"bash scripts/test-selfhost.sh\",\"resourceClass\":\"heavy\",\"oomRisk\":\"high\",\"requiresManagedGuard\":true,\"executionAdvice\":\"safe-direct\",\"compilerStateAccess\":\"compiler-build-or-cache\"}],\"commandResourceSummary\":{\"commandCount\":1,\"staticCommandCount\":0,\"focusedCommandCount\":0,\"heavyCommandCount\":1,\"safeDirectCommandCount\":1,\"managedGuardCommandCount\":0,\"compilerStateFreeCommandCount\":0,\"compilerStateTouchingCommandCount\":1,\"canRunWithoutCompilerState\":false,\"requiresManagedGuard\":false,\"overallAdvice\":\"safe-direct\"},\"planOnly\":true,\"finalVerdict\":\"planned\"}"
+
+affectedDirectLaunchPolicyJson : Str
+affectedDirectLaunchPolicyJson = "{\"valid\":true,\"ready\":false,\"mode\":\"direct-compiler-state-access\",\"canRunDirect\":true,\"canRunWithoutCompilerState\":false,\"requiresManagedGuard\":false,\"recommendation\":\"affected-verification-launch:direct-compiler-state-access-preflight\",\"verificationPlanRecommendation\":\"affected-verification-plan:safe-direct-compiler-state-access\",\"blockingGaps\":[\"affected verifier plan touches compiler/cache state before launch\"],\"requiredClosure\":[\"affected-verification-plan:safe-direct-compiler-state-access\"],\"evidence\":[\"affected-launch-mode=direct-compiler-state-access\",\"affected-launch-ready=false\"]}"
+
+workspaceRoot : Str
+workspaceRoot = firstTextOrDefault argv "agent-ergonomics-workspace"
+
+processResultOrEmpty : AgentProcessResult
+processResultOrEmpty =
+  agentResultWithDefault
+    (AgentProcessResult {
+      exitCode = 127,
+      stdout = "",
+      stderr = "",
+      timedOut = false,
+      error = "missing-process"
+    })
+    (agentRunWorkspaceCommandTimeout workspaceRoot "." 3000 ["node", "-e", "process.stdout.write('agent-process-ok')"])
+
+main : Str
+main = {
+  let workspaceMkdirStatus = agentWorkspaceMkdirAllStatus workspaceRoot "notes";
+  let workspaceWriteStatus = agentWorkspaceWriteTextStatus workspaceRoot "notes/input.txt" "status=pending\n";
+  let workspaceAppendStatus = agentWorkspaceAppendTextStatus workspaceRoot "notes/input.txt" "extra=present\n";
+  let workspacePatchResults = agentWorkspaceApplyPatches workspaceRoot [
+    AgentWorkspacePatch {
+      relative = "notes/input.txt",
+      findText = "status=pending",
+      replaceText = "status=done"
+    },
+    AgentWorkspacePatch {
+      relative = "notes/input.txt",
+      findText = "extra=present",
+      replaceText = "extra=done"
+    }
+  ];
+  let workspaceReplaceCount = agentWorkspacePatchResultsReplacementCount workspacePatchResults;
+  let workspaceReadText = agentWorkspaceReadTextOr workspaceRoot "notes/input.txt" "missing";
+  let workspaceSearch = agentWorkspaceSearchTextOrEmpty workspaceRoot "notes" "status=done";
+  let workspaceEscapeStatus = agentWorkspaceWriteTextStatus workspaceRoot "../outside.txt" "leak";
+  let workspacePatchFailure =
+    agentWorkspaceApplyPatch
+      workspaceRoot
+      (AgentWorkspacePatch {
+        relative = "notes/input.txt",
+        findText = "does-not-exist",
+        replaceText = "unused"
+      });
+  let workspacePatchIssueTexts = agentWorkspacePatchResultsIssueTexts workspacePatchResults;
+  let validationIssues =
+    append
+      (agentRequireNonEmptyText "taskId" harnessTask.taskId)
+      (append
+        (agentRequireNonEmptyText "emptyField" "")
+        (append
+          (agentRequireNonEmptyList "tasks" (agentResultToList harnessTaskResult))
+          (agentRequireTextIncludes "workspaceReadText" workspaceReadText "status=done")));
+  let validationSummary = agentValidationFromIssues ["validation-harness"] validationIssues;
+  let validJsonDecoded = tryDecode HarnessJsonItem validJsonText;
+  let jsonDecodeSummary =
+    agentJsonDecodeAndRequireFields
+      "HarnessJsonItem"
+      validJsonText
+      validJsonDecoded
+      ["name", "count"];
+  let jsonMissingFieldSummary =
+    agentJsonDecodeAndRequireFields
+      "HarnessJsonItem"
+      missingFieldJsonText
+      validJsonDecoded
+      ["name", "missing"];
+  let jsonMalformedSummary =
+    agentJsonDecodeSummary
+      "HarnessJsonItem"
+      (tryDecode HarnessJsonItem malformedJsonText);
+  let processValidationSummary = agentValidationFromIssues ["process-harness"] (agentRequireProcessSucceeded "process" processResultOrEmpty);
+  let checkedProcessRun =
+    agentRunWorkspaceCommandTimeoutChecked
+      workspaceRoot
+      "."
+      3000
+      ["node", "-e", "process.stdout.write('checked-process-ok')"];
+  let checkedProcessPreflightFailure =
+    agentRunWorkspaceCommandTimeoutChecked
+      workspaceRoot
+      ""
+      0
+      [];
+  let commandPlan =
+    agentRunCommandPlan
+      workspaceRoot
+      [
+        AgentCommandStep {
+          label = "plan-a",
+          cwd = ".",
+          timeoutMs = 3000,
+          command = ["node", "-e", "process.stdout.write('plan-a')"]
+        },
+        AgentCommandStep {
+          label = "plan-b",
+          cwd = ".",
+          timeoutMs = 3000,
+          command = ["node", "-e", "process.stdout.write('plan-b')"]
+        }
+      ];
+  let failFastPlan =
+    agentRunCommandPlanFailFast
+      workspaceRoot
+      [
+        AgentCommandStep {
+          label = "failfast-a",
+          cwd = ".",
+          timeoutMs = 3000,
+          command = ["node", "-e", "process.stdout.write('before-failure')"]
+        },
+        AgentCommandStep {
+          label = "failfast-b",
+          cwd = ".",
+          timeoutMs = 3000,
+          command = ["node", "-e", "process.exit(2)"]
+        },
+        AgentCommandStep {
+          label = "failfast-c",
+          cwd = ".",
+          timeoutMs = 3000,
+          command = ["node", "-e", "process.stdout.write('should-not-run')"]
+        }
+      ];
+  let verifierMemoryPolicySummary =
+    agentVerifierMemoryPolicySummary agentVerifierMemoryPolicyDefault;
+  let unsafeVerifierMemoryPolicySummary =
+    agentVerifierMemoryPolicySummary
+      (AgentVerifierMemoryPolicy {
+        managedMemoryMb = 8192,
+        minAvailableMemoryMb = 45056,
+        directMemoryLimitMb = 0,
+        affectedDirectMemoryLimitMb = 0,
+        directMemoryLimitEnabled = false,
+        affectedDirectMemoryLimitEnabled = false
+      });
+  let verifierGate =
+    agentVerifierGate verifierMemoryPolicySummary commandPlan;
+  let failedVerifierGate =
+    agentVerifierGate verifierMemoryPolicySummary failFastPlan;
+  let unsafeVerifierGate =
+    agentVerifierGate unsafeVerifierMemoryPolicySummary commandPlan;
+  let affectedStaticPlanDecision =
+    agentAffectedVerificationPlanDecisionFromJson affectedStaticPlanJson;
+  let affectedCacheProbePlanDecision =
+    agentAffectedVerificationPlanDecisionFromJson affectedCacheProbePlanJson;
+  let affectedHeavyPlanDecision =
+    agentAffectedVerificationPlanDecisionFromJson affectedHeavyPlanJson;
+  let affectedInvalidPlanDecision =
+    agentAffectedVerificationPlanDecisionFromJson affectedInvalidPlanJson;
+  let affectedInconsistentPlanDecision =
+    agentAffectedVerificationPlanDecisionFromJson affectedInconsistentPlanJson;
+  let affectedStaticLaunchPolicy =
+    agentAffectedVerificationLaunchPolicy affectedStaticPlanDecision;
+  let affectedCacheProbeLaunchPolicy =
+    agentAffectedVerificationLaunchPolicy affectedCacheProbePlanDecision;
+  let affectedHeavyLaunchPolicy =
+    agentAffectedVerificationLaunchPolicy affectedHeavyPlanDecision;
+  let affectedDirectLaunchPolicy =
+    agentAffectedVerificationLaunchPolicyFromJson affectedDirectLaunchPolicyJson;
+  let autonomousStaticLaunchGate =
+    agentAutonomousLaunchGate agentAutonomousLaunchGateInputStaticTiny;
+  let autonomousDirtyLaunchGate =
+    agentAutonomousLaunchGate agentAutonomousLaunchGateInputCurrentDirty;
+  let autonomousCompilerRepairInput =
+    AgentAutonomousLaunchGateInput {
+      workspaceCheckpointReady = true,
+      dirtyWorktree = false,
+      resourceAdmissionOk = true,
+      loopAlreadyRunning = false,
+      boundedTaskCount = 1,
+      requestedChildAgents = 1,
+      admittedChildCapacity = 1,
+      managedLaunch = true,
+      focusedVerificationReady = false,
+      fullVerificationRequested = false,
+      promotionRequested = false,
+      compilerMutationRequested = true
+    };
+  let autonomousGateJson =
+    agentAutonomousLaunchGateJsonBlock (encode autonomousStaticLaunchGate);
+  let autonomousGateFromJson =
+    agentAutonomousLaunchGateFromJson (agentAutonomousLaunchGateJsonFromPrompt autonomousGateJson);
+  let validationCombinedSummary =
+    agentValidationMergeAll [
+      validationSummary,
+      jsonDecodeSummary,
+      jsonMissingFieldSummary,
+      processValidationSummary
+    ];
+  let validationPassingBatchOk =
+    agentValidationSummariesOk [
+      jsonDecodeSummary,
+      processValidationSummary
+    ];
+  encode (AgentErgonomicsReport {
+    resultOk = agentResultIsOk (Ok "ready"),
+    resultErr = agentResultIsErr (Err "not-ready"),
+    resultDefaultText = agentResultWithDefault "fallback" (Err "missing-text"),
+    resultDefaultInt = agentResultWithDefault 41 (Ok 7),
+    resultError = agentResultErrorOr "no-error" (Err "missing-record"),
+    taskListCount = length (agentResultToList harnessTaskResult),
+    emptyTaskListCount = length harnessEmptyTaskList,
+    emptySearchCount = length harnessEmptySearch,
+    nonEmptyJoined = agentJoinNonEmpty "," ["alpha", "", "beta"],
+    workspaceMkdirStatus = workspaceMkdirStatus,
+    workspaceWriteStatus = workspaceWriteStatus,
+    workspaceAppendStatus = workspaceAppendStatus,
+    workspaceReadText = workspaceReadText,
+    workspaceReplaceCount = workspaceReplaceCount,
+    workspaceSearchCount = length workspaceSearch,
+    workspaceEscapeStatus = workspaceEscapeStatus,
+    workspacePatchOk = agentWorkspacePatchResultsOk workspacePatchResults,
+    workspacePatchResultCount = length workspacePatchResults,
+    workspacePatchIssueCount = length workspacePatchIssueTexts,
+    workspacePatchFailureOk = workspacePatchFailure.ok,
+    workspacePatchFailureIssue = firstTextOrDefault workspacePatchFailure.issueTexts "missing",
+    validationOk = agentValidationOk validationSummary,
+    validationIssueCount = validationSummary.issueCount,
+    validationIssueText = firstTextOrDefault (agentValidationIssueTexts validationSummary.issues) "missing",
+    validationEvidenceCount = length validationSummary.evidence,
+    validationCombinedOk = agentValidationOk validationCombinedSummary,
+    validationCombinedIssueCount = validationCombinedSummary.issueCount,
+    validationCombinedIssueText = firstTextOrDefault (agentValidationIssueTexts validationCombinedSummary.issues) "missing",
+    validationCombinedEvidenceCount = length validationCombinedSummary.evidence,
+    validationPassingBatchOk = validationPassingBatchOk,
+    jsonDecodeOk = agentValidationOk jsonDecodeSummary,
+    jsonDecodeIssueCount = jsonDecodeSummary.issueCount,
+    jsonDecodeEvidenceCount = length jsonDecodeSummary.evidence,
+    jsonMissingFieldIssue = firstTextOrDefault (agentValidationIssueTexts jsonMissingFieldSummary.issues) "missing",
+    jsonMalformedIssue = firstTextOrDefault (agentValidationIssueTexts jsonMalformedSummary.issues) "missing",
+    processValidationOk = agentValidationOk processValidationSummary,
+    processValidationIssueCount = processValidationSummary.issueCount,
+    processOk = agentProcessSucceeded processResultOrEmpty,
+    processExitCode = processResultOrEmpty.exitCode,
+    processStdout = processResultOrEmpty.stdout,
+    processSummary = agentProcessSummary processResultOrEmpty,
+    checkedProcessOk = checkedProcessRun.ok,
+    checkedProcessStatus = checkedProcessRun.status,
+    checkedProcessStdout = checkedProcessRun.result.stdout,
+    checkedProcessEvidenceCount = length checkedProcessRun.evidence,
+    checkedProcessPreflightOk = checkedProcessPreflightFailure.ok,
+    checkedProcessPreflightStatus = checkedProcessPreflightFailure.status,
+    checkedProcessPreflightIssueCount = length checkedProcessPreflightFailure.issueTexts,
+    checkedProcessPreflightFirstIssue = firstTextOrDefault checkedProcessPreflightFailure.issueTexts "missing",
+    commandPlanOk = commandPlan.ok,
+    commandPlanCompletedCount = commandPlan.completedCount,
+    commandPlanFailedCount = commandPlan.failedCount,
+    commandPlanEvidenceCount = length commandPlan.evidence,
+    commandPlanFirstStatus = firstTextOrDefault (agentCommandStepResultStatusTexts commandPlan.results) "missing",
+    failFastPlanOk = failFastPlan.ok,
+    failFastPlanCompletedCount = failFastPlan.completedCount,
+    failFastPlanFailedCount = failFastPlan.failedCount,
+    failFastPlanStatusText = textJoin "," (agentCommandStepResultStatusTexts failFastPlan.results),
+    verifierMemoryPolicyOk = verifierMemoryPolicySummary.ok,
+    verifierMemoryPolicyIssueCount = verifierMemoryPolicySummary.issueCount,
+    verifierMemoryPolicyEvidenceCount = length verifierMemoryPolicySummary.evidence,
+    verifierMemoryPolicyRecommendation = verifierMemoryPolicySummary.recommendation,
+    unsafeVerifierMemoryPolicyOk = unsafeVerifierMemoryPolicySummary.ok,
+    unsafeVerifierMemoryPolicyIssueText = firstTextOrDefault unsafeVerifierMemoryPolicySummary.issueTexts "missing",
+    verifierGateOk = verifierGate.ok,
+    verifierGateStatus = verifierGate.status,
+    verifierGateIssueCount = verifierGate.issueCount,
+    verifierGateEvidenceCount = length verifierGate.evidence,
+    verifierGateRecommendation = verifierGate.recommendation,
+    failedVerifierGateOk = failedVerifierGate.ok,
+    failedVerifierGateStatus = failedVerifierGate.status,
+    failedVerifierGateRecommendation = failedVerifierGate.recommendation,
+    unsafeVerifierGateOk = unsafeVerifierGate.ok,
+    unsafeVerifierGateStatus = unsafeVerifierGate.status,
+    unsafeVerifierGateIssueText = firstTextOrDefault unsafeVerifierGate.issueTexts "missing",
+    affectedStaticPlanStatus = affectedStaticPlanDecision.status,
+    affectedStaticPlanCanRunDirect = affectedStaticPlanDecision.canRunDirect,
+    affectedStaticPlanCanRunWithoutCompilerState = affectedStaticPlanDecision.canRunWithoutCompilerState,
+    affectedStaticPlanRecommendation = affectedStaticPlanDecision.recommendation,
+    affectedStaticPlanIssueCount = affectedStaticPlanDecision.issueCount,
+    affectedStaticPlanEvidenceCount = length affectedStaticPlanDecision.evidence,
+    affectedStaticPlanSafeDirectCommandCount = affectedStaticPlanDecision.safeDirectCommandCount,
+    affectedStaticPlanCompilerStateFreeCommandCount = affectedStaticPlanDecision.compilerStateFreeCommandCount,
+    affectedStaticLaunchMode = affectedStaticLaunchPolicy.mode,
+    affectedStaticLaunchReady = affectedStaticLaunchPolicy.ready,
+    affectedStaticLaunchRecommendation = affectedStaticLaunchPolicy.recommendation,
+    affectedCacheProbePlanStatus = affectedCacheProbePlanDecision.status,
+    affectedCacheProbePlanCanRunDirect = affectedCacheProbePlanDecision.canRunDirect,
+    affectedCacheProbePlanCanRunWithoutCompilerState = affectedCacheProbePlanDecision.canRunWithoutCompilerState,
+    affectedCacheProbePlanRecommendation = affectedCacheProbePlanDecision.recommendation,
+    affectedCacheProbePlanCompilerStateTouchingCommandCount = affectedCacheProbePlanDecision.compilerStateTouchingCommandCount,
+    affectedCacheProbeLaunchMode = affectedCacheProbeLaunchPolicy.mode,
+    affectedCacheProbeLaunchReady = affectedCacheProbeLaunchPolicy.ready,
+    affectedCacheProbeLaunchBlockingGap = firstTextOrDefault affectedCacheProbeLaunchPolicy.blockingGaps "missing",
+    affectedDirectLaunchPolicyMode = affectedDirectLaunchPolicy.mode,
+    affectedDirectLaunchPolicyReady = affectedDirectLaunchPolicy.ready,
+    affectedDirectLaunchPolicyPlanRecommendation = affectedDirectLaunchPolicy.verificationPlanRecommendation,
+    affectedDirectLaunchPolicyBlockingGap = firstTextOrDefault affectedDirectLaunchPolicy.blockingGaps "missing",
+    affectedHeavyPlanStatus = affectedHeavyPlanDecision.status,
+    affectedHeavyPlanCanRunDirect = affectedHeavyPlanDecision.canRunDirect,
+    affectedHeavyPlanCanRunWithoutCompilerState = affectedHeavyPlanDecision.canRunWithoutCompilerState,
+    affectedHeavyPlanRequiresManaged = affectedHeavyPlanDecision.requiresManagedGuard,
+    affectedHeavyPlanRecommendation = affectedHeavyPlanDecision.recommendation,
+    affectedHeavyPlanFocusedCommandCount = affectedHeavyPlanDecision.focusedCommandCount,
+    affectedHeavyPlanHeavyCommandCount = affectedHeavyPlanDecision.heavyCommandCount,
+    affectedHeavyPlanManagedGuardCommandCount = affectedHeavyPlanDecision.managedGuardCommandCount,
+    affectedHeavyPlanCompilerStateTouchingCommandCount = affectedHeavyPlanDecision.compilerStateTouchingCommandCount,
+    affectedHeavyLaunchMode = affectedHeavyLaunchPolicy.mode,
+    affectedHeavyLaunchReady = affectedHeavyLaunchPolicy.ready,
+    affectedHeavyLaunchBlockingGap = firstTextOrDefault affectedHeavyLaunchPolicy.blockingGaps "missing",
+    affectedInvalidPlanStatus = affectedInvalidPlanDecision.status,
+    affectedInvalidPlanIssueText = firstTextOrDefault affectedInvalidPlanDecision.issueTexts "missing",
+    affectedInvalidPlanRecommendation = affectedInvalidPlanDecision.recommendation,
+    affectedInconsistentPlanStatus = affectedInconsistentPlanDecision.status,
+    affectedInconsistentPlanIssueText = firstTextOrDefault affectedInconsistentPlanDecision.issueTexts "missing",
+    affectedInconsistentPlanRecommendation = affectedInconsistentPlanDecision.recommendation,
+    autonomousStaticLaunchMode = autonomousStaticLaunchGate.mode,
+    autonomousStaticLaunchReady = autonomousStaticLaunchGate.ready,
+    autonomousStaticLaunchRecommendation = autonomousStaticLaunchGate.recommendation,
+    autonomousStaticRepairMaySpawn = agentAutonomousLaunchGateRepairMaySpawn agentAutonomousLaunchGateInputStaticTiny,
+    autonomousDirtyLaunchMode = autonomousDirtyLaunchGate.mode,
+    autonomousDirtyLaunchReady = autonomousDirtyLaunchGate.ready,
+    autonomousDirtyRepairMaySpawn = agentAutonomousLaunchGateRepairMaySpawn agentAutonomousLaunchGateInputCurrentDirty,
+    autonomousDirtyLaunchBlockingGap = firstTextOrDefault autonomousDirtyLaunchGate.blockingGaps "missing",
+    autonomousDirtyLaunchRequiredClosure = firstTextOrDefault autonomousDirtyLaunchGate.requiredClosure "missing",
+    autonomousDirtyLaunchRecommendation = autonomousDirtyLaunchGate.recommendation,
+    autonomousCompilerRepairMaySpawn = agentAutonomousLaunchGateRepairMaySpawn autonomousCompilerRepairInput,
+    autonomousCompilerRepairRecommendation = agentAutonomousLaunchGateRepairRecommendation autonomousCompilerRepairInput,
+    autonomousGateJsonMode = autonomousGateFromJson.mode,
+    autonomousGateJsonReady = autonomousGateFromJson.ready
+  })
+}

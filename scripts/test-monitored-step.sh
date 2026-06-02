@@ -35,10 +35,15 @@ claspc_bin="$(
   env -u CLASP_CLASPC -u CLASPC_BIN CLASP_PROJECT_ROOT="$project_root" \
     "$project_root/scripts/resolve-claspc.sh"
 )"
-demo_path="$project_root/examples/feedback-loop/MonitoredStepDemo.clasp"
+demo_path="$project_root/examples/feedback-loop/MonitoredStepHarness.clasp"
 
 if grep -F '"bash"' "$demo_path" >/dev/null; then
-  printf 'MonitoredStepDemo should exercise a direct executable, not a shell wrapper\n' >&2
+  printf 'MonitoredStepHarness should exercise a direct executable, not a shell wrapper\n' >&2
+  exit 1
+fi
+
+if grep -F 'import Process' "$demo_path" >/dev/null; then
+  printf 'MonitoredStepHarness should stay single-source for verification speed\n' >&2
   exit 1
 fi
 

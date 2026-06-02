@@ -1,0 +1,78 @@
+module Compiler.Emit.Native.ExprText
+
+import Compiler.Checker.TypeOps
+import Compiler.Checker.Types
+import Compiler.Json
+
+nativeExprNameText : Str -> Str
+nativeExprNameText name = textConcat ["local(", name, ")"]
+
+nativeExprStringText : Str -> Str
+nativeExprStringText value = textConcat ["string(", encode value, ")"]
+
+nativeExprIntText : Str -> Str
+nativeExprIntText value = textConcat ["int(", value, ")"]
+
+nativeExprBoolText : Bool -> Str
+nativeExprBoolText value = textConcat ["bool(", if value then "true" else "false", ")"]
+
+nativeExprListText : [Str] -> Str
+nativeExprListText values = textConcat ["list([", textJoin ", " values, "])"]
+
+nativeExprBinaryIntrinsicText : Str -> Str -> Str -> Str
+nativeExprBinaryIntrinsicText name left right = textConcat ["intrinsic.", name, "(", left, ", ", right, ")"]
+
+nativeExprUnaryIntrinsicText : Str -> Str -> Str
+nativeExprUnaryIntrinsicText name value = textConcat ["intrinsic.", name, "(", value, ")"]
+
+nativeExprCalleeIntrinsicText : Str -> Str -> Str -> Str
+nativeExprCalleeIntrinsicText name callee values = textConcat ["intrinsic.", name, "(", callee, ", ", values, ")"]
+
+nativeExprFoldIntrinsicText : Str -> Str -> Str -> Str
+nativeExprFoldIntrinsicText callee initial values = textConcat ["intrinsic.list.fold(", callee, ", ", initial, ", ", values, ")"]
+
+nativeExprDecodeIntrinsicText : Str -> TypeText -> Str -> Str
+nativeExprDecodeIntrinsicText name targetType value = textConcat ["intrinsic.", name, "(", renderType targetType, ", ", value, ")"]
+
+nativeExprIfText : Str -> Str -> Str -> Str
+nativeExprIfText condition thenBranch elseBranch = textConcat ["if ", condition, " then ", thenBranch, " else ", elseBranch]
+
+nativeExprCompareText : Str -> Str -> Str -> Str
+nativeExprCompareText op left right = textConcat ["compare.", op, "(", left, ", ", right, ")"]
+
+nativeExprCallText : Str -> [Str] -> Str
+nativeExprCallText callee args = textConcat ["call(local(", callee, "), [", textJoin ", " args, "])"]
+
+nativeExprMatchText : Str -> [Str] -> Str
+nativeExprMatchText subject branches = textConcat ["match ", subject, " [", textJoin ", " branches, "]"]
+
+nativeExprRecordText : Str -> [Str] -> Str
+nativeExprRecordText recordName fields = textConcat ["record ", recordName, " {", textJoin ", " fields, "}"]
+
+nativeExprFieldAccessText : Str -> Str -> Str -> Str
+nativeExprFieldAccessText recordName subject fieldName =
+  if recordName == "" then textConcat ["field(", subject, ", ", fieldName, ")"] else textConcat ["field(", recordName, ", ", subject, ", ", fieldName, ")"]
+
+nativeExprLetText : Str -> Str -> Str -> Str -> Str
+nativeExprLetText mutability binder value body = textConcat ["let.", mutability, " ", binder, " = ", value, " in ", body]
+
+nativeExprAssignText : Str -> Str -> Str -> Str
+nativeExprAssignText binder value body = textConcat ["assign ", binder, " = ", value, " then ", body]
+
+nativeExprForText : Str -> Str -> Str -> Str -> Str
+nativeExprForText binder iterable loopBody body = textConcat ["for_each ", binder, " in ", iterable, " do ", loopBody, " then ", body]
+
+nativeExprReturnText : Str -> Str
+nativeExprReturnText value = textConcat ["return(", value, ")"]
+
+nativeRecordFieldText : Str -> Str -> Str
+nativeRecordFieldText name value = textConcat [name, " = ", value]
+
+nativeMatchBranchText : Str -> [Str] -> Str -> Str
+nativeMatchBranchText constructorName binders body = textConcat [constructorName, "(", textJoin ", " binders, ") -> ", body]
+
+nativeConstDeclText : Str -> Str -> Str
+nativeConstDeclText name body = textConcat ["global ", name, " = ", body]
+
+nativeFnDeclText : Str -> [Str] -> Str -> Str
+nativeFnDeclText name params body = textConcat ["function ", name, "(", textJoin ", " params, ") = ", body]

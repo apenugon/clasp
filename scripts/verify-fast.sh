@@ -5,6 +5,8 @@ project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 affected_mode=0
 affected_args=()
 verify_report_json_arg=""
+export CLASP_BENCHMARK_PREP_COMPILER_FINGERPRINT_CACHE="${CLASP_BENCHMARK_PREP_COMPILER_FINGERPRINT_CACHE:-$project_root/.clasp-verify/cache/benchmark-prep-compiler-fingerprint-v1.json}"
+export CLASP_BENCHMARK_PREP_CACHE_MODE="${CLASP_BENCHMARK_PREP_CACHE_MODE:-link}"
 
 usage() {
   cat <<'EOF'
@@ -34,6 +36,10 @@ Environment:
   CLASP_VERIFY_MAX_PARALLEL_JOBS
                                 Cap verify-all's effective parallel job count.
   CLASP_VERIFY_MANAGED          Set to 0 to bypass verify-all's managed memory guard.
+  CLASP_VERIFY_FAST_RESOLVE_CLASPC
+                                Set to 0 to skip resolving claspc before verify-all.
+                                Defaults to auto, which skips resolving when all
+                                verify command bundles are caller-provided.
   CLASP_CLASPC or CLASPC_BIN    Ignored when resolving this checkout's claspc.
 EOF
 }
@@ -96,14 +102,28 @@ bash scripts/test-native-claspc-diagnostics.sh
 bash src/scripts/verify.sh
 bash scripts/test-source-run-cache.sh
 bash scripts/test-promoted-source-export-cache.sh
+bash scripts/test-promote-selfhost-managed.sh
 bash scripts/test-int-builtins.sh
 bash scripts/test-dict-builtins.sh
+bash scripts/test-try-decode.sh
+bash scripts/test-service-decode.sh
 bash scripts/test-native-runtime-smoke.sh
 bash scripts/test-native-claspc-smoke.sh
+bash scripts/test-swarm-policy-helpers.sh
+bash scripts/test-swarm-preflight.sh
 bash scripts/test-swarm-memory.sh
+bash scripts/test-swarm-priority.sh
+bash scripts/test-swarm-spawn-policy.sh
 bash scripts/test-swarm-context-pack.sh
 bash scripts/test-swarm-semantic-summary-index.sh
 bash scripts/test-managed-job.sh
+bash scripts/test-resolve-claspc.sh
+bash scripts/test-resource-guard-policy.sh
+bash scripts/test-resource-recovery-policy.sh
+bash scripts/test-goal-manager-resource-health.sh
+bash scripts/test-goal-manager-generated-cleanup-health.sh
+bash scripts/test-goal-manager-mailbox-capability-details.sh
+bash scripts/test-generated-state-cleanup.sh
 '
 fast_sequential_verify_commands=$'
 bash scripts/verify-compiler-slice.sh all
@@ -114,9 +134,7 @@ bash examples/agent-task-scenario/scripts/verify.sh
 bash scripts/test-js-process-runtime.sh
 bash scripts/test-js-emitter-determinism.sh
 bash scripts/test-unsafe-quarantine.sh
-bash scripts/test-swarm-memory.sh
-bash scripts/test-swarm-context-pack.sh
-bash scripts/test-swarm-semantic-summary-index.sh
+bash scripts/test-model-boundary.sh
 bash scripts/test-verify-all-smoke.sh
 bash scripts/test-verify-affected.sh
 bash scripts/test-verify-compiler-slice.sh
@@ -131,11 +149,26 @@ bash src/scripts/verify.sh
 bash scripts/test-native-claspc-diagnostics.sh
 bash scripts/test-int-builtins.sh
 bash scripts/test-dict-builtins.sh
+bash scripts/test-try-decode.sh
+bash scripts/test-model-boundary.sh
+bash scripts/test-service-decode.sh
 bash scripts/test-native-runtime-smoke.sh
 bash scripts/test-native-claspc-smoke.sh
 bash scripts/test-managed-job.sh
+bash scripts/test-resolve-claspc.sh
+bash scripts/test-resource-guard-policy.sh
+bash scripts/test-resource-recovery-policy.sh
+bash scripts/test-goal-manager-resource-health.sh
+bash scripts/test-goal-manager-generated-cleanup-health.sh
+bash scripts/test-goal-manager-mailbox-capability-details.sh
+bash scripts/test-generated-state-cleanup.sh
+bash scripts/test-swarm-policy-helpers.sh
+bash scripts/test-swarm-preflight.sh
+bash scripts/test-swarm-priority.sh
+bash scripts/test-swarm-spawn-policy.sh
 bash scripts/test-swarm-semantic-summary-index.sh
 bash scripts/test-promoted-source-export-cache.sh
+bash scripts/test-promote-selfhost-managed.sh
 bash scripts/test-unsafe-quarantine.sh
 bash examples/agent-metadata/scripts/verify.sh
 bash examples/agent-task-scenario/scripts/verify.sh
@@ -147,16 +180,42 @@ bash scripts/test-verify-runtime-slice.sh
 bash scripts/test-task-manifest.sh
 '
 
+caller_provided_verify_parallel_commands=0
+caller_provided_verify_sequential_commands=0
+caller_provided_verify_fallback_commands=0
+[[ -v CLASP_VERIFY_PARALLEL_COMMANDS ]] && caller_provided_verify_parallel_commands=1
+[[ -v CLASP_VERIFY_SEQUENTIAL_COMMANDS ]] && caller_provided_verify_sequential_commands=1
+[[ -v CLASP_VERIFY_FALLBACK_COMMANDS ]] && caller_provided_verify_fallback_commands=1
+
 export CLASP_VERIFY_LABEL="${CLASP_VERIFY_LABEL:-verify-fast}"
 export CLASP_VERIFY_PARALLEL_COMMANDS="${CLASP_VERIFY_PARALLEL_COMMANDS-$fast_parallel_verify_commands}"
 export CLASP_VERIFY_SEQUENTIAL_COMMANDS="${CLASP_VERIFY_SEQUENTIAL_COMMANDS-$fast_sequential_verify_commands}"
 export CLASP_VERIFY_FALLBACK_COMMANDS="${CLASP_VERIFY_FALLBACK_COMMANDS-$fallback_verify_commands}"
 
-resolved_claspc_bin="$(
-  env -u CLASP_CLASPC -u CLASPC_BIN CLASP_PROJECT_ROOT="$project_root" \
-    "$project_root/scripts/resolve-claspc.sh"
-)"
-export CLASP_CLASPC="$resolved_claspc_bin"
-export CLASPC_BIN="$resolved_claspc_bin"
+verify_fast_should_resolve_claspc() {
+  case "${CLASP_VERIFY_FAST_RESOLVE_CLASPC:-auto}" in
+    0|false|FALSE|False|no|NO|No|off|OFF|Off|never|NEVER|Never)
+      return 1
+      ;;
+    1|true|TRUE|True|yes|YES|Yes|on|ON|On|always|ALWAYS|Always)
+      return 0
+      ;;
+  esac
+
+  if [[ "$caller_provided_verify_parallel_commands" == "1" && "$caller_provided_verify_sequential_commands" == "1" && "$caller_provided_verify_fallback_commands" == "1" ]]; then
+    return 1
+  fi
+
+  return 0
+}
+
+if verify_fast_should_resolve_claspc; then
+  resolved_claspc_bin="$(
+    env -u CLASP_CLASPC -u CLASPC_BIN CLASP_PROJECT_ROOT="$project_root" \
+      "$project_root/scripts/resolve-claspc.sh"
+  )"
+  export CLASP_CLASPC="$resolved_claspc_bin"
+  export CLASPC_BIN="$resolved_claspc_bin"
+fi
 
 exec bash "$project_root/scripts/verify-all.sh"

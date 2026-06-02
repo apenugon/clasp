@@ -1,0 +1,65 @@
+module Compiler.Checker.ModuleSummary
+
+import Compiler.Ast
+import Compiler.Checker.ModuleInfer
+import Compiler.Checker.TypeOps
+import Compiler.Checker.Types
+
+renderModuleSummaryFromEnv : [TypeBinding] -> HostedModuleAst -> Str
+renderModuleSummaryFromEnv env modl = {
+  let mut summaries = emptyRenderedTexts;
+  for decl in moduleDeclarations modl {
+    if declIsMetadataDeclaration decl then {
+      summaries
+    } else {
+      summaries = appendCheckerRenderedText summaries (renderDeclSummary env decl);
+      summaries
+    }
+  };
+  textJoin "\n" summaries
+}
+
+renderDeclSummary : [TypeBinding] -> HostedDeclAst -> Str
+renderDeclSummary env decl = match lookupTypeBinding env (declName decl) {
+  FoundType bindingType ->
+    textConcat [declName decl, " : ", renderType bindingType],
+  MissingType missing ->
+    textConcat [missing, " : ?", missing]
+}
+
+renderModuleSummary : HostedModuleAst -> Str
+renderModuleSummary modl = match inferModuleBindings modl {
+  InferModuleError message ->
+    message,
+  InferredModule env ->
+    renderModuleSummaryFromEnv env modl
+}
+
+renderModuleSummaryWithImportedBindings : Str -> HostedModuleAst -> Str
+renderModuleSummaryWithImportedBindings importedSummaryText modl = match inferModuleBindingsWithImportedBindings (parseRenderedTypeBindings importedSummaryText) modl {
+  InferModuleError message ->
+    textConcat ["ERROR:", message],
+  InferredModule env ->
+    renderModuleSummaryFromEnv env modl
+}
+
+checkedTypeForDecl : HostedModuleAst -> Str -> TypeText
+checkedTypeForDecl modl name = match inferModuleBindings modl {
+  InferModuleError message ->
+    TUnknown name,
+  InferredModule env ->
+    match lookupTypeBinding env name {
+      FoundType bindingType ->
+        bindingType,
+      MissingType missing ->
+        TUnknown missing
+    }
+}
+
+mismatchDiagnosticForModule : HostedModuleAst -> Str
+mismatchDiagnosticForModule modl = match inferModuleBindings modl {
+  InferModuleError message ->
+    message,
+  InferredModule env ->
+    textConcat ["unexpected success:", renderModuleSummary modl]
+}

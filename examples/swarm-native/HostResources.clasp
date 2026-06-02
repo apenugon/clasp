@@ -1,0 +1,64 @@
+module HostResources
+
+foreign hostAvailableDiskMb : Str -> Result Int = "hostAvailableDiskMb"
+foreign hostFileSizeMb : Str -> Result Int = "hostFileSizeMb"
+foreign hostCapFileTailMb : Str -> Int -> Result Int = "hostCapFileTailMb"
+foreign hostAvailableMemoryMb : Result Int = "hostAvailableMemoryMb"
+foreign hostProcessAlive : Str -> Result Bool = "hostProcessAlive"
+foreign hostProcessCountByName : [Str] -> Result Int = "hostProcessCountByName"
+foreign hostUnmanagedProcessCountByName : [Str] -> Result Int = "hostUnmanagedProcessCountByName"
+foreign hostUnmanagedProcessRssMbByName : [Str] -> Result Int = "hostUnmanagedProcessRssMbByName"
+
+hostOkBool : Bool -> Result Bool
+hostOkBool value = Ok value
+
+hostErrBool : Str -> Result Bool
+hostErrBool message = Err message
+
+hostDiskReserveMet : Str -> Int -> Result Bool
+hostDiskReserveMet path requiredMb =
+  if requiredMb < 1 then
+    hostOkBool true
+  else
+    match hostAvailableDiskMb path {
+      Err message -> hostErrBool message,
+      Ok availableMb -> hostOkBool (availableMb >= requiredMb)
+    }
+
+hostMemoryReserveMet : Int -> Result Bool
+hostMemoryReserveMet requiredMb =
+  if requiredMb < 1 then
+    hostOkBool true
+  else
+    match hostAvailableMemoryMb {
+      Err message -> hostErrBool message,
+      Ok availableMb -> hostOkBool (availableMb >= requiredMb)
+    }
+
+hostFileSizeMbOrZero : Str -> Int
+hostFileSizeMbOrZero path =
+  match hostFileSizeMb path {
+    Ok sizeMb -> sizeMb,
+    Err message -> 0
+  }
+
+hostProcessAliveOrFalse : Str -> Bool
+hostProcessAliveOrFalse pid =
+  match hostProcessAlive pid {
+    Ok alive -> alive,
+    Err message -> false
+  }
+
+hostUnmanagedProcessCountByNameOrZero : [Str] -> Int
+hostUnmanagedProcessCountByNameOrZero names =
+  match hostUnmanagedProcessCountByName names {
+    Ok count -> count,
+    Err message -> 0
+  }
+
+hostUnmanagedProcessRssMbByNameOrZero : [Str] -> Int
+hostUnmanagedProcessRssMbByNameOrZero names =
+  match hostUnmanagedProcessRssMbByName names {
+    Ok rssMb -> rssMb,
+    Err message -> 0
+  }

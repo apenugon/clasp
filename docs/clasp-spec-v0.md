@@ -121,7 +121,7 @@ The self-hosting slice also reserves a small compiler-known stdlib surface:
 - `sqliteOpen : Str -> SqliteConnection`
 - `sqliteOpenReadonly : Str -> SqliteConnection`
 
-The text and path helpers are emitted with default JavaScript behavior. The filesystem, environment, time, cwd, and process helpers remain host/runtime bindings so compiler code and ordinary native Clasp programs can interact with the surrounding machine without baking host access into every target runtime. `runProcessJson` and `runProcessTimeoutJson` take `(cwd, env, argv)` where `env` is an explicit `KEY=VALUE` list and `argv` is an argument vector; they return JSON with `exitCode`, `stdout`, and `stderr`, plus timeout fields for the timeout variant. Native `claspc run` compiles an entry module to a temporary backend binary and executes it with any trailing `--` arguments. The SQLite helpers also stay host/runtime-backed. Bun hosts expose typed connection descriptors through `sqliteOpen` and `sqliteOpenReadonly`, typed query bindings can opt into `sqlite:queryOne` and `sqlite:queryAll` runtime names so declared return schemas validate and map query rows at the host boundary, typed mutation bindings can opt into `sqlite:mutateOne[:isolation]` and `sqlite:mutateAll[:isolation]` so semantic input and output schemas stay intact across transaction boundaries, explicit SQL escape hatches must use `foreign unsafe` plus `sqlite:unsafeQueryOne`, `sqlite:unsafeQueryAll`, `sqlite:unsafeMutateOne[:isolation]`, or `sqlite:unsafeMutateAll[:isolation]` so generated sqlite contracts keep row-contract and audit metadata attached to those bindings, `storage:*` host bindings must use named schema-bearing types instead of bare primitives, generated binding contracts derive storage table metadata and database constraints from those schemas, and `createSqliteRuntime` can now enforce app-level schema version compatibility, run host-supplied migrations when SQLite-backed apps open a database, and expose typed transaction descriptors with nested savepoint boundaries.
+The text and path helpers are emitted with default JavaScript behavior. The filesystem, environment, time, cwd, and process helpers remain host/runtime bindings so compiler code and ordinary native Clasp programs can interact with the surrounding machine without baking host access into every target runtime. Native hosts also expose root-confined workspace foreign bindings such as `workspacePath`, `workspaceReadFile`, `workspaceWriteFile`, `workspaceAppendFile`, `workspaceMkdirAll`, `workspaceListDir`, bounded recursive `workspaceListTree`, bounded source-text `workspaceSearchText`, bounded exact source edit `workspaceReplaceText`, `workspacePathSizeMb`, and `workspaceRemovePath` for ordinary agent programs that need safe workspace inspection and edits. `runProcessJson` and `runProcessTimeoutJson` take `(cwd, env, argv)` where `env` is an explicit `KEY=VALUE` list and `argv` is an argument vector; they return JSON with `exitCode`, `stdout`, and `stderr`, plus timeout fields for the timeout variant. Native `claspc run` compiles an entry module to a temporary backend binary and executes it with any trailing `--` arguments. The SQLite helpers also stay host/runtime-backed. Bun hosts expose typed connection descriptors through `sqliteOpen` and `sqliteOpenReadonly`, typed query bindings can opt into `sqlite:queryOne` and `sqlite:queryAll` runtime names so declared return schemas validate and map query rows at the host boundary, typed mutation bindings can opt into `sqlite:mutateOne[:isolation]` and `sqlite:mutateAll[:isolation]` so semantic input and output schemas stay intact across transaction boundaries, explicit SQL escape hatches must use `foreign unsafe` plus `sqlite:unsafeQueryOne`, `sqlite:unsafeQueryAll`, `sqlite:unsafeMutateOne[:isolation]`, or `sqlite:unsafeMutateAll[:isolation]` so generated sqlite contracts keep row-contract and audit metadata attached to those bindings, `storage:*` host bindings must use named schema-bearing types instead of bare primitives, generated binding contracts derive storage table metadata and database constraints from those schemas, and `createSqliteRuntime` can now enforce app-level schema version compatibility, run host-supplied migrations when SQLite-backed apps open a database, and expose typed transaction descriptors with nested savepoint boundaries.
 
 ## Design Constraints
 
@@ -283,6 +283,20 @@ pickLast names = {
 }
 ```
 
+Expression-form `let ... in ...` can also be used as a statement inside a block when its result is intentionally discarded. In that statement context, `name = value` targets an enclosing `let mut` binding when `name` is mutable, so short scoped computations inside loop bodies can update an accumulator without introducing another nested block:
+
+```clasp
+renderTargets : [Str] -> [Str]
+renderTargets targets = {
+  let mut rendered = [];
+  for target in targets {
+    let label = textConcat [target, "!"] in rendered = append rendered [label];
+    rendered
+  };
+  rendered
+}
+```
+
 ```clasp
 module Main
 
@@ -323,7 +337,19 @@ differentFlag : Bool -> Bool -> Bool
 differentFlag left right = left != right
 ```
 
-Comparison binds tighter than equality, so `1 < 2 == 3 > 2` parses as `(1 < 2) == (3 > 2)`. Equality also remains restricted to concrete `Int`, `Str`, and `Bool` operands rather than unconstrained inferred values.
+Boolean expressions support short-circuiting `&&` and `||`; single `&` and `|` are not logical operators:
+
+```clasp
+module Main
+
+needsReview : Bool -> Bool -> Bool
+needsReview changed risky = changed && risky
+
+canShip : Bool -> Bool -> Bool
+canShip verified override = verified || override
+```
+
+Comparison binds tighter than equality, equality binds tighter than `&&`, and `&&` binds tighter than `||`, so `1 < 2 == 3 > 2 || false` parses as `((1 < 2) == (3 > 2)) || false`. Equality remains restricted to concrete `Int`, `Str`, and `Bool` operands rather than unconstrained inferred values.
 
 Integer comparisons are currently available for `Int` values:
 
@@ -457,17 +483,19 @@ route-decl  ::= "route" lower-ident "=" method string upper-ident "->" upper-ide
 method      ::= "GET" | "POST"
 signature   ::= lower-ident ":" type
 decl        ::= lower-ident lower-ident* "=" expr
-block-expr  ::= "{" block-let* expr "}"
-block-let   ::= ("let" ["mut"] lower-ident "=" expr | lower-ident "=" expr | "for" lower-ident "in" for-iterable-expr block-expr) block-separator
+block-expr  ::= "{" block-item* expr "}"
+block-item  ::= ("let" ["mut"] lower-ident "=" expr | lower-ident "=" expr | "for" lower-ident "in" for-iterable-expr block-expr | let-expr) block-separator
 block-separator ::= ";" | newline+
 let-expr    ::= "let" (lower-ident | "{" lower-ident ("," lower-ident)* "}") "=" expr "in" expr
-expr        ::= let-expr | equality-expr
+expr        ::= let-expr | logical-or-expr
 for-iterable-expr ::= let-expr | for-equality-expr
 for-equality-expr ::= for-comparison-expr (("==" | "!=") for-comparison-expr)*
 for-comparison-expr ::= for-app-expr (("<" | "<=" | ">" | ">=") for-app-expr)?
 for-app-expr ::= for-term for-term*
 for-term    ::= for-atom ("." lower-ident)*
 for-atom    ::= lower-ident | upper-ident | integer | string | list-expr | "true" | "false" | decode-expr | encode-expr | return-expr | "(" expr ")"
+logical-or-expr ::= logical-and-expr ("||" logical-and-expr)*
+logical-and-expr ::= equality-expr ("&&" equality-expr)*
 equality-expr ::= comparison-expr (("==" | "!=") comparison-expr)*
 comparison-expr ::= app-expr (("<" | "<=" | ">" | ">=") app-expr)?
 app-expr    ::= term term*
@@ -508,7 +536,7 @@ Package-backed foreign declarations are checked against the referenced declarati
 - Field access binds tighter than function application.
 - Operators are intentionally absent in `v0`.
 - Declarations are expression-bodied only.
-- Blocks return their final expression and may contain leading local `let` declarations, `for` loops over list or string values, or assignments to previously declared `let mut` locals.
+- Blocks return their final expression and may contain leading local `let` declarations, expression-form `let` statements whose results are discarded, `for` loops over list or string values, or assignments to previously declared `let mut` locals.
 - `return` is only valid inside function bodies and exits the enclosing function immediately.
 - `let` binds as a full expression; use parentheses when passing a `let` as a function argument.
 - Constructor names and type names are currently uppercase; value names are lowercase.
@@ -525,6 +553,7 @@ Package-backed foreign declarations are checked against the referenced declarati
 - List literals, record literals, record field declarations, and other comma-delimited block forms may span multiple lines and accept an optional trailing comma after the final item.
 - A list literal becomes a JavaScript array, and every element in the literal must have the same type. Empty list literals must be checked against an expected list type, which may come from an annotation, a branch expectation, or a polymorphic builtin/constructor application.
 - `if condition then left else right` requires a `Bool` condition and matching branch types.
+- `left && right` and `left || right` are short-circuiting boolean operators.
 - `append left right` is overloaded by the checker: list operands lower to array concatenation, while `View` operands keep the view-append surface.
 - `prepend value values` inserts a single element at the front of a list and is polymorphic over the element type.
 - `reverse values` reverses a list and preserves the list item type.

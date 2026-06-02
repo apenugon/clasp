@@ -88,8 +88,8 @@ claspc_bin="$(
   CLASP_CLASPC= CLASPC_BIN= CLASP_PROJECT_ROOT="$project_root" \
     "$project_root/scripts/resolve-claspc.sh"
 )"
-demo_path="$project_root/examples/agent-loop-scenario/Main.clasp"
-handoff_demo_path="$project_root/examples/agent-loop-scenario/HandoffDemo.clasp"
+demo_path="$project_root/examples/agent-loop-scenario/AgentLoopHarness.clasp"
+handoff_demo_path="$project_root/examples/agent-loop-scenario/AgentHandoffHarness.clasp"
 
 if grep -F '"bash"' "$demo_path" >/dev/null; then
   fail "agent loop scenario should invoke direct executables, not shell wrappers"
@@ -97,6 +97,14 @@ fi
 
 if grep -E 'clasp-swarm|claspc[[:space:]]+swarm' "$demo_path" >/dev/null; then
   fail "agent loop scenario should not use first-class compiler swarm commands"
+fi
+
+if grep -F 'import Process' "$demo_path" >/dev/null || grep -F 'import AgentRuntime' "$demo_path" >/dev/null; then
+  fail "agent loop runtime harness must stay single-source"
+fi
+
+if grep -F 'import AgentRuntime' "$handoff_demo_path" >/dev/null; then
+  fail "agent handoff runtime harness must stay single-source"
 fi
 
 grep -F 'agentTaskQueue' "$demo_path" >/dev/null
@@ -116,7 +124,9 @@ grep -F 'record AgentHandoffSnapshot' "$project_root/examples/agent-loop-scenari
 grep -F 'type AgentHandoffClaim' "$project_root/examples/agent-loop-scenario/AgentRuntime.clasp" >/dev/null
 grep -F 'agentHandoffPersist' "$project_root/examples/agent-loop-scenario/AgentRuntime.clasp" >/dev/null
 grep -F 'agentHandoffLoad' "$project_root/examples/agent-loop-scenario/AgentRuntime.clasp" >/dev/null
+grep -F 'match tryDecode AgentHandoffSnapshot raw' "$project_root/examples/agent-loop-scenario/AgentRuntime.clasp" >/dev/null
 grep -F 'agentHandoffCompleteTask' "$project_root/examples/agent-loop-scenario/AgentRuntime.clasp" >/dev/null
+grep -F 'match tryDecode AgentHandoffSnapshot raw' "$handoff_demo_path" >/dev/null
 grep -F 'runVerifierStep restoredForVerifier' "$handoff_demo_path" >/dev/null
 
 (
@@ -261,6 +271,7 @@ function readText(relativePath) {
 
 assert(report.workflowId === "ordinary-clasp-agent-handoff", "handoff workflow id changed");
 assert(report.finalStatus === "completed", `unexpected handoff final status ${report.finalStatus}`);
+assert(report.recoveredCorruptSnapshot === true, "handoff load should recover from a corrupt durable snapshot");
 assert(report.restoredAfterBuilder === true, "verifier should resume from a persisted builder snapshot");
 assert(report.resumedTaskId === "handoff-verifier", "verifier should claim the second task after resume");
 assert(JSON.stringify(report.completedTaskIds) === JSON.stringify(["handoff-builder", "handoff-verifier"]), "completed task ids changed");

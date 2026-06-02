@@ -1,0 +1,201 @@
+module Compiler.Emit.Native.RuntimeCodecs
+
+import Compiler.Ast
+import Compiler.Checker
+import Compiler.Checker.Builtins
+import Compiler.Checker.TypeOps
+import Compiler.Checker.Types
+import Compiler.Emit.Native.Core
+import Compiler.Lower
+
+supportsRuntimeCodecType : TypeText -> Bool
+supportsRuntimeCodecType typ = match typ {
+  TInt ->
+    true,
+  TStr ->
+    true,
+  TBool ->
+    true,
+  TList itemType ->
+    supportsRuntimeCodecType itemType,
+  TNamed name ->
+    true,
+  TApply name args ->
+    false,
+  TFunction input result ->
+    false,
+  TVar label ->
+    false,
+  TUnknown label ->
+    false
+}
+
+appendUniqueRuntimeCodecType : [TypeText] -> TypeText -> [TypeText]
+appendUniqueRuntimeCodecType types typ = if supportsRuntimeCodecType typ then {
+  if containsText (renderTypeTextList types) (renderType typ) then types else append types [typ]
+} else {
+  types
+}
+
+appendUniqueRuntimeCodecTypes : [TypeText] -> [TypeText] -> [TypeText]
+appendUniqueRuntimeCodecTypes existing additions = {
+  let mut merged = existing;
+  for typ in additions {
+    merged = appendUniqueRuntimeCodecType merged typ;
+    merged
+  };
+  merged
+}
+
+collectRuntimeCodecTypesFromExprList : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> [TypeText]
+collectRuntimeCodecTypesFromExprList typeDecls recordDecls env localEnv fnContext exprs = {
+  let mut collected = emptyNativeTypeTexts;
+  for expr in exprs {
+    collected = appendUniqueRuntimeCodecTypes collected (collectRuntimeCodecTypesFromExpr typeDecls recordDecls env localEnv fnContext expr);
+    collected
+  };
+  collected
+}
+
+collectRuntimeCodecTypesFromRecordFields : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedRecordFieldExprAst] -> [TypeText]
+collectRuntimeCodecTypesFromRecordFields typeDecls recordDecls env localEnv fnContext fields = {
+  let mut collected = emptyNativeTypeTexts;
+  for field in fields {
+    collected = appendUniqueRuntimeCodecTypes collected (collectRuntimeCodecTypesFromExpr typeDecls recordDecls env localEnv fnContext (recordExprFieldValue field));
+    collected
+  };
+  collected
+}
+
+collectRuntimeCodecTypesFromBranches : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedMatchBranchAst] -> [TypeText]
+collectRuntimeCodecTypesFromBranches typeDecls recordDecls env localEnv fnContext branches = {
+  let mut collected = emptyNativeTypeTexts;
+  for branch in branches {
+    collected = appendUniqueRuntimeCodecTypes collected (collectRuntimeCodecTypesFromExpr typeDecls recordDecls env localEnv fnContext (branchBodyExpr branch));
+    collected
+  };
+  collected
+}
+
+collectRuntimeCodecTypesFromExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedExprAst -> [TypeText]
+collectRuntimeCodecTypesFromExpr typeDecls recordDecls env localEnv fnContext expr = match expr {
+  HostedName name ->
+    emptyNativeTypeTexts,
+  HostedString value ->
+    emptyNativeTypeTexts,
+  HostedInt value ->
+    emptyNativeTypeTexts,
+  HostedBool value ->
+    emptyNativeTypeTexts,
+  HostedList values ->
+    collectRuntimeCodecTypesFromExprList typeDecls recordDecls env localEnv fnContext values,
+  HostedCall callee args -> {
+    let argTypes = collectRuntimeCodecTypesFromExprList typeDecls recordDecls env localEnv fnContext args;
+    if callee == "encode" then {
+      appendUniqueRuntimeCodecType argTypes (inferredExprType typeDecls recordDecls env localEnv fnContext (firstHostedExpr args))
+    } else if callee == "decode" then {
+      match decodeTargetTypeFromExpr (firstHostedExpr args) {
+        DecodeTargetType targetType ->
+          appendUniqueRuntimeCodecType argTypes targetType,
+        DecodeTargetTypeError message ->
+          argTypes
+      }
+    } else {
+      argTypes
+    }
+  },
+  HostedConstructor constructorName args ->
+    collectRuntimeCodecTypesFromExprList typeDecls recordDecls env localEnv fnContext args,
+  HostedMatch subject branches -> {
+    let subjectTypes = collectRuntimeCodecTypesFromExpr typeDecls recordDecls env localEnv fnContext subject;
+    appendUniqueRuntimeCodecTypes subjectTypes (collectRuntimeCodecTypesFromBranches typeDecls recordDecls env localEnv fnContext branches)
+  },
+  HostedRecord recordName fields ->
+    collectRuntimeCodecTypesFromRecordFields typeDecls recordDecls env localEnv fnContext fields,
+  HostedFieldAccess subject fieldName ->
+    collectRuntimeCodecTypesFromExpr typeDecls recordDecls env localEnv fnContext subject,
+  HostedLet binder value body -> {
+    let valueTypes = collectRuntimeCodecTypesFromExpr typeDecls recordDecls env localEnv fnContext value;
+    let extendedLocalEnv = extendLowerLocalEnv typeDecls recordDecls env localEnv fnContext binder value;
+    appendUniqueRuntimeCodecTypes valueTypes (collectRuntimeCodecTypesFromExpr typeDecls recordDecls env extendedLocalEnv fnContext body)
+  },
+  HostedMutableLet binder value body -> {
+    let valueTypes = collectRuntimeCodecTypesFromExpr typeDecls recordDecls env localEnv fnContext value;
+    let extendedLocalEnv = extendLowerLocalEnv typeDecls recordDecls env localEnv fnContext binder value;
+    appendUniqueRuntimeCodecTypes valueTypes (collectRuntimeCodecTypesFromExpr typeDecls recordDecls env extendedLocalEnv fnContext body)
+  },
+  HostedAssign binder value body -> {
+    let valueTypes = collectRuntimeCodecTypesFromExpr typeDecls recordDecls env localEnv fnContext value;
+    appendUniqueRuntimeCodecTypes valueTypes (collectRuntimeCodecTypesFromExpr typeDecls recordDecls env localEnv fnContext body)
+  },
+  HostedFor binder iterable loopBody body -> {
+    let iterableTypes = collectRuntimeCodecTypesFromExpr typeDecls recordDecls env localEnv fnContext iterable;
+    let loopLocalEnv = extendLowerLoopLocalEnv typeDecls recordDecls env localEnv fnContext binder iterable;
+    let loopTypes = collectRuntimeCodecTypesFromExpr typeDecls recordDecls env loopLocalEnv fnContext loopBody;
+    appendUniqueRuntimeCodecTypes (appendUniqueRuntimeCodecTypes iterableTypes loopTypes) (collectRuntimeCodecTypesFromExpr typeDecls recordDecls env localEnv fnContext body)
+  },
+  HostedReturn value ->
+    collectRuntimeCodecTypesFromExpr typeDecls recordDecls env localEnv fnContext value,
+  HostedIf condition thenBranch elseBranch -> {
+    let conditionTypes = collectRuntimeCodecTypesFromExpr typeDecls recordDecls env localEnv fnContext condition;
+    let thenTypes = collectRuntimeCodecTypesFromExpr typeDecls recordDecls env localEnv fnContext thenBranch;
+    appendUniqueRuntimeCodecTypes (appendUniqueRuntimeCodecTypes conditionTypes thenTypes) (collectRuntimeCodecTypesFromExpr typeDecls recordDecls env localEnv fnContext elseBranch)
+  },
+  HostedEqual left right -> {
+    let leftTypes = collectRuntimeCodecTypesFromExpr typeDecls recordDecls env localEnv fnContext left;
+    appendUniqueRuntimeCodecTypes leftTypes (collectRuntimeCodecTypesFromExpr typeDecls recordDecls env localEnv fnContext right)
+  },
+  HostedNotEqual left right -> {
+    let leftTypes = collectRuntimeCodecTypesFromExpr typeDecls recordDecls env localEnv fnContext left;
+    appendUniqueRuntimeCodecTypes leftTypes (collectRuntimeCodecTypesFromExpr typeDecls recordDecls env localEnv fnContext right)
+  },
+  HostedLessThan left right -> {
+    let leftTypes = collectRuntimeCodecTypesFromExpr typeDecls recordDecls env localEnv fnContext left;
+    appendUniqueRuntimeCodecTypes leftTypes (collectRuntimeCodecTypesFromExpr typeDecls recordDecls env localEnv fnContext right)
+  },
+  HostedLessThanOrEqual left right -> {
+    let leftTypes = collectRuntimeCodecTypesFromExpr typeDecls recordDecls env localEnv fnContext left;
+    appendUniqueRuntimeCodecTypes leftTypes (collectRuntimeCodecTypesFromExpr typeDecls recordDecls env localEnv fnContext right)
+  },
+  HostedGreaterThan left right -> {
+    let leftTypes = collectRuntimeCodecTypesFromExpr typeDecls recordDecls env localEnv fnContext left;
+    appendUniqueRuntimeCodecTypes leftTypes (collectRuntimeCodecTypesFromExpr typeDecls recordDecls env localEnv fnContext right)
+  },
+  HostedGreaterThanOrEqual left right -> {
+    let leftTypes = collectRuntimeCodecTypesFromExpr typeDecls recordDecls env localEnv fnContext left;
+    appendUniqueRuntimeCodecTypes leftTypes (collectRuntimeCodecTypesFromExpr typeDecls recordDecls env localEnv fnContext right)
+  }
+}
+
+collectModuleRuntimeCodecTypes : HostedModuleAst -> [TypeText]
+collectModuleRuntimeCodecTypes modl = {
+  let typeDecls = effectiveModuleTypeDecls modl;
+  let recordDecls = moduleRecordDeclarations modl;
+  let env = lowerModuleEnv modl typeDecls;
+  let mut collected = emptyNativeTypeTexts;
+  for workflowDecl in moduleWorkflowDeclarations modl {
+    collected = appendUniqueRuntimeCodecType collected (typeFromHostedTypeAst (workflowDeclStateTypeAst workflowDecl));
+    collected
+  };
+  for routeDecl in moduleRouteDeclarations modl {
+    collected = appendUniqueRuntimeCodecType collected (TNamed (routeDeclRequestType routeDecl));
+    collected = appendUniqueRuntimeCodecType collected (TNamed (routeDeclResponseType routeDecl));
+    collected
+  };
+  for hookDecl in moduleHookDeclarations modl {
+    collected = appendUniqueRuntimeCodecType collected (TNamed (hookDeclRequestType hookDecl));
+    collected = appendUniqueRuntimeCodecType collected (TNamed (hookDeclResponseType hookDecl));
+    collected
+  };
+  for toolDecl in moduleToolDeclarations modl {
+    collected = appendUniqueRuntimeCodecType collected (TNamed (toolDeclRequestType toolDecl));
+    collected = appendUniqueRuntimeCodecType collected (TNamed (toolDeclResponseType toolDecl));
+    collected
+  };
+  for decl in moduleDeclarations modl {
+    let declCodecTypes = if hasLowerParams decl then collectRuntimeCodecTypesFromExpr typeDecls recordDecls env (lowerFunctionLocalEnv decl) (lowerFunctionFnContext decl) (declBody decl) else collectRuntimeCodecTypesFromExpr typeDecls recordDecls env emptyTypeBindings OutsideFunction (declBody decl);
+    collected = appendUniqueRuntimeCodecTypes collected declCodecTypes;
+    collected
+  };
+  collected
+}

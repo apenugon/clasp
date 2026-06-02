@@ -3,7 +3,9 @@ module Process
 foreign runCommandRaw : Str -> [Str] -> Result Str = "runCommandJson"
 foreign runCommandTimeoutRaw : Str -> Int -> [Str] -> Result Str = "runCommandTimeoutJson"
 foreign spawnCommandRaw : Str -> Str -> Str -> Str -> Int -> [Str] -> Result Str = "spawnCommandJson"
+foreign spawnCommandWithLimitsRaw : Str -> Str -> Str -> Str -> Int -> Int -> [Str] -> Result Str = "spawnCommandWithLimitsJson"
 foreign watchCommandRaw : Str -> Str -> Str -> Str -> Int -> [Str] -> Result Str = "watchCommandJson"
+foreign watchCommandWithLimitsRaw : Str -> Str -> Str -> Str -> Int -> Int -> [Str] -> Result Str = "watchCommandWithLimitsJson"
 foreign reconcileWatchedProcessRaw : Str -> Result Str = "reconcileWatchedProcessJson"
 foreign cancelWatchedProcessRaw : Str -> Result Str = "cancelWatchedProcessJson"
 foreign awaitWatchedProcessRaw : Str -> Int -> Result Str = "awaitWatchedProcessJson"
@@ -34,6 +36,9 @@ record WatchedProcessDetails = {
   exitCode : Int,
   timedOut : Bool,
   error : Str,
+  outputLimitBytes : Int,
+  stdoutTruncated : Bool,
+  stderrTruncated : Bool,
   command : [Str],
   stdoutPath : Str,
   stderrPath : Str,
@@ -57,6 +62,9 @@ record MonitoredStepResult = {
   completed : Bool,
   timedOut : Bool,
   error : Str,
+  outputLimitBytes : Int,
+  stdoutTruncated : Bool,
+  stderrTruncated : Bool,
   startedAtMs : Int,
   endedAtMs : Int,
   durationMs : Int,
@@ -64,6 +72,18 @@ record MonitoredStepResult = {
 }
 
 record CommandSpec = { cwd : Str, command : [Str] }
+
+readProcessEnvInt : Str -> Int -> Int
+readProcessEnvInt name fallback = match envVar name {
+  Ok raw -> if raw == "" then fallback else decode Int raw,
+  Err message -> fallback
+}
+
+processMemoryLimitMb : Int
+processMemoryLimitMb =
+  readProcessEnvInt
+    "CLASP_LOOP_WATCH_MEMORY_MB_JSON"
+    (readProcessEnvInt "CLASP_LOOP_AGENT_MEMORY_MB_JSON" 8192)
 
 record WatchedCommandSpec = {
   cwd : Str,
@@ -303,6 +323,9 @@ monitoredStepResultWithStatus process status exitCode timedOut =
     completed = process.completed,
     timedOut = timedOut,
     error = if timedOut then "timeout" else process.error,
+    outputLimitBytes = process.outputLimitBytes,
+    stdoutTruncated = process.stdoutTruncated,
+    stderrTruncated = process.stderrTruncated,
     startedAtMs = process.startedAtMs,
     endedAtMs = process.endedAtMs,
     durationMs = process.durationMs,
@@ -425,9 +448,18 @@ run spec = processResult (runCommandRaw spec.cwd spec.command)
 runTimeout : CommandSpec -> Int -> Result TimedProcessResult
 runTimeout spec timeoutMs = timedProcessResult (runCommandTimeoutRaw spec.cwd timeoutMs spec.command)
 
-spawn : WatchedCommandSpec -> Result WatchedProcess
-spawn spec =
-  watchedProcessResult (
+spawnRaw : WatchedCommandSpec -> Result Str
+spawnRaw spec =
+  if processMemoryLimitMb > 0 then
+    spawnCommandWithLimitsRaw
+      spec.cwd
+      spec.stdoutPath
+      spec.stderrPath
+      spec.heartbeatPath
+      spec.watchPollMs
+      processMemoryLimitMb
+      spec.command
+  else
     spawnCommandRaw
       spec.cwd
       spec.stdoutPath
@@ -435,43 +467,42 @@ spawn spec =
       spec.heartbeatPath
       spec.watchPollMs
       spec.command
-  )
+
+spawn : WatchedCommandSpec -> Result WatchedProcess
+spawn spec =
+  watchedProcessResult (spawnRaw spec)
 
 spawnDetails : WatchedCommandSpec -> Result WatchedProcessDetails
 spawnDetails spec =
-  watchedProcessDetailsResult (
-    spawnCommandRaw
+  watchedProcessDetailsResult (spawnRaw spec)
+
+watchRaw : WatchedCommandSpec -> Result Str
+watchRaw spec =
+  if processMemoryLimitMb > 0 then
+    watchCommandWithLimitsRaw
+      spec.cwd
+      spec.stdoutPath
+      spec.stderrPath
+      spec.heartbeatPath
+      spec.watchPollMs
+      processMemoryLimitMb
+      spec.command
+  else
+    watchCommandRaw
       spec.cwd
       spec.stdoutPath
       spec.stderrPath
       spec.heartbeatPath
       spec.watchPollMs
       spec.command
-  )
 
 watch : WatchedCommandSpec -> Result WatchedProcess
 watch spec =
-  watchedProcessResult (
-    watchCommandRaw
-      spec.cwd
-      spec.stdoutPath
-      spec.stderrPath
-      spec.heartbeatPath
-      spec.watchPollMs
-      spec.command
-  )
+  watchedProcessResult (watchRaw spec)
 
 watchDetails : WatchedCommandSpec -> Result WatchedProcessDetails
 watchDetails spec =
-  watchedProcessDetailsResult (
-    watchCommandRaw
-      spec.cwd
-      spec.stdoutPath
-      spec.stderrPath
-      spec.heartbeatPath
-      spec.watchPollMs
-      spec.command
-  )
+  watchedProcessDetailsResult (watchRaw spec)
 
 runMonitored : WatchedCommandSpec -> Result MonitoredStepResult
 runMonitored spec = match watchDetails spec {

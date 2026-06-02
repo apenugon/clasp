@@ -1,0 +1,1120 @@
+module GeneratedStateCleanupPlan
+
+import HostResources
+
+foreign workspaceReadFileRaw : Str -> Str -> Result Str = "workspaceReadFile"
+foreign workspaceListDirRaw : Str -> Str -> Result [Str] = "workspaceListDir"
+foreign workspacePathRaw : Str -> Str -> Result Str = "workspacePath"
+foreign workspacePathSizeMbRaw : Str -> Str -> Result Int = "workspacePathSizeMb"
+foreign workspaceRemovePathRaw : Str -> Str -> Result Str = "workspaceRemovePath"
+foreign hostFileSizeMbRaw : Str -> Result Int = "hostFileSizeMb"
+foreign hostCapFileTailMbRaw : Str -> Int -> Result Int = "hostCapFileTailMb"
+
+record GeneratedCleanupTarget = {
+  scope : Str,
+  relativePath : Str,
+  reason : Str,
+  removeWith : Str
+}
+
+record GeneratedCleanupConfiguredTarget = {
+  relativePath : Str,
+  reason : Str
+}
+
+record GeneratedInvalidConfiguredTarget = {
+  relativePath : Str,
+  reason : Str,
+  message : Str
+}
+
+record GeneratedActiveProcess = {
+  pid : Str,
+  pidPath : Str,
+  status : Str
+}
+
+record GeneratedInactiveProcess = {
+  pid : Str,
+  pidPath : Str,
+  status : Str,
+  reason : Str
+}
+
+record GeneratedProcessMetadataScan = {
+  activeProcesses : [GeneratedActiveProcess],
+  inactiveProcesses : [GeneratedInactiveProcess]
+}
+
+record GeneratedCleanupDisk = {
+  reservePath : Str,
+  availableMb : Int,
+  requiredMb : Int,
+  minHeadroomMb : Int,
+  headroomMb : Int,
+  shortfallMb : Int,
+  lowHeadroom : Bool,
+  reserveMet : Bool
+}
+
+record GeneratedExternalLog = {
+  name : Str,
+  path : Str,
+  exists : Bool,
+  sizeMb : Int,
+  maxMb : Int,
+  reclaimableMb : Int,
+  recommendedAction : Str
+}
+
+record GeneratedExternalLogCap = {
+  name : Str,
+  path : Str,
+  ok : Bool,
+  beforeSizeMb : Int,
+  afterSizeMb : Int,
+  maxMb : Int,
+  message : Str
+}
+
+record GeneratedCleanupProjection = {
+  repoReclaimableMb : Int,
+  externalLogReclaimableMb : Int,
+  totalReclaimableMb : Int,
+  projectedAvailableMb : Int,
+  reserveRequiredMb : Int,
+  guardRequiredMb : Int,
+  reserveShortfallAfterCleanupMb : Int,
+  guardShortfallAfterCleanupMb : Int,
+  cleanupCanSatisfyReserve : Bool,
+  cleanupCanSatisfyGuard : Bool
+}
+
+record GeneratedStateCleanupPlan = {
+  projectRoot : Str,
+  safeToClean : Bool,
+  recommendedAction : Str,
+  configuredTargetCount : Int,
+  invalidConfiguredTargetCount : Int,
+  invalidConfiguredTargets : [GeneratedInvalidConfiguredTarget],
+  repoGeneratedTargetCount : Int,
+  repoGeneratedTargets : [GeneratedCleanupTarget],
+  activeProcessCount : Int,
+  activeProcesses : [GeneratedActiveProcess],
+  inactiveProcessCount : Int,
+  inactiveProcesses : [GeneratedInactiveProcess],
+  externalLogCount : Int,
+  externalLogs : [GeneratedExternalLog],
+  disk : GeneratedCleanupDisk,
+  cleanup : GeneratedCleanupProjection,
+  summary : Str
+}
+
+record GeneratedCleanupRemoval = {
+  relativePath : Str,
+  ok : Bool,
+  message : Str
+}
+
+record GeneratedStateCleanupRun = {
+  mode : Str,
+  plan : GeneratedStateCleanupPlan,
+  removals : [GeneratedCleanupRemoval],
+  externalLogCaps : [GeneratedExternalLogCap],
+  finalAction : Str,
+  summary : Str
+}
+
+record GeneratedStateCleanupTestMatrix = {
+  plan : GeneratedStateCleanupPlan,
+  applyRun : GeneratedStateCleanupRun,
+  activeApplyRun : GeneratedStateCleanupRun
+}
+
+emptyCleanupTargets : [GeneratedCleanupTarget]
+emptyCleanupTargets = []
+
+emptyConfiguredCleanupTargets : [GeneratedCleanupConfiguredTarget]
+emptyConfiguredCleanupTargets = []
+
+emptyInvalidConfiguredTargets : [GeneratedInvalidConfiguredTarget]
+emptyInvalidConfiguredTargets = []
+
+emptyActiveProcesses : [GeneratedActiveProcess]
+emptyActiveProcesses = []
+
+emptyInactiveProcesses : [GeneratedInactiveProcess]
+emptyInactiveProcesses = []
+
+emptyExternalLogs : [GeneratedExternalLog]
+emptyExternalLogs = []
+
+emptyExternalLogCaps : [GeneratedExternalLogCap]
+emptyExternalLogCaps = []
+
+emptyProcessMetadataScan : GeneratedProcessMetadataScan
+emptyProcessMetadataScan =
+  GeneratedProcessMetadataScan {
+    activeProcesses = emptyActiveProcesses,
+    inactiveProcesses = emptyInactiveProcesses
+  }
+
+emptyCleanupRemovals : [GeneratedCleanupRemoval]
+emptyCleanupRemovals = []
+
+emptyTexts : [Str]
+emptyTexts = []
+
+cleanupOkBool : Bool -> Result Bool
+cleanupOkBool value = Ok value
+
+cleanupErrBool : Str -> Result Bool
+cleanupErrBool message = Err message
+
+workspaceReadText : Str -> Str -> Result Str
+workspaceReadText root relative = workspaceReadFileRaw root relative
+
+workspaceListDir : Str -> Str -> Result [Str]
+workspaceListDir root relative = workspaceListDirRaw root relative
+
+resultTextListOrEmpty : Result [Str] -> [Str]
+resultTextListOrEmpty result = match result {
+  Ok values -> values,
+  Err message -> emptyTexts
+}
+
+resultTextListExists : Result [Str] -> Bool
+resultTextListExists result = match result {
+  Ok values -> true,
+  Err message -> false
+}
+
+workspacePath : Str -> Str -> Result Str
+workspacePath root relative = workspacePathRaw root relative
+
+workspacePathSizeMb : Str -> Str -> Result Int
+workspacePathSizeMb root relative = workspacePathSizeMbRaw root relative
+
+workspaceRemovePath : Str -> Str -> Result Str
+workspaceRemovePath root relative = workspaceRemovePathRaw root relative
+
+hostFileSizeMb : Str -> Result Int
+hostFileSizeMb path = hostFileSizeMbRaw path
+
+hostCapFileTailMb : Str -> Int -> Result Int
+hostCapFileTailMb path maxMb = hostCapFileTailMbRaw path maxMb
+
+textIncludes : Str -> Str -> Bool
+textIncludes value needle = length (textSplit value needle) > 1
+
+firstTextOrEmpty : [Str] -> Str
+firstTextOrEmpty values = {
+  let mut first = "";
+  let mut found = false;
+  for value in values {
+    found = if found then
+      found
+    else {
+      first = value;
+      true
+    };
+    found
+  };
+  first
+}
+
+firstLine : Str -> Str
+firstLine value = firstTextOrEmpty (textSplit value "\n")
+
+readEnvText : Str -> Str -> Str
+readEnvText name fallback = match envVar name {
+  Ok raw -> if raw == "" then fallback else raw,
+  Err message -> fallback
+}
+
+readEnvJsonText : Str -> Str -> Str
+readEnvJsonText name fallback = match envVar name {
+  Ok raw ->
+    if raw == "" then
+      fallback
+    else {
+      let decoded = decode Str raw in
+      if decoded == "" then fallback else decoded
+    },
+  Err message -> fallback
+}
+
+readEnvInt : Str -> Int -> Int
+readEnvInt name fallback = match envVar name {
+  Ok raw -> if raw == "" then fallback else decode Int raw,
+  Err message -> fallback
+}
+
+readEnvJsonInt : Str -> Int -> Int
+readEnvJsonInt name fallback = match envVar name {
+  Ok raw -> if raw == "" then fallback else decode Int raw,
+  Err message -> fallback
+}
+
+rawEnvTextOrEmpty : Str -> Str
+rawEnvTextOrEmpty name =
+  match envVar name {
+    Ok raw -> raw,
+    Err message -> ""
+  }
+
+truthyEnvText : Str -> Bool
+truthyEnvText value =
+  if value == "1" then
+    true
+  else if value == "true" then
+    true
+  else if value == "yes" then
+    true
+  else if value == "on" then
+    true
+  else if value == "\"1\"" then
+    true
+  else if value == "\"true\"" then
+    true
+  else if value == "\"yes\"" then
+    true
+  else
+    value == "\"on\""
+
+readEnvTruthy : Str -> Bool
+readEnvTruthy name = match envVar name {
+  Ok raw -> truthyEnvText raw,
+  Err message -> false
+}
+
+generatedCleanupProjectRoot : Str
+generatedCleanupProjectRoot = {
+  let configured = firstTextOrEmpty argv;
+  if configured == "" then "." else configured
+}
+
+generatedCleanupDiskReservePath : Str
+generatedCleanupDiskReservePath =
+  readEnvText
+    "CLASP_GENERATED_STATE_DISK_RESERVE_PATH"
+    (readEnvJsonText "CLASP_MANAGER_DISK_RESERVE_PATH_JSON" generatedCleanupProjectRoot)
+
+generatedCleanupMinAvailableDiskMb : Int
+generatedCleanupMinAvailableDiskMb =
+  readEnvInt
+    "CLASP_GENERATED_STATE_MIN_AVAILABLE_DISK_MB"
+    (readEnvJsonInt
+      "CLASP_MANAGER_MIN_AVAILABLE_DISK_MB_JSON"
+      (readEnvInt "CLASP_VERIFY_MANAGED_MIN_AVAILABLE_DISK_MB" 16384))
+
+generatedCleanupMinHeadroomMb : Int
+generatedCleanupMinHeadroomMb =
+  readEnvInt
+    "CLASP_GENERATED_STATE_MIN_HEADROOM_MB"
+    (readEnvJsonInt "CLASP_MANAGER_MIN_DISK_HEADROOM_MB_JSON" 1024)
+
+generatedCleanupHomeDir : Str
+generatedCleanupHomeDir = readEnvText "HOME" ""
+
+generatedCleanupCodexHome : Str
+generatedCleanupCodexHome =
+  readEnvText
+    "CODEX_HOME"
+    (if generatedCleanupHomeDir == "" then "" else pathJoin [generatedCleanupHomeDir, ".codex"])
+
+generatedCleanupDefaultCodexLogPath : Str
+generatedCleanupDefaultCodexLogPath =
+  if generatedCleanupCodexHome == "" then
+    ""
+  else
+    pathJoin [generatedCleanupCodexHome, "log", "codex-tui.log"]
+
+generatedCleanupCodexLogPath : Str
+generatedCleanupCodexLogPath =
+  readEnvText "CLASP_GENERATED_STATE_CODEX_LOG_PATH" generatedCleanupDefaultCodexLogPath
+
+generatedCleanupCodexLogMaxMb : Int
+generatedCleanupCodexLogMaxMb =
+  readEnvInt "CLASP_GENERATED_STATE_CODEX_LOG_MAX_MB" 32
+
+generatedCleanupApplyEnabled : Bool
+generatedCleanupApplyEnabled = readEnvTruthy "CLASP_GENERATED_STATE_APPLY_JSON"
+
+generatedCleanupTestMatrixEnabled : Bool
+generatedCleanupTestMatrixEnabled = readEnvTruthy "CLASP_GENERATED_STATE_TEST_MATRIX_JSON"
+
+generatedCleanupActiveProjectRoot : Str
+generatedCleanupActiveProjectRoot =
+  readEnvText "CLASP_GENERATED_STATE_ACTIVE_PROJECT_ROOT" generatedCleanupProjectRoot
+
+cleanupRelativeJoin : Str -> Str -> Str
+cleanupRelativeJoin base name =
+  if base == "." then
+    name
+  else
+    pathJoin [base, name]
+
+cleanupTarget : Str -> Str -> Str -> GeneratedCleanupTarget
+cleanupTarget scope relativePath reason =
+  GeneratedCleanupTarget {
+    scope = scope,
+    relativePath = relativePath,
+    reason = reason,
+    removeWith = "workspaceRemovePath"
+  }
+
+configuredCleanupTarget : GeneratedCleanupConfiguredTarget -> GeneratedCleanupTarget
+configuredCleanupTarget target =
+  cleanupTarget
+    "configured-generated-output"
+    target.relativePath
+    (if target.reason == "" then "configured generated output" else target.reason)
+
+configuredCleanupTargetExists : Str -> GeneratedCleanupConfiguredTarget -> Result Bool
+configuredCleanupTargetExists workspaceRoot target = {
+  let rootPathResult = workspacePath workspaceRoot ".";
+  if target.relativePath == "" then
+    cleanupErrBool "configured cleanup target path is empty"
+  else
+    match rootPathResult {
+      Err message -> cleanupErrBool message,
+      Ok rootResolved -> {
+        let targetPathResult = workspacePath workspaceRoot target.relativePath;
+        match targetPathResult {
+          Err message -> cleanupErrBool message,
+          Ok resolved ->
+            if resolved == rootResolved then
+              cleanupErrBool "configured cleanup target must not be the workspace root"
+            else
+              cleanupOkBool (fileExists resolved)
+        }
+      }
+    }
+}
+
+configuredCleanupTargetsAsCleanupTargets : Str -> [GeneratedCleanupConfiguredTarget] -> [GeneratedCleanupTarget]
+configuredCleanupTargetsAsCleanupTargets workspaceRoot configured = {
+  let mut targets = emptyCleanupTargets;
+  for target in configured {
+    let existsResult = configuredCleanupTargetExists workspaceRoot target;
+    targets = match existsResult {
+      Ok exists ->
+        if exists then
+          append targets [configuredCleanupTarget target]
+        else
+          targets,
+      Err message ->
+        targets
+    };
+    targets
+  };
+  targets
+}
+
+invalidConfiguredCleanupTarget : GeneratedCleanupConfiguredTarget -> Str -> Str -> GeneratedInvalidConfiguredTarget
+invalidConfiguredCleanupTarget target reason message =
+  GeneratedInvalidConfiguredTarget {
+    relativePath = target.relativePath,
+    reason = reason,
+    message = message
+  }
+
+invalidConfiguredCleanupTargetsFor : Str -> [GeneratedCleanupConfiguredTarget] -> [GeneratedInvalidConfiguredTarget]
+invalidConfiguredCleanupTargetsFor workspaceRoot configured = {
+  let mut invalidTargets = emptyInvalidConfiguredTargets;
+  for target in configured {
+    let existsResult = configuredCleanupTargetExists workspaceRoot target;
+    invalidTargets = match existsResult {
+      Ok exists ->
+        if exists then
+          invalidTargets
+        else
+          append invalidTargets [invalidConfiguredCleanupTarget target "missing-path" "configured cleanup target does not exist"],
+      Err message ->
+        append invalidTargets [invalidConfiguredCleanupTarget target "invalid-path" message]
+    };
+    invalidTargets
+  };
+  invalidTargets
+}
+
+readGeneratedCleanupConfiguredTargets : Str -> [GeneratedCleanupConfiguredTarget]
+readGeneratedCleanupConfiguredTargets raw =
+  if raw == "" then
+    emptyConfiguredCleanupTargets
+  else
+    match tryDecode [GeneratedCleanupConfiguredTarget] raw {
+      Ok targets -> targets,
+      Err message -> emptyConfiguredCleanupTargets
+    }
+
+readGeneratedCleanupConfiguredTargetsFromPath : Str -> [GeneratedCleanupConfiguredTarget]
+readGeneratedCleanupConfiguredTargetsFromPath path =
+  if path == "" then
+    emptyConfiguredCleanupTargets
+  else
+    match readFile path {
+      Ok raw -> readGeneratedCleanupConfiguredTargets raw,
+      Err message -> emptyConfiguredCleanupTargets
+    }
+
+generatedCleanupWorkspaceConfiguredTargetsPath : Str -> Str
+generatedCleanupWorkspaceConfiguredTargetsPath workspaceRoot =
+  if workspaceRoot == "" then
+    ""
+  else
+    pathJoin [workspaceRoot, ".clasp-generated-state", "cleanup-targets.json"]
+
+generatedCleanupConfiguredTargetsFor : Str -> [GeneratedCleanupConfiguredTarget]
+generatedCleanupConfiguredTargetsFor workspaceRoot = {
+  let envRaw = rawEnvTextOrEmpty "CLASP_GENERATED_STATE_CLEANUP_TARGETS_JSON";
+  let envTargets = readGeneratedCleanupConfiguredTargets envRaw;
+  let configuredPath = rawEnvTextOrEmpty "CLASP_GENERATED_STATE_CLEANUP_TARGETS_PATH";
+  let configuredPathTargets = readGeneratedCleanupConfiguredTargetsFromPath configuredPath;
+  let workspacePath = generatedCleanupWorkspaceConfiguredTargetsPath workspaceRoot;
+  let workspacePathTargets = readGeneratedCleanupConfiguredTargetsFromPath workspacePath;
+  append (append envTargets configuredPathTargets) workspacePathTargets
+}
+
+cleanupNameIsGeneratedRunDir : Str -> Bool
+cleanupNameIsGeneratedRunDir name =
+  if name == "runs" then
+    true
+  else
+    name == "jobs"
+
+scanGeneratedTargetDirsAtDepth : Str -> Str -> Int -> [GeneratedCleanupTarget]
+scanGeneratedTargetDirsAtDepth workspaceRoot relative depth =
+  if depth < 1 then
+    []
+  else {
+    let names = resultTextListOrEmpty (workspaceListDir workspaceRoot relative);
+    let mut targets = [];
+    let nextDepth = intSubtract depth 1;
+    for name in names {
+      let child = cleanupRelativeJoin relative name;
+      let generatedTarget = cleanupTarget "repo-generated-state" child "generated run/job directory";
+      targets = if cleanupNameIsGeneratedRunDir name then
+        append targets [generatedTarget]
+      else
+        append targets (scanGeneratedTargetDirsAtDepth workspaceRoot child nextDepth);
+      targets
+    };
+    targets
+  }
+
+ignoredChildTargets : Str -> Str -> [GeneratedCleanupTarget]
+ignoredChildTargets workspaceRoot relative = {
+  let names = resultTextListOrEmpty (workspaceListDir workspaceRoot relative);
+  let mut targets = [];
+  for name in names {
+    let generatedTarget = cleanupTarget "repo-generated-output" (cleanupRelativeJoin relative name) "ignored generated output";
+    targets = if name == ".gitkeep" then
+      targets
+    else
+      append targets [generatedTarget];
+    targets
+  };
+  targets
+}
+
+directDirectoryTargetIfPresent : Str -> Str -> Str -> [GeneratedCleanupTarget]
+directDirectoryTargetIfPresent workspaceRoot relative reason = {
+  let listing = workspaceListDir workspaceRoot relative;
+  let target = cleanupTarget "repo-generated-output" relative reason;
+  if resultTextListExists listing then
+    [target]
+  else
+    []
+}
+
+generatedCleanupRepoTargetsFor : Str -> [GeneratedCleanupTarget]
+generatedCleanupRepoTargetsFor workspaceRoot =
+  generatedCleanupRepoTargetsForConfigured workspaceRoot (generatedCleanupConfiguredTargetsFor workspaceRoot)
+
+generatedCleanupRepoTargetsForConfigured : Str -> [GeneratedCleanupConfiguredTarget] -> [GeneratedCleanupTarget]
+generatedCleanupRepoTargetsForConfigured workspaceRoot configuredTargets = {
+  let mut targets = [];
+  targets = append targets (configuredCleanupTargetsAsCleanupTargets workspaceRoot configuredTargets);
+  targets = append targets (scanGeneratedTargetDirsAtDepth workspaceRoot ".clasp-swarm" 5);
+  targets = append targets (scanGeneratedTargetDirsAtDepth workspaceRoot ".clasp-agents" 5);
+  targets = append targets (scanGeneratedTargetDirsAtDepth workspaceRoot ".clasp-loops" 5);
+  targets = append targets (scanGeneratedTargetDirsAtDepth workspaceRoot ".clasp-verify" 5);
+  targets = append targets (ignoredChildTargets workspaceRoot "benchmarks/workspaces");
+  targets = append targets (ignoredChildTargets workspaceRoot "benchmarks/results");
+  targets = append targets (directDirectoryTargetIfPresent workspaceRoot "dist" "rebuildable dist output");
+  targets
+}
+
+cleanupPidName : Str -> Bool
+cleanupPidName name =
+  if name == "pid" then
+    true
+  else
+    textIncludes name ".pid"
+
+terminalJobStatus : Str -> Bool
+terminalJobStatus status =
+  if status == "completed" then
+    true
+  else if status == "failed" then
+    true
+  else if status == "stopped" then
+    true
+  else if status == "memory-exceeded" then
+    true
+  else if status == "disk-exceeded" then
+    true
+  else if status == "memory-enforcer-unavailable" then
+    true
+  else
+    status == "admission-lock-unavailable"
+
+readStatusOrUnknown : Str -> Str -> Str
+readStatusOrUnknown workspaceRoot relative = {
+  let statusRead = workspaceReadText workspaceRoot relative;
+  let status = match statusRead {
+    Ok raw -> firstLine raw,
+    Err message -> "unknown"
+  };
+  status
+}
+
+processMetadataForPidFile : Str -> Str -> GeneratedProcessMetadataScan
+processMetadataForPidFile workspaceRoot pidPath = {
+  let pidRead = workspaceReadText workspaceRoot pidPath;
+  let pidRaw = match pidRead {
+    Ok raw -> firstLine raw,
+    Err message -> ""
+  } in
+  if pidRaw == "" then
+    GeneratedProcessMetadataScan {
+      activeProcesses = emptyActiveProcesses,
+      inactiveProcesses = [GeneratedInactiveProcess { pid = "", pidPath = pidPath, status = "unknown", reason = "empty-pid-file" }]
+    }
+  else {
+    let statusPath = pathJoin [pathDirname pidPath, "status"] in
+    let status = readStatusOrUnknown workspaceRoot statusPath in
+    if terminalJobStatus status then
+      GeneratedProcessMetadataScan {
+        activeProcesses = emptyActiveProcesses,
+        inactiveProcesses = [GeneratedInactiveProcess { pid = pidRaw, pidPath = pidPath, status = status, reason = "terminal-status" }]
+      }
+    else if hostProcessAliveOrFalse pidRaw == false then
+      GeneratedProcessMetadataScan {
+        activeProcesses = emptyActiveProcesses,
+        inactiveProcesses = [GeneratedInactiveProcess { pid = pidRaw, pidPath = pidPath, status = status, reason = "stale-pid" }]
+      }
+    else
+      GeneratedProcessMetadataScan {
+        activeProcesses = [GeneratedActiveProcess { pid = pidRaw, pidPath = pidPath, status = status }],
+        inactiveProcesses = emptyInactiveProcesses
+      }
+  }
+}
+
+appendProcessMetadataScan : GeneratedProcessMetadataScan -> GeneratedProcessMetadataScan -> GeneratedProcessMetadataScan
+appendProcessMetadataScan left right =
+  GeneratedProcessMetadataScan {
+    activeProcesses = append left.activeProcesses right.activeProcesses,
+    inactiveProcesses = append left.inactiveProcesses right.inactiveProcesses
+  }
+
+scanGeneratedProcessMetadataAtDepth : Str -> Str -> Int -> GeneratedProcessMetadataScan
+scanGeneratedProcessMetadataAtDepth workspaceRoot relative depth =
+  if depth < 1 then
+    emptyProcessMetadataScan
+  else {
+    let names = resultTextListOrEmpty (workspaceListDir workspaceRoot relative);
+    let mut scanned = emptyProcessMetadataScan;
+    let nextDepth = intSubtract depth 1;
+    for name in names {
+      let child = cleanupRelativeJoin relative name;
+      scanned = if cleanupPidName name then
+        appendProcessMetadataScan scanned (processMetadataForPidFile workspaceRoot child)
+      else
+        appendProcessMetadataScan scanned (scanGeneratedProcessMetadataAtDepth workspaceRoot child nextDepth);
+      scanned
+    };
+    scanned
+  }
+
+generatedCleanupProcessMetadataFor : Str -> GeneratedProcessMetadataScan
+generatedCleanupProcessMetadataFor workspaceRoot = {
+  let mut scanned = emptyProcessMetadataScan;
+  scanned = appendProcessMetadataScan scanned (scanGeneratedProcessMetadataAtDepth workspaceRoot ".clasp-swarm" 6);
+  scanned = appendProcessMetadataScan scanned (scanGeneratedProcessMetadataAtDepth workspaceRoot ".clasp-agents" 6);
+  scanned = appendProcessMetadataScan scanned (scanGeneratedProcessMetadataAtDepth workspaceRoot ".clasp-loops" 6);
+  scanned = appendProcessMetadataScan scanned (scanGeneratedProcessMetadataAtDepth workspaceRoot ".clasp-verify" 6);
+  scanned
+}
+
+generatedCleanupActiveProcessesFor : Str -> [GeneratedActiveProcess]
+generatedCleanupActiveProcessesFor workspaceRoot = {
+  let scanned = generatedCleanupProcessMetadataFor workspaceRoot in
+  scanned.activeProcesses
+}
+
+generatedCleanupInactiveProcessesFor : Str -> [GeneratedInactiveProcess]
+generatedCleanupInactiveProcessesFor workspaceRoot = {
+  let scanned = generatedCleanupProcessMetadataFor workspaceRoot in
+  scanned.inactiveProcesses
+}
+
+generatedCleanupDiskFor : Str -> Int -> Int -> GeneratedCleanupDisk
+generatedCleanupDiskFor reservePath requiredMb minHeadroomMb =
+  match hostAvailableDiskMb reservePath {
+    Err message ->
+      GeneratedCleanupDisk {
+        reservePath = reservePath,
+        availableMb = 0,
+        requiredMb = requiredMb,
+        minHeadroomMb = minHeadroomMb,
+        headroomMb = 0,
+        shortfallMb = requiredMb,
+        lowHeadroom = false,
+        reserveMet = false
+    },
+    Ok availableMb -> {
+      let headroom = intSubtract availableMb requiredMb;
+      let shortfall = if headroom < 0 then intSubtract 0 headroom else 0;
+      let reserveMet = if requiredMb < 1 then true else shortfall == 0 in
+      GeneratedCleanupDisk {
+        reservePath = reservePath,
+        availableMb = availableMb,
+        requiredMb = requiredMb,
+        minHeadroomMb = minHeadroomMb,
+        headroomMb = headroom,
+        shortfallMb = shortfall,
+        lowHeadroom =
+          if reserveMet then
+            headroom < minHeadroomMb
+          else
+            false,
+        reserveMet = reserveMet
+      }
+    }
+  }
+
+generatedCleanupTargetSizeMb : Str -> GeneratedCleanupTarget -> Int
+generatedCleanupTargetSizeMb workspaceRoot target =
+  match workspacePathSizeMb workspaceRoot target.relativePath {
+    Ok sizeMb -> sizeMb,
+    Err message -> 0
+  }
+
+generatedCleanupTargetsSizeMb : Str -> [GeneratedCleanupTarget] -> Int
+generatedCleanupTargetsSizeMb workspaceRoot targets = {
+  let mut total = 0;
+  for target in targets {
+    total = intAdd total (generatedCleanupTargetSizeMb workspaceRoot target);
+    total
+  };
+  total
+}
+
+generatedCleanupPositiveShortfall : Int -> Int -> Int
+generatedCleanupPositiveShortfall current limit =
+  if current > limit then
+    intSubtract current limit
+  else
+    0
+
+generatedExternalLogAction : Bool -> Int -> Str
+generatedExternalLogAction exists reclaimableMb =
+  if exists == false then
+    "missing"
+  else if reclaimableMb > 0 then
+    "cap-log-tail"
+  else
+    "ok"
+
+generatedExternalLogFor : Str -> Str -> Int -> [GeneratedExternalLog]
+generatedExternalLogFor name path maxMb =
+  if path == "" then
+    emptyExternalLogs
+  else
+    match hostFileSizeMb path {
+      Ok sizeMb -> {
+        let reclaimableMb = generatedCleanupPositiveShortfall sizeMb maxMb;
+        [GeneratedExternalLog {
+          name = name,
+          path = path,
+          exists = true,
+          sizeMb = sizeMb,
+          maxMb = maxMb,
+          reclaimableMb = reclaimableMb,
+          recommendedAction = generatedExternalLogAction true reclaimableMb
+        }]
+      },
+      Err message ->
+        [GeneratedExternalLog {
+          name = name,
+          path = path,
+          exists = false,
+          sizeMb = 0,
+          maxMb = maxMb,
+          reclaimableMb = 0,
+          recommendedAction = generatedExternalLogAction false 0
+        }]
+    }
+
+generatedCleanupExternalLogs : [GeneratedExternalLog]
+generatedCleanupExternalLogs =
+  generatedExternalLogFor "codex-tui-log" generatedCleanupCodexLogPath generatedCleanupCodexLogMaxMb
+
+generatedExternalLogReclaimableMb : [GeneratedExternalLog] -> Int
+generatedExternalLogReclaimableMb logs = {
+  let mut total = 0;
+  for log in logs {
+    total = intAdd total log.reclaimableMb;
+    total
+  };
+  total
+}
+
+generatedExternalLogCapFor : GeneratedExternalLog -> GeneratedExternalLogCap
+generatedExternalLogCapFor log =
+  if log.exists == false then
+    GeneratedExternalLogCap {
+      name = log.name,
+      path = log.path,
+      ok = false,
+      beforeSizeMb = log.sizeMb,
+      afterSizeMb = log.sizeMb,
+      maxMb = log.maxMb,
+      message = "external log does not exist"
+    }
+  else
+    match hostCapFileTailMb log.path log.maxMb {
+      Ok afterSizeMb ->
+        GeneratedExternalLogCap {
+          name = log.name,
+          path = log.path,
+          ok = true,
+          beforeSizeMb = log.sizeMb,
+          afterSizeMb = afterSizeMb,
+          maxMb = log.maxMb,
+          message = "capped"
+        },
+      Err message ->
+        GeneratedExternalLogCap {
+          name = log.name,
+          path = log.path,
+          ok = false,
+          beforeSizeMb = log.sizeMb,
+          afterSizeMb = log.sizeMb,
+          maxMb = log.maxMb,
+          message = message
+        }
+    }
+
+generatedExternalLogCapsFor : [GeneratedExternalLog] -> [GeneratedExternalLogCap]
+generatedExternalLogCapsFor logs = {
+  let mut caps = emptyExternalLogCaps;
+  for log in logs {
+    caps =
+      if log.reclaimableMb > 0 then
+        append caps [generatedExternalLogCapFor log]
+      else
+        caps;
+    caps
+  };
+  caps
+}
+
+generatedExternalLogCapFailures : [GeneratedExternalLogCap] -> [GeneratedExternalLogCap]
+generatedExternalLogCapFailures caps = {
+  let mut failures = emptyExternalLogCaps;
+  for cap in caps {
+    failures = if cap.ok then
+      failures
+    else
+      append failures [cap];
+    failures
+  };
+  failures
+}
+
+generatedCleanupShortfallAfter : Int -> Int -> Int
+generatedCleanupShortfallAfter projectedAvailableMb requiredMb =
+  if projectedAvailableMb < requiredMb then
+    intSubtract requiredMb projectedAvailableMb
+  else
+    0
+
+generatedCleanupProjectionFor : Str -> Bool -> [GeneratedCleanupTarget] -> [GeneratedExternalLog] -> GeneratedCleanupDisk -> GeneratedCleanupProjection
+generatedCleanupProjectionFor workspaceRoot safeToClean targets externalLogs disk = {
+  let reclaimableMb = generatedCleanupTargetsSizeMb workspaceRoot targets;
+  let externalLogReclaimableMb = generatedExternalLogReclaimableMb externalLogs;
+  let totalReclaimableMb = intAdd reclaimableMb externalLogReclaimableMb;
+  let projectedAvailableMb = intAdd disk.availableMb totalReclaimableMb;
+  let guardRequiredMb = intAdd disk.requiredMb disk.minHeadroomMb;
+  let healthAvailable =
+    if disk.availableMb == 0 && disk.reserveMet == false then
+      false
+    else
+      true;
+  let canSatisfyReserve =
+    safeToClean && healthAvailable && projectedAvailableMb >= disk.requiredMb;
+  let canSatisfyGuard =
+    safeToClean && healthAvailable && projectedAvailableMb >= guardRequiredMb;
+  GeneratedCleanupProjection {
+    repoReclaimableMb = reclaimableMb,
+    externalLogReclaimableMb = externalLogReclaimableMb,
+    totalReclaimableMb = totalReclaimableMb,
+    projectedAvailableMb = projectedAvailableMb,
+    reserveRequiredMb = disk.requiredMb,
+    guardRequiredMb = guardRequiredMb,
+    reserveShortfallAfterCleanupMb = generatedCleanupShortfallAfter projectedAvailableMb disk.requiredMb,
+    guardShortfallAfterCleanupMb = generatedCleanupShortfallAfter projectedAvailableMb guardRequiredMb,
+    cleanupCanSatisfyReserve = canSatisfyReserve,
+    cleanupCanSatisfyGuard = canSatisfyGuard
+  }
+}
+
+generatedCleanupRecommendedAction : Int -> Int -> Int -> GeneratedCleanupDisk -> GeneratedCleanupProjection -> Str
+generatedCleanupRecommendedAction targetCount externalLogReclaimableMb activeCount disk cleanup =
+  if activeCount > 0 then
+    "wait-active-generated-work"
+  else if disk.availableMb == 0 && disk.reserveMet == false then
+    "resource-health-unavailable"
+  else if disk.reserveMet == false && targetCount > 0 && externalLogReclaimableMb > 0 && cleanup.cleanupCanSatisfyReserve then
+    "run-cleanup-and-cap-external-logs"
+  else if disk.reserveMet == false && externalLogReclaimableMb > 0 && cleanup.cleanupCanSatisfyReserve then
+    "cap-external-logs"
+  else if disk.reserveMet == false && targetCount > 0 && cleanup.cleanupCanSatisfyReserve then
+    "run-cleanup"
+  else if disk.reserveMet == false && targetCount > 0 then
+    "run-cleanup-then-free-disk-externally"
+  else if disk.reserveMet == false then
+    "free-disk-externally"
+  else if disk.lowHeadroom && targetCount > 0 && externalLogReclaimableMb > 0 && cleanup.cleanupCanSatisfyGuard then
+    "cleanup-and-cap-external-logs-low-headroom"
+  else if disk.lowHeadroom && externalLogReclaimableMb > 0 && cleanup.cleanupCanSatisfyGuard then
+    "cap-external-logs-low-headroom"
+  else if disk.lowHeadroom && targetCount > 0 && cleanup.cleanupCanSatisfyGuard then
+    "cleanup-low-disk-headroom"
+  else if disk.lowHeadroom && targetCount > 0 then
+    "cleanup-then-free-disk-headroom"
+  else if disk.lowHeadroom then
+    "free-disk-headroom"
+  else if targetCount > 0 && externalLogReclaimableMb > 0 then
+    "cleanup-stale-generated-state-and-cap-external-logs"
+  else if externalLogReclaimableMb > 0 then
+    "cap-stale-external-logs"
+  else if targetCount > 0 then
+    "cleanup-stale-generated-state"
+  else
+    "ok"
+
+generatedCleanupSummary : GeneratedStateCleanupPlan -> Str
+generatedCleanupSummary plan =
+  textJoin "\n" [
+    textConcat ["generated-state-cleanup-plan action=", plan.recommendedAction],
+    textConcat ["safeToClean=", encode plan.safeToClean],
+    textConcat ["configuredTargetCount=", encode plan.configuredTargetCount],
+    textConcat ["invalidConfiguredTargetCount=", encode plan.invalidConfiguredTargetCount],
+    textConcat ["repoGeneratedTargetCount=", encode plan.repoGeneratedTargetCount],
+    textConcat ["externalLogCount=", encode plan.externalLogCount],
+    textConcat ["activeProcessCount=", encode plan.activeProcessCount],
+    textConcat ["inactiveProcessCount=", encode plan.inactiveProcessCount],
+    textConcat [
+      "disk availableMb=",
+      encode plan.disk.availableMb,
+      " requiredMb=",
+      encode plan.disk.requiredMb,
+      " headroomMb=",
+      encode plan.disk.headroomMb,
+      " shortfallMb=",
+      encode plan.disk.shortfallMb
+    ],
+    textConcat [
+      "cleanup reclaimableMb=",
+      encode plan.cleanup.repoReclaimableMb,
+      " externalLogReclaimableMb=",
+      encode plan.cleanup.externalLogReclaimableMb,
+      " totalReclaimableMb=",
+      encode plan.cleanup.totalReclaimableMb,
+      " projectedAvailableMb=",
+      encode plan.cleanup.projectedAvailableMb,
+      " guardRequiredMb=",
+      encode plan.cleanup.guardRequiredMb,
+      " guardShortfallAfterCleanupMb=",
+      encode plan.cleanup.guardShortfallAfterCleanupMb
+    ]
+  ]
+
+generatedStateCleanupPlanFor : Str -> GeneratedStateCleanupPlan
+generatedStateCleanupPlanFor workspaceRoot = {
+  let configuredTargets = generatedCleanupConfiguredTargetsFor workspaceRoot in
+  let invalidConfiguredTargets = invalidConfiguredCleanupTargetsFor workspaceRoot configuredTargets in
+  let targets = generatedCleanupRepoTargetsForConfigured workspaceRoot configuredTargets in
+  let processMetadata = generatedCleanupProcessMetadataFor workspaceRoot in
+  let active = processMetadata.activeProcesses in
+  let inactive = processMetadata.inactiveProcesses in
+  let externalLogs = generatedCleanupExternalLogs in
+  let externalLogReclaimableMb = generatedExternalLogReclaimableMb externalLogs in
+  let disk = generatedCleanupDiskFor generatedCleanupDiskReservePath generatedCleanupMinAvailableDiskMb generatedCleanupMinHeadroomMb in
+  let safeToClean = length active == 0 in
+  let cleanup = generatedCleanupProjectionFor workspaceRoot safeToClean targets externalLogs disk in
+  let action = generatedCleanupRecommendedAction (length targets) externalLogReclaimableMb (length active) disk cleanup in
+  let planWithoutSummary =
+    GeneratedStateCleanupPlan {
+      projectRoot = workspaceRoot,
+      safeToClean = safeToClean,
+      recommendedAction = action,
+      configuredTargetCount = length configuredTargets,
+      invalidConfiguredTargetCount = length invalidConfiguredTargets,
+      invalidConfiguredTargets = invalidConfiguredTargets,
+      repoGeneratedTargetCount = length targets,
+      repoGeneratedTargets = targets,
+      activeProcessCount = length active,
+      activeProcesses = active,
+      inactiveProcessCount = length inactive,
+      inactiveProcesses = inactive,
+      externalLogCount = length externalLogs,
+      externalLogs = externalLogs,
+      disk = disk,
+      cleanup = cleanup,
+      summary = ""
+    } in
+  GeneratedStateCleanupPlan {
+    projectRoot = planWithoutSummary.projectRoot,
+    safeToClean = planWithoutSummary.safeToClean,
+    recommendedAction = planWithoutSummary.recommendedAction,
+    configuredTargetCount = planWithoutSummary.configuredTargetCount,
+    invalidConfiguredTargetCount = planWithoutSummary.invalidConfiguredTargetCount,
+    invalidConfiguredTargets = planWithoutSummary.invalidConfiguredTargets,
+    repoGeneratedTargetCount = planWithoutSummary.repoGeneratedTargetCount,
+    repoGeneratedTargets = planWithoutSummary.repoGeneratedTargets,
+    activeProcessCount = planWithoutSummary.activeProcessCount,
+    activeProcesses = planWithoutSummary.activeProcesses,
+    inactiveProcessCount = planWithoutSummary.inactiveProcessCount,
+    inactiveProcesses = planWithoutSummary.inactiveProcesses,
+    externalLogCount = planWithoutSummary.externalLogCount,
+    externalLogs = planWithoutSummary.externalLogs,
+    disk = planWithoutSummary.disk,
+    cleanup = planWithoutSummary.cleanup,
+    summary = generatedCleanupSummary planWithoutSummary
+  }
+}
+
+cleanupRemovalForTarget : Str -> GeneratedCleanupTarget -> GeneratedCleanupRemoval
+cleanupRemovalForTarget workspaceRoot target = {
+  let removeResult = workspaceRemovePath workspaceRoot target.relativePath;
+  match removeResult {
+    Ok removed ->
+      GeneratedCleanupRemoval {
+        relativePath = target.relativePath,
+        ok = true,
+        message = removed
+      },
+    Err message ->
+      GeneratedCleanupRemoval {
+        relativePath = target.relativePath,
+        ok = false,
+        message = message
+      }
+  }
+}
+
+cleanupRemovalsForTargets : Str -> [GeneratedCleanupTarget] -> [GeneratedCleanupRemoval]
+cleanupRemovalsForTargets workspaceRoot targets = {
+  let mut removals = emptyCleanupRemovals;
+  for target in targets {
+    removals = append removals [cleanupRemovalForTarget workspaceRoot target];
+    removals
+  };
+  removals
+}
+
+cleanupRemovalFailures : [GeneratedCleanupRemoval] -> [GeneratedCleanupRemoval]
+cleanupRemovalFailures removals = {
+  let mut failures = emptyCleanupRemovals;
+  for removal in removals {
+    failures = if removal.ok then
+      failures
+    else
+      append failures [removal];
+    failures
+  };
+  failures
+}
+
+generatedCleanupRunSummary : GeneratedStateCleanupRun -> Str
+generatedCleanupRunSummary run =
+  textJoin "\n" [
+    textConcat ["generated-state-cleanup-run mode=", run.mode],
+    textConcat ["finalAction=", run.finalAction],
+    textConcat ["removalCount=", encode (length run.removals)],
+    textConcat ["failedRemovalCount=", encode (length (cleanupRemovalFailures run.removals))],
+    textConcat ["externalLogCapCount=", encode (length run.externalLogCaps)],
+    textConcat ["failedExternalLogCapCount=", encode (length (generatedExternalLogCapFailures run.externalLogCaps))],
+    run.plan.summary
+  ]
+
+generatedStateCleanupApplyFor : Str -> GeneratedStateCleanupRun
+generatedStateCleanupApplyFor workspaceRoot = {
+  let plan = generatedStateCleanupPlanFor workspaceRoot in
+  let removals =
+    if plan.safeToClean && plan.repoGeneratedTargetCount > 0 then
+      cleanupRemovalsForTargets workspaceRoot plan.repoGeneratedTargets
+    else
+      emptyCleanupRemovals in
+  let externalLogCaps = generatedExternalLogCapsFor plan.externalLogs in
+  let failureCount = length (cleanupRemovalFailures removals) in
+  let capFailureCount = length (generatedExternalLogCapFailures externalLogCaps) in
+  let finalAction =
+    if plan.safeToClean == false && length externalLogCaps > 0 && capFailureCount == 0 then
+      "external-log-cap-applied-active-generated-work-remains"
+    else if plan.safeToClean == false then
+      "refused-active-generated-work"
+    else if failureCount > 0 then
+      "cleanup-failed"
+    else if capFailureCount > 0 then
+      "external-log-cap-failed"
+    else if plan.repoGeneratedTargetCount == 0 && length externalLogCaps > 0 then
+      "external-log-cap-applied"
+    else if plan.repoGeneratedTargetCount == 0 then
+      plan.recommendedAction
+    else if length externalLogCaps > 0 then
+      "cleanup-and-external-log-cap-applied"
+    else
+      "cleanup-applied" in
+  let runWithoutSummary =
+    GeneratedStateCleanupRun {
+      mode = "apply",
+      plan = plan,
+      removals = removals,
+      externalLogCaps = externalLogCaps,
+      finalAction = finalAction,
+      summary = ""
+    } in
+  GeneratedStateCleanupRun {
+    mode = runWithoutSummary.mode,
+    plan = runWithoutSummary.plan,
+    removals = runWithoutSummary.removals,
+    externalLogCaps = runWithoutSummary.externalLogCaps,
+    finalAction = runWithoutSummary.finalAction,
+    summary = generatedCleanupRunSummary runWithoutSummary
+  }
+}
+
+generatedStateCleanupTestMatrixFor : Str -> Str -> GeneratedStateCleanupTestMatrix
+generatedStateCleanupTestMatrixFor workspaceRoot activeWorkspaceRoot =
+  GeneratedStateCleanupTestMatrix {
+    plan = generatedStateCleanupPlanFor workspaceRoot,
+    applyRun = generatedStateCleanupApplyFor workspaceRoot,
+    activeApplyRun = generatedStateCleanupApplyFor activeWorkspaceRoot
+  }
+
+main : Str
+main =
+  if generatedCleanupTestMatrixEnabled then
+    encode (generatedStateCleanupTestMatrixFor generatedCleanupProjectRoot generatedCleanupActiveProjectRoot)
+  else if generatedCleanupApplyEnabled then
+    encode (generatedStateCleanupApplyFor generatedCleanupProjectRoot)
+  else
+    encode (generatedStateCleanupPlanFor generatedCleanupProjectRoot)

@@ -1,0 +1,531 @@
+module Compiler.Emit.Native.Layout
+
+import Compiler.Ast
+import Compiler.Checker.Builtins
+import Compiler.Checker.TypeOps
+import Compiler.Emit.Native.Core
+import Compiler.Emit.Native.Expr
+import Compiler.Emit.Native.RuntimeCodecs
+import Compiler.Emit.Native.RuntimeBindings
+import Compiler.Emit.Native.RuntimeCodecEmit
+import Compiler.Emit.NativeDecls
+import Compiler.Emit.NativeJson
+import Compiler.Emit.NativeMetadata
+import Compiler.Emit.NativeSurface
+import Compiler.Json
+import Compiler.Lower
+
+emitNativeJsonNumberList : [Str] -> [Str]
+emitNativeJsonNumberList values = values
+
+emitNativeAbiAllocationImage : Str
+emitNativeAbiAllocationImage =
+  jsonObject [
+    jsonFieldText "immediate" "stack",
+    jsonFieldText "handle" "heap",
+    jsonFieldText "global" "static"
+  ]
+
+emitNativeBuiltinLayoutImage : Str -> Str -> Str -> Str
+emitNativeBuiltinLayoutImage name storage words =
+  jsonObject [
+    jsonFieldText "name" name,
+    jsonFieldText "storage" storage,
+    jsonFieldRaw "words" words
+  ]
+
+emitNativeBuiltinLayoutImages : [Str]
+emitNativeBuiltinLayoutImages =
+  [
+    emitNativeBuiltinLayoutImage "Int" "immediate" "1",
+    emitNativeBuiltinLayoutImage "Bool" "immediate" "1",
+    emitNativeBuiltinLayoutImage "Str" "handle" "1",
+    emitNativeBuiltinLayoutImage "List" "handle" "1",
+    emitNativeBuiltinLayoutImage "Page" "handle" "1",
+    emitNativeBuiltinLayoutImage "Redirect" "handle" "1",
+    emitNativeBuiltinLayoutImage "View" "handle" "1",
+    emitNativeBuiltinLayoutImage "Prompt" "handle" "1"
+  ]
+
+emitNativeStaticFieldLayoutImage : Str -> Str -> Str -> Str -> Str
+emitNativeStaticFieldLayoutImage name typ storage wordOffset =
+  jsonObject [
+    jsonFieldText "name" name,
+    jsonFieldText "type" typ,
+    jsonFieldText "storage" storage,
+    jsonFieldRaw "wordOffset" wordOffset,
+    jsonFieldRaw "wordCount" "1"
+  ]
+
+emitNativeStaticRecordLayoutImage : Str -> Str -> [Str] -> Str
+emitNativeStaticRecordLayoutImage name words fields =
+  jsonObject [
+    jsonFieldText "name" name,
+    jsonFieldRaw "words" words,
+    jsonFieldArray "fields" fields
+  ]
+
+emitNativeStaticRecordLayoutImages : [Str]
+emitNativeStaticRecordLayoutImages =
+  [
+    emitNativeStaticRecordLayoutImage "Principal" "1" [
+      emitNativeStaticFieldLayoutImage "id" "Str" "handle" "0"
+    ],
+    emitNativeStaticRecordLayoutImage "Tenant" "1" [
+      emitNativeStaticFieldLayoutImage "id" "Str" "handle" "0"
+    ],
+    emitNativeStaticRecordLayoutImage "ResourceIdentity" "2" [
+      emitNativeStaticFieldLayoutImage "resourceType" "Str" "handle" "0",
+      emitNativeStaticFieldLayoutImage "resourceId" "Str" "handle" "1"
+    ],
+    emitNativeStaticRecordLayoutImage "AuditActor" "2" [
+      emitNativeStaticFieldLayoutImage "actorType" "Str" "handle" "0",
+      emitNativeStaticFieldLayoutImage "actorId" "Str" "handle" "1"
+    ],
+    emitNativeStaticRecordLayoutImage "AuditAction" "2" [
+      emitNativeStaticFieldLayoutImage "actionType" "Str" "handle" "0",
+      emitNativeStaticFieldLayoutImage "summary" "Str" "handle" "1"
+    ],
+    emitNativeStaticRecordLayoutImage "AuditProvenance" "3" [
+      emitNativeStaticFieldLayoutImage "source" "Str" "handle" "0",
+      emitNativeStaticFieldLayoutImage "requestId" "Str" "handle" "1",
+      emitNativeStaticFieldLayoutImage "traceId" "Str" "handle" "2"
+    ],
+    emitNativeStaticRecordLayoutImage "SqliteConnection" "4" [
+      emitNativeStaticFieldLayoutImage "id" "Str" "handle" "0",
+      emitNativeStaticFieldLayoutImage "databasePath" "Str" "handle" "1",
+      emitNativeStaticFieldLayoutImage "readOnly" "Bool" "immediate" "2",
+      emitNativeStaticFieldLayoutImage "memory" "Bool" "immediate" "3"
+    ],
+    emitNativeStaticRecordLayoutImage "AuthSession" "4" [
+      emitNativeStaticFieldLayoutImage "sessionId" "Str" "handle" "0",
+      emitNativeStaticFieldLayoutImage "principal" "Principal" "handle" "1",
+      emitNativeStaticFieldLayoutImage "tenant" "Tenant" "handle" "2",
+      emitNativeStaticFieldLayoutImage "resource" "ResourceIdentity" "handle" "3"
+    ],
+    emitNativeStaticRecordLayoutImage "StandardAuditEnvelope" "5" [
+      emitNativeStaticFieldLayoutImage "actor" "AuditActor" "handle" "0",
+      emitNativeStaticFieldLayoutImage "resource" "ResourceIdentity" "handle" "1",
+      emitNativeStaticFieldLayoutImage "action" "AuditAction" "handle" "2",
+      emitNativeStaticFieldLayoutImage "timestamp" "Int" "immediate" "3",
+      emitNativeStaticFieldLayoutImage "provenance" "AuditProvenance" "handle" "4"
+    ]
+  ]
+
+emitNativeStaticObjectLayoutImage : Str -> Str -> [Str] -> Str
+emitNativeStaticObjectLayoutImage name words roots =
+  jsonObject [
+    jsonFieldText "name" name,
+    jsonFieldText "kind" "record",
+    jsonFieldRaw "headerWords" "2",
+    jsonFieldRaw "words" words,
+    jsonFieldArray "roots" roots
+  ]
+
+emitNativeStaticObjectLayoutImages : [Str]
+emitNativeStaticObjectLayoutImages =
+  [
+    emitNativeStaticObjectLayoutImage "Principal" "3" (emitNativeJsonNumberList ["2"]),
+    emitNativeStaticObjectLayoutImage "Tenant" "3" (emitNativeJsonNumberList ["2"]),
+    emitNativeStaticObjectLayoutImage "ResourceIdentity" "4" (emitNativeJsonNumberList ["2", "3"]),
+    emitNativeStaticObjectLayoutImage "AuditActor" "4" (emitNativeJsonNumberList ["2", "3"]),
+    emitNativeStaticObjectLayoutImage "AuditAction" "4" (emitNativeJsonNumberList ["2", "3"]),
+    emitNativeStaticObjectLayoutImage "AuditProvenance" "5" (emitNativeJsonNumberList ["2", "3", "4"]),
+    emitNativeStaticObjectLayoutImage "SqliteConnection" "6" (emitNativeJsonNumberList ["2", "3"]),
+    emitNativeStaticObjectLayoutImage "AuthSession" "6" (emitNativeJsonNumberList ["2", "3", "4", "5"]),
+    emitNativeStaticObjectLayoutImage "StandardAuditEnvelope" "7" (emitNativeJsonNumberList ["2", "3", "4", "6"])
+  ]
+
+emitHostedRecordFieldLayoutImage : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> Str -> HostedRecordFieldDeclAst -> Str
+emitHostedRecordFieldLayoutImage typeDecls recordDecls wordOffset fieldDecl =
+  jsonObject [
+    jsonFieldText "name" (recordFieldDeclName fieldDecl),
+    jsonFieldText "type" (renderHostedType (recordFieldDeclType fieldDecl)),
+    jsonFieldText "storage" (nativeLayoutStorageForType typeDecls recordDecls (recordFieldDeclType fieldDecl)),
+    jsonFieldRaw "wordOffset" wordOffset,
+    jsonFieldRaw "wordCount" "1"
+  ]
+
+emitHostedRecordFieldLayoutImages : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [HostedRecordFieldDeclAst] -> [Str]
+emitHostedRecordFieldLayoutImages typeDecls recordDecls fields = {
+  let mut rendered = emptyRenderedTexts;
+  let mut wordOffset = "0";
+  for fieldDecl in fields {
+    rendered = appendNativeRenderedText rendered (emitHostedRecordFieldLayoutImage typeDecls recordDecls wordOffset fieldDecl);
+    wordOffset = incrementNativeNumber wordOffset;
+    rendered
+  };
+  rendered
+}
+
+emitHostedRecordLayoutImages : HostedModuleAst -> [Str]
+emitHostedRecordLayoutImages modl = {
+  let typeDecls = effectiveModuleTypeDecls modl;
+  let recordDecls = moduleRecordDeclarations modl;
+  let mut rendered = emptyRenderedTexts;
+  for recordDecl in recordDecls {
+    rendered = appendNativeRenderedText rendered (jsonObject [
+      jsonFieldText "name" (recordDeclName recordDecl),
+      jsonFieldRaw "words" (countHostedRecordFields (recordDeclFields recordDecl)),
+      jsonFieldArray "fields" (emitHostedRecordFieldLayoutImages typeDecls recordDecls (recordDeclFields recordDecl))
+    ]);
+    rendered
+  };
+  rendered
+}
+
+emitHostedPayloadLayoutImage : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> Str -> HostedTypeAst -> Str
+emitHostedPayloadLayoutImage typeDecls recordDecls wordOffset payloadType =
+  jsonObject [
+    jsonFieldText "name" (textConcat ["$", decrementNativeNumber wordOffset]),
+    jsonFieldText "type" (renderHostedType payloadType),
+    jsonFieldText "storage" (nativeLayoutStorageForType typeDecls recordDecls payloadType),
+    jsonFieldRaw "wordOffset" wordOffset,
+    jsonFieldRaw "wordCount" "1"
+  ]
+
+emitHostedPayloadLayoutImages : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [HostedTypeAst] -> [Str]
+emitHostedPayloadLayoutImages typeDecls recordDecls payloadTypes = {
+  let mut rendered = emptyRenderedTexts;
+  let mut wordOffset = "1";
+  for payloadType in payloadTypes {
+    rendered = appendNativeRenderedText rendered (emitHostedPayloadLayoutImage typeDecls recordDecls wordOffset payloadType);
+    wordOffset = incrementNativeNumber wordOffset;
+    rendered
+  };
+  rendered
+}
+
+emitHostedConstructorLayoutImage : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> HostedConstructorDeclAst -> Str
+emitHostedConstructorLayoutImage typeDecls recordDecls constructorDecl = {
+  let payloadTypes = constructorDeclPayloadTypes constructorDecl;
+  let payloadWords = countHostedTypes payloadTypes;
+  let totalWords = incrementNativeNumber payloadWords;
+  jsonObject [
+    jsonFieldText "name" (constructorDeclName constructorDecl),
+    jsonFieldRaw "tagWord" "0",
+    jsonFieldRaw "payloadWords" payloadWords,
+    jsonFieldRaw "words" totalWords,
+    jsonFieldArray "payloads" (emitHostedPayloadLayoutImages typeDecls recordDecls payloadTypes)
+  ]
+}
+
+emitHostedVariantLayoutImages : HostedModuleAst -> [Str]
+emitHostedVariantLayoutImages modl = {
+  let typeDecls = effectiveModuleTypeDecls modl;
+  let emittedTypeDecls = nativeEmittedTypeDecls modl;
+  let recordDecls = moduleRecordDeclarations modl;
+  let mut rendered = emptyRenderedTexts;
+  for typeDecl in emittedTypeDecls {
+    let maxPayloadWords = countHostedTypes (maxConstructorPayloadTypes typeDecl);
+    let mut constructorLayouts = emptyRenderedTexts;
+    for constructorDecl in typeDeclConstructors typeDecl {
+      constructorLayouts = appendNativeRenderedText constructorLayouts (emitHostedConstructorLayoutImage typeDecls recordDecls constructorDecl);
+      constructorLayouts
+    };
+    rendered = appendNativeRenderedText rendered (jsonObject [
+      jsonFieldText "name" (typeDeclName typeDecl),
+      jsonFieldRaw "tagWord" "0",
+      jsonFieldRaw "maxPayloadWords" maxPayloadWords,
+      jsonFieldRaw "words" (incrementNativeNumber maxPayloadWords),
+      jsonFieldArray "constructors" constructorLayouts
+    ]);
+    rendered
+  };
+  rendered
+}
+
+emitHostedRecordObjectLayoutImages : HostedModuleAst -> [Str]
+emitHostedRecordObjectLayoutImages modl = {
+  let typeDecls = effectiveModuleTypeDecls modl;
+  let recordDecls = moduleRecordDeclarations modl;
+  let mut rendered = emptyRenderedTexts;
+  for recordDecl in recordDecls {
+    let fieldCount = countHostedRecordFields (recordDeclFields recordDecl);
+    rendered = appendNativeRenderedText rendered (jsonObject [
+      jsonFieldText "name" (recordDeclName recordDecl),
+      jsonFieldText "kind" "record",
+      jsonFieldRaw "headerWords" "2",
+      jsonFieldRaw "words" (headerAdjustedOffset fieldCount),
+      jsonFieldArray "roots" (emitNativeJsonNumberList (emitHostedRecordRootOffsets typeDecls recordDecls (recordDeclFields recordDecl)))
+    ]);
+    rendered
+  };
+  rendered
+}
+
+emitHostedVariantObjectLayoutImages : HostedModuleAst -> [Str]
+emitHostedVariantObjectLayoutImages modl = {
+  let typeDecls = effectiveModuleTypeDecls modl;
+  let emittedTypeDecls = nativeEmittedTypeDecls modl;
+  let recordDecls = moduleRecordDeclarations modl;
+  let mut rendered = emptyRenderedTexts;
+  for typeDecl in emittedTypeDecls {
+    for constructorDecl in typeDeclConstructors typeDecl {
+      let payloadTypes = constructorDeclPayloadTypes constructorDecl;
+      let totalWords = incrementNativeNumber (countHostedTypes payloadTypes);
+      rendered = appendNativeRenderedText rendered (jsonObject [
+        jsonFieldText "name" (textConcat [typeDeclName typeDecl, ".", constructorDeclName constructorDecl]),
+        jsonFieldText "kind" "variant",
+        jsonFieldRaw "headerWords" "2",
+        jsonFieldRaw "words" (headerAdjustedOffset totalWords),
+        jsonFieldArray "roots" (emitNativeJsonNumberList (emitHostedVariantRootOffsets typeDecls recordDecls payloadTypes))
+      ]);
+      rendered
+    };
+    rendered
+  };
+  rendered
+}
+
+renderNativeDecls : [LowerDeclText] -> [Str]
+renderNativeDecls decls = {
+  let mut rendered = emptyRenderedTexts;
+  for decl in decls {
+    rendered = appendNativeRenderedText rendered (emitNativeDecl decl);
+    rendered
+  };
+  rendered
+}
+
+nativeAbiRecordLayoutLines : [Str]
+nativeAbiRecordLayoutLines = {
+  let mut lines = emptyRenderedTexts;
+  lines = appendNativeRenderedText lines "  record_layout Principal { words = 1, fields = [id:Str@word0/handle] }";
+  lines = appendNativeRenderedText lines "  record_layout Tenant { words = 1, fields = [id:Str@word0/handle] }";
+  lines = appendNativeRenderedText lines "  record_layout ResourceIdentity { words = 2, fields = [resourceType:Str@word0/handle, resourceId:Str@word1/handle] }";
+  lines = appendNativeRenderedText lines "  record_layout AuditActor { words = 2, fields = [actorType:Str@word0/handle, actorId:Str@word1/handle] }";
+  lines = appendNativeRenderedText lines "  record_layout AuditAction { words = 2, fields = [actionType:Str@word0/handle, summary:Str@word1/handle] }";
+  lines = appendNativeRenderedText lines "  record_layout AuditProvenance { words = 3, fields = [source:Str@word0/handle, requestId:Str@word1/handle, traceId:Str@word2/handle] }";
+  lines = appendNativeRenderedText lines "  record_layout SqliteConnection { words = 4, fields = [id:Str@word0/handle, databasePath:Str@word1/handle, readOnly:Bool@word2/immediate, memory:Bool@word3/immediate] }";
+  lines = appendNativeRenderedText lines "  record_layout AuthSession { words = 4, fields = [sessionId:Str@word0/handle, principal:Principal@word1/handle, tenant:Tenant@word2/handle, resource:ResourceIdentity@word3/handle] }";
+  lines = appendNativeRenderedText lines "  record_layout StandardAuditEnvelope { words = 5, fields = [actor:AuditActor@word0/handle, resource:ResourceIdentity@word1/handle, action:AuditAction@word2/handle, timestamp:Int@word3/immediate, provenance:AuditProvenance@word4/handle] }";
+  lines
+}
+
+nativeAbiObjectLayoutLines : [Str]
+nativeAbiObjectLayoutLines = {
+  let mut lines = emptyRenderedTexts;
+  lines = appendNativeRenderedText lines "  object_layout Principal { kind = record, header_words = 2, words = 3, roots = [2] }";
+  lines = appendNativeRenderedText lines "  object_layout Tenant { kind = record, header_words = 2, words = 3, roots = [2] }";
+  lines = appendNativeRenderedText lines "  object_layout ResourceIdentity { kind = record, header_words = 2, words = 4, roots = [2, 3] }";
+  lines = appendNativeRenderedText lines "  object_layout AuditActor { kind = record, header_words = 2, words = 4, roots = [2, 3] }";
+  lines = appendNativeRenderedText lines "  object_layout AuditAction { kind = record, header_words = 2, words = 4, roots = [2, 3] }";
+  lines = appendNativeRenderedText lines "  object_layout AuditProvenance { kind = record, header_words = 2, words = 5, roots = [2, 3, 4] }";
+  lines = appendNativeRenderedText lines "  object_layout SqliteConnection { kind = record, header_words = 2, words = 6, roots = [2, 3] }";
+  lines = appendNativeRenderedText lines "  object_layout AuthSession { kind = record, header_words = 2, words = 6, roots = [2, 3, 4, 5] }";
+  lines = appendNativeRenderedText lines "  object_layout StandardAuditEnvelope { kind = record, header_words = 2, words = 7, roots = [2, 3, 4, 6] }";
+  lines
+}
+
+typeDeclAllNullary : HostedTypeDeclAst -> Bool
+typeDeclAllNullary typeDecl = {
+  for constructorDecl in typeDeclConstructors typeDecl {
+    if hasHostedTypeValues (constructorDeclPayloadTypes constructorDecl) then return false else true
+  };
+  true
+}
+
+nativeLayoutStorageForType : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> HostedTypeAst -> Str
+nativeLayoutStorageForType typeDecls recordDecls typ = match typ {
+  HostedTypeName name ->
+    if name == "Int" then "immediate" else if name == "Bool" then "immediate" else if name == "Str" then "handle" else if name == "Page" then "handle" else if name == "Redirect" then "handle" else if name == "View" then "handle" else if name == "Prompt" then "handle" else match lookupRecordDecl recordDecls name {
+      FoundRecord recordDecl ->
+        "handle",
+      MissingRecord missingRecord ->
+        match lookupTypeDecl typeDecls name {
+          FoundTypeDecl typeDecl ->
+            if typeDeclAllNullary typeDecl then "immediate" else "handle",
+          MissingTypeDecl missingType ->
+            "handle"
+        }
+    },
+  HostedTypeApply name args ->
+    "handle",
+  HostedTypeVar name ->
+    "handle",
+  HostedTypeList itemType ->
+    "handle",
+  HostedTypeFunction input result ->
+    "handle"
+}
+
+emitHostedRecordFieldLayout : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> Str -> HostedRecordFieldDeclAst -> Str
+emitHostedRecordFieldLayout typeDecls recordDecls wordOffset fieldDecl = textConcat [recordFieldDeclName fieldDecl, ":", renderHostedType (recordFieldDeclType fieldDecl), "@word", wordOffset, "/", nativeLayoutStorageForType typeDecls recordDecls (recordFieldDeclType fieldDecl)]
+
+emitHostedRecordFieldLayouts : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [HostedRecordFieldDeclAst] -> [Str]
+emitHostedRecordFieldLayouts typeDecls recordDecls fields = {
+  let mut rendered = emptyRenderedTexts;
+  let mut wordOffset = "0";
+  for fieldDecl in fields {
+    rendered = appendNativeRenderedText rendered (emitHostedRecordFieldLayout typeDecls recordDecls wordOffset fieldDecl);
+    wordOffset = incrementNativeNumber wordOffset;
+    rendered
+  };
+  rendered
+}
+
+emitHostedRecordRootOffsets : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [HostedRecordFieldDeclAst] -> [Str]
+emitHostedRecordRootOffsets typeDecls recordDecls fields = {
+  let mut rendered = emptyRenderedTexts;
+  let mut wordOffset = "0";
+  for fieldDecl in fields {
+    rendered = if nativeLayoutStorageForType typeDecls recordDecls (recordFieldDeclType fieldDecl) == "handle" then appendNativeRenderedText rendered (headerAdjustedOffset wordOffset) else rendered;
+    wordOffset = incrementNativeNumber wordOffset;
+    rendered
+  };
+  rendered
+}
+
+emitHostedRecordLayoutLines : HostedModuleAst -> [Str]
+emitHostedRecordLayoutLines modl = {
+  let typeDecls = effectiveModuleTypeDecls modl;
+  let recordDecls = moduleRecordDeclarations modl;
+  let mut rendered = emptyRenderedTexts;
+  for recordDecl in recordDecls {
+    rendered = appendNativeRenderedText rendered (textConcat ["  record_layout ", recordDeclName recordDecl, " { words = ", countHostedRecordFields (recordDeclFields recordDecl), ", fields = [", textJoin ", " (emitHostedRecordFieldLayouts typeDecls recordDecls (recordDeclFields recordDecl)), "] }"]);
+    rendered
+  };
+  rendered
+}
+
+emitHostedRecordObjectLayoutLines : HostedModuleAst -> [Str]
+emitHostedRecordObjectLayoutLines modl = {
+  let typeDecls = effectiveModuleTypeDecls modl;
+  let recordDecls = moduleRecordDeclarations modl;
+  let mut rendered = emptyRenderedTexts;
+  for recordDecl in recordDecls {
+    let fieldCount = countHostedRecordFields (recordDeclFields recordDecl);
+    rendered = appendNativeRenderedText rendered (textConcat ["  object_layout ", recordDeclName recordDecl, " { kind = record, header_words = 2, words = ", headerAdjustedOffset fieldCount, ", roots = [", textJoin ", " (emitHostedRecordRootOffsets typeDecls recordDecls (recordDeclFields recordDecl)), "] }"]);
+    rendered
+  };
+  rendered
+}
+
+maxConstructorPayloadTypes : HostedTypeDeclAst -> [HostedTypeAst]
+maxConstructorPayloadTypes typeDecl = {
+  let mut payloadTypes = emptyHostedTypes;
+  for constructorDecl in typeDeclConstructors typeDecl {
+    payloadTypes = maxHostedTypeList payloadTypes (constructorDeclPayloadTypes constructorDecl);
+    payloadTypes
+  };
+  payloadTypes
+}
+
+emitHostedPayloadLayouts : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [HostedTypeAst] -> [Str]
+emitHostedPayloadLayouts typeDecls recordDecls payloadTypes = {
+  let mut rendered = emptyRenderedTexts;
+  let mut wordOffset = "1";
+  for payloadType in payloadTypes {
+    rendered = appendNativeRenderedText rendered (textConcat ["$", decrementNativeNumber wordOffset, ":", renderHostedType payloadType, "@word", wordOffset, "/", nativeLayoutStorageForType typeDecls recordDecls payloadType]);
+    wordOffset = incrementNativeNumber wordOffset;
+    rendered
+  };
+  rendered
+}
+
+emitHostedConstructorLayout : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> HostedConstructorDeclAst -> Str
+emitHostedConstructorLayout typeDecls recordDecls constructorDecl = {
+  let payloadTypes = constructorDeclPayloadTypes constructorDecl;
+  let payloadWords = countHostedTypes payloadTypes;
+  let totalWords = incrementNativeNumber payloadWords;
+  textConcat [constructorDeclName constructorDecl, "{tag_word=0, payload_words=", payloadWords, ", words=", totalWords, ", payloads=[", textJoin ", " (emitHostedPayloadLayouts typeDecls recordDecls payloadTypes), "]}"]
+}
+
+emitHostedVariantLayoutLines : HostedModuleAst -> [Str]
+emitHostedVariantLayoutLines modl = {
+  let typeDecls = effectiveModuleTypeDecls modl;
+  let emittedTypeDecls = nativeEmittedTypeDecls modl;
+  let recordDecls = moduleRecordDeclarations modl;
+  let mut rendered = emptyRenderedTexts;
+  for typeDecl in emittedTypeDecls {
+    let maxPayloadTypes = maxConstructorPayloadTypes typeDecl;
+    let maxPayloadWords = countHostedTypes maxPayloadTypes;
+    let mut constructorLayouts = emptyRenderedTexts;
+    for constructorDecl in typeDeclConstructors typeDecl {
+      constructorLayouts = appendNativeRenderedText constructorLayouts (emitHostedConstructorLayout typeDecls recordDecls constructorDecl);
+      constructorLayouts
+    };
+    rendered = appendNativeRenderedText rendered (textConcat ["  variant_layout ", typeDeclName typeDecl, " { tag_word = 0, max_payload_words = ", maxPayloadWords, ", words = ", incrementNativeNumber maxPayloadWords, ", constructors = [", textJoin ", " constructorLayouts, "] }"]);
+    rendered
+  };
+  rendered
+}
+
+emitHostedVariantRootOffsets : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [HostedTypeAst] -> [Str]
+emitHostedVariantRootOffsets typeDecls recordDecls payloadTypes = {
+  let mut rendered = emptyRenderedTexts;
+  let mut wordOffset = "1";
+  for payloadType in payloadTypes {
+    rendered = if nativeLayoutStorageForType typeDecls recordDecls payloadType == "handle" then appendNativeRenderedText rendered (headerAdjustedOffset wordOffset) else rendered;
+    wordOffset = incrementNativeNumber wordOffset;
+    rendered
+  };
+  rendered
+}
+
+emitHostedVariantObjectLayoutLines : HostedModuleAst -> [Str]
+emitHostedVariantObjectLayoutLines modl = {
+  let typeDecls = effectiveModuleTypeDecls modl;
+  let emittedTypeDecls = nativeEmittedTypeDecls modl;
+  let recordDecls = moduleRecordDeclarations modl;
+  let mut rendered = emptyRenderedTexts;
+  for typeDecl in emittedTypeDecls {
+    for constructorDecl in typeDeclConstructors typeDecl {
+      let payloadTypes = constructorDeclPayloadTypes constructorDecl;
+      let totalWords = incrementNativeNumber (countHostedTypes payloadTypes);
+      rendered = appendNativeRenderedText rendered (textConcat ["  object_layout ", typeDeclName typeDecl, ".", constructorDeclName constructorDecl, " { kind = variant, header_words = 2, words = ", headerAdjustedOffset totalWords, ", roots = [", textJoin ", " (emitHostedVariantRootOffsets typeDecls recordDecls payloadTypes), "] }"]);
+      rendered
+    };
+    rendered
+  };
+  rendered
+}
+
+nativeAbiLines : HostedModuleAst -> [Str]
+nativeAbiLines modl = {
+  let mut lines = emptyRenderedTexts;
+  lines = appendNativeRenderedText lines "abi {";
+  lines = appendNativeRenderedText lines "  version clasp-native-v1";
+  lines = appendNativeRenderedText lines "  word_bytes 8";
+  lines = appendNativeRenderedText lines "  memory_strategy reference_counting";
+  lines = appendNativeRenderedText lines "  allocation { immediate = stack, handle = heap, global = static }";
+  lines = appendNativeRenderedText lines "  ownership_rules [caller_owns_returns, callee_borrows_arguments, aggregates_retain_handle_fields, globals_are_static_roots]";
+  lines = appendNativeRenderedText lines "  root_discovery_rules [static_globals, stack_handle_slots, heap_object_layouts]";
+  lines = appendNativeRenderedText lines "  lifetime_invariants [layout_and_retain_headers, declared_root_offsets_only, release_children_before_free, borrowed_handles_do_not_retain]";
+  lines = appendNativeRenderedText lines "  builtin_layout Int { storage = immediate, words = 1 }";
+  lines = appendNativeRenderedText lines "  builtin_layout Bool { storage = immediate, words = 1 }";
+  lines = appendNativeRenderedText lines "  builtin_layout Str { storage = handle, words = 1 }";
+  lines = appendNativeRenderedText lines "  builtin_layout List { storage = handle, words = 1 }";
+  lines = appendNativeRenderedText lines "  builtin_layout Page { storage = handle, words = 1 }";
+  lines = appendNativeRenderedText lines "  builtin_layout Redirect { storage = handle, words = 1 }";
+  lines = appendNativeRenderedText lines "  builtin_layout View { storage = handle, words = 1 }";
+  lines = appendNativeRenderedText lines "  builtin_layout Prompt { storage = handle, words = 1 }";
+  lines = append lines nativeAbiRecordLayoutLines;
+  lines = append lines (emitHostedRecordLayoutLines modl);
+  lines = append lines (emitHostedVariantLayoutLines modl);
+  lines = append lines nativeAbiObjectLayoutLines;
+  lines = append lines (emitHostedRecordObjectLayoutLines modl);
+  lines = append lines (emitHostedVariantObjectLayoutLines modl);
+  lines = appendNativeRenderedText lines "}";
+  lines
+}
+
+nativeRuntimeLines : HostedModuleAst -> [Str]
+nativeRuntimeLines modl = {
+  let moduleName = moduleNameOf modl;
+  let runtimeBindings = emitNativeRuntimeBindingTexts modl;
+  let codecTypes = collectModuleRuntimeCodecTypes modl;
+  let mut lines = emptyRenderedTexts;
+  lines = appendNativeRenderedText lines "runtime {";
+  lines = appendNativeRenderedText lines "  profile compiler_backend_minimal";
+  lines = appendNativeRenderedText lines "  artifacts [\"runtime/clasp_runtime.h\", \"runtime/clasp_runtime.rs\"]";
+  lines = appendNativeRenderedText lines "  memory_symbols [clasp_rt_init, clasp_rt_register_static_root, clasp_rt_alloc_object, clasp_rt_retain, clasp_rt_release, clasp_rt_string_from_utf8, clasp_rt_bytes_new, clasp_rt_string_list_new, clasp_rt_result_ok_string, clasp_rt_result_err_string, clasp_rt_json_from_string, clasp_rt_json_to_string, clasp_rt_binary_from_json, clasp_rt_json_from_binary, clasp_rt_transport_frame, clasp_rt_transport_unframe]";
+  lines = appendNativeRenderedText lines (textConcat ["  bindings [", textJoin ", " runtimeBindings, "]"]);
+  lines = appendNativeRenderedText lines (textConcat ["  json_codecs [", textJoin ", " (emitNativeJsonCodecTextsFromTypes codecTypes), "]"]);
+  lines = appendNativeRenderedText lines (textConcat ["  binary_codecs [", textJoin ", " (emitNativeBinaryCodecTextsFromTypes codecTypes), "]"]);
+  lines = appendNativeRenderedText lines (textConcat ["  boundaries [", textJoin ", " (emitHostedBoundaryTexts moduleName modl), "]"]);
+  lines = appendNativeRenderedText lines (textConcat ["  service_transports [", textJoin ", " (emitHostedServiceTransportTexts modl), "]"]);
+  lines = appendNativeRenderedText lines "}";
+  lines
+}

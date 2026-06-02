@@ -1,0 +1,226 @@
+module ResourceGuardPolicyHarness
+
+import ResourceGuardPolicy
+
+record ResourceGuardPolicyHarnessReport = {
+  minAvailableMemoryMb : Int,
+  childMemoryReserveMb : Int,
+  launchRequiredMemoryMb : Int,
+  projectedChildren : Int,
+  projectedLaunchRequiredMemoryMb : Int,
+  externalAgentReserveMb : Int,
+  externalAgentCount : Int,
+  externalAgentRssMb : Int,
+  externalAgentReservedMemoryMb : Int,
+  externalAgentReservedStatsMemoryMb : Int,
+  projectedLaunchRequiredWithExternalMemoryMb : Int,
+  projectedLaunchRequiredWithExternalStatsMemoryMb : Int,
+  belowReserveError : Str,
+  reserveOnlyError : Str,
+  secondChildReserveOnlyError : Str,
+  externalAgentReserveOnlyError : Str,
+  externalAgentStatsReserveOnlyError : Str,
+  justEnoughError : Str,
+  secondChildJustEnoughError : Str,
+  externalAgentJustEnoughError : Str,
+  externalAgentStatsJustEnoughError : Str,
+  externalAgentDisabledError : Str,
+  admittedDecisionStatus : Str,
+  admittedDecisionReason : Str,
+  admittedDecisionAction : Str,
+  admittedDecisionRequiredMemoryMb : Int,
+  childBlockedDecisionReason : Str,
+  childBlockedDecisionAction : Str,
+  externalBlockedDecisionReason : Str,
+  externalBlockedDecisionAction : Str,
+  externalBlockedDecisionMessage : Str,
+  reserveMetAtFloor : Bool,
+  launchReserveMetAtFloor : Bool,
+  launchReserveMetAtRequired : Bool,
+  projectedLaunchReserveMetAtFirstRequired : Bool,
+  projectedLaunchReserveMetAtProjectedRequired : Bool,
+  launchHeadroomAtRequired : Int
+}
+
+main : Str
+main =
+  let minAvailableMemoryMb = 1000 in
+  let childMemoryReserveMb = 256 in
+  let launchRequiredMemoryMb =
+    resourceGuardMemoryLaunchRequiredMb minAvailableMemoryMb childMemoryReserveMb in
+  let projectedChildren = 2 in
+  let projectedLaunchRequiredMemoryMb =
+    resourceGuardMemoryProjectedLaunchRequiredMb
+      minAvailableMemoryMb
+      childMemoryReserveMb
+      projectedChildren in
+  let externalAgentReserveMb = 512 in
+  let externalAgentCount = 3 in
+  let externalAgentRssMb = 64 in
+  let externalAgentReservedMemoryMb =
+    resourceGuardExternalAgentReserveMb externalAgentReserveMb externalAgentCount in
+  let externalAgentReservedStatsMemoryMb =
+    resourceGuardExternalAgentReservedMemoryMb
+      externalAgentReserveMb
+      externalAgentCount
+      externalAgentRssMb in
+  let projectedLaunchRequiredWithExternalMemoryMb =
+    resourceGuardMemoryProjectedLaunchRequiredWithExternalMb
+      minAvailableMemoryMb
+      childMemoryReserveMb
+      projectedChildren
+      externalAgentReserveMb
+      externalAgentCount in
+  let projectedLaunchRequiredWithExternalStatsMemoryMb =
+    resourceGuardMemoryProjectedLaunchRequiredWithExternalStatsMb
+      minAvailableMemoryMb
+      childMemoryReserveMb
+      projectedChildren
+      externalAgentReserveMb
+      externalAgentCount
+      externalAgentRssMb in
+  let admittedDecision =
+    resourceGuardMemoryAdmissionDecisionWithExternalStats
+      minAvailableMemoryMb
+      childMemoryReserveMb
+      projectedChildren
+      externalAgentReserveMb
+      externalAgentCount
+      externalAgentRssMb
+      projectedLaunchRequiredWithExternalStatsMemoryMb in
+  let childBlockedDecision =
+    resourceGuardMemoryAdmissionDecisionWithExternalStats
+      minAvailableMemoryMb
+      childMemoryReserveMb
+      projectedChildren
+      0
+      0
+      0
+      launchRequiredMemoryMb in
+  let externalBlockedDecision =
+    resourceGuardMemoryAdmissionDecisionWithExternalStats
+      minAvailableMemoryMb
+      childMemoryReserveMb
+      projectedChildren
+      externalAgentReserveMb
+      externalAgentCount
+      externalAgentRssMb
+      projectedLaunchRequiredWithExternalMemoryMb in
+  encode (ResourceGuardPolicyHarnessReport {
+    minAvailableMemoryMb = minAvailableMemoryMb,
+    childMemoryReserveMb = childMemoryReserveMb,
+    launchRequiredMemoryMb = launchRequiredMemoryMb,
+    projectedChildren = projectedChildren,
+    projectedLaunchRequiredMemoryMb = projectedLaunchRequiredMemoryMb,
+    externalAgentReserveMb = externalAgentReserveMb,
+    externalAgentCount = externalAgentCount,
+    externalAgentRssMb = externalAgentRssMb,
+    externalAgentReservedMemoryMb = externalAgentReservedMemoryMb,
+    externalAgentReservedStatsMemoryMb = externalAgentReservedStatsMemoryMb,
+    projectedLaunchRequiredWithExternalMemoryMb = projectedLaunchRequiredWithExternalMemoryMb,
+    projectedLaunchRequiredWithExternalStatsMemoryMb = projectedLaunchRequiredWithExternalStatsMemoryMb,
+    belowReserveError =
+      resourceGuardMemoryLaunchErrorFromAvailable
+        minAvailableMemoryMb
+        childMemoryReserveMb
+        (intSubtract minAvailableMemoryMb 1),
+    reserveOnlyError =
+      resourceGuardMemoryLaunchErrorFromAvailable
+        minAvailableMemoryMb
+        childMemoryReserveMb
+        minAvailableMemoryMb,
+    secondChildReserveOnlyError =
+      resourceGuardMemoryProjectedLaunchErrorFromAvailable
+        minAvailableMemoryMb
+        childMemoryReserveMb
+        projectedChildren
+        launchRequiredMemoryMb,
+    externalAgentReserveOnlyError =
+      resourceGuardMemoryProjectedLaunchErrorWithExternalFromAvailable
+        minAvailableMemoryMb
+        childMemoryReserveMb
+        projectedChildren
+        externalAgentReserveMb
+        externalAgentCount
+        projectedLaunchRequiredMemoryMb,
+    externalAgentStatsReserveOnlyError =
+      resourceGuardMemoryProjectedLaunchErrorWithExternalStatsFromAvailable
+        minAvailableMemoryMb
+        childMemoryReserveMb
+        projectedChildren
+        externalAgentReserveMb
+        externalAgentCount
+        externalAgentRssMb
+        projectedLaunchRequiredWithExternalMemoryMb,
+    justEnoughError =
+      resourceGuardMemoryLaunchErrorFromAvailable
+        minAvailableMemoryMb
+        childMemoryReserveMb
+        launchRequiredMemoryMb,
+    secondChildJustEnoughError =
+      resourceGuardMemoryProjectedLaunchErrorFromAvailable
+        minAvailableMemoryMb
+        childMemoryReserveMb
+        projectedChildren
+        projectedLaunchRequiredMemoryMb,
+    externalAgentJustEnoughError =
+      resourceGuardMemoryProjectedLaunchErrorWithExternalFromAvailable
+        minAvailableMemoryMb
+        childMemoryReserveMb
+        projectedChildren
+        externalAgentReserveMb
+        externalAgentCount
+        projectedLaunchRequiredWithExternalMemoryMb,
+    externalAgentStatsJustEnoughError =
+      resourceGuardMemoryProjectedLaunchErrorWithExternalStatsFromAvailable
+        minAvailableMemoryMb
+        childMemoryReserveMb
+        projectedChildren
+        externalAgentReserveMb
+        externalAgentCount
+        externalAgentRssMb
+        projectedLaunchRequiredWithExternalStatsMemoryMb,
+    externalAgentDisabledError =
+      resourceGuardMemoryProjectedLaunchErrorWithExternalStatsFromAvailable
+        minAvailableMemoryMb
+        childMemoryReserveMb
+        projectedChildren
+        0
+        externalAgentCount
+        externalAgentRssMb
+        projectedLaunchRequiredMemoryMb,
+    admittedDecisionStatus = admittedDecision.status,
+    admittedDecisionReason = admittedDecision.reason,
+    admittedDecisionAction = admittedDecision.recommendedAction,
+    admittedDecisionRequiredMemoryMb = admittedDecision.requiredMb,
+    childBlockedDecisionReason = childBlockedDecision.reason,
+    childBlockedDecisionAction = childBlockedDecision.recommendedAction,
+    externalBlockedDecisionReason = externalBlockedDecision.reason,
+    externalBlockedDecisionAction = externalBlockedDecision.recommendedAction,
+    externalBlockedDecisionMessage = externalBlockedDecision.blockingMessage,
+    reserveMetAtFloor = resourceGuardMemoryReserveMet minAvailableMemoryMb minAvailableMemoryMb,
+    launchReserveMetAtFloor =
+      resourceGuardMemoryLaunchReserveMet
+        minAvailableMemoryMb
+        childMemoryReserveMb
+        minAvailableMemoryMb,
+    launchReserveMetAtRequired =
+      resourceGuardMemoryLaunchReserveMet
+        minAvailableMemoryMb
+        childMemoryReserveMb
+        launchRequiredMemoryMb,
+    projectedLaunchReserveMetAtFirstRequired =
+      resourceGuardMemoryProjectedLaunchReserveMet
+        minAvailableMemoryMb
+        childMemoryReserveMb
+        projectedChildren
+        launchRequiredMemoryMb,
+    projectedLaunchReserveMetAtProjectedRequired =
+      resourceGuardMemoryProjectedLaunchReserveMet
+        minAvailableMemoryMb
+        childMemoryReserveMb
+        projectedChildren
+        projectedLaunchRequiredMemoryMb,
+    launchHeadroomAtRequired =
+      resourceGuardMemoryHeadroomMb minAvailableMemoryMb launchRequiredMemoryMb
+  })

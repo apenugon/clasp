@@ -1,0 +1,193 @@
+module Compiler.Emit.JavaScript.MetadataCore
+
+import Compiler.Ast
+import Compiler.Lower
+import Compiler.Emit.JavaScript.Util
+
+lowerDeclHasOneParamText : [Str] -> Bool
+lowerDeclHasOneParamText params = if firstText params == "" then false else firstText (remainingTexts params) == ""
+
+lowerDeclIsMetadata : LowerDeclText -> Bool
+lowerDeclIsMetadata decl = match decl {
+  LowerConst name body ->
+    false,
+  LowerFn name params body ->
+    if name == "metadata" then lowerDeclHasOneParamText params else false
+}
+
+hasMetadataDeclarations : [HostedDeclAst] -> Bool
+hasMetadataDeclarations decls = {
+  for decl in decls {
+    if declIsMetadataDeclaration decl then return true else false
+  };
+  false
+}
+
+hasGuideDeclarations : [HostedGuideDeclAst] -> Bool
+hasGuideDeclarations decls = {
+  for decl in decls {
+    return true
+  };
+  false
+}
+
+hasPolicyDeclarations : [HostedPolicyDeclAst] -> Bool
+hasPolicyDeclarations decls = {
+  for decl in decls {
+    return true
+  };
+  false
+}
+
+hasAgentRoleDeclarations : [HostedAgentRoleDeclAst] -> Bool
+hasAgentRoleDeclarations decls = {
+  for decl in decls {
+    return true
+  };
+  false
+}
+
+hasAgentDeclarations : [HostedAgentDeclAst] -> Bool
+hasAgentDeclarations decls = {
+  for decl in decls {
+    return true
+  };
+  false
+}
+
+hasHookDeclarations : [HostedHookDeclAst] -> Bool
+hasHookDeclarations decls = {
+  for decl in decls {
+    return true
+  };
+  false
+}
+
+hasToolServerDeclarations : [HostedToolServerDeclAst] -> Bool
+hasToolServerDeclarations decls = {
+  for decl in decls {
+    return true
+  };
+  false
+}
+
+hasToolDeclarations : [HostedToolDeclAst] -> Bool
+hasToolDeclarations decls = {
+  for decl in decls {
+    return true
+  };
+  false
+}
+
+hasVerifierDeclarations : [HostedVerifierDeclAst] -> Bool
+hasVerifierDeclarations decls = {
+  for decl in decls {
+    return true
+  };
+  false
+}
+
+hasMergeGateDeclarations : [HostedMergeGateDeclAst] -> Bool
+hasMergeGateDeclarations decls = {
+  for decl in decls {
+    return true
+  };
+  false
+}
+
+emitMetadata : [HostedDeclAst] -> [Str]
+emitMetadata declarations = if hasMetadataDeclarations declarations then {
+  let mut rendered = ["export const __claspMetadata = Object.freeze(["];
+  for metadataDecl in declarations {
+    if declIsMetadataDeclaration metadataDecl then {
+      rendered = append rendered ["  Object.freeze({", textConcat ["    key: ", emitJsString (metadataDeclKey metadataDecl), ","], textConcat ["    value: ", emitJsString (metadataDeclStringValue metadataDecl)], "  }),"];
+      rendered
+    } else {
+      rendered
+    }
+  };
+  append rendered ["]);", "const $claspMetadataMap = Object.freeze(Object.fromEntries(__claspMetadata.map((entry) => [entry.key, entry.value])));", ""]
+} else emptyRenderedTexts
+
+renderGuideEntryObjectLines : [HostedGuideEntryAst] -> [Str]
+renderGuideEntryObjectLines entries = {
+  let mut rendered = emptyRenderedTexts;
+  for entry in entries {
+    rendered = appendJsRenderedText rendered (textConcat ["      ", emitJsString (guideEntryName entry), ": ", emitJsString (guideEntryValue entry), ","]);
+    rendered
+  };
+  rendered
+}
+
+emitGuides : [HostedGuideDeclAst] -> [Str]
+emitGuides guides = if hasGuideDeclarations guides then {
+  let mut rendered = ["export const __claspGuides = Object.freeze(["];
+  for guideDecl in guides {
+    rendered = append rendered ["  Object.freeze({", textConcat ["    name: ", emitJsString (guideDeclName guideDecl), ","], textConcat ["    id: ", emitJsString (textConcat ["guide:", guideDeclName guideDecl]), ","], textConcat ["    extends: ", emitOptionalJsString (guideDeclExtends guideDecl), ","], "    entries: Object.freeze({"];
+    rendered = append rendered (renderGuideEntryObjectLines (guideDeclEntries guideDecl));
+    rendered = append rendered ["    })", "  }),"];
+    rendered
+  };
+  append rendered ["]);", ""]
+} else ["export const __claspGuides = Object.freeze([]);", ""]
+
+emitPolicyPermissionValues : HostedPolicyPermissionKindAst -> [HostedPolicyPermissionAst] -> [Str]
+emitPolicyPermissionValues targetKind permissions = {
+  let mut rendered = emptyRenderedTexts;
+  for permission in permissions {
+    if renderHostedPolicyPermissionKind (policyPermissionKind permission) == renderHostedPolicyPermissionKind targetKind then {
+      rendered = appendRenderedText rendered (emitJsString (policyPermissionValue permission));
+      rendered
+    } else {
+      rendered
+    }
+  };
+  rendered
+}
+
+emitJsStringValues : [Str] -> [Str]
+emitJsStringValues values = {
+  let mut rendered = emptyRenderedTexts;
+  for value in values {
+    rendered = appendRenderedText rendered (emitJsString value);
+    rendered
+  };
+  rendered
+}
+
+emitPolicies : [HostedPolicyDeclAst] -> [Str]
+emitPolicies policies = if hasPolicyDeclarations policies then {
+  let mut rendered = ["export const __claspPolicies = Object.freeze(["];
+  for policyDecl in policies {
+    rendered = append rendered ["  $claspCreatePolicyRuntime({", textConcat ["    name: ", emitJsString (policyDeclName policyDecl), ","], textConcat ["    id: ", emitJsString (textConcat ["policy:", policyDeclName policyDecl]), ","], textConcat ["    allowedClassifications: Object.freeze([", textJoin ", " (emitJsStringValues (policyDeclAllowedClassifications policyDecl)), "]),"], textConcat ["    file: Object.freeze([", textJoin ", " (emitPolicyPermissionValues HostedPolicyPermissionFile (policyDeclPermissions policyDecl)), "]),"], textConcat ["    network: Object.freeze([", textJoin ", " (emitPolicyPermissionValues HostedPolicyPermissionNetwork (policyDeclPermissions policyDecl)), "]),"], textConcat ["    process: Object.freeze([", textJoin ", " (emitPolicyPermissionValues HostedPolicyPermissionProcess (policyDeclPermissions policyDecl)), "]),"], textConcat ["    secret: Object.freeze([", textJoin ", " (emitPolicyPermissionValues HostedPolicyPermissionSecret (policyDeclPermissions policyDecl)), "])"], "  }),"];
+    rendered
+  };
+  append rendered ["]);", "const $claspPolicyMap = Object.freeze(Object.fromEntries(__claspPolicies.map((policy) => [policy.name, policy])));", ""]
+} else ["export const __claspPolicies = Object.freeze([]);", "const $claspPolicyMap = Object.freeze({});", ""]
+
+emitGuideHelpers : [Str]
+emitGuideHelpers =
+  [
+    "const $claspGuideMap = Object.freeze(Object.fromEntries(__claspGuides.map((guide) => [guide.name, guide])));",
+    ""
+  ]
+
+emitAgentRoles : [HostedAgentRoleDeclAst] -> [Str]
+emitAgentRoles roles = if hasAgentRoleDeclarations roles then {
+  let mut rendered = ["const __claspAgentRoleSpecs = Object.freeze(["];
+  for roleDecl in roles {
+    rendered = append rendered ["  Object.freeze({", textConcat ["    name: ", emitJsString (agentRoleDeclName roleDecl), ","], textConcat ["    id: ", emitJsString (textConcat ["agent-role:", agentRoleDeclName roleDecl]), ","], textConcat ["    guideName: ", emitOptionalJsString (agentRoleDeclGuideName roleDecl), ","], textConcat ["    policyName: ", emitOptionalJsString (agentRoleDeclPolicyName roleDecl), ","], textConcat ["    approvalPolicy: ", emitOptionalJsString (agentRoleDeclApprovalPolicy roleDecl), ","], textConcat ["    sandboxPolicy: ", emitOptionalJsString (agentRoleDeclSandboxPolicy roleDecl)], "  }),"];
+    rendered
+  };
+  append rendered ["]);", "export const __claspAgentRoles = Object.freeze(__claspAgentRoleSpecs.map((role) => Object.freeze({", "  ...role,", "  guide: typeof role.guideName === \"string\" && role.guideName !== \"\" ? $claspGuideMap[role.guideName] ?? null : null,", "  policy: typeof role.policyName === \"string\" && role.policyName !== \"\" ? $claspPolicyMap[role.policyName] ?? null : null,", "  instructions: $claspResolveGuideInstructions(role.guideName, $claspGuideMap)", "})));", "const $claspAgentRoleMap = Object.freeze(Object.fromEntries(__claspAgentRoles.map((role) => [role.name, role])));", ""]
+} else ["export const __claspAgentRoles = Object.freeze([]);", "const $claspAgentRoleMap = Object.freeze({});", ""]
+
+emitAgents : [HostedAgentDeclAst] -> [Str]
+emitAgents agents = if hasAgentDeclarations agents then {
+  let mut rendered = ["const __claspAgentSpecs = Object.freeze(["];
+  for agentDecl in agents {
+    rendered = append rendered ["  Object.freeze({", textConcat ["    name: ", emitJsString (agentDeclName agentDecl), ","], textConcat ["    id: ", emitJsString (textConcat ["agent:", agentDeclName agentDecl]), ","], textConcat ["    roleName: ", emitOptionalJsString (agentDeclRoleName agentDecl)], "  }),"];
+    rendered
+  };
+  append rendered ["]);", "export const __claspAgents = Object.freeze(__claspAgentSpecs.map((agent) => {", "  const role = typeof agent.roleName === \"string\" && agent.roleName !== \"\" ? $claspAgentRoleMap[agent.roleName] ?? null : null;", "  return Object.freeze({", "    ...agent,", "    role,", "    policy: role?.policy ?? null,", "    instructions: role?.instructions ?? Object.freeze({})", "  });", "}));", ""]
+} else ["export const __claspAgents = Object.freeze([]);", ""]

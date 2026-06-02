@@ -1,0 +1,411 @@
+module StandaloneSwarmClosureReport
+
+foreign standaloneSwarmHostFileSizeMb : Str -> Result Int = "hostFileSizeMb"
+
+record StandaloneSwarmVerifierReport = {
+  schemaVersion : Int,
+  kind : Str,
+  mode : Str,
+  status : Str,
+  workspaceRoot : Str,
+  builderReport : Str,
+  verifierReport : Str,
+  proofPath : Str,
+  workspaceFingerprintManifest : Str,
+  workspaceFingerprintManifestSha256 : Str,
+  requiredSurfaceCount : Int,
+  evidence : [Str]
+}
+
+record StandaloneSwarmClosureDecision = {
+  ok : Bool,
+  status : Str,
+  closed : Bool,
+  issueCount : Int,
+  issueTexts : [Str],
+  evidence : [Str],
+  recommendation : Str
+}
+
+standaloneSwarmFirstTextOrEmpty : [Str] -> Str
+standaloneSwarmFirstTextOrEmpty values =
+  match values {
+    [] -> "",
+    head :: tail -> head
+  }
+
+standaloneSwarmSecondTextOrEmpty : [Str] -> Str
+standaloneSwarmSecondTextOrEmpty values =
+  match values {
+    [] -> "",
+    first :: rest -> standaloneSwarmFirstTextOrEmpty rest
+  }
+
+standaloneSwarmReadTextOr : Str -> Str -> Str
+standaloneSwarmReadTextOr path fallback =
+  match readFile path {
+    Ok raw -> raw,
+    Err message -> fallback
+  }
+
+standaloneSwarmReadEnvInt : Str -> Int -> Int
+standaloneSwarmReadEnvInt name fallback = match envVar name {
+  Ok raw -> if raw == "" then fallback else decode Int raw,
+  Err message -> fallback
+}
+
+standaloneSwarmClosureContextMaxMb : Int
+standaloneSwarmClosureContextMaxMb =
+  standaloneSwarmReadEnvInt "CLASP_LOOP_STANDALONE_SWARM_CLOSURE_CONTEXT_MAX_MB_JSON" 4
+
+standaloneSwarmClosureReportJsonStartMarker : Str
+standaloneSwarmClosureReportJsonStartMarker = "Standalone swarm closure report JSON:\n"
+
+standaloneSwarmClosureReportJsonEndMarker : Str
+standaloneSwarmClosureReportJsonEndMarker = "\nEnd standalone swarm closure report JSON."
+
+standaloneSwarmClosureReportJsonPathStartMarker : Str
+standaloneSwarmClosureReportJsonPathStartMarker = "Standalone swarm closure report JSON path:\n"
+
+standaloneSwarmClosureReportJsonPathEndMarker : Str
+standaloneSwarmClosureReportJsonPathEndMarker = "\nEnd standalone swarm closure report JSON path."
+
+standaloneSwarmPromptBlockText : Str -> Str -> Str -> Str
+standaloneSwarmPromptBlockText prompt startMarker endMarker = {
+  let afterMarker = standaloneSwarmSecondTextOrEmpty (textSplit prompt startMarker);
+  if afterMarker == "" then
+    ""
+  else
+    standaloneSwarmFirstTextOrEmpty (textSplit afterMarker endMarker)
+}
+
+standaloneSwarmPromptBlockOrEmpty : Str -> Str -> Str -> Str
+standaloneSwarmPromptBlockOrEmpty header footer raw =
+  if raw == "" then
+    ""
+  else
+    textJoin "\n" [header, raw, footer]
+
+standaloneSwarmClosureReportInlineJsonFromPrompt : Str -> Str
+standaloneSwarmClosureReportInlineJsonFromPrompt prompt =
+  standaloneSwarmPromptBlockText prompt standaloneSwarmClosureReportJsonStartMarker standaloneSwarmClosureReportJsonEndMarker
+
+standaloneSwarmClosureReportJsonPathFromPrompt : Str -> Str
+standaloneSwarmClosureReportJsonPathFromPrompt prompt =
+  standaloneSwarmPromptBlockText prompt standaloneSwarmClosureReportJsonPathStartMarker standaloneSwarmClosureReportJsonPathEndMarker
+
+standaloneSwarmInvalidVerifierReportForReason : Str -> StandaloneSwarmVerifierReport
+standaloneSwarmInvalidVerifierReportForReason reason =
+  StandaloneSwarmVerifierReport {
+    schemaVersion = 1,
+    kind = "standalone-swarm-verifier-report",
+    mode = "closure",
+    status = "invalid-closure-report",
+    workspaceRoot = "",
+    builderReport = "",
+    verifierReport = "",
+    proofPath = "",
+    workspaceFingerprintManifest = "",
+    workspaceFingerprintManifestSha256 = "",
+    requiredSurfaceCount = 0,
+    evidence = [reason]
+  }
+
+standaloneSwarmInvalidVerifierReportJsonForReason : Str -> Str
+standaloneSwarmInvalidVerifierReportJsonForReason reason =
+  encode (standaloneSwarmInvalidVerifierReportForReason reason)
+
+standaloneSwarmClosurePathOversizeReason : Int -> Int -> Str
+standaloneSwarmClosurePathOversizeReason actualMb maxMb =
+  textConcat [
+    "standalone-swarm-closure-context:oversize actualMb=",
+    encode actualMb,
+    " maxMb=",
+    encode maxMb
+  ]
+
+standaloneSwarmBoundedClosureReportJsonFromPathWithLimit : Int -> Str -> Str
+standaloneSwarmBoundedClosureReportJsonFromPathWithLimit maxMb path =
+  match standaloneSwarmHostFileSizeMb path {
+    Err message ->
+      standaloneSwarmInvalidVerifierReportJsonForReason "standalone-swarm-closure-context:size-check-failed",
+    Ok sizeMb ->
+      if sizeMb > maxMb then
+        standaloneSwarmInvalidVerifierReportJsonForReason (standaloneSwarmClosurePathOversizeReason sizeMb maxMb)
+      else
+        standaloneSwarmReadTextOr path ""
+  }
+
+standaloneSwarmBoundedClosureReportJsonFromPath : Str -> Str
+standaloneSwarmBoundedClosureReportJsonFromPath path =
+  standaloneSwarmBoundedClosureReportJsonFromPathWithLimit standaloneSwarmClosureContextMaxMb path
+
+standaloneSwarmClosureReportJsonFromPrompt : Str -> Str
+standaloneSwarmClosureReportJsonFromPrompt prompt = {
+  let inlineJson = standaloneSwarmClosureReportInlineJsonFromPrompt prompt;
+  if inlineJson != "" then
+    inlineJson
+  else {
+    let reportPath = standaloneSwarmClosureReportJsonPathFromPrompt prompt;
+    if reportPath == "" then
+      ""
+    else
+      standaloneSwarmBoundedClosureReportJsonFromPath reportPath
+  }
+}
+
+standaloneSwarmHasClosureReportJson : Str -> Bool
+standaloneSwarmHasClosureReportJson prompt =
+  standaloneSwarmClosureReportJsonFromPrompt prompt != ""
+
+standaloneSwarmClosureReportJsonBlock : Str -> Str
+standaloneSwarmClosureReportJsonBlock raw =
+  standaloneSwarmPromptBlockOrEmpty standaloneSwarmClosureReportJsonStartMarker standaloneSwarmClosureReportJsonEndMarker raw
+
+standaloneSwarmClosureReportJsonBlockFromPath : Str -> Str
+standaloneSwarmClosureReportJsonBlockFromPath path =
+  if path == "" then
+    ""
+  else
+    standaloneSwarmPromptBlockOrEmpty
+      "Standalone swarm closure report JSON:"
+      "End standalone swarm closure report JSON."
+      (standaloneSwarmBoundedClosureReportJsonFromPath path)
+
+standaloneSwarmClosureEvidenceContains : [Str] -> Str -> Bool
+standaloneSwarmClosureEvidenceContains evidence needle = {
+  let mut found = false;
+  for item in evidence {
+    if found then
+      found
+    else if item == needle then {
+      found = true;
+      found
+    } else
+      found
+  };
+  found
+}
+
+standaloneSwarmClosureAppendIssue : [Str] -> Bool -> Str -> [Str]
+standaloneSwarmClosureAppendIssue issues ok message =
+  if ok then issues else append issues [message]
+
+standaloneSwarmClosureIssuesContain : [Str] -> Str -> Bool
+standaloneSwarmClosureIssuesContain issues needle = {
+  let mut found = false;
+  for item in issues {
+    if found then
+      found
+    else if item == needle then {
+      found = true;
+      found
+    } else
+      found
+  };
+  found
+}
+
+standaloneSwarmClosureIssuesNeedManifestRepair : [Str] -> Bool
+standaloneSwarmClosureIssuesNeedManifestRepair issues =
+  if standaloneSwarmClosureIssuesContain issues "workspaceFingerprintManifest must be present" then
+    true
+  else if standaloneSwarmClosureIssuesContain issues "workspaceFingerprintManifestSha256 must be present" then
+    true
+  else
+    standaloneSwarmClosureIssuesContain issues "missing workspace fingerprint manifest evidence"
+
+standaloneSwarmClosureIssuesNeedProofRepair : [Str] -> Bool
+standaloneSwarmClosureIssuesNeedProofRepair issues =
+  if standaloneSwarmClosureIssuesContain issues "proofPath must be present" then
+    true
+  else
+    standaloneSwarmClosureIssuesContain issues "missing direct source edit proof evidence"
+
+standaloneSwarmClosureIssuesNeedReportRepair : [Str] -> Bool
+standaloneSwarmClosureIssuesNeedReportRepair issues =
+  if standaloneSwarmClosureIssuesContain issues "builderReport must be present" then
+    true
+  else if standaloneSwarmClosureIssuesContain issues "verifierReport must be present" then
+    true
+  else if standaloneSwarmClosureIssuesContain issues "missing builder report evidence" then
+    true
+  else
+    standaloneSwarmClosureIssuesContain issues "missing verifier report evidence"
+
+standaloneSwarmClosureIssuesNeedGateRepair : [Str] -> Bool
+standaloneSwarmClosureIssuesNeedGateRepair issues =
+  standaloneSwarmClosureIssuesContain issues "missing typed local verifier gate evidence"
+
+standaloneSwarmClosureIssuesNeedVerifierRerun : [Str] -> Bool
+standaloneSwarmClosureIssuesNeedVerifierRerun issues =
+  if standaloneSwarmClosureIssuesContain issues "schemaVersion must be 1" then
+    true
+  else if standaloneSwarmClosureIssuesContain issues "kind must be standalone-swarm-verifier-report" then
+    true
+  else if standaloneSwarmClosureIssuesContain issues "mode must be closure" then
+    true
+  else if standaloneSwarmClosureIssuesContain issues "status must be closed" then
+    true
+  else if standaloneSwarmClosureIssuesContain issues "requiredSurfaceCount must be 8" then
+    true
+  else
+    standaloneSwarmClosureIssuesContain issues "workspaceRoot must be present"
+
+standaloneSwarmClosureRepairKindForIssues : [Str] -> Str
+standaloneSwarmClosureRepairKindForIssues issues =
+  if standaloneSwarmClosureIssuesNeedManifestRepair issues then
+    "repair-workspace-fingerprint-manifest"
+  else if standaloneSwarmClosureIssuesNeedProofRepair issues then
+    "repair-direct-source-edit-proof"
+  else if standaloneSwarmClosureIssuesNeedReportRepair issues then
+    "repair-builder-verifier-reports"
+  else if standaloneSwarmClosureIssuesNeedGateRepair issues then
+    "repair-local-verifier-gate"
+  else if standaloneSwarmClosureIssuesNeedVerifierRerun issues then
+    "rerun-closure-verifier"
+  else
+    "repair-closure-report"
+
+standaloneSwarmClosureRepairPromptForKind : Str -> Str
+standaloneSwarmClosureRepairPromptForKind kind =
+  if kind == "repair-workspace-fingerprint-manifest" then
+    "Repair the standalone-swarm workspace fingerprint manifest handoff. Regenerate notes/direct-source-edit-manifest.json from the candidate workspace bytes, keep workspaceFingerprintManifest=notes/direct-source-edit-manifest.json and workspaceFingerprintAlgorithm=textFingerprint64Hex in notes/direct-source-edit.txt, make both builder and verifier reports claim the same Clasp manifest fingerprint, then rerun scripts/standalone-swarm-verify.sh --closure --json. Do not redo unrelated source edits, promotion, or full verification from this task."
+  else if kind == "repair-direct-source-edit-proof" then
+    "Repair the standalone-swarm direct-source-edit proof. Provide notes/direct-source-edit.txt with fixed markers, target postchecks, patch fingerprints, workspace fingerprint manifest metadata, and the local-agent direct-source-edit evidence required by scripts/standalone-swarm-verify.sh --closure --json. Do not launch a broader swarm from this task."
+  else if kind == "repair-builder-verifier-reports" then
+    "Repair the standalone-swarm builder/verifier JSON reports. Ensure the builder report lists every touched source surface plus notes/direct-source-edit.txt and notes/direct-source-edit-manifest.json, ensure verifier verdict is pass, include typed local verifier gate evidence, and make both reports claim the same workspace manifest fingerprint before rerunning scripts/standalone-swarm-verify.sh --closure --json."
+  else if kind == "repair-local-verifier-gate" then
+    "Repair the standalone-swarm local verifier gate evidence. Rerun the local Clasp verifier path so the verifier report includes clasp-local-agent-verifier-gate coverage and typed-local-verifier-gate evidence before rerunning scripts/standalone-swarm-verify.sh --closure --json."
+  else if kind == "rerun-closure-verifier" then
+    "Rerun scripts/standalone-swarm-verify.sh --closure --json with the fixed workspace, builder report, and verifier report so the closure report has schemaVersion=1, kind=standalone-swarm-verifier-report, mode=closure, status=closed, workspaceRoot, and requiredSurfaceCount=8."
+  else
+    "Repair the standalone-swarm closure report handoff. Provide a scripts/standalone-swarm-verify.sh --closure --json report with fixed markers, direct-source-edit proof, workspace fingerprint manifest, builder report, verifier report, and typed local verifier gate evidence before broader standalone-swarm work."
+
+standaloneSwarmVerifierReportFromRaw : Str -> Result StandaloneSwarmVerifierReport
+standaloneSwarmVerifierReportFromRaw raw =
+  match tryDecode StandaloneSwarmVerifierReport raw {
+    Ok report -> Ok report,
+    Err message -> Err (textConcat ["standalone swarm verifier report decode failed: ", message])
+  }
+
+standaloneSwarmClosureDecisionFromReport : StandaloneSwarmVerifierReport -> StandaloneSwarmClosureDecision
+standaloneSwarmClosureDecisionFromReport report = {
+  let mut issues = [];
+  issues = standaloneSwarmClosureAppendIssue issues (report.schemaVersion == 1) "schemaVersion must be 1";
+  issues = standaloneSwarmClosureAppendIssue issues (report.kind == "standalone-swarm-verifier-report") "kind must be standalone-swarm-verifier-report";
+  issues = standaloneSwarmClosureAppendIssue issues (report.mode == "closure") "mode must be closure";
+  issues = standaloneSwarmClosureAppendIssue issues (report.status == "closed") "status must be closed";
+  issues = standaloneSwarmClosureAppendIssue issues (report.requiredSurfaceCount == 8) "requiredSurfaceCount must be 8";
+  issues = standaloneSwarmClosureAppendIssue issues (report.workspaceRoot != "") "workspaceRoot must be present";
+  issues = standaloneSwarmClosureAppendIssue issues (report.builderReport != "") "builderReport must be present";
+  issues = standaloneSwarmClosureAppendIssue issues (report.verifierReport != "") "verifierReport must be present";
+  issues = standaloneSwarmClosureAppendIssue issues (report.proofPath != "") "proofPath must be present";
+  issues = standaloneSwarmClosureAppendIssue issues (report.workspaceFingerprintManifest != "") "workspaceFingerprintManifest must be present";
+  issues = standaloneSwarmClosureAppendIssue issues (report.workspaceFingerprintManifestSha256 != "") "workspaceFingerprintManifestSha256 must be present";
+  issues =
+    standaloneSwarmClosureAppendIssue
+      issues
+      (standaloneSwarmClosureEvidenceContains report.evidence "fixed-standalone-swarm-markers")
+      "missing fixed marker evidence";
+  issues =
+    standaloneSwarmClosureAppendIssue
+      issues
+      (standaloneSwarmClosureEvidenceContains report.evidence "direct-source-edit-proof")
+      "missing direct source edit proof evidence";
+  issues =
+    standaloneSwarmClosureAppendIssue
+      issues
+      (standaloneSwarmClosureEvidenceContains report.evidence "workspace-fingerprint-manifest")
+      "missing workspace fingerprint manifest evidence";
+  issues =
+    standaloneSwarmClosureAppendIssue
+      issues
+      (standaloneSwarmClosureEvidenceContains report.evidence "local-agent-builder-report")
+      "missing builder report evidence";
+  issues =
+    standaloneSwarmClosureAppendIssue
+      issues
+      (standaloneSwarmClosureEvidenceContains report.evidence "local-agent-verifier-report")
+      "missing verifier report evidence";
+  issues =
+    standaloneSwarmClosureAppendIssue
+      issues
+      (standaloneSwarmClosureEvidenceContains report.evidence "typed-local-verifier-gate")
+      "missing typed local verifier gate evidence";
+  StandaloneSwarmClosureDecision {
+    ok = length issues == 0,
+    status = if length issues == 0 then "closed" else "invalid-closure-report",
+    closed = length issues == 0,
+    issueCount = length issues,
+    issueTexts = issues,
+    evidence = report.evidence,
+    recommendation =
+      if length issues == 0 then
+        "standalone-swarm-closure-accepted"
+      else
+        "rerun scripts/standalone-swarm-verify.sh --closure --json with fixed workspace and local-agent reports"
+  }
+}
+
+standaloneSwarmClosureRepairKindForDecision : StandaloneSwarmClosureDecision -> Str
+standaloneSwarmClosureRepairKindForDecision decision =
+  if decision.closed then
+    "accepted"
+  else
+    standaloneSwarmClosureRepairKindForIssues decision.issueTexts
+
+standaloneSwarmClosureRepairPromptForDecision : StandaloneSwarmClosureDecision -> Str
+standaloneSwarmClosureRepairPromptForDecision decision =
+  if decision.closed then
+    "Consume the accepted standalone-swarm closure report, preserve the typed verifier evidence, and use the capability audit to choose the next non-standalone gap. Do not rerun broad swarms, promotion, or full verification from this task."
+  else
+    standaloneSwarmClosureRepairPromptForKind (standaloneSwarmClosureRepairKindForDecision decision)
+
+standaloneSwarmClosureDecisionFromRaw : Str -> StandaloneSwarmClosureDecision
+standaloneSwarmClosureDecisionFromRaw raw =
+  match standaloneSwarmVerifierReportFromRaw raw {
+    Ok report -> standaloneSwarmClosureDecisionFromReport report,
+    Err message ->
+      StandaloneSwarmClosureDecision {
+        ok = false,
+        status = "decode-error",
+        closed = false,
+        issueCount = 1,
+        issueTexts = [message],
+        evidence = [],
+        recommendation = "rerun scripts/standalone-swarm-verify.sh --closure --json"
+      }
+  }
+
+standaloneSwarmClosureDecisionFromJson : Str -> StandaloneSwarmClosureDecision
+standaloneSwarmClosureDecisionFromJson raw =
+  standaloneSwarmClosureDecisionFromRaw raw
+
+standaloneSwarmClosureDecisionFromPath : Str -> StandaloneSwarmClosureDecision
+standaloneSwarmClosureDecisionFromPath path =
+  standaloneSwarmClosureDecisionFromJson (standaloneSwarmBoundedClosureReportJsonFromPath path)
+
+standaloneSwarmClosureDecisionFromPromptOrRaw : Str -> StandaloneSwarmClosureDecision
+standaloneSwarmClosureDecisionFromPromptOrRaw prompt = {
+  let reportJson = standaloneSwarmClosureReportJsonFromPrompt prompt;
+  if reportJson == "" then
+    standaloneSwarmClosureDecisionFromRaw prompt
+  else
+    standaloneSwarmClosureDecisionFromRaw reportJson
+}
+
+standaloneSwarmClosureDecisionSummary : StandaloneSwarmClosureDecision -> Str
+standaloneSwarmClosureDecisionSummary decision =
+  textConcat [
+    "standalone-swarm-closure-decision=",
+    decision.status,
+    " ok=",
+    if decision.ok then "true" else "false",
+    " issues=",
+    encode decision.issueCount,
+    " repairKind=",
+    standaloneSwarmClosureRepairKindForDecision decision,
+    " recommendation=",
+    decision.recommendation
+  ]

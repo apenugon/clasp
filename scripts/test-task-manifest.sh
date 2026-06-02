@@ -3,6 +3,7 @@ set -euo pipefail
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 task_file="$project_root/agents/swarm/full/01-swarm-infra/SW-001-replace-the-current-coarse-agents-tasks-backlog-with-a-granular-task-manifest-template-and-task-schema.md"
+second_task_file="$project_root/agents/swarm/full/01-swarm-infra/SW-002-add-tests-for-autopilot-queue-behavior-especially-blocked-task-handling-workaround-generation-and-restart-behavior.md"
 
 [[ -f "$project_root/agents/swarm/task-template.md" ]]
 [[ -f "$project_root/agents/swarm/task.schema.json" ]]
@@ -11,6 +12,7 @@ node "$project_root/scripts/clasp-swarm-validate-task.mjs" "$task_file" >/dev/nu
 [[ "$(node "$project_root/scripts/clasp-swarm-validate-task.mjs" --print-field taskId "$task_file")" == 'SW-001-replace-the-current-coarse-agents-tasks-backlog-with-a-granular-task-manifest-template-and-task-schema' ]]
 [[ "$(node "$project_root/scripts/clasp-swarm-validate-task.mjs" --print-field taskKey "$task_file")" == 'SW-001' ]]
 [[ "$(node "$project_root/scripts/clasp-swarm-validate-task.mjs" --print-field batchLabel "$task_file")" == "" ]]
+[[ "$(node "$project_root/scripts/clasp-swarm-validate-task.mjs" --print-field-tsv taskKey "$task_file" "$second_task_file")" == "$task_file"$'\t''SW-001'$'\n'"$second_task_file"$'\t''SW-002' ]]
 
 if rg -n 'deprecated/|src/Clasp|runtime/bun' "$project_root/agents/swarm/full" "$project_root/scripts/materialize-full-backlog.mjs" >/dev/null; then
   printf 'task manifests should point at current self-hosted Clasp paths, not removed legacy paths\n' >&2

@@ -29,14 +29,27 @@ semantic_air_output="$test_root/semantic.air.json"
 semantic_context_output="$test_root/semantic.context.json"
 lead_app_context_output="$test_root/lead-app.context.json"
 large_selfhost_project_root="$test_root/large-selfhost-project"
-large_selfhost_cache_root="$test_root/large-selfhost-cache"
+large_selfhost_cache_root="$shared_selfhost_cache_root/large-selfhost"
 large_selfhost_check_output="$test_root/large-selfhost.check.json"
 large_selfhost_check_log="$test_root/large-selfhost.check.log"
 large_selfhost_check_time="$test_root/large-selfhost.check.time"
 large_selfhost_invalid_output="$test_root/large-selfhost.invalid.json"
 large_selfhost_invalid_log="$test_root/large-selfhost.invalid.log"
+large_selfhost_probe_line="keepNoRenderedText value = value == \"__clasp_selfhost_probe_$$\""
+large_selfhost_invalid_line='keepNoRenderedText value = "not-bool"'
 
 selfhost_incremental_report="$test_root/selfhost.incremental.report.json"
+selfhost_compiler_module_incremental_report="$test_root/selfhost.compiler-module.incremental.report.json"
+selfhost_incremental_native_jobs_max="${CLASP_TEST_SELFHOST_INCREMENTAL_NATIVE_JOBS_MAX:-2}"
+selfhost_incremental_bundle_jobs="${CLASP_TEST_SELFHOST_INCREMENTAL_BUNDLE_JOBS:-2}"
+selfhost_incremental_image_section_jobs="${CLASP_TEST_SELFHOST_INCREMENTAL_IMAGE_SECTION_JOBS:-2}"
+selfhost_incremental_image_section_jobs_max="${CLASP_TEST_SELFHOST_INCREMENTAL_IMAGE_SECTION_JOBS_MAX:-2}"
+selfhost_incremental_module_decl_fresh_process="${CLASP_TEST_SELFHOST_INCREMENTAL_MODULE_DECL_FRESH_PROCESS:-0}"
+selfhost_incremental_module_decl_chunk_size="${CLASP_TEST_SELFHOST_INCREMENTAL_MODULE_DECL_CHUNK_SIZE:-8}"
+selfhost_incremental_export_host_idle_timeout_secs="${CLASP_TEST_SELFHOST_INCREMENTAL_EXPORT_HOST_IDLE_TIMEOUT_SECS:-5}"
+selfhost_incremental_check_body_change_max_seconds="${CLASP_TEST_SELFHOST_INCREMENTAL_CHECK_BODY_CHANGE_MAX_SECONDS:-5}"
+selfhost_incremental_image_body_change_max_seconds="${CLASP_TEST_SELFHOST_INCREMENTAL_IMAGE_BODY_CHANGE_MAX_SECONDS:-15}"
+selfhost_compiler_module_check_body_change_max_seconds="${CLASP_TEST_SELFHOST_COMPILER_MODULE_CHECK_BODY_CHANGE_MAX_SECONDS:-10}"
 
 cleanup() {
   rm -rf "$test_root"
@@ -379,14 +392,14 @@ mkdir -p "$large_selfhost_project_root"
     cp "$source_path" "$large_selfhost_project_root/$source_path"
   done
 )
-sed -i 's/keepNoRenderedText value = false/keepNoRenderedText value = true/' "$large_selfhost_project_root/Compiler/Ast.clasp"
+sed -i "s/keepNoRenderedText value = false/$large_selfhost_probe_line/" "$large_selfhost_project_root/Compiler/Ast.clasp"
 
 "$time_bin" -p -o "$large_selfhost_check_time" \
   env XDG_CACHE_HOME="$large_selfhost_cache_root" CLASP_NATIVE_TRACE_CACHE=1 \
   "$claspc_bin" --json check "$large_selfhost_project_root/Main.clasp" \
   >"$large_selfhost_check_output" 2>"$large_selfhost_check_log"
 grep -F '"status":"ok"' "$large_selfhost_check_output" >/dev/null
-grep -F '[claspc-cache] module-summary promoted unvalidated-hit module=Compiler.Ast ' "$large_selfhost_check_log" >/dev/null
+grep -E '\[claspc-cache\] module-summary (promoted )?unvalidated-hit module=Compiler\.Ast ' "$large_selfhost_check_log" >/dev/null
 grep -F '[claspc-cache] module-summary decl-validation module=Compiler.Ast changed=keepNoRenderedText' "$large_selfhost_check_log" >/dev/null
 grep -F '[claspc-cache] module-summary validated-hit module=Compiler.Ast path=' "$large_selfhost_check_log" >/dev/null
 node - "$large_selfhost_check_time" <<'EOF'
@@ -404,7 +417,7 @@ if (!(realSeconds < maxSeconds)) {
   throw new Error(`edited Compiler.Ast check took ${realSeconds}s, expected < ${maxSeconds}s`);
 }
 EOF
-sed -i 's/keepNoRenderedText value = true/keepNoRenderedText value = "not-bool"/' "$large_selfhost_project_root/Compiler/Ast.clasp"
+sed -i "s/$large_selfhost_probe_line/$large_selfhost_invalid_line/" "$large_selfhost_project_root/Compiler/Ast.clasp"
 if env XDG_CACHE_HOME="$large_selfhost_cache_root" CLASP_NATIVE_TRACE_CACHE=1 \
   "$claspc_bin" --json check "$large_selfhost_project_root/Main.clasp" \
   >"$large_selfhost_invalid_output" 2>"$large_selfhost_invalid_log"; then
@@ -415,10 +428,25 @@ grep -F '"status":"error"' "$large_selfhost_invalid_output" >/dev/null
 grep -F 'keepNoRenderedText' "$large_selfhost_invalid_output" >/dev/null
 grep -F '[claspc-cache] module-summary decl-validation module=Compiler.Ast changed=keepNoRenderedText' "$large_selfhost_invalid_log" >/dev/null
 
-if ! CLASPC_BIN="$claspc_bin" bash "$project_root/scripts/measure-native-incremental.sh" \
+if ! env \
+  CLASP_NATIVE_JOBS_MAX="$selfhost_incremental_native_jobs_max" \
+  CLASP_NATIVE_BUNDLE_JOBS="$selfhost_incremental_bundle_jobs" \
+  CLASP_NATIVE_IMAGE_SECTION_JOBS="$selfhost_incremental_image_section_jobs" \
+  CLASP_NATIVE_IMAGE_SECTION_JOBS_MAX="$selfhost_incremental_image_section_jobs_max" \
+  CLASP_NATIVE_IMAGE_MODULE_DECL_FRESH_PROCESS="$selfhost_incremental_module_decl_fresh_process" \
+  CLASP_NATIVE_IMAGE_MODULE_DECL_CHUNK_SIZE="$selfhost_incremental_module_decl_chunk_size" \
+  CLASP_NATIVE_EXPORT_HOST_IDLE_TIMEOUT_SECS="$selfhost_incremental_export_host_idle_timeout_secs" \
+  CLASP_NATIVE_INCREMENTAL_PROBE_ROOT="$shared_selfhost_cache_root/incremental-probe" \
+  CLASP_NATIVE_INCREMENTAL_SHARED_CACHE_HOME="$shared_selfhost_cache_root/incremental-cache" \
+  CLASP_NATIVE_INCREMENTAL_REUSE_WARMUP="${CLASP_NATIVE_INCREMENTAL_REUSE_WARMUP:-1}" \
+  CLASP_NATIVE_INCREMENTAL_PROBE_SUFFIX="-$$" \
+  CLASPC_BIN="$claspc_bin" \
+  bash "$project_root/scripts/measure-native-incremental.sh" \
   --scenario selfhost-body-change \
   --report "$selfhost_incremental_report" \
-  --assert >/dev/null; then
+  --assert \
+  --max-duration "checkBodyChange=$selfhost_incremental_check_body_change_max_seconds" \
+  --max-duration "imageBodyChange=$selfhost_incremental_image_body_change_max_seconds" >/dev/null; then
   cat "$selfhost_incremental_report" >&2
   exit 1
 fi
@@ -438,14 +466,71 @@ if (JSON.stringify(report.changedModules) !== JSON.stringify(["Helper"])) {
 if (report.observedCacheBehavior.image?.sourceExport?.nativeImageProjectText !== "miss") {
   throw new Error("expected nativeImageProjectText source-export miss");
 }
-const expectedBuildPlan = report.expectedCacheBehavior.image?.buildPlan;
-if (!Array.isArray(expectedBuildPlan) || !expectedBuildPlan.includes("hit") || !expectedBuildPlan.includes("miss")) {
-  throw new Error("expected selfhost report to include build-plan cache expectation");
+if (report.expectedCacheBehavior.image?.buildPlan !== "hit") {
+  throw new Error(`expected selfhost report to require build-plan cache hits, got ${JSON.stringify(report.expectedCacheBehavior.image?.buildPlan)}`);
 }
 if (typeof report.advisoryTimings.checkBodyChange?.realSeconds !== "number") {
   throw new Error("expected selfhost check body-change timing");
 }
 if (typeof report.advisoryTimings.imageBodyChange?.realSeconds !== "number") {
   throw new Error("expected selfhost image body-change timing");
+}
+if (report.advisoryTimings.checkBodyChange.realSeconds > Number(process.env.CLASP_TEST_SELFHOST_INCREMENTAL_CHECK_BODY_CHANGE_MAX_SECONDS || "5")) {
+  throw new Error(`selfhost check body-change exceeded guard: ${report.advisoryTimings.checkBodyChange.realSeconds}s`);
+}
+if (report.advisoryTimings.imageBodyChange.realSeconds > Number(process.env.CLASP_TEST_SELFHOST_INCREMENTAL_IMAGE_BODY_CHANGE_MAX_SECONDS || "15")) {
+  throw new Error(`selfhost image body-change exceeded guard: ${report.advisoryTimings.imageBodyChange.realSeconds}s`);
+}
+if (report.meta?.warmupReused !== "true" && report.meta?.warmupReused !== "false") {
+  throw new Error(`expected warmup reuse metadata, got ${JSON.stringify(report.meta)}`);
+}
+EOF
+
+if ! env \
+  CLASP_NATIVE_JOBS_MAX="$selfhost_incremental_native_jobs_max" \
+  CLASP_NATIVE_BUNDLE_JOBS="$selfhost_incremental_bundle_jobs" \
+  CLASP_NATIVE_IMAGE_SECTION_JOBS="$selfhost_incremental_image_section_jobs" \
+  CLASP_NATIVE_IMAGE_SECTION_JOBS_MAX="$selfhost_incremental_image_section_jobs_max" \
+  CLASP_NATIVE_IMAGE_MODULE_DECL_FRESH_PROCESS="$selfhost_incremental_module_decl_fresh_process" \
+  CLASP_NATIVE_IMAGE_MODULE_DECL_CHUNK_SIZE="$selfhost_incremental_module_decl_chunk_size" \
+  CLASP_NATIVE_EXPORT_HOST_IDLE_TIMEOUT_SECS="$selfhost_incremental_export_host_idle_timeout_secs" \
+  CLASP_NATIVE_INCREMENTAL_PROBE_ROOT="$shared_selfhost_cache_root/compiler-module-incremental-probe" \
+  CLASP_NATIVE_INCREMENTAL_SHARED_CACHE_HOME="$shared_selfhost_cache_root/compiler-module-incremental-cache" \
+  CLASPC_BIN="$claspc_bin" \
+  bash "$project_root/scripts/measure-native-incremental.sh" \
+  --scenario selfhost-compiler-module-body-change \
+  --report "$selfhost_compiler_module_incremental_report" \
+  --assert \
+  --max-duration "compilerCheckBodyChange=$selfhost_compiler_module_check_body_change_max_seconds" >/dev/null; then
+  cat "$selfhost_compiler_module_incremental_report" >&2
+  exit 1
+fi
+node - "$selfhost_compiler_module_incremental_report" <<'EOF'
+const fs = require("node:fs");
+
+const report = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (report.scenario !== "selfhost-compiler-module-body-change") {
+  throw new Error(`unexpected compiler-module incremental scenario: ${report.scenario}`);
+}
+if (!report.matchesExpectations) {
+  throw new Error(`compiler-module incremental mismatches: ${report.mismatches.join("; ")}`);
+}
+if (JSON.stringify(report.changedModules) !== JSON.stringify(["Compiler.Ast"])) {
+  throw new Error(`unexpected compiler-module changed modules: ${JSON.stringify(report.changedModules)}`);
+}
+if (JSON.stringify(report.observedChangedModules) !== JSON.stringify(["Compiler.Ast"])) {
+  throw new Error(`unexpected observed compiler-module changes: ${JSON.stringify(report.observedChangedModules)}`);
+}
+if (report.observedCacheBehavior.check?.moduleSummary?.["Compiler.Ast"] !== "validated-hit") {
+  throw new Error("expected Compiler.Ast module-summary validated hit");
+}
+if (typeof report.advisoryTimings.compilerCheckBodyChange?.realSeconds !== "number") {
+  throw new Error("expected compiler-module check body-change timing");
+}
+if (report.advisoryTimings.compilerCheckBodyChange.realSeconds > Number(process.env.CLASP_TEST_SELFHOST_COMPILER_MODULE_CHECK_BODY_CHANGE_MAX_SECONDS || "10")) {
+  throw new Error(`compiler-module check body-change exceeded guard: ${report.advisoryTimings.compilerCheckBodyChange.realSeconds}s`);
+}
+if (report.meta?.compilerModuleImageProbe !== "skipped") {
+  throw new Error(`expected compiler-module native image probe to be skipped by default, got ${JSON.stringify(report.meta)}`);
 }
 EOF

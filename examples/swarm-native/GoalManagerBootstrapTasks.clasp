@@ -4,6 +4,7 @@ import GoalManagerPreludeProject
 import GoalManagerTaskSet
 import GoalManagerPlannerRoles
 import GoalManagerMailboxSummary
+import GoalManagerTaskReportIO
 import GoalManagerPrelude
 import GoalManagerConfig
 import GoalManagerTypes
@@ -34,22 +35,37 @@ ensureObjective =
       }
   }
 
-ensureTask : Str -> Str -> [Str] -> Str
-ensureTask taskId detail dependencies =
+ensureTaskWithSpawnPolicy : SwarmSpawnPolicy -> Str -> Str -> [Str] -> Str
+ensureTaskWithSpawnPolicy spawnPolicy taskId detail dependencies =
   match tasks swarmStateRoot {
     Ok values ->
       if taskListHasId taskId values then
         ""
       else
-        match taskCreate objectiveRef taskId detail dependencies childMaxAttempts taskLeaseTimeoutMs {
+        match taskCreateWithSpawnPolicy objectiveRef spawnPolicy taskId detail dependencies childMaxAttempts noDeadlineAtMs 0 taskLeaseTimeoutMs {
           Ok created -> "",
           Err message -> ignoreAlreadyExistsTaskBootstrap message
         },
     Err message ->
-      match taskCreate objectiveRef taskId detail dependencies childMaxAttempts taskLeaseTimeoutMs {
+      match taskCreateWithSpawnPolicy objectiveRef spawnPolicy taskId detail dependencies childMaxAttempts noDeadlineAtMs 0 taskLeaseTimeoutMs {
         Ok created -> "",
         Err createMessage -> ignoreAlreadyExistsTaskBootstrap createMessage
       }
+  }
+
+ensureTask : Str -> Str -> [Str] -> Str
+ensureTask taskId detail dependencies =
+  ensureTaskWithSpawnPolicy (swarmSpawnPolicy "" 0) taskId detail dependencies
+
+ensurePlannedTask : Str -> Str -> Str -> [Str] -> Str
+ensurePlannedTask parentTaskId taskId detail dependencies =
+  ensureTaskWithSpawnPolicy (swarmSpawnPolicyWithChildBudget parentTaskId 0 0) taskId detail dependencies
+
+ensurePlannedTaskPolicy : Str -> Str
+ensurePlannedTaskPolicy taskId =
+  match policySetVerificationPolicy (taskHandleFor taskId) plannedTaskVerificationPolicy {
+    Ok policyValue -> "",
+    Err message -> message
   }
 
 ensurePlannerTaskFor : Int -> Str
@@ -59,23 +75,29 @@ ensurePlannerTaskFor wave =
       if taskListHasId (plannerTaskIdForWave wave) values then
         ""
       else
-        match taskCreate
+        match taskCreateWithSpawnPolicy
           objectiveRef
+          (swarmSpawnPolicyWithChildBudget "" 1 maxTaskLoops)
           (plannerTaskIdForWave wave)
           (textConcat ["Plan bounded task DAG wave ", encode wave, " for the high-level objective."])
           emptyTexts
           plannerTaskMaxRuns
+          noDeadlineAtMs
+          0
           taskLeaseTimeoutMs {
           Ok created -> "",
           Err message -> ignoreAlreadyExistsTaskBootstrap message
         },
     Err message ->
-      match taskCreate
+      match taskCreateWithSpawnPolicy
         objectiveRef
+        (swarmSpawnPolicyWithChildBudget "" 1 maxTaskLoops)
         (plannerTaskIdForWave wave)
         (textConcat ["Plan bounded task DAG wave ", encode wave, " for the high-level objective."])
         emptyTexts
         plannerTaskMaxRuns
+        noDeadlineAtMs
+        0
         taskLeaseTimeoutMs {
         Ok created -> "",
         Err createMessage -> ignoreAlreadyExistsTaskBootstrap createMessage
@@ -86,15 +108,25 @@ ensurePlannedTaskStep : EnsurePlanState -> PlannerTaskSpec -> EnsurePlanState
 ensurePlannedTaskStep state spec =
   if state.error != "" then
     state
-  else
-    let taskError = ensureTask spec.taskId (annotatedPlannerTaskDetail spec) spec.dependencies in
-    EnsurePlanState {
-      error = taskError
+  else {
+    let taskError = ensurePlannedTask state.parentTaskId spec.taskId (annotatedPlannerTaskDetail spec) spec.dependencies in
+    if taskError != "" then
+      EnsurePlanState {
+        error = taskError,
+        parentTaskId = state.parentTaskId
+      }
+    else {
+      let policyError = ensurePlannedTaskPolicy spec.taskId in
+      EnsurePlanState {
+        error = policyError,
+        parentTaskId = state.parentTaskId
+      }
     }
+  }
 
-ensurePlannedTasks : PlannerReport -> Str
-ensurePlannedTasks report =
-  (fold ensurePlannedTaskStep (EnsurePlanState { error = "" }) report.tasks).error
+ensurePlannedTasks : Int -> PlannerReport -> Str
+ensurePlannedTasks wave report =
+  (fold ensurePlannedTaskStep (EnsurePlanState { error = "", parentTaskId = plannerTaskIdForWave wave }) report.tasks).error
 
 plannerTaskCountError : PlannerReport -> Str
 plannerTaskCountError report =
@@ -109,6 +141,58 @@ plannerTaskCountError report =
   else
     ""
 
+plannerTaskDependencyVerifierEvidenceLine : Str -> Str
+plannerTaskDependencyVerifierEvidenceLine taskId =
+  if fileExists (taskFeedbackPath taskId) then
+    let report = readVerifierReportPath (taskFeedbackPath taskId) in
+    textConcat [
+      "- ",
+      taskId,
+      " verifier=",
+      report.verdict,
+      " summary=",
+      report.summary
+    ]
+  else
+    textConcat ["- ", taskId, " verifier=missing"]
+
+plannerTaskDependencyBuilderEvidenceLine : Str -> Str
+plannerTaskDependencyBuilderEvidenceLine taskId =
+  if fileExists (taskLatestBuilderReportPath taskId) then
+    match taskLatestBuilderReport taskId {
+      Ok report ->
+        textConcat [
+          "  builder=",
+          report.summary,
+          " feedback=",
+          report.feedback.summary
+        ],
+      Err message ->
+        textConcat ["  builder=read-error:", message]
+    }
+  else
+    "  builder=missing"
+
+plannerTaskDependencyEvidenceLines : [Str] -> [Str]
+plannerTaskDependencyEvidenceLines dependencies = {
+  let mut lines = emptyTexts;
+  for taskId in dependencies {
+    lines = append lines [
+      plannerTaskDependencyVerifierEvidenceLine taskId,
+      plannerTaskDependencyBuilderEvidenceLine taskId
+    ];
+    lines
+  };
+  lines
+}
+
+plannerTaskDependencyEvidenceText : PlannerTaskSpec -> Str
+plannerTaskDependencyEvidenceText spec =
+  if length spec.dependencies == 0 then
+    "No declared task dependencies."
+  else
+    textJoin "\n" (plannerTaskDependencyEvidenceLines spec.dependencies)
+
 taskPromptText : Int -> PlannerReport -> PlannerTaskSpec -> Str
 taskPromptText wave report spec =
   textJoin "\n\n" [
@@ -120,6 +204,7 @@ taskPromptText wave report spec =
     textConcat ["Detail: ", spec.detail],
     textConcat ["Prompt:\n", spec.taskPrompt],
     textConcat ["Sibling branches:\n", plannerTaskSiblingSummaryText report spec.taskId],
+    textConcat ["Dependency completion evidence:\n", plannerTaskDependencyEvidenceText spec],
     textConcat ["Mailbox summary:\n", mailboxSummaryTextForReport wave report],
     "Make repo changes, verify them, and write a schema-valid builder report."
   ]
@@ -170,6 +255,8 @@ childLoopCommandArgs spec = [
   "CLASP_MANAGER_BENCHMARK_POLL_MS_JSON",
   "-u",
   "CLASP_MANAGER_BENCHMARK_TIMEOUT_MS_JSON",
+  "-u",
+  "CLASP_MANAGER_BENCHMARK_MEMORY_MB_JSON",
   textConcat ["CLASP_LOOP_OBJECTIVE_JSON=", encode spec.taskId],
   textConcat ["CLASP_LOOP_TASK_JSON=", encode spec.detail],
   textConcat ["CLASP_LOOP_TASK_FILE_JSON=", encode (taskPromptPath spec.taskId)],
@@ -184,6 +271,9 @@ childLoopCommandArgs spec = [
   textConcat ["CLASP_LOOP_AGENT_REASONING_JSON=", encode agentReasoning],
   textConcat ["CLASP_LOOP_AGENT_SANDBOX_JSON=", encode agentSandbox],
   textConcat ["CLASP_LOOP_AGENT_COMMAND_JSON=", encode agentCommandTemplate],
+  textConcat ["CLASP_LOOP_AGENT_CAPABILITY_PROFILE_JSON=", encode agentCapabilityProfileName],
+  textConcat ["CLASP_REQUIRE_STANDALONE_AGENT_BACKEND_JSON=", encode requireStandaloneAgentBackend],
+  textConcat ["CLASP_LOOP_REQUIRE_STANDALONE_AGENT_BACKEND_JSON=", encode loopRequireStandaloneAgentBackend],
   textConcat ["CLASP_LOOP_AGENT_MEMORY_MB_JSON=", encode agentMemoryLimitMb],
   textConcat ["CLASP_LOOP_BUILDER_MEMORY_MB_JSON=", encode builderMemoryLimitMb],
   textConcat ["CLASP_LOOP_VERIFIER_MEMORY_MB_JSON=", encode verifierMemoryLimitMb],
@@ -193,6 +283,10 @@ childLoopCommandArgs spec = [
   textConcat ["CLASP_LOOP_VERIFICATION_TIER_JSON=", encode (taskVerificationTier spec)],
   textConcat ["CLASP_LOOP_FOCUSED_VERIFY_COMMANDS_JSON=", encode childFocusedVerifyCommands],
   textConcat ["CLASP_LOOP_FULL_VERIFY_COMMAND_JSON=", encode childFullVerifyCommand],
+  textConcat ["CLASP_LOOP_AFFECTED_VERIFICATION_PLAN_JSON=", encode childAffectedVerificationPlanInlineJson],
+  textConcat ["CLASP_LOOP_AFFECTED_VERIFICATION_PLAN_PATH_JSON=", encode childAffectedVerificationPlanPath],
+  textConcat ["CLASP_LOOP_AFFECTED_VERIFICATION_LAUNCH_POLICY_JSON=", encode childAffectedVerificationLaunchPolicyInlineJson],
+  textConcat ["CLASP_LOOP_AFFECTED_VERIFICATION_LAUNCH_POLICY_PATH_JSON=", encode childAffectedVerificationLaunchPolicyPath],
   textConcat ["CLASP_LOOP_BASELINE_WORKSPACE_JSON=", encode (resolvedTaskWorkspaceBaselineActualRoot spec.taskId)],
   textConcat ["CLASP_LOOP_BASELINE_CACHE_ROOT_JSON=", encode (pathJoin [taskReportStateRoot spec.taskId, "baseline-cache"])],
   textConcat ["CLASP_LOOP_BASELINE_CACHE_MAX_MB_JSON=", encode feedbackLoopBaselineCacheMaxMb],

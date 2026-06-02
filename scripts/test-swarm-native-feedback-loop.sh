@@ -33,9 +33,10 @@ timeout_run_output="$test_root_abs/timeout-run-output.json"
 timeout_status_output="$test_root_abs/timeout-status-output.json"
 timeout_builder_status_output="$test_root_abs/timeout-builder-status.json"
 timeout_builder_runs_output="$test_root_abs/timeout-builder-runs.json"
-demo_path="$project_root/examples/swarm-native/FeedbackLoop.clasp"
+feedback_loop_source_path="$project_root/examples/swarm-native/FeedbackLoop.clasp"
+demo_path="$project_root/examples/swarm-native/FeedbackLoopHarness.clasp"
 
-test_xdg_cache_home="${CLASP_TEST_SHARED_XDG_CACHE_HOME:-$tmp_root/clasp-test-xdg-cache}"
+test_xdg_cache_home="${CLASP_TEST_SHARED_XDG_CACHE_HOME:-${XDG_CACHE_HOME:-$tmp_root/clasp-test-xdg-cache}}"
 if [[ "${CLASP_TEST_ISOLATED_XDG_CACHE:-0}" == "1" ]]; then
   test_xdg_cache_home="$test_root_abs/xdg-cache"
 fi
@@ -158,16 +159,24 @@ else
   claspc_bin="$(env -u CLASP_CLASPC -u CLASPC_BIN CLASP_PROJECT_ROOT="$project_root" "$project_root/scripts/resolve-claspc.sh")"
 fi
 
-grep -F 'codexCommand' "$demo_path" >/dev/null
-grep -F '"exec"' "$demo_path" >/dev/null
-grep -F 'CLASP_LOOP_BUILDER_TIMEOUT_MS_JSON' "$demo_path" >/dev/null
-grep -F 'CLASP_LOOP_VERIFIER_TIMEOUT_MS_JSON' "$demo_path" >/dev/null
-grep -F 'CLASP_LOOP_BUILDER_MEMORY_MB_JSON' "$demo_path" >/dev/null
-grep -F 'CLASP_LOOP_VERIFIER_MEMORY_MB_JSON' "$demo_path" >/dev/null
-grep -F 'toolRunWithOptionalLimits (builderHandle attempt) (builderCommand attempt) builderTimeoutMs builderMemoryLimitMb' "$demo_path" >/dev/null
-grep -F 'verifierRunWithOptionalLimits (verifierHandle attempt) "autonomous-confidence" (verifierCommand attempt) verifierTimeoutMs verifierMemoryLimitMb' "$demo_path" >/dev/null
-grep -F 'finishToolRun (builderHandle attempt) runValue' "$demo_path" >/dev/null
-grep -F 'finishToolRun (verifierHandle attempt) runValue' "$demo_path" >/dev/null
+grep -F 'codexCommand' "$feedback_loop_source_path" >/dev/null
+grep -F '"exec"' "$project_root/examples/swarm-native/AgentBackend.clasp" >/dev/null
+grep -F 'CLASP_LOOP_BUILDER_TIMEOUT_MS_JSON' "$feedback_loop_source_path" >/dev/null
+grep -F 'CLASP_LOOP_VERIFIER_TIMEOUT_MS_JSON' "$feedback_loop_source_path" >/dev/null
+grep -F 'CLASP_LOOP_BUILDER_MEMORY_MB_JSON' "$feedback_loop_source_path" >/dev/null
+grep -F 'CLASP_LOOP_VERIFIER_MEMORY_MB_JSON' "$feedback_loop_source_path" >/dev/null
+grep -F 'CLASP_LOOP_AFFECTED_VERIFICATION_PLAN_JSON' "$feedback_loop_source_path" >/dev/null
+grep -F 'CLASP_LOOP_AFFECTED_VERIFICATION_PLAN_PATH_JSON' "$feedback_loop_source_path" >/dev/null
+grep -F 'CLASP_LOOP_AFFECTED_VERIFICATION_LAUNCH_POLICY_JSON' "$feedback_loop_source_path" >/dev/null
+grep -F 'CLASP_LOOP_AFFECTED_VERIFICATION_LAUNCH_POLICY_PATH_JSON' "$feedback_loop_source_path" >/dev/null
+grep -F 'Affected verification launch policy JSON:' "$feedback_loop_source_path" >/dev/null
+grep -F 'affectedVerificationVerifierPromptSection' "$feedback_loop_source_path" >/dev/null
+grep -F 'toolRunWithOptionalLimits (builderHandle attempt) (builderCommand attempt) builderTimeoutMs builderMemoryLimitMb' "$feedback_loop_source_path" >/dev/null
+grep -F 'verifierRunWithOptionalLimits (verifierHandle attempt) "autonomous-confidence" (verifierCommand attempt) verifierTimeoutMs verifierMemoryLimitMb' "$feedback_loop_source_path" >/dev/null
+grep -F 'finishToolRun (builderHandle attempt) runValue' "$feedback_loop_source_path" >/dev/null
+grep -F 'finishToolRun (verifierHandle attempt) runValue' "$feedback_loop_source_path" >/dev/null
+grep -F 'agentBackendCommand loopAgentBackend' "$demo_path" >/dev/null
+grep -F 'taskContextPack handle query limit' "$demo_path" >/dev/null
 
 CLASP_LOOP_CODEX_BIN_JSON="\"$fake_codex\"" \
   timeout "$timeout_secs" "$claspc_bin" --json check "$demo_path" |
@@ -175,6 +184,8 @@ CLASP_LOOP_CODEX_BIN_JSON="\"$fake_codex\"" \
 
 mkdir -p "$workspace_root"
 CLASP_LOOP_CODEX_BIN_JSON="\"$fake_codex\"" \
+  CLASP_ALLOW_UNMANAGED_AGENT_RUNTIME=1 \
+  CLASP_TEST_CODEX_MODE=builder \
   CLASP_LOOP_TASK_FILE_JSON="\"$task_file\"" \
   CLASP_LOOP_WORKSPACE_JSON="\"$workspace_root\"" \
   CLASP_LOOP_MAX_ATTEMPTS_JSON='2' \
@@ -259,6 +270,9 @@ assert(statusState(run).objectiveId === "autonomous-confidence", "run should rep
 assert(statusState(run).attempt === 2, `run attempt ${statusState(run).attempt}`);
 assert(statusState(run).phase === "completed", `run phase ${statusState(run).phase}`);
 assert(statusState(run).verdict === "pass", `run verdict ${statusState(run).verdict}`);
+assert(run.agentBackend?.kind === "codex", `run backend kind ${run.agentBackend?.kind}`);
+assert(run.agentBackend?.promptTransport === "argument", `run backend prompt transport ${run.agentBackend?.promptTransport}`);
+assert(run.agentBackend?.valid === true, "run backend should be valid");
 assert(run.objectiveProjectedStatus === "completed", `run projected ${run.objectiveProjectedStatus}`);
 assert(run.taskCount === 4, `run taskCount ${run.taskCount}`);
 assert(run.approvalCount === 1, `run approvalCount ${run.approvalCount}`);
@@ -273,6 +287,8 @@ assert(run.allTaskIds.includes("builder-1") && run.allTaskIds.includes("verifier
 assert(statusState(status).attempt === 2, `status attempt ${statusState(status).attempt}`);
 assert(statusState(status).phase === "completed", `status phase ${statusState(status).phase}`);
 assert(statusState(status).verdict === "pass", `status verdict ${statusState(status).verdict}`);
+assert(status.agentBackend?.kind === "codex", `status backend kind ${status.agentBackend?.kind}`);
+assert(status.agentBackend?.promptTransport === "argument", `status backend prompt transport ${status.agentBackend?.promptTransport}`);
 assert(Array.isArray(status.readyTaskIds) && status.readyTaskIds.length === 0, "status ready tasks should be empty");
 assert(status.approvalCount === 1, `status approvalCount ${status.approvalCount}`);
 assert(status.mergeGateSatisfied === true, "status merge gate should be satisfied");
@@ -313,6 +329,8 @@ NODE
 
 mkdir -p "$timeout_workspace_root"
 CLASP_LOOP_CODEX_BIN_JSON="\"$fake_codex\"" \
+  CLASP_ALLOW_UNMANAGED_AGENT_RUNTIME=1 \
+  CLASP_TEST_CODEX_MODE=builder \
   CLASP_LOOP_TASK_FILE_JSON="\"$task_file\"" \
   CLASP_LOOP_WORKSPACE_JSON="\"$timeout_workspace_root\"" \
   CLASP_LOOP_MAX_ATTEMPTS_JSON='1' \

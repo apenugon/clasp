@@ -1,0 +1,5 @@
+module Compiler.Emit.JavaScript.Metadata
+
+import Compiler.Emit.JavaScript.MetadataBindings
+import Compiler.Emit.JavaScript.MetadataContracts
+import Compiler.Emit.JavaScript.MetadataCore

@@ -109,6 +109,9 @@ nativeImageProjectDeclModulePlanText bundle = nativeDriverImageProjectDeclModule
 nativeImageProjectModuleDeclsText : Str -> Str -> Str
 nativeImageProjectModuleDeclsText bundle moduleName = nativeDriverImageProjectModuleDeclsText bundle moduleName
 
+nativeImageProjectModuleNamedDeclsText : Str -> Str -> Str -> Str
+nativeImageProjectModuleNamedDeclsText bundle moduleName namesText = nativeDriverImageProjectModuleNamedDeclsText bundle moduleName namesText
+
 nativeImageProjectNamedDeclsText : Str -> Str -> Str
 nativeImageProjectNamedDeclsText bundle namesText = nativeDriverImageProjectNamedDeclsText bundle namesText
 

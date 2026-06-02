@@ -1,0 +1,2969 @@
+module Main
+
+foreign swarmLeaseRaw : Str -> Str -> Str -> Result Str = "swarmLeaseJson"
+foreign swarmCompleteRaw : Str -> Str -> Str -> Result Str = "swarmCompleteJson"
+foreign swarmFailRaw : Str -> Str -> Str -> Result Str = "swarmFailJson"
+foreign swarmRetryRaw : Str -> Str -> Str -> Result Str = "swarmRetryJson"
+foreign swarmStatusRaw : Str -> Str -> Result Str = "swarmStatusJson"
+foreign swarmReadyRaw : Str -> Str -> Result Str = "swarmReadyJson"
+foreign swarmManagerNextRaw : Str -> Str -> Result Str = "swarmManagerNextJson"
+foreign swarmObjectiveCreateRaw : Str -> Str -> Str -> Int -> Int -> Result Str = "swarmObjectiveCreateJson"
+foreign swarmObjectiveStatusRaw : Str -> Str -> Result Str = "swarmObjectiveStatusJson"
+foreign swarmObjectivesRaw : Str -> Result Str = "swarmObjectivesJson"
+foreign swarmTaskCreateRaw : Str -> Str -> Str -> Str -> [Str] -> Int -> Int -> Result Str = "swarmTaskCreateJson"
+foreign swarmPolicySetRaw : Str -> Str -> Str -> [Str] -> [Str] -> Result Str = "swarmPolicySetJson"
+foreign swarmToolRunRaw : Str -> Str -> Str -> Str -> [Str] -> Result Str = "swarmToolRunJson"
+foreign swarmToolRunWithTimeoutRaw : Str -> Str -> Str -> Str -> Int -> [Str] -> Result Str = "swarmToolRunWithTimeoutJson"
+foreign swarmToolRunWithLimitsRaw : Str -> Str -> Str -> Str -> Int -> Int -> [Str] -> Result Str = "swarmToolRunWithLimitsJson"
+foreign swarmVerifierRunRaw : Str -> Str -> Str -> Str -> Str -> [Str] -> Result Str = "swarmVerifierRunJson"
+foreign swarmVerifierRunWithTimeoutRaw : Str -> Str -> Str -> Str -> Str -> Int -> [Str] -> Result Str = "swarmVerifierRunWithTimeoutJson"
+foreign swarmVerifierRunWithLimitsRaw : Str -> Str -> Str -> Str -> Str -> Int -> Int -> [Str] -> Result Str = "swarmVerifierRunWithLimitsJson"
+foreign swarmApproveRaw : Str -> Str -> Str -> Str -> Result Str = "swarmApproveJson"
+foreign swarmApprovalsRaw : Str -> Str -> Result Str = "swarmApprovalsJson"
+foreign swarmMergegateDecideRaw : Str -> Str -> Str -> Str -> [Str] -> Result Str = "swarmMergegateDecideJson"
+foreign swarmRunsRaw : Str -> Str -> Result Str = "swarmRunsJson"
+foreign swarmArtifactsRaw : Str -> Str -> Result Str = "swarmArtifactsJson"
+foreign swarmArtifactSearchRaw : Str -> Str -> Str -> Str -> Int -> Int -> Result Str = "swarmArtifactSearchJson"
+foreign swarmArtifactWriteRaw : Str -> Str -> Str -> Str -> Str -> Result Str = "swarmArtifactWriteJson"
+foreign swarmMemoryPutRaw : Str -> Str -> Str -> Str -> Str -> Str -> Result Str = "swarmMemoryPutJson"
+foreign swarmMemoryQueryRaw : Str -> Str -> Str -> Str -> Int -> Result Str = "swarmMemoryQueryJson"
+foreign swarmMemorySearchRaw : Str -> Str -> Str -> Str -> Int -> Result Str = "swarmMemorySearchJson"
+foreign swarmHistoryRaw : Str -> Str -> Result Str = "swarmHistoryJson"
+foreign swarmTailRaw : Str -> Str -> Int -> Result Str = "swarmTailJson"
+foreign swarmTasksRaw : Str -> Result Str = "swarmTasksJson"
+
+record SwarmRoot = { path : Str }
+record ObjectiveHandle = { root : SwarmRoot, objectiveId : Str }
+record TaskHandle = { root : SwarmRoot, taskId : Str, actor : Str }
+record SwarmCommand = { cwd : Str, command : [Str] }
+
+record SwarmObjective = {
+  objectiveId : Str,
+  detail : Str,
+  maxRuns : Int,
+  maxTasks : Int,
+  projectedStatus : Str,
+  status : Str,
+  taskCount : Int,
+  runCount : Int
+}
+
+record SwarmTask = {
+  attempts : Int,
+  taskId : Str,
+  status : Str,
+  objectiveId : Str,
+  detail : Str,
+  dependencies : [Str],
+  ready : Bool,
+  blockedBy : [Str],
+  leaseActor : Str,
+  maxRuns : Int,
+  priority : Int
+}
+
+record SwarmPolicy = {
+  taskId : Str,
+  mergegateName : Str,
+  requiredApprovals : [Str],
+  requiredVerifiers : [Str]
+}
+
+record SwarmRun = {
+  actor : Str,
+  command : [Str],
+  cwd : Str,
+  exitCode : Int,
+  name : Str,
+  role : Str,
+  runId : Int,
+  status : Str,
+  stderrArtifactPath : Str,
+  stdoutArtifactPath : Str,
+  taskId : Str,
+  timedOut : Bool,
+  memoryLimitMb : Int
+}
+
+record SwarmApproval = {
+  approvalId : Int,
+  actor : Str,
+  name : Str,
+  taskId : Str
+}
+
+record SwarmMergeDecision = {
+  taskId : Str,
+  mergegateName : Str,
+  verdict : Str
+}
+
+record SwarmArtifact = {
+  artifactId : Int,
+  taskId : Str,
+  kind : Str,
+  path : Str
+}
+
+record SwarmArtifactContent = {
+  artifactId : Int,
+  taskId : Str,
+  kind : Str,
+  path : Str,
+  maxBytes : Int,
+  bytesRead : Int,
+  totalBytes : Int,
+  truncated : Bool,
+  lossyUtf8 : Bool,
+  text : Str
+}
+
+record SwarmArtifactSearchResult = {
+  artifact : SwarmArtifact,
+  score : Int,
+  matchedText : Str,
+  excerpt : SwarmArtifactContent
+}
+
+record SwarmSemanticIndexEntry = {
+  id : Str,
+  kind : Str,
+  editFiles : [Str],
+  artifactRefs : [Str],
+  surfaceIds : [Str],
+  queryText : Str
+}
+
+record SwarmSemanticIndex = {
+  entries : [SwarmSemanticIndexEntry]
+}
+
+record SwarmSemanticIndexArtifact = {
+  semanticIndex : SwarmSemanticIndex
+}
+
+record SwarmMemory = {
+  actor : Str,
+  memoryId : Int,
+  objectiveId : Str,
+  taskId : Str,
+  key : Str,
+  value : Str
+}
+
+record SwarmMemorySearchResult = {
+  memory : SwarmMemory,
+  score : Int,
+  matchedText : Str
+}
+
+record SwarmEvent = {
+  actor : Str,
+  kind : Str,
+  detail : Str,
+  taskId : Str
+}
+
+record SwarmTaskUpdate = {
+  root : Str,
+  database : Str,
+  task : SwarmTask,
+  event : SwarmEvent
+}
+
+record SwarmManagerAction = {
+  objectiveId : Str,
+  status : Str,
+  action : Str,
+  taskId : Str,
+  taskStatus : Str,
+  taskPriority : Int,
+  blockedBy : [Str],
+  blockerTaskIds : [Str],
+  requiredApprovals : [Str],
+  requiredVerifiers : [Str],
+  latestRunName : Str,
+  latestRunStatus : Str,
+  latestVerifier : Str,
+  latestVerifierStatus : Str,
+  mergegateName : Str,
+  mergegateVerdict : Str,
+  mergegateDetail : Str
+}
+
+record SwarmObjectiveStatus = {
+  objective : SwarmObjective,
+  projectedStatus : Str,
+  tasks : [SwarmTask]
+}
+
+record SwarmMailbox = {
+  history : [SwarmEvent],
+  tail : [SwarmEvent],
+  approvals : [SwarmApproval],
+  runs : [SwarmRun],
+  artifacts : [SwarmArtifact],
+  memory : [SwarmMemory],
+  latestRunStatus : Str,
+  latestRunName : Str,
+  latestVerifierStatus : Str,
+  latestVerifier : Str
+}
+
+record ToolStepResult = {
+  lease : SwarmTaskUpdate,
+  run : SwarmRun,
+  status : SwarmTaskUpdate,
+  mailbox : SwarmMailbox
+}
+
+record VerifierStepResult = {
+  run : SwarmRun,
+  mailbox : SwarmMailbox
+}
+
+record VerificationCommand = {
+  verifierName : Str,
+  command : SwarmCommand
+}
+
+record VerificationPlan = {
+  name : Str,
+  commands : [VerificationCommand],
+  requiredVerifierNames : [Str]
+}
+
+record VerificationTraceEntry = {
+  verifierName : Str,
+  runId : Int,
+  status : Str,
+  exitCode : Int,
+  timedOut : Bool,
+  memoryLimitMb : Int,
+  stdoutArtifactPath : Str,
+  stderrArtifactPath : Str,
+  failedVerifierClassification : Str
+}
+
+record VerificationPlanMailboxSummary = {
+  historyCount : Int,
+  tailCount : Int,
+  approvalCount : Int,
+  runCount : Int,
+  artifactCount : Int,
+  memoryCount : Int,
+  latestRunStatus : Str,
+  latestRunName : Str,
+  latestVerifierStatus : Str,
+  latestVerifier : Str,
+  artifactKinds : [Str],
+  artifactPaths : [Str]
+}
+
+record SwarmTextSearch = {
+  wanted : Str,
+  found : Bool
+}
+
+record SwarmDependencyProjection = {
+  dependencyProjectionIds : [Str],
+  dependencyProjectionStatuses : [Str],
+  dependencyProjectionReady : [Bool]
+}
+
+record SwarmContextPack = {
+  task : SwarmTask,
+  readyTaskIds : [Str],
+  dependencyTaskIds : [Str],
+  dependencyTaskStatuses : [Str],
+  dependencyTaskReady : [Bool],
+  managerAction : SwarmManagerAction,
+  mailboxSummary : VerificationPlanMailboxSummary,
+  taskMemoryMatches : [SwarmMemorySearchResult],
+  objectiveMemoryMatches : [SwarmMemorySearchResult],
+  benchmarkMemoryMatches : [SwarmMemorySearchResult],
+  artifactSearchMatches : [SwarmArtifactSearchResult],
+  semanticArtifactMatches : [SwarmArtifactSearchResult],
+  memoryValues : [Str],
+  memoryMatchedText : [Str],
+  memoryScores : [Int],
+  benchmarkValues : [Str],
+  benchmarkMatchedText : [Str],
+  benchmarkScores : [Int],
+  artifactSearchMatchedText : [Str],
+  artifactSearchScores : [Int],
+  semanticArtifactMatchedText : [Str],
+  semanticArtifactScores : [Int],
+  semanticIndexEntries : [SwarmSemanticIndexEntry],
+  semanticIndexEntryIds : [Str],
+  semanticIndexEditFiles : [Str],
+  semanticIndexArtifactRefs : [Str],
+  semanticIndexSurfaceIds : [Str],
+  semanticIndexQueryTexts : [Str],
+  runTrace : [VerificationTraceEntry],
+  artifactKinds : [Str],
+  artifactPaths : [Str],
+  artifactExcerpts : [SwarmArtifactContent]
+}
+
+record VerificationPlanResult = {
+  plan : VerificationPlan,
+  steps : [VerifierStepResult],
+  passed : Bool,
+  failedVerifiers : [Str],
+  trace : [VerificationTraceEntry],
+  mailbox : SwarmMailbox,
+  mailboxSummary : VerificationPlanMailboxSummary
+}
+
+record VerificationPlanExecutionWithLimits = {
+  handle : TaskHandle,
+  mailboxLimit : Int,
+  timeoutMs : Int,
+  memoryLimitMb : Int,
+  steps : [VerifierStepResult],
+  passed : Bool,
+  failedVerifiers : [Str],
+  trace : [VerificationTraceEntry],
+  error : Str
+}
+
+record ReviewStepResult = {
+  approval : SwarmApproval,
+  approvals : [SwarmApproval],
+  managerAfterApproval : SwarmManagerAction,
+  mergeDecision : SwarmMergeDecision,
+  mailbox : SwarmMailbox
+}
+
+emptyTexts : [Str]
+emptyTexts = []
+
+emptyBools : [Bool]
+emptyBools = []
+
+emptyVerifierStepResults : [VerifierStepResult]
+emptyVerifierStepResults = []
+
+emptyVerifierNames : [Str]
+emptyVerifierNames = []
+
+emptyVerificationTraceEntries : [VerificationTraceEntry]
+emptyVerificationTraceEntries = []
+
+emptySwarmSemanticIndexEntries : [SwarmSemanticIndexEntry]
+emptySwarmSemanticIndexEntries = []
+
+contextPackSemanticIndexReadBytes : Int
+contextPackSemanticIndexReadBytes = 65536
+
+contextPackSemanticIndexQuery : Str
+contextPackSemanticIndexQuery = "semanticIndex entries editFiles artifactRefs surfaceIds queryText route schema host-boundary action-item"
+
+swarmRoot : Str -> SwarmRoot
+swarmRoot path = SwarmRoot { path = path }
+
+objectiveHandle : SwarmRoot -> Str -> ObjectiveHandle
+objectiveHandle root objectiveId = ObjectiveHandle { root = root, objectiveId = objectiveId }
+
+taskHandle : SwarmRoot -> Str -> Str -> TaskHandle
+taskHandle root taskId actor = TaskHandle { root = root, taskId = taskId, actor = actor }
+
+commandSpec : Str -> [Str] -> SwarmCommand
+commandSpec cwd command = SwarmCommand { cwd = cwd, command = command }
+
+verificationCommand : Str -> SwarmCommand -> VerificationCommand
+verificationCommand verifierName command =
+  VerificationCommand { verifierName = verifierName, command = command }
+
+verificationCommandName : VerificationCommand -> Str
+verificationCommandName command = command.verifierName
+
+verificationPlan : Str -> [VerificationCommand] -> VerificationPlan
+verificationPlan name commands =
+  VerificationPlan {
+    name = name,
+    commands = commands,
+    requiredVerifierNames = map verificationCommandName commands
+  }
+
+taskResultError : Str -> Result SwarmTask
+taskResultError message = Err message
+
+taskUpdateResultError : Str -> Result SwarmTaskUpdate
+taskUpdateResultError message = Err message
+
+objectiveResultError : Str -> Result SwarmObjective
+objectiveResultError message = Err message
+
+objectiveStatusResultError : Str -> Result SwarmObjectiveStatus
+objectiveStatusResultError message = Err message
+
+objectiveListResultError : Str -> Result [SwarmObjective]
+objectiveListResultError message = Err message
+
+policyResultError : Str -> Result SwarmPolicy
+policyResultError message = Err message
+
+runResultError : Str -> Result SwarmRun
+runResultError message = Err message
+
+approvalResultError : Str -> Result SwarmApproval
+approvalResultError message = Err message
+
+approvalListResultError : Str -> Result [SwarmApproval]
+approvalListResultError message = Err message
+
+mergeDecisionResultError : Str -> Result SwarmMergeDecision
+mergeDecisionResultError message = Err message
+
+managerActionResultError : Str -> Result SwarmManagerAction
+managerActionResultError message = Err message
+
+taskListResultError : Str -> Result [SwarmTask]
+taskListResultError message = Err message
+
+runListResultError : Str -> Result [SwarmRun]
+runListResultError message = Err message
+
+artifactListResultError : Str -> Result [SwarmArtifact]
+artifactListResultError message = Err message
+
+artifactResultError : Str -> Result SwarmArtifact
+artifactResultError message = Err message
+
+artifactSearchResultListError : Str -> Result [SwarmArtifactSearchResult]
+artifactSearchResultListError message = Err message
+
+memoryResultError : Str -> Result SwarmMemory
+memoryResultError message = Err message
+
+memoryListResultError : Str -> Result [SwarmMemory]
+memoryListResultError message = Err message
+
+memorySearchResultListError : Str -> Result [SwarmMemorySearchResult]
+memorySearchResultListError message = Err message
+
+eventListResultError : Str -> Result [SwarmEvent]
+eventListResultError message = Err message
+
+mailboxResultError : Str -> Result SwarmMailbox
+mailboxResultError message = Err message
+
+toolStepResultError : Str -> Result ToolStepResult
+toolStepResultError message = Err message
+
+verifierStepResultError : Str -> Result VerifierStepResult
+verifierStepResultError message = Err message
+
+verificationPlanResultError : Str -> Result VerificationPlanResult
+verificationPlanResultError message = Err message
+
+reviewStepResultError : Str -> Result ReviewStepResult
+reviewStepResultError message = Err message
+
+contextPackResultError : Str -> Result SwarmContextPack
+contextPackResultError message = Err message
+
+taskResult : Result Str -> Result SwarmTask
+taskResult value = match value {
+  Ok raw -> Ok (decode SwarmTask raw),
+  Err message -> taskResultError message
+}
+
+taskUpdateResult : Result Str -> Result SwarmTaskUpdate
+taskUpdateResult value = match value {
+  Ok raw -> Ok (decode SwarmTaskUpdate raw),
+  Err message -> taskUpdateResultError message
+}
+
+objectiveResult : Result Str -> Result SwarmObjective
+objectiveResult value = match value {
+  Ok raw -> Ok (decode SwarmObjective raw),
+  Err message -> objectiveResultError message
+}
+
+objectiveStatusResult : Result Str -> Result SwarmObjectiveStatus
+objectiveStatusResult value = match value {
+  Ok raw -> Ok (decode SwarmObjectiveStatus raw),
+  Err message -> objectiveStatusResultError message
+}
+
+objectiveListResult : Result Str -> Result [SwarmObjective]
+objectiveListResult value = match value {
+  Ok raw -> Ok (decode [SwarmObjective] raw),
+  Err message -> objectiveListResultError message
+}
+
+policyResult : Result Str -> Result SwarmPolicy
+policyResult value = match value {
+  Ok raw -> Ok (decode SwarmPolicy raw),
+  Err message -> policyResultError message
+}
+
+runResult : Result Str -> Result SwarmRun
+runResult value = match value {
+  Ok raw -> Ok (decode SwarmRun raw),
+  Err message -> runResultError message
+}
+
+approvalResult : Result Str -> Result SwarmApproval
+approvalResult value = match value {
+  Ok raw -> Ok (decode SwarmApproval raw),
+  Err message -> approvalResultError message
+}
+
+approvalListResult : Result Str -> Result [SwarmApproval]
+approvalListResult value = match value {
+  Ok raw -> Ok (decode [SwarmApproval] raw),
+  Err message -> approvalListResultError message
+}
+
+mergeDecisionResult : Result Str -> Result SwarmMergeDecision
+mergeDecisionResult value = match value {
+  Ok raw -> Ok (decode SwarmMergeDecision raw),
+  Err message -> mergeDecisionResultError message
+}
+
+managerActionResult : Result Str -> Result SwarmManagerAction
+managerActionResult value = match value {
+  Ok raw -> Ok (decode SwarmManagerAction raw),
+  Err message -> managerActionResultError message
+}
+
+taskListResult : Result Str -> Result [SwarmTask]
+taskListResult value = match value {
+  Ok raw -> Ok (decode [SwarmTask] raw),
+  Err message -> taskListResultError message
+}
+
+runListResult : Result Str -> Result [SwarmRun]
+runListResult value = match value {
+  Ok raw -> Ok (decode [SwarmRun] raw),
+  Err message -> runListResultError message
+}
+
+artifactListResult : Result Str -> Result [SwarmArtifact]
+artifactListResult value = match value {
+  Ok raw -> Ok (decode [SwarmArtifact] raw),
+  Err message -> artifactListResultError message
+}
+
+artifactResult : Result Str -> Result SwarmArtifact
+artifactResult value = match value {
+  Ok raw -> Ok (decode SwarmArtifact raw),
+  Err message -> artifactResultError message
+}
+
+artifactSearchResultListResult : Result Str -> Result [SwarmArtifactSearchResult]
+artifactSearchResultListResult value = match value {
+  Ok raw -> Ok (decode [SwarmArtifactSearchResult] raw),
+  Err message -> artifactSearchResultListError message
+}
+
+memoryResult : Result Str -> Result SwarmMemory
+memoryResult value = match value {
+  Ok raw -> Ok (decode SwarmMemory raw),
+  Err message -> memoryResultError message
+}
+
+memoryListResult : Result Str -> Result [SwarmMemory]
+memoryListResult value = match value {
+  Ok raw -> Ok (decode [SwarmMemory] raw),
+  Err message -> memoryListResultError message
+}
+
+memorySearchResultListResult : Result Str -> Result [SwarmMemorySearchResult]
+memorySearchResultListResult value = match value {
+  Ok raw -> Ok (decode [SwarmMemorySearchResult] raw),
+  Err message -> memorySearchResultListError message
+}
+
+eventListResult : Result Str -> Result [SwarmEvent]
+eventListResult value = match value {
+  Ok raw -> Ok (decode [SwarmEvent] raw),
+  Err message -> eventListResultError message
+}
+
+lease : TaskHandle -> Result SwarmTaskUpdate
+lease handle = taskUpdateResult (swarmLeaseRaw handle.root.path handle.taskId handle.actor)
+
+complete : TaskHandle -> Result SwarmTaskUpdate
+complete handle = taskUpdateResult (swarmCompleteRaw handle.root.path handle.taskId handle.actor)
+
+fail : TaskHandle -> Result SwarmTaskUpdate
+fail handle = taskUpdateResult (swarmFailRaw handle.root.path handle.taskId handle.actor)
+
+retry : TaskHandle -> Result SwarmTaskUpdate
+retry handle = taskUpdateResult (swarmRetryRaw handle.root.path handle.taskId handle.actor)
+
+status : TaskHandle -> Result SwarmTask
+status handle = taskResult (swarmStatusRaw handle.root.path handle.taskId)
+
+ready : ObjectiveHandle -> Result [SwarmTask]
+ready handle = taskListResult (swarmReadyRaw handle.root.path handle.objectiveId)
+
+managerNext : ObjectiveHandle -> Result SwarmManagerAction
+managerNext handle = managerActionResult (swarmManagerNextRaw handle.root.path handle.objectiveId)
+
+objectiveCreate : SwarmRoot -> Str -> Str -> Int -> Int -> Result SwarmObjective
+objectiveCreate root objectiveId detail maxTasks maxRuns =
+  objectiveResult (swarmObjectiveCreateRaw root.path objectiveId detail maxTasks maxRuns)
+
+objectiveStatus : ObjectiveHandle -> Result SwarmObjectiveStatus
+objectiveStatus handle = objectiveStatusResult (swarmObjectiveStatusRaw handle.root.path handle.objectiveId)
+
+objectives : SwarmRoot -> Result [SwarmObjective]
+objectives root = objectiveListResult (swarmObjectivesRaw root.path)
+
+taskCreate : ObjectiveHandle -> Str -> Str -> [Str] -> Int -> Int -> Result SwarmTask
+taskCreate handle taskId detail dependencies maxRuns leaseTimeoutMs =
+  taskResult (swarmTaskCreateRaw handle.root.path handle.objectiveId taskId detail dependencies maxRuns leaseTimeoutMs)
+
+policySet : TaskHandle -> Str -> [Str] -> [Str] -> Result SwarmPolicy
+policySet handle mergegateName requiredApprovals requiredVerifiers =
+  policyResult (swarmPolicySetRaw handle.root.path handle.taskId mergegateName requiredApprovals requiredVerifiers)
+
+policySetForVerificationPlan : TaskHandle -> Str -> [Str] -> VerificationPlan -> Result SwarmPolicy
+policySetForVerificationPlan handle mergegateName requiredApprovals plan =
+  policySet handle mergegateName requiredApprovals plan.requiredVerifierNames
+
+toolRun : TaskHandle -> SwarmCommand -> Result SwarmRun
+toolRun handle spec =
+  runResult (swarmToolRunRaw handle.root.path handle.taskId handle.actor spec.cwd spec.command)
+
+toolRunWithTimeout : TaskHandle -> SwarmCommand -> Int -> Result SwarmRun
+toolRunWithTimeout handle spec timeoutMs =
+  runResult (swarmToolRunWithTimeoutRaw handle.root.path handle.taskId handle.actor spec.cwd timeoutMs spec.command)
+
+toolRunWithLimits : TaskHandle -> SwarmCommand -> Int -> Int -> Result SwarmRun
+toolRunWithLimits handle spec timeoutMs memoryLimitMb =
+  runResult (swarmToolRunWithLimitsRaw handle.root.path handle.taskId handle.actor spec.cwd timeoutMs memoryLimitMb spec.command)
+
+toolRunWithOptionalLimits : TaskHandle -> SwarmCommand -> Int -> Int -> Result SwarmRun
+toolRunWithOptionalLimits handle spec timeoutMs memoryLimitMb =
+  if memoryLimitMb > 0 then
+    toolRunWithLimits handle spec timeoutMs memoryLimitMb
+  else if timeoutMs > 0 then
+    toolRunWithTimeout handle spec timeoutMs
+  else
+    toolRun handle spec
+
+verifierRunWithTimeout : TaskHandle -> Str -> SwarmCommand -> Int -> Result SwarmRun
+verifierRunWithTimeout handle verifierName spec timeoutMs =
+  runResult (swarmVerifierRunWithTimeoutRaw handle.root.path handle.taskId handle.actor verifierName spec.cwd timeoutMs spec.command)
+
+verifierRunWithLimits : TaskHandle -> Str -> SwarmCommand -> Int -> Int -> Result SwarmRun
+verifierRunWithLimits handle verifierName spec timeoutMs memoryLimitMb =
+  runResult (swarmVerifierRunWithLimitsRaw handle.root.path handle.taskId handle.actor verifierName spec.cwd timeoutMs memoryLimitMb spec.command)
+
+verifierRun : TaskHandle -> Str -> SwarmCommand -> Result SwarmRun
+verifierRun handle verifierName spec =
+  runResult (swarmVerifierRunRaw handle.root.path handle.taskId handle.actor verifierName spec.cwd spec.command)
+
+verifierRunWithOptionalLimits : TaskHandle -> Str -> SwarmCommand -> Int -> Int -> Result SwarmRun
+verifierRunWithOptionalLimits handle verifierName spec timeoutMs memoryLimitMb =
+  if memoryLimitMb > 0 then
+    verifierRunWithLimits handle verifierName spec timeoutMs memoryLimitMb
+  else if timeoutMs > 0 then
+    verifierRunWithTimeout handle verifierName spec timeoutMs
+  else
+    verifierRun handle verifierName spec
+
+approve : TaskHandle -> Str -> Result SwarmApproval
+approve handle approvalName =
+  approvalResult (swarmApproveRaw handle.root.path handle.taskId handle.actor approvalName)
+
+approvals : TaskHandle -> Result [SwarmApproval]
+approvals handle = approvalListResult (swarmApprovalsRaw handle.root.path handle.taskId)
+
+mergegateDecide : TaskHandle -> Str -> [Str] -> Result SwarmMergeDecision
+mergegateDecide handle mergegateName requiredVerifiers =
+  mergeDecisionResult (swarmMergegateDecideRaw handle.root.path handle.taskId handle.actor mergegateName requiredVerifiers)
+
+runs : TaskHandle -> Result [SwarmRun]
+runs handle = runListResult (swarmRunsRaw handle.root.path handle.taskId)
+
+artifacts : TaskHandle -> Result [SwarmArtifact]
+artifacts handle = artifactListResult (swarmArtifactsRaw handle.root.path handle.taskId)
+
+artifactWrite : TaskHandle -> Str -> Str -> Result SwarmArtifact
+artifactWrite handle kind text =
+  artifactResult (swarmArtifactWriteRaw handle.root.path handle.taskId handle.actor kind text)
+
+artifactSearch : TaskHandle -> Str -> Str -> Int -> Int -> Result [SwarmArtifactSearchResult]
+artifactSearch handle kind query limit maxBytes =
+  artifactSearchResultListResult (swarmArtifactSearchRaw handle.root.path handle.taskId kind query limit maxBytes)
+
+memoryPut : SwarmRoot -> Str -> Str -> Str -> Str -> Str -> Result SwarmMemory
+memoryPut root objectiveId taskId actor key value =
+  memoryResult (swarmMemoryPutRaw root.path objectiveId taskId actor key value)
+
+memoryQuery : SwarmRoot -> Str -> Str -> Str -> Int -> Result [SwarmMemory]
+memoryQuery root objectiveId taskId key limit =
+  memoryListResult (swarmMemoryQueryRaw root.path objectiveId taskId key limit)
+
+memorySearch : SwarmRoot -> Str -> Str -> Str -> Int -> Result [SwarmMemorySearchResult]
+memorySearch root objectiveId taskId query limit =
+  memorySearchResultListResult (swarmMemorySearchRaw root.path objectiveId taskId query limit)
+
+taskMemoryPut : TaskHandle -> Str -> Str -> Result SwarmMemory
+taskMemoryPut handle key value =
+  memoryPut handle.root "" handle.taskId handle.actor key value
+
+taskMemory : TaskHandle -> Str -> Int -> Result [SwarmMemory]
+taskMemory handle key limit =
+  memoryQuery handle.root "" handle.taskId key limit
+
+objectiveMemorySearch : ObjectiveHandle -> Str -> Int -> Result [SwarmMemorySearchResult]
+objectiveMemorySearch handle query limit =
+  memorySearch handle.root handle.objectiveId "" query limit
+
+taskMemorySearch : TaskHandle -> Str -> Int -> Result [SwarmMemorySearchResult]
+taskMemorySearch handle query limit =
+  memorySearch handle.root "" handle.taskId query limit
+
+history : TaskHandle -> Result [SwarmEvent]
+history handle = eventListResult (swarmHistoryRaw handle.root.path handle.taskId)
+
+tail : TaskHandle -> Int -> Result [SwarmEvent]
+tail handle limit = eventListResult (swarmTailRaw handle.root.path handle.taskId limit)
+
+tasks : SwarmRoot -> Result [SwarmTask]
+tasks root = taskListResult (swarmTasksRaw root.path)
+
+runPassed : SwarmRun -> Bool
+runPassed run = run.status == "passed"
+
+finishToolRun : TaskHandle -> SwarmRun -> Result SwarmTaskUpdate
+finishToolRun handle run =
+  if runPassed run then
+    complete handle
+  else
+    fail handle
+
+firstRunStatus : Str -> SwarmRun -> Str
+firstRunStatus current run = if current == "" then run.status else current
+
+firstRunName : Str -> SwarmRun -> Str
+firstRunName current run = if current == "" then run.name else current
+
+firstVerifierStatus : Str -> SwarmRun -> Str
+firstVerifierStatus current run =
+  if current == "" then
+    if run.role == "verifier" then run.status else ""
+  else
+    current
+
+firstVerifierName : Str -> SwarmRun -> Str
+firstVerifierName current run =
+  if current == "" then
+    if run.role == "verifier" then run.name else ""
+  else
+    current
+
+artifactKind : SwarmArtifact -> Str
+artifactKind artifact = artifact.kind
+
+artifactPath : SwarmArtifact -> Str
+artifactPath artifact = artifact.path
+
+readyTaskId : SwarmTask -> Str
+readyTaskId task = task.taskId
+
+memorySearchResultMemoryValue : SwarmMemorySearchResult -> Str
+memorySearchResultMemoryValue item = item.memory.value
+
+memorySearchResultScore : SwarmMemorySearchResult -> Int
+memorySearchResultScore item = item.score
+
+semanticIndexArtifactKind : Str
+semanticIndexArtifactKind = "agent-pack"
+
+semanticIndexEntry : Str -> Str -> [Str] -> [Str] -> [Str] -> Str -> SwarmSemanticIndexEntry
+semanticIndexEntry id kind editFiles artifactRefs surfaceIds queryText =
+  SwarmSemanticIndexEntry {
+    id = id,
+    kind = kind,
+    editFiles = editFiles,
+    artifactRefs = artifactRefs,
+    surfaceIds = surfaceIds,
+    queryText = queryText
+  }
+
+semanticIndexArtifactText : [SwarmSemanticIndexEntry] -> Str
+semanticIndexArtifactText entries =
+  encode
+    (SwarmSemanticIndexArtifact {
+      semanticIndex = SwarmSemanticIndex {
+        entries = entries
+      }
+    })
+
+artifactWriteSemanticIndex : TaskHandle -> [SwarmSemanticIndexEntry] -> Result SwarmArtifact
+artifactWriteSemanticIndex handle entries =
+  artifactWrite handle semanticIndexArtifactKind (semanticIndexArtifactText entries)
+
+semanticArtifactSearch : TaskHandle -> Str -> Int -> Int -> Result [SwarmArtifactSearchResult]
+semanticArtifactSearch handle query limit maxBytes =
+  artifactSearch handle semanticIndexArtifactKind query limit maxBytes
+
+semanticIndexSearchResultEntries : SwarmArtifactSearchResult -> [SwarmSemanticIndexEntry]
+semanticIndexSearchResultEntries result =
+  if result.excerpt.truncated then
+    emptySwarmSemanticIndexEntries
+  else
+    (decode SwarmSemanticIndexArtifact result.excerpt.text).semanticIndex.entries
+
+appendSemanticIndexSearchResultEntries : [SwarmSemanticIndexEntry] -> SwarmArtifactSearchResult -> [SwarmSemanticIndexEntry]
+appendSemanticIndexSearchResultEntries entries result =
+  append entries (semanticIndexSearchResultEntries result)
+
+semanticIndexEntriesFromSearchResults : [SwarmArtifactSearchResult] -> [SwarmSemanticIndexEntry]
+semanticIndexEntriesFromSearchResults results =
+  fold appendSemanticIndexSearchResultEntries emptySwarmSemanticIndexEntries results
+
+semanticIndexEntryId : SwarmSemanticIndexEntry -> Str
+semanticIndexEntryId entry = entry.id
+
+semanticIndexEntryQueryText : SwarmSemanticIndexEntry -> Str
+semanticIndexEntryQueryText entry = entry.queryText
+
+appendSemanticIndexEntryEditFiles : [Str] -> SwarmSemanticIndexEntry -> [Str]
+appendSemanticIndexEntryEditFiles values entry = append values entry.editFiles
+
+appendSemanticIndexEntryArtifactRefs : [Str] -> SwarmSemanticIndexEntry -> [Str]
+appendSemanticIndexEntryArtifactRefs values entry = append values entry.artifactRefs
+
+appendSemanticIndexEntrySurfaceIds : [Str] -> SwarmSemanticIndexEntry -> [Str]
+appendSemanticIndexEntrySurfaceIds values entry = append values entry.surfaceIds
+
+semanticIndexEntryEditFiles : [SwarmSemanticIndexEntry] -> [Str]
+semanticIndexEntryEditFiles entries = fold appendSemanticIndexEntryEditFiles emptyTexts entries
+
+semanticIndexEntryArtifactRefs : [SwarmSemanticIndexEntry] -> [Str]
+semanticIndexEntryArtifactRefs entries = fold appendSemanticIndexEntryArtifactRefs emptyTexts entries
+
+semanticIndexEntrySurfaceIds : [SwarmSemanticIndexEntry] -> [Str]
+semanticIndexEntrySurfaceIds entries = fold appendSemanticIndexEntrySurfaceIds emptyTexts entries
+
+verificationTraceFailureClassification : SwarmRun -> Str
+verificationTraceFailureClassification run =
+  if runPassed run then
+    "none"
+  else
+    if run.timedOut then
+      "timeout"
+    else
+      "exit-code"
+
+verificationTraceEntry : Str -> SwarmRun -> VerificationTraceEntry
+verificationTraceEntry verifierName run =
+  VerificationTraceEntry {
+    verifierName = textConcat [verifierName],
+    runId = run.runId,
+    status = textConcat [run.status],
+    exitCode = run.exitCode,
+    timedOut = run.timedOut,
+    memoryLimitMb = run.memoryLimitMb,
+    stdoutArtifactPath = textConcat [run.stdoutArtifactPath],
+    stderrArtifactPath = textConcat [run.stderrArtifactPath],
+    failedVerifierClassification = textConcat [verificationTraceFailureClassification run]
+  }
+
+verificationTraceVerifierName : VerificationTraceEntry -> Str
+verificationTraceVerifierName entry = entry.verifierName
+
+verificationTraceFailedVerifierClassification : VerificationTraceEntry -> Str
+verificationTraceFailedVerifierClassification entry = entry.failedVerifierClassification
+
+runTraceEntry : SwarmRun -> VerificationTraceEntry
+runTraceEntry run = verificationTraceEntry run.name run
+
+verificationPlanMailboxSummary : SwarmMailbox -> VerificationPlanMailboxSummary
+verificationPlanMailboxSummary mailbox =
+  VerificationPlanMailboxSummary {
+    historyCount = length mailbox.history,
+    tailCount = length mailbox.tail,
+    approvalCount = length mailbox.approvals,
+    runCount = length mailbox.runs,
+    artifactCount = length mailbox.artifacts,
+    memoryCount = length mailbox.memory,
+    latestRunStatus = mailbox.latestRunStatus,
+    latestRunName = mailbox.latestRunName,
+    latestVerifierStatus = mailbox.latestVerifierStatus,
+    latestVerifier = mailbox.latestVerifier,
+    artifactKinds = map artifactKind mailbox.artifacts,
+    artifactPaths = map artifactPath mailbox.artifacts
+  }
+
+taskMailbox : TaskHandle -> Int -> Result SwarmMailbox
+taskMailbox handle limit =
+  match history handle {
+    Ok historyValue ->
+      match tail handle limit {
+        Ok tailValue ->
+          match approvals handle {
+            Ok approvalsValue ->
+              match runs handle {
+                Ok runsValue ->
+                  match artifacts handle {
+                    Ok artifactsValue ->
+                      match taskMemory handle "" limit {
+                        Ok memoryValue ->
+                          Ok (SwarmMailbox {
+                            history = historyValue,
+                            tail = tailValue,
+                            approvals = approvalsValue,
+                            runs = runsValue,
+                            artifacts = artifactsValue,
+                            memory = memoryValue,
+                            latestRunStatus = fold firstRunStatus "" runsValue,
+                            latestRunName = fold firstRunName "" runsValue,
+                            latestVerifierStatus = fold firstVerifierStatus "" runsValue,
+                            latestVerifier = fold firstVerifierName "" runsValue
+                          }),
+                        Err message -> mailboxResultError message
+                      },
+                    Err message -> mailboxResultError message
+                  },
+                Err message -> mailboxResultError message
+              },
+            Err message -> mailboxResultError message
+          },
+        Err message -> mailboxResultError message
+      },
+    Err message -> mailboxResultError message
+  }
+
+runToolStepWithLimits : TaskHandle -> SwarmCommand -> Int -> Int -> Int -> Result ToolStepResult
+runToolStepWithLimits handle spec timeoutMs memoryLimitMb mailboxLimit =
+  match lease handle {
+    Ok leaseValue ->
+      match toolRunWithLimits handle spec timeoutMs memoryLimitMb {
+        Ok runValue ->
+          match finishToolRun handle runValue {
+            Ok statusValue ->
+              match taskMailbox handle mailboxLimit {
+                Ok mailboxValue ->
+                  Ok (ToolStepResult { lease = leaseValue, run = runValue, status = statusValue, mailbox = mailboxValue }),
+                Err message -> toolStepResultError message
+              },
+            Err message -> toolStepResultError message
+          },
+        Err message -> toolStepResultError message
+      },
+    Err message -> toolStepResultError message
+  }
+
+runToolStepWithTimeout : TaskHandle -> SwarmCommand -> Int -> Int -> Result ToolStepResult
+runToolStepWithTimeout handle spec timeoutMs mailboxLimit =
+  match lease handle {
+    Ok leaseValue ->
+      match toolRunWithTimeout handle spec timeoutMs {
+        Ok runValue ->
+          match finishToolRun handle runValue {
+            Ok statusValue ->
+              match taskMailbox handle mailboxLimit {
+                Ok mailboxValue ->
+                  Ok (ToolStepResult { lease = leaseValue, run = runValue, status = statusValue, mailbox = mailboxValue }),
+                Err message -> toolStepResultError message
+              },
+            Err message -> toolStepResultError message
+          },
+        Err message -> toolStepResultError message
+      },
+    Err message -> toolStepResultError message
+  }
+
+runToolStep : TaskHandle -> SwarmCommand -> Int -> Result ToolStepResult
+runToolStep handle spec mailboxLimit =
+  match lease handle {
+    Ok leaseValue ->
+      match toolRun handle spec {
+        Ok runValue ->
+          match finishToolRun handle runValue {
+            Ok statusValue ->
+              match taskMailbox handle mailboxLimit {
+                Ok mailboxValue ->
+                  Ok (ToolStepResult { lease = leaseValue, run = runValue, status = statusValue, mailbox = mailboxValue }),
+                Err message -> toolStepResultError message
+              },
+            Err message -> toolStepResultError message
+          },
+        Err message -> toolStepResultError message
+      },
+    Err message -> toolStepResultError message
+  }
+
+runToolStepWithOptionalLimits : TaskHandle -> SwarmCommand -> Int -> Int -> Int -> Result ToolStepResult
+runToolStepWithOptionalLimits handle spec timeoutMs memoryLimitMb mailboxLimit =
+  if memoryLimitMb > 0 then
+    runToolStepWithLimits handle spec timeoutMs memoryLimitMb mailboxLimit
+  else if timeoutMs > 0 then
+    runToolStepWithTimeout handle spec timeoutMs mailboxLimit
+  else
+    runToolStep handle spec mailboxLimit
+
+runVerifierStepWithLimits : TaskHandle -> Str -> SwarmCommand -> Int -> Int -> Int -> Result VerifierStepResult
+runVerifierStepWithLimits handle verifierName spec timeoutMs memoryLimitMb mailboxLimit =
+  match verifierRunWithLimits handle verifierName spec timeoutMs memoryLimitMb {
+    Ok runValue ->
+      match taskMailbox handle mailboxLimit {
+        Ok mailboxValue -> Ok (VerifierStepResult { run = runValue, mailbox = mailboxValue }),
+        Err message -> verifierStepResultError message
+      },
+    Err message -> verifierStepResultError message
+  }
+
+runVerifierStepWithTimeout : TaskHandle -> Str -> SwarmCommand -> Int -> Int -> Result VerifierStepResult
+runVerifierStepWithTimeout handle verifierName spec timeoutMs mailboxLimit =
+  match verifierRunWithTimeout handle verifierName spec timeoutMs {
+    Ok runValue ->
+      match taskMailbox handle mailboxLimit {
+        Ok mailboxValue -> Ok (VerifierStepResult { run = runValue, mailbox = mailboxValue }),
+        Err message -> verifierStepResultError message
+      },
+    Err message -> verifierStepResultError message
+  }
+
+emptyVerificationPlanExecutionWithLimits : TaskHandle -> Int -> Int -> Int -> VerificationPlanExecutionWithLimits
+emptyVerificationPlanExecutionWithLimits handle mailboxLimit timeoutMs memoryLimitMb =
+  VerificationPlanExecutionWithLimits {
+    handle = handle,
+    mailboxLimit = mailboxLimit,
+    timeoutMs = timeoutMs,
+    memoryLimitMb = memoryLimitMb,
+    steps = emptyVerifierStepResults,
+    passed = true,
+    failedVerifiers = emptyVerifierNames,
+    trace = emptyVerificationTraceEntries,
+    error = ""
+  }
+
+verificationPlanExecutionWithLimitsError : VerificationPlanExecutionWithLimits -> Str -> VerificationPlanExecutionWithLimits
+verificationPlanExecutionWithLimitsError state message =
+  VerificationPlanExecutionWithLimits {
+    handle = state.handle,
+    mailboxLimit = state.mailboxLimit,
+    timeoutMs = state.timeoutMs,
+    memoryLimitMb = state.memoryLimitMb,
+    steps = state.steps,
+    passed = state.passed,
+    failedVerifiers = state.failedVerifiers,
+    trace = state.trace,
+    error = message
+  }
+
+verificationPlanExecutionWithLimitsAppend : VerificationPlanExecutionWithLimits -> Str -> VerifierStepResult -> VerificationPlanExecutionWithLimits
+verificationPlanExecutionWithLimitsAppend state verifierName step =
+  VerificationPlanExecutionWithLimits {
+    handle = state.handle,
+    mailboxLimit = state.mailboxLimit,
+    timeoutMs = state.timeoutMs,
+    memoryLimitMb = state.memoryLimitMb,
+    steps = append state.steps [step],
+    passed = if runPassed step.run then state.passed else false,
+    failedVerifiers = if runPassed step.run then state.failedVerifiers else append state.failedVerifiers [verifierName],
+    trace = append state.trace [verificationTraceEntry verifierName step.run],
+    error = state.error
+  }
+
+verificationPlanExecutionWithLimitsStep : VerificationPlanExecutionWithLimits -> VerificationCommand -> VerificationPlanExecutionWithLimits
+verificationPlanExecutionWithLimitsStep state command =
+  if state.error != "" then
+    state
+  else
+    match runVerifierStepWithLimits state.handle command.verifierName command.command state.timeoutMs state.memoryLimitMb state.mailboxLimit {
+      Ok stepValue -> verificationPlanExecutionWithLimitsAppend state command.verifierName stepValue,
+      Err message -> verificationPlanExecutionWithLimitsError state message
+    }
+
+executeVerificationPlanWithLimits : TaskHandle -> VerificationPlan -> Int -> Int -> Int -> Result VerificationPlanResult
+executeVerificationPlanWithLimits handle plan timeoutMs memoryLimitMb mailboxLimit =
+  let execution = fold verificationPlanExecutionWithLimitsStep (emptyVerificationPlanExecutionWithLimits handle mailboxLimit timeoutMs memoryLimitMb) plan.commands in
+  if execution.error != "" then
+    verificationPlanResultError execution.error
+  else
+    match taskMailbox handle mailboxLimit {
+      Ok mailboxValue ->
+        Ok (VerificationPlanResult {
+          plan = plan,
+          steps = execution.steps,
+          passed = execution.passed,
+          failedVerifiers = execution.failedVerifiers,
+          trace = execution.trace,
+          mailbox = mailboxValue,
+          mailboxSummary = verificationPlanMailboxSummary mailboxValue
+        }),
+      Err message -> verificationPlanResultError message
+    }
+
+executeVerificationPlanWithTimeout : TaskHandle -> VerificationPlan -> Int -> Int -> Result VerificationPlanResult
+executeVerificationPlanWithTimeout handle plan timeoutMs mailboxLimit =
+  executeVerificationPlanWithLimits handle plan timeoutMs 0 mailboxLimit
+
+executeVerificationPlanWithOptionalLimits : TaskHandle -> VerificationPlan -> Int -> Int -> Int -> Result VerificationPlanResult
+executeVerificationPlanWithOptionalLimits handle plan timeoutMs memoryLimitMb mailboxLimit =
+  if memoryLimitMb > 0 then
+    executeVerificationPlanWithLimits handle plan timeoutMs memoryLimitMb mailboxLimit
+  else
+    executeVerificationPlanWithTimeout handle plan timeoutMs mailboxLimit
+
+approveAndMergeVerificationPlan : TaskHandle -> Str -> Str -> VerificationPlan -> Int -> Result ReviewStepResult
+approveAndMergeVerificationPlan handle approvalName mergegateName plan mailboxLimit =
+  match approve handle approvalName {
+    Ok approvalValue ->
+      match approvals handle {
+        Ok approvalsValue ->
+          match status handle {
+            Ok taskStatusValue ->
+              match managerNext (objectiveHandle handle.root taskStatusValue.objectiveId) {
+                Ok managerAfterApprovalValue ->
+                  match mergegateDecide handle mergegateName plan.requiredVerifierNames {
+                    Ok mergeDecisionValue ->
+                      match taskMailbox handle mailboxLimit {
+                        Ok mailboxValue ->
+                          Ok (ReviewStepResult {
+                            approval = approvalValue,
+                            approvals = approvalsValue,
+                            managerAfterApproval = managerAfterApprovalValue,
+                            mergeDecision = mergeDecisionValue,
+                            mailbox = mailboxValue
+                          }),
+                        Err message -> reviewStepResultError message
+                      },
+                    Err message -> reviewStepResultError message
+                  },
+                Err message -> reviewStepResultError message
+              },
+            Err message -> reviewStepResultError message
+          },
+        Err message -> reviewStepResultError message
+      },
+    Err message -> reviewStepResultError message
+  }
+
+emptyMemorySearchResults : [SwarmMemorySearchResult]
+emptyMemorySearchResults = []
+
+emptyArtifactSearchResults : [SwarmArtifactSearchResult]
+emptyArtifactSearchResults = []
+
+emptyArtifactContents : [SwarmArtifactContent]
+emptyArtifactContents = []
+
+memorySearchResultMatchedText : SwarmMemorySearchResult -> Str
+memorySearchResultMatchedText item = item.matchedText
+
+artifactSearchResultMatchedText : SwarmArtifactSearchResult -> Str
+artifactSearchResultMatchedText item = item.matchedText
+
+artifactSearchResultScore : SwarmArtifactSearchResult -> Int
+artifactSearchResultScore item = item.score
+
+taskContextPack : TaskHandle -> Str -> Int -> Result SwarmContextPack
+taskContextPack handle query limit =
+  match status handle {
+    Ok taskValue ->
+      let objective = objectiveHandle handle.root taskValue.objectiveId in
+      match taskMailbox handle limit {
+        Ok mailboxValue ->
+          let mailboxSummary = verificationPlanMailboxSummary mailboxValue in
+          match taskMemorySearch handle query limit {
+            Ok taskMemoryMatchesValue ->
+              match objectiveMemorySearch objective query limit {
+                Ok objectiveMemoryMatchesValue ->
+                  match semanticArtifactSearch handle contextPackSemanticIndexQuery limit contextPackSemanticIndexReadBytes {
+                    Ok semanticSearchResultsValue ->
+                      match ready objective {
+                        Ok readyTasks ->
+                          match managerNext objective {
+                            Ok managerActionValue ->
+                              let memoryMatches = append taskMemoryMatchesValue objectiveMemoryMatchesValue in
+                              let semanticIndexEntriesValue = semanticIndexEntriesFromSearchResults semanticSearchResultsValue in
+                              Ok (SwarmContextPack {
+                                task = taskValue,
+                                readyTaskIds = map readyTaskId readyTasks,
+                                dependencyTaskIds = emptyTexts,
+                                dependencyTaskStatuses = emptyTexts,
+                                dependencyTaskReady = emptyBools,
+                                managerAction = managerActionValue,
+                                mailboxSummary = mailboxSummary,
+                                taskMemoryMatches = taskMemoryMatchesValue,
+                                objectiveMemoryMatches = objectiveMemoryMatchesValue,
+                                benchmarkMemoryMatches = emptyMemorySearchResults,
+                                artifactSearchMatches = emptyArtifactSearchResults,
+                                semanticArtifactMatches = semanticSearchResultsValue,
+                                memoryValues = map memorySearchResultMemoryValue memoryMatches,
+                                memoryMatchedText = map memorySearchResultMatchedText memoryMatches,
+                                memoryScores = map memorySearchResultScore memoryMatches,
+                                benchmarkValues = emptyTexts,
+                                benchmarkMatchedText = emptyTexts,
+                                benchmarkScores = [],
+                                artifactSearchMatchedText = emptyTexts,
+                                artifactSearchScores = [],
+                                semanticArtifactMatchedText = map artifactSearchResultMatchedText semanticSearchResultsValue,
+                                semanticArtifactScores = map artifactSearchResultScore semanticSearchResultsValue,
+                                semanticIndexEntries = semanticIndexEntriesValue,
+                                semanticIndexEntryIds = map semanticIndexEntryId semanticIndexEntriesValue,
+                                semanticIndexEditFiles = semanticIndexEntryEditFiles semanticIndexEntriesValue,
+                                semanticIndexArtifactRefs = semanticIndexEntryArtifactRefs semanticIndexEntriesValue,
+                                semanticIndexSurfaceIds = semanticIndexEntrySurfaceIds semanticIndexEntriesValue,
+                                semanticIndexQueryTexts = map semanticIndexEntryQueryText semanticIndexEntriesValue,
+                                runTrace = map runTraceEntry mailboxValue.runs,
+                                artifactKinds = mailboxSummary.artifactKinds,
+                                artifactPaths = mailboxSummary.artifactPaths,
+                                artifactExcerpts = emptyArtifactContents
+                              }),
+                            Err message -> contextPackResultError message
+                          },
+                        Err message -> contextPackResultError message
+                      },
+                    Err message -> contextPackResultError message
+                  },
+                Err message -> contextPackResultError message
+              },
+            Err message -> contextPackResultError message
+          },
+        Err message -> contextPackResultError message
+      },
+    Err message -> contextPackResultError message
+  }
+
+record AgentBackendSpec = {
+  agentBin : Str,
+  model : Str,
+  reasoning : Str,
+  sandbox : Str,
+  workspaceRoot : Str,
+  template : [Str]
+}
+
+record AgentBackendSummary = {
+  kind : Str,
+  agentBin : Str,
+  model : Str,
+  reasoning : Str,
+  sandbox : Str,
+  workspaceRoot : Str,
+  templateArgCount : Int,
+  promptTransport : Str,
+  hasRoleInput : Bool,
+  hasPromptPathInput : Bool,
+  hasInlinePromptInput : Bool,
+  hasReportOutput : Bool,
+  hasSchemaInput : Bool,
+  hasWorkspaceInput : Bool,
+  valid : Bool,
+  validationMessage : Str,
+  warnings : [Str]
+}
+
+record AgentCommandRequest = {
+  role : Str,
+  schemaPath : Str,
+  reportPath : Str,
+  promptPath : Str,
+  prompt : Str
+}
+
+agentBackendEmptyCommand : [Str]
+agentBackendEmptyCommand = []
+
+agentBackendSpec : Str -> Str -> Str -> Str -> Str -> [Str] -> AgentBackendSpec
+agentBackendSpec agentBin model reasoning sandbox workspaceRoot template =
+  AgentBackendSpec {
+    agentBin = agentBin,
+    model = model,
+    reasoning = reasoning,
+    sandbox = sandbox,
+    workspaceRoot = workspaceRoot,
+    template = template
+  }
+
+agentCommandRequest : Str -> Str -> Str -> Str -> Str -> AgentCommandRequest
+agentCommandRequest role schemaPath reportPath promptPath prompt =
+  AgentCommandRequest {
+    role = role,
+    schemaPath = schemaPath,
+    reportPath = reportPath,
+    promptPath = promptPath,
+    prompt = prompt
+  }
+
+agentBackendReasoningConfig : AgentBackendSpec -> Str
+agentBackendReasoningConfig backend =
+  textConcat ["model_reasoning_effort=\"", backend.reasoning, "\""]
+
+agentBackendTemplateReplace : Str -> Str -> Str -> Str
+agentBackendTemplateReplace value needle replacement =
+  textJoin replacement (textSplit value needle)
+
+agentBackendTextIncludes : Str -> Str -> Bool
+agentBackendTextIncludes value needle =
+  length (textSplit value needle) > 1
+
+agentBackendTemplateContains : [Str] -> Str -> Bool
+agentBackendTemplateContains template needle = {
+  let mut found = false;
+  for arg in template {
+    if found then
+      found
+    else {
+      found = agentBackendTextIncludes arg needle;
+      found
+    }
+  };
+  found
+}
+
+agentBackendKind : AgentBackendSpec -> Str
+agentBackendKind backend =
+  if length backend.template > 0 then
+    "template"
+  else
+    "codex"
+
+agentBackendTemplateHasPromptPathInput : AgentBackendSpec -> Bool
+agentBackendTemplateHasPromptPathInput backend =
+  if length backend.template == 0 then
+    true
+  else
+    agentBackendTemplateContains backend.template "{prompt_path}"
+
+agentBackendTemplateHasInlinePromptInput : AgentBackendSpec -> Bool
+agentBackendTemplateHasInlinePromptInput backend =
+  if length backend.template == 0 then
+    true
+  else
+    agentBackendTemplateContains backend.template "{prompt}"
+
+agentBackendTemplateHasRoleInput : AgentBackendSpec -> Bool
+agentBackendTemplateHasRoleInput backend =
+  if length backend.template == 0 then
+    true
+  else
+    agentBackendTemplateContains backend.template "{role}"
+
+agentBackendTemplateHasReportOutput : AgentBackendSpec -> Bool
+agentBackendTemplateHasReportOutput backend =
+  if length backend.template == 0 then
+    true
+  else
+    agentBackendTemplateContains backend.template "{report_path}"
+
+agentBackendTemplateHasSchemaInput : AgentBackendSpec -> Bool
+agentBackendTemplateHasSchemaInput backend =
+  if length backend.template == 0 then
+    true
+  else
+    agentBackendTemplateContains backend.template "{schema_path}"
+
+agentBackendTemplateHasWorkspaceInput : AgentBackendSpec -> Bool
+agentBackendTemplateHasWorkspaceInput backend =
+  if length backend.template == 0 then
+    true
+  else
+    agentBackendTemplateContains backend.template "{workspace_root}"
+
+agentBackendPromptTransport : AgentBackendSpec -> Str
+agentBackendPromptTransport backend =
+  if length backend.template == 0 then
+    "argument"
+  else {
+    let hasPromptPath = agentBackendTemplateHasPromptPathInput backend in
+    let hasInlinePrompt = agentBackendTemplateHasInlinePromptInput backend in
+    if hasPromptPath then
+      if hasInlinePrompt then
+        "prompt-path+inline"
+      else
+        "prompt-path"
+    else if hasInlinePrompt then
+      "inline-prompt"
+    else
+      "missing"
+  }
+
+agentBackendValidationMessage : AgentBackendSpec -> Str
+agentBackendValidationMessage backend =
+  if length backend.template == 0 then
+    ""
+  else if agentBackendTemplateHasRoleInput backend == false then
+    "agent-backend-template-missing-role"
+  else if agentBackendPromptTransport backend == "missing" then
+    "agent-backend-template-missing-prompt-input"
+  else if agentBackendTemplateHasReportOutput backend == false then
+    "agent-backend-template-missing-report-output"
+  else
+    ""
+
+agentBackendWarningMessages : AgentBackendSpec -> [Str]
+agentBackendWarningMessages backend =
+  if length backend.template == 0 then
+    []
+  else {
+    let schemaWarnings =
+      if agentBackendTemplateHasSchemaInput backend then
+        []
+      else
+        ["agent-backend-template-missing-schema-path"] in
+    if agentBackendTemplateHasWorkspaceInput backend then
+      schemaWarnings
+    else
+      append schemaWarnings ["agent-backend-template-missing-workspace-root"]
+  }
+
+agentBackendValid : AgentBackendSpec -> Bool
+agentBackendValid backend =
+  agentBackendValidationMessage backend == ""
+
+agentBackendSummary : AgentBackendSpec -> AgentBackendSummary
+agentBackendSummary backend = {
+  let validationMessage = agentBackendValidationMessage backend in
+  AgentBackendSummary {
+    kind = agentBackendKind backend,
+    agentBin = backend.agentBin,
+    model = backend.model,
+    reasoning = backend.reasoning,
+    sandbox = backend.sandbox,
+    workspaceRoot = backend.workspaceRoot,
+    templateArgCount = length backend.template,
+    promptTransport = agentBackendPromptTransport backend,
+    hasRoleInput = agentBackendTemplateHasRoleInput backend,
+    hasPromptPathInput = agentBackendTemplateHasPromptPathInput backend,
+    hasInlinePromptInput = agentBackendTemplateHasInlinePromptInput backend,
+    hasReportOutput = agentBackendTemplateHasReportOutput backend,
+    hasSchemaInput = agentBackendTemplateHasSchemaInput backend,
+    hasWorkspaceInput = agentBackendTemplateHasWorkspaceInput backend,
+    valid = validationMessage == "",
+    validationMessage = validationMessage,
+    warnings = agentBackendWarningMessages backend
+  }
+}
+
+agentBackendRenderArg : AgentBackendSpec -> AgentCommandRequest -> Str -> Str
+agentBackendRenderArg backend request value = {
+  let rendered0 = agentBackendTemplateReplace value "{role}" request.role in
+  let rendered1 = agentBackendTemplateReplace rendered0 "{schema_path}" request.schemaPath in
+  let rendered2 = agentBackendTemplateReplace rendered1 "{report_path}" request.reportPath in
+  let rendered3 = agentBackendTemplateReplace rendered2 "{prompt_path}" request.promptPath in
+  let rendered4 = agentBackendTemplateReplace rendered3 "{prompt}" request.prompt in
+  let rendered5 = agentBackendTemplateReplace rendered4 "{workspace_root}" backend.workspaceRoot in
+  let rendered6 = agentBackendTemplateReplace rendered5 "{agent_bin}" backend.agentBin in
+  let rendered7 = agentBackendTemplateReplace rendered6 "{model}" backend.model in
+  let rendered8 = agentBackendTemplateReplace rendered7 "{reasoning}" backend.reasoning in
+  agentBackendTemplateReplace rendered8 "{sandbox}" backend.sandbox
+}
+
+agentBackendRenderTemplate : AgentBackendSpec -> AgentCommandRequest -> [Str]
+agentBackendRenderTemplate backend request = {
+  let mut rendered = agentBackendEmptyCommand;
+  for arg in backend.template {
+    rendered = append rendered [agentBackendRenderArg backend request arg];
+    rendered
+  };
+  rendered
+}
+
+agentBackendCodexCommand : AgentBackendSpec -> AgentCommandRequest -> [Str]
+agentBackendCodexCommand backend request = [
+  backend.agentBin,
+  "exec",
+  "--json",
+  "--cd",
+  backend.workspaceRoot,
+  "-m",
+  backend.model,
+  "-c",
+  agentBackendReasoningConfig backend,
+  "--skip-git-repo-check",
+  "--sandbox",
+  backend.sandbox,
+  "--ephemeral",
+  "--output-schema",
+  request.schemaPath,
+  "-o",
+  request.reportPath,
+  request.prompt
+]
+
+agentBackendCommand : AgentBackendSpec -> AgentCommandRequest -> [Str]
+agentBackendCommand backend request =
+  if length backend.template > 0 then
+    agentBackendRenderTemplate backend request
+  else
+    agentBackendCodexCommand backend request
+
+record AttemptSpec = {
+  root : SwarmRoot,
+  objectiveId : Str,
+  objectiveDetail : Str,
+  objectiveMaxTasks : Int,
+  objectiveMaxRuns : Int,
+  stateRootPath : Str,
+  statusPath : Str,
+  feedbackPath : Str,
+  maxAttempts : Int,
+  actor : Str,
+  approvalName : Str,
+  mergegateName : Str,
+  requiredApprovals : [Str],
+  requiredVerifiers : [Str]
+}
+
+record AttemptTaskIds = {
+  builderTaskId : Str,
+  verifierTaskId : Str
+}
+
+record PreviousVerifierFeedback = {
+  present : Bool,
+  path : Str,
+  raw : Str,
+  summary : Str
+}
+
+record AttemptStatus = {
+  attempt : Int,
+  maxAttempts : Int,
+  phase : Str,
+  verdict : Str,
+  completed : Bool,
+  objectiveId : Str,
+  lastBuilderTaskId : Str,
+  lastVerifierTaskId : Str,
+  final : Bool
+}
+
+record AttemptTerminalOutcome = {
+  attempt : Int,
+  phase : Str,
+  verdict : Str,
+  completed : Bool,
+  final : Bool,
+  builderTaskId : Str,
+  verifierTaskId : Str,
+  feedbackPath : Str
+}
+
+record AttemptRetryDecision = {
+  attempt : Int,
+  maxAttempts : Int,
+  shouldRetry : Bool,
+  nextAttempt : Int,
+  terminal : Bool,
+  reason : Str,
+  feedbackSummary : Str,
+  feedbackPath : Str
+}
+
+record AttemptTaskIdSearch = {
+  wanted : Str,
+  found : Bool
+}
+
+record AttemptObjectiveSearch = {
+  wanted : Str,
+  found : Bool
+}
+
+attemptEmptyTexts : [Str]
+attemptEmptyTexts = []
+
+attemptSpec : SwarmRoot -> Str -> Str -> Int -> Int -> Str -> Int -> Str -> Str -> Str -> [Str] -> [Str] -> AttemptSpec
+attemptSpec root objectiveId objectiveDetail objectiveMaxTasks objectiveMaxRuns stateRootPath maxAttempts actor approvalName mergegateName requiredApprovals requiredVerifiers =
+  AttemptSpec {
+    root = root,
+    objectiveId = objectiveId,
+    objectiveDetail = objectiveDetail,
+    objectiveMaxTasks = objectiveMaxTasks,
+    objectiveMaxRuns = objectiveMaxRuns,
+    stateRootPath = stateRootPath,
+    statusPath = pathJoin [stateRootPath, "status.json"],
+    feedbackPath = pathJoin [stateRootPath, "feedback.json"],
+    maxAttempts = maxAttempts,
+    actor = actor,
+    approvalName = approvalName,
+    mergegateName = mergegateName,
+    requiredApprovals = requiredApprovals,
+    requiredVerifiers = requiredVerifiers
+  }
+
+attemptBuilderTaskId : Int -> Str
+attemptBuilderTaskId attempt = textConcat ["builder-", encode attempt]
+
+attemptVerifierTaskId : Int -> Str
+attemptVerifierTaskId attempt = textConcat ["verifier-", encode attempt]
+
+attemptTaskIds : Int -> AttemptTaskIds
+attemptTaskIds attempt =
+  AttemptTaskIds {
+    builderTaskId = attemptBuilderTaskId attempt,
+    verifierTaskId = attemptVerifierTaskId attempt
+  }
+
+attemptBuilderHandle : AttemptSpec -> Int -> TaskHandle
+attemptBuilderHandle spec attempt =
+  taskHandle spec.root (attemptBuilderTaskId attempt) spec.actor
+
+attemptVerifierHandle : AttemptSpec -> Int -> TaskHandle
+attemptVerifierHandle spec attempt =
+  taskHandle spec.root (attemptVerifierTaskId attempt) spec.actor
+
+attemptStatus : Int -> Int -> Str -> Str -> Bool -> Str -> Str -> Str -> Bool -> AttemptStatus
+attemptStatus attempt maxAttempts phase verdict completed objective builderTask verifierTask final =
+  AttemptStatus {
+    attempt = attempt,
+    maxAttempts = maxAttempts,
+    phase = phase,
+    verdict = verdict,
+    completed = completed,
+    objectiveId = objective,
+    lastBuilderTaskId = builderTask,
+    lastVerifierTaskId = verifierTask,
+    final = final
+  }
+
+attemptStatusForPhase : AttemptSpec -> Int -> Str -> Str -> Bool -> Bool -> AttemptStatus
+attemptStatusForPhase spec attempt phase verdict completed final = {
+  let ids = attemptTaskIds attempt in
+  attemptStatus
+    attempt
+    spec.maxAttempts
+    phase
+    verdict
+    completed
+    spec.objectiveId
+    ids.builderTaskId
+    ids.verifierTaskId
+    final
+}
+
+attemptInitialStatus : AttemptSpec -> AttemptStatus
+attemptInitialStatus spec =
+  attemptStatus 1 spec.maxAttempts "needs-builder" "pending" false spec.objectiveId "" "" false
+
+attemptWriteStatus : AttemptSpec -> AttemptStatus -> Str
+attemptWriteStatus spec state = match writeFile spec.statusPath (encode state) {
+  Ok written -> "",
+  Err message -> message
+}
+
+attemptReadStatus : AttemptSpec -> AttemptStatus
+attemptReadStatus spec = match readFile spec.statusPath {
+  Ok raw -> decode AttemptStatus raw,
+  Err message -> attemptInitialStatus spec
+}
+
+attemptEnsureRoot : AttemptSpec -> Str
+attemptEnsureRoot spec = match mkdirAll spec.stateRootPath {
+  Ok created -> "",
+  Err message -> textConcat ["state-root-error:", message]
+}
+
+attemptPreviousVerifierFeedback : AttemptSpec -> PreviousVerifierFeedback
+attemptPreviousVerifierFeedback spec = match readFile spec.feedbackPath {
+  Ok raw ->
+    PreviousVerifierFeedback {
+      present = true,
+      path = spec.feedbackPath,
+      raw = raw,
+      summary = raw
+    },
+  Err message ->
+    PreviousVerifierFeedback {
+      present = false,
+      path = spec.feedbackPath,
+      raw = "",
+      summary = ""
+    }
+}
+
+attemptFeedbackPromptSection : AttemptSpec -> Str -> Str
+attemptFeedbackPromptSection spec missingText = {
+  let feedback = attemptPreviousVerifierFeedback spec in
+  if feedback.present then
+    textJoin "\n" [
+      "Verifier feedback from the previous attempt:",
+      feedback.raw
+    ]
+  else
+    missingText
+}
+
+attemptNextNumber : Int -> Int
+attemptNextNumber value =
+  if value == 0 then
+    1
+  else if value == 1 then
+    2
+  else if value == 2 then
+    3
+  else if value == 3 then
+    4
+  else if value == 4 then
+    5
+  else if value == 5 then
+    6
+  else if value == 6 then
+    7
+  else if value == 7 then
+    8
+  else if value == 8 then
+    9
+  else if value == 9 then
+    10
+  else if value == 10 then
+    11
+  else if value == 11 then
+    12
+  else if value == 12 then
+    13
+  else if value == 13 then
+    14
+  else if value == 14 then
+    15
+  else if value == 15 then
+    16
+  else if value == 16 then
+    17
+  else if value == 17 then
+    18
+  else if value == 18 then
+    19
+  else if value == 19 then
+    20
+  else
+    value
+
+attemptRetryDecision : AttemptSpec -> Int -> Str -> AttemptRetryDecision
+attemptRetryDecision spec attempt reason = {
+  let feedback = attemptPreviousVerifierFeedback spec in
+  let shouldRetry = attempt != spec.maxAttempts in
+  AttemptRetryDecision {
+    attempt = attempt,
+    maxAttempts = spec.maxAttempts,
+    shouldRetry = shouldRetry,
+    nextAttempt = if shouldRetry then attemptNextNumber attempt else attempt,
+    terminal = if shouldRetry then false else true,
+    reason = reason,
+    feedbackSummary = feedback.summary,
+    feedbackPath = spec.feedbackPath
+  }
+}
+
+attemptRetryDecisionFromStatus : AttemptSpec -> AttemptStatus -> AttemptRetryDecision
+attemptRetryDecisionFromStatus spec state = {
+  let feedback = attemptPreviousVerifierFeedback spec in
+  let persistedMaxAttempts =
+    if state.maxAttempts == 0 then
+      spec.maxAttempts
+    else
+      state.maxAttempts in
+  let shouldRetry =
+    if state.final then
+      false
+    else if state.completed then
+      false
+    else
+      state.attempt != persistedMaxAttempts in
+  AttemptRetryDecision {
+    attempt = state.attempt,
+    maxAttempts = persistedMaxAttempts,
+    shouldRetry = shouldRetry,
+    nextAttempt = if shouldRetry then attemptNextNumber state.attempt else state.attempt,
+    terminal = if shouldRetry then false else true,
+    reason = state.phase,
+    feedbackSummary = feedback.summary,
+    feedbackPath = spec.feedbackPath
+  }
+}
+
+attemptRetryStatus : AttemptSpec -> AttemptRetryDecision -> AttemptStatus
+attemptRetryStatus spec decision = {
+  let ids = attemptTaskIds decision.attempt in
+  attemptStatus
+    decision.nextAttempt
+    decision.maxAttempts
+    "needs-builder"
+    "retry"
+    false
+    spec.objectiveId
+    ids.builderTaskId
+    ids.verifierTaskId
+    false
+}
+
+attemptTerminalOutcome : AttemptSpec -> Int -> Str -> Bool -> AttemptTerminalOutcome
+attemptTerminalOutcome spec attempt verdict completed = {
+  let ids = attemptTaskIds attempt in
+  AttemptTerminalOutcome {
+    attempt = attempt,
+    phase = if completed then "completed" else "failed",
+    verdict = verdict,
+    completed = completed,
+    final = true,
+    builderTaskId = ids.builderTaskId,
+    verifierTaskId = ids.verifierTaskId,
+    feedbackPath = spec.feedbackPath
+  }
+}
+
+attemptOutcomeFromStatus : AttemptSpec -> AttemptStatus -> AttemptTerminalOutcome
+attemptOutcomeFromStatus spec state =
+  AttemptTerminalOutcome {
+    attempt = state.attempt,
+    phase = state.phase,
+    verdict = state.verdict,
+    completed = state.completed,
+    final = state.final,
+    builderTaskId =
+      if state.lastBuilderTaskId == "" then
+        attemptBuilderTaskId state.attempt
+      else
+        state.lastBuilderTaskId,
+    verifierTaskId =
+      if state.lastVerifierTaskId == "" then
+        attemptVerifierTaskId state.attempt
+      else
+        state.lastVerifierTaskId,
+    feedbackPath = spec.feedbackPath
+  }
+
+attemptStatusFromTerminalOutcome : AttemptSpec -> AttemptTerminalOutcome -> AttemptStatus
+attemptStatusFromTerminalOutcome spec outcome =
+  attemptStatus
+    outcome.attempt
+    spec.maxAttempts
+    outcome.phase
+    outcome.verdict
+    outcome.completed
+    spec.objectiveId
+    outcome.builderTaskId
+    outcome.verifierTaskId
+    outcome.final
+
+attemptPersistTerminalOutcome : AttemptSpec -> AttemptTerminalOutcome -> Str
+attemptPersistTerminalOutcome spec outcome =
+  attemptWriteStatus spec (attemptStatusFromTerminalOutcome spec outcome)
+
+attemptObjectiveSearch : AttemptObjectiveSearch -> SwarmObjective -> AttemptObjectiveSearch
+attemptObjectiveSearch search objective =
+  if search.found then
+    search
+  else
+    AttemptObjectiveSearch {
+      wanted = search.wanted,
+      found = objective.objectiveId == search.wanted
+    }
+
+attemptObjectiveListHasId : Str -> [SwarmObjective] -> Bool
+attemptObjectiveListHasId wanted objectiveValues =
+  (fold attemptObjectiveSearch (AttemptObjectiveSearch { wanted = wanted, found = false }) objectiveValues).found
+
+attemptTaskIdSearch : AttemptTaskIdSearch -> SwarmTask -> AttemptTaskIdSearch
+attemptTaskIdSearch search task =
+  if search.found then
+    search
+  else
+    AttemptTaskIdSearch {
+      wanted = search.wanted,
+      found = task.taskId == search.wanted
+    }
+
+attemptTaskListHasId : Str -> [SwarmTask] -> Bool
+attemptTaskListHasId wanted taskValues =
+  (fold attemptTaskIdSearch (AttemptTaskIdSearch { wanted = wanted, found = false }) taskValues).found
+
+attemptEnsureObjective : AttemptSpec -> Str
+attemptEnsureObjective spec = match objectives spec.root {
+  Ok objectiveValues ->
+    if attemptObjectiveListHasId spec.objectiveId objectiveValues then
+      ""
+    else
+      match objectiveCreate spec.root spec.objectiveId spec.objectiveDetail spec.objectiveMaxTasks spec.objectiveMaxRuns {
+        Ok created -> "",
+        Err message -> message
+      },
+  Err message ->
+    match objectiveCreate spec.root spec.objectiveId spec.objectiveDetail spec.objectiveMaxTasks spec.objectiveMaxRuns {
+      Ok created -> "",
+      Err createMessage -> createMessage
+    }
+}
+
+attemptEnsureTask : AttemptSpec -> Str -> Str -> [Str] -> Int -> Int -> Str
+attemptEnsureTask spec taskId detail dependencies maxRuns leaseTimeoutMs = match tasks spec.root {
+  Ok taskValues ->
+    if attemptTaskListHasId taskId taskValues then
+      ""
+    else
+      match taskCreate (objectiveHandle spec.root spec.objectiveId) taskId detail dependencies maxRuns leaseTimeoutMs {
+        Ok created -> "",
+        Err message -> message
+      },
+  Err message ->
+    match taskCreate (objectiveHandle spec.root spec.objectiveId) taskId detail dependencies maxRuns leaseTimeoutMs {
+      Ok created -> "",
+      Err createMessage -> createMessage
+    }
+}
+
+attemptEnsureAttemptTasks : AttemptSpec -> Int -> Str -> Str -> Str
+attemptEnsureAttemptTasks spec attempt builderDetail verifierDetail = {
+  let objectiveError = attemptEnsureObjective spec in
+  if objectiveError != "" then
+    objectiveError
+  else {
+    let ids = attemptTaskIds attempt in
+    let builderError = attemptEnsureTask spec ids.builderTaskId builderDetail attemptEmptyTexts 1 60000 in
+    if builderError != "" then
+      builderError
+    else
+      attemptEnsureTask spec ids.verifierTaskId verifierDetail [ids.builderTaskId] 1 60000
+  }
+}
+
+record CapabilityStatus = {
+  name : Str,
+  status : Str,
+  evidence : [Str],
+  blocking_gaps : [Str],
+  required_closure : [Str]
+}
+
+record VerifierReport = {
+  verdict : Str,
+  summary : Str,
+  findings : [Str],
+  tests_run : [Str],
+  follow_up : [Str],
+  capability_statuses : [CapabilityStatus]
+}
+
+record StatusView = {
+  state : AttemptStatus,
+  agentBackend : AgentBackendSummary,
+  objectiveProjectedStatus : Str,
+  taskCount : Int,
+  allTaskIds : [Str],
+  completedTaskIds : [Str],
+  readyTaskIds : [Str],
+  approvalCount : Int,
+  mergeDecisionDetail : Str,
+  mergeGateSatisfied : Bool,
+  feedbackSummary : Str,
+  previousVerifierFeedback : PreviousVerifierFeedback,
+  retryDecision : AttemptRetryDecision,
+  terminalOutcome : AttemptTerminalOutcome
+}
+
+
+emptyCapabilityStatuses : [CapabilityStatus]
+emptyCapabilityStatuses = []
+
+stateRootPath : Str
+stateRootPath =
+  if textJoin "" argv == "" then
+    "swarm-native-feedback-loop-state"
+  else
+    pathJoin argv
+
+swarmStateRoot : SwarmRoot
+swarmStateRoot = swarmRoot stateRootPath
+
+objectiveId : Str
+objectiveId = "autonomous-confidence"
+
+objectiveRef : ObjectiveHandle
+objectiveRef = objectiveHandle swarmStateRoot objectiveId
+
+readEnvText : Str -> Str -> Str
+readEnvText name fallback = match envVar name {
+  Ok raw -> decode Str raw,
+  Err message -> fallback
+}
+
+readEnvTextList : Str -> [Str] -> [Str]
+readEnvTextList name fallback = match envVar name {
+  Ok raw -> if raw == "" then fallback else decode [Str] raw,
+  Err message -> fallback
+}
+
+readEnvInt : Str -> Int -> Int
+readEnvInt name fallback = match envVar name {
+  Ok raw -> if raw == "" then fallback else decode Int raw,
+  Err message -> fallback
+}
+
+envPresent : Str -> Bool
+envPresent name = match envVar name {
+  Ok raw -> raw != "",
+  Err message -> false
+}
+
+truthyText : Str -> Bool
+truthyText value =
+  if value == "1" then
+    true
+  else if value == "true" then
+    true
+  else if value == "yes" then
+    true
+  else
+    value == "on"
+
+allowUnmanagedAgentRuntime : Bool
+allowUnmanagedAgentRuntime = match envVar "CLASP_ALLOW_UNMANAGED_AGENT_RUNTIME" {
+  Ok raw ->
+    if raw == "dangerous" then
+      truthyText (readEnvText "CLASP_UNMANAGED_AGENT_RUNTIME_DANGER_ACCEPTED" "false")
+    else if truthyText raw then
+      envPresent "CLASP_TEST_CODEX_MODE"
+    else
+      false,
+  Err message -> false
+}
+
+managedAgentRuntimeReady : Bool
+managedAgentRuntimeReady =
+  if envPresent "CLASP_MANAGED_JOB_ID" then
+    true
+  else
+    allowUnmanagedAgentRuntime
+
+taskFile : Str
+taskFile = readEnvText "CLASP_LOOP_TASK_FILE_JSON" "agents/tasks/0012-autonomous-swarm-confidence.md"
+
+workspaceRoot : Str
+workspaceRoot = readEnvText "CLASP_LOOP_WORKSPACE_JSON" "."
+
+codexBin : Str
+codexBin = readEnvText "CLASP_LOOP_CODEX_BIN_JSON" (readEnvText "CLASP_LOOP_AGENT_BIN_JSON" "codex")
+
+builderSchemaPath : Str
+builderSchemaPath = readEnvText "CLASP_LOOP_BUILDER_SCHEMA_JSON" "agents/schemas/builder-report.schema.json"
+
+verifierSchemaPath : Str
+verifierSchemaPath = readEnvText "CLASP_LOOP_VERIFIER_SCHEMA_JSON" "agents/schemas/verifier-report.schema.json"
+
+codexModel : Str
+codexModel = readEnvText "CLASP_LOOP_CODEX_MODEL_JSON" (readEnvText "CLASP_LOOP_AGENT_MODEL_JSON" "gpt-5.5")
+
+codexReasoning : Str
+codexReasoning = readEnvText "CLASP_LOOP_CODEX_REASONING_JSON" (readEnvText "CLASP_LOOP_AGENT_REASONING_JSON" "xhigh")
+
+codexSandbox : Str
+codexSandbox = readEnvText "CLASP_LOOP_CODEX_SANDBOX_JSON" (readEnvText "CLASP_LOOP_AGENT_SANDBOX_JSON" "danger-full-access")
+
+agentBin : Str
+agentBin = readEnvText "CLASP_LOOP_AGENT_BIN_JSON" codexBin
+
+agentModel : Str
+agentModel = readEnvText "CLASP_LOOP_AGENT_MODEL_JSON" codexModel
+
+agentReasoning : Str
+agentReasoning = readEnvText "CLASP_LOOP_AGENT_REASONING_JSON" codexReasoning
+
+agentSandbox : Str
+agentSandbox = readEnvText "CLASP_LOOP_AGENT_SANDBOX_JSON" codexSandbox
+
+agentCommandTemplate : [Str]
+agentCommandTemplate = readEnvTextList "CLASP_LOOP_AGENT_COMMAND_JSON" emptyTexts
+
+maxAttempts : Int
+maxAttempts = readEnvInt "CLASP_LOOP_MAX_ATTEMPTS_JSON" 20
+
+agentTimeoutMs : Int
+agentTimeoutMs = readEnvInt "CLASP_LOOP_AGENT_TIMEOUT_MS_JSON" 0
+
+agentMemoryLimitMb : Int
+agentMemoryLimitMb = readEnvInt "CLASP_LOOP_AGENT_MEMORY_MB_JSON" 8192
+
+builderTimeoutMs : Int
+builderTimeoutMs = readEnvInt "CLASP_LOOP_BUILDER_TIMEOUT_MS_JSON" agentTimeoutMs
+
+verifierTimeoutMs : Int
+verifierTimeoutMs = readEnvInt "CLASP_LOOP_VERIFIER_TIMEOUT_MS_JSON" agentTimeoutMs
+
+builderMemoryLimitMb : Int
+builderMemoryLimitMb = readEnvInt "CLASP_LOOP_BUILDER_MEMORY_MB_JSON" agentMemoryLimitMb
+
+verifierMemoryLimitMb : Int
+verifierMemoryLimitMb = readEnvInt "CLASP_LOOP_VERIFIER_MEMORY_MB_JSON" agentMemoryLimitMb
+
+actorName : Str
+actorName = match envVar "CLASP_SWARM_ACTOR" {
+  Ok raw -> raw,
+  Err message -> "manager"
+}
+
+commandName : Str
+commandName = match envVar "CLASP_LOOP_COMMAND" {
+  Ok raw -> raw,
+  Err message ->
+    match envVar "CLASP_AUTONOMOUS_LOOP_COMMAND" {
+      Ok legacy -> legacy,
+      Err missing -> "run"
+    }
+}
+
+builderPolicyPath : Str
+builderPolicyPath = pathJoin [stateRootPath, "builder-policy.md"]
+
+verifierPolicyPath : Str
+verifierPolicyPath = pathJoin [stateRootPath, "verifier-policy.md"]
+
+approvalName : Str
+approvalName = "merge-ready"
+
+mergegateName : Str
+mergegateName = "autonomous-confidence"
+
+requiredApprovals : [Str]
+requiredApprovals = [approvalName]
+
+requiredVerifiers : [Str]
+requiredVerifiers = [mergegateName]
+
+loopSpec : AttemptSpec
+loopSpec =
+  attemptSpec
+    swarmStateRoot
+    objectiveId
+    "Run the configured builder/verifier agent loop directly from ordinary Clasp code on the native swarm substrate."
+    40
+    40
+    stateRootPath
+    maxAttempts
+    actorName
+    approvalName
+    mergegateName
+    requiredApprovals
+    requiredVerifiers
+
+feedbackPath : Str
+feedbackPath = loopSpec.feedbackPath
+
+builderReportPath : Int -> Str
+builderReportPath attempt = pathJoin [stateRootPath, textConcat ["builder-", encode attempt, ".json"]]
+
+verifierReportPath : Int -> Str
+verifierReportPath attempt = pathJoin [stateRootPath, textConcat ["verifier-", encode attempt, ".json"]]
+
+builderPromptPath : Int -> Str
+builderPromptPath attempt = pathJoin [stateRootPath, textConcat ["builder-", encode attempt, ".prompt.md"]]
+
+verifierPromptPath : Int -> Str
+verifierPromptPath attempt = pathJoin [stateRootPath, textConcat ["verifier-", encode attempt, ".prompt.md"]]
+
+builderTaskId : Int -> Str
+builderTaskId attempt = attemptBuilderTaskId attempt
+
+verifierTaskId : Int -> Str
+verifierTaskId attempt = attemptVerifierTaskId attempt
+
+builderHandle : Int -> TaskHandle
+builderHandle attempt = attemptBuilderHandle loopSpec attempt
+
+verifierHandle : Int -> TaskHandle
+verifierHandle attempt = attemptVerifierHandle loopSpec attempt
+
+defaultBuilderPolicyText : Str
+defaultBuilderPolicyText = textJoin "\n" [
+  "Close whole blocking capability categories rather than single complaint lines.",
+  "Prefer code/runtime/compiler/example/test changes over docs-only movement.",
+  "Use the previous verifier report as the primary steering input for the next attempt.",
+  "Do not broaden backend-native swarm/runtime work into JavaScript-emitter parity unless the frontend compile target actually requires it.",
+  "Treat Compiler.Emit.JavaScript as the frontend/client emitter, not as a backend execution path."
+]
+
+defaultVerifierPolicyText : Str
+defaultVerifierPolicyText = textJoin "\n" [
+  "Judge the whole repository, not only the latest diff.",
+  "Group failures by capability category.",
+  "Do not fail merely because legacy helper scripts remain in the repo if the ordinary-program path is complete and not required.",
+  "Do not demand JavaScript-emitter parity for backend-native swarm/runtime capabilities unless the task explicitly requires frontend/client support."
+]
+
+capabilityChecklistText : Str
+capabilityChecklistText = textJoin "\n" [
+  "- ordinary_program_execution: the live builder/verifier loop runs as a normal Clasp program via claspc run, invokes a configured agent backend from Clasp (Codex by default), and persists durable final state/status in ordinary runtime storage.",
+  "- durable_native_substrate: objective/run/task/event/artifact persistence, DAG edges, projected status, leases, approvals, merge-policy state, tool/process execution, and monitoring/state inspection are durably available.",
+  "- clasp_native_control_api: ordinary Clasp programs can use the orchestration substrate directly without requiring shell wrapper orchestration or external claspc swarm subprocesses as the primary model.",
+  "- orchestration_viability: builder/verifier/planner-style programs are realistically implementable in Clasp itself without obvious missing runtime/control-plane substrate.",
+  "- ergonomics: Dict state, empty lists, polymorphic collections, and record update/destructuring are usable enough for state-heavy orchestration code.",
+  "- verification_gate: scenario-level coverage exists for the ordinary-program loop path and new runtime/workflow/control-plane behavior, and bash scripts/verify-all.sh passes."
+]
+
+readPolicyText : Str -> Str -> Str
+readPolicyText path fallback = match readFile path {
+  Ok raw -> raw,
+  Err message -> fallback
+}
+
+ensurePolicyFile : Str -> Str -> Str
+ensurePolicyFile path fallback =
+  if fileExists path then
+    ""
+  else
+    match writeFile path fallback {
+      Ok written -> "",
+      Err message -> message
+    }
+
+ensurePolicies : Str
+ensurePolicies = {
+  let builderError = ensurePolicyFile builderPolicyPath defaultBuilderPolicyText in
+  if builderError != "" then
+    builderError
+  else
+    ensurePolicyFile verifierPolicyPath defaultVerifierPolicyText
+}
+
+builderFeedbackSection : Str
+builderFeedbackSection =
+  attemptFeedbackPromptSection loopSpec "No previous verifier feedback is present yet."
+
+builderPolicySection : Str
+builderPolicySection = textJoin "\n" [
+  textConcat ["Current builder policy from ", builderPolicyPath, ":"],
+  readPolicyText builderPolicyPath defaultBuilderPolicyText
+]
+
+verifierPolicySection : Str
+verifierPolicySection = textJoin "\n" [
+  textConcat ["Current verifier policy from ", verifierPolicyPath, ":"],
+  readPolicyText verifierPolicyPath defaultVerifierPolicyText
+]
+
+taskFileContentSection : Str
+taskFileContentSection = match readFile taskFile {
+  Ok raw -> textJoin "\n" [
+    "Task file content:",
+    raw
+  ],
+  Err message -> textJoin "\n" [
+    "Task file content unavailable:",
+    message
+  ]
+}
+
+promptBoolText : Bool -> Str
+promptBoolText value = if value then "true" else "false"
+
+memorySearchPromptLine : SwarmMemorySearchResult -> Str
+memorySearchPromptLine item =
+  textConcat [
+    "- score=",
+    encode item.score,
+    " key=",
+    item.memory.key,
+    " actor=",
+    item.memory.actor,
+    " value=",
+    item.memory.value,
+    " matched=",
+    item.matchedText
+  ]
+
+runTracePromptLine : VerificationTraceEntry -> Str
+runTracePromptLine entry =
+  textConcat [
+    "- verifier=",
+    entry.verifierName,
+    " status=",
+    entry.status,
+    " exit=",
+    encode entry.exitCode,
+    " timedOut=",
+    promptBoolText entry.timedOut,
+    " class=",
+    entry.failedVerifierClassification,
+    " stdout=",
+    entry.stdoutArtifactPath,
+    " stderr=",
+    entry.stderrArtifactPath
+  ]
+
+artifactExcerptPromptLine : SwarmArtifactContent -> Str
+artifactExcerptPromptLine excerpt =
+  textConcat [
+    "- id=",
+    encode excerpt.artifactId,
+    " kind=",
+    excerpt.kind,
+    " bytes=",
+    encode excerpt.bytesRead,
+    "/",
+    encode excerpt.totalBytes,
+    " truncated=",
+    promptBoolText excerpt.truncated,
+    " text=",
+    excerpt.text
+  ]
+
+promptListSection : Str -> [Str] -> Str
+promptListSection title values =
+  if length values == 0 then
+    textJoin "\n" [title, "- none"]
+  else
+    textJoin "\n" [title, textJoin "\n" values]
+
+memorySearchPromptSection : Str -> [SwarmMemorySearchResult] -> Str
+memorySearchPromptSection title matches =
+  promptListSection title (map memorySearchPromptLine matches)
+
+runTracePromptSection : Str -> [VerificationTraceEntry] -> Str
+runTracePromptSection title trace =
+  promptListSection title (map runTracePromptLine trace)
+
+artifactExcerptPromptSection : Str -> [SwarmArtifactContent] -> Str
+artifactExcerptPromptSection title excerpts =
+  promptListSection title (map artifactExcerptPromptLine excerpts)
+
+artifactSearchPromptLine : SwarmArtifactSearchResult -> Str
+artifactSearchPromptLine item =
+  textConcat [
+    "- artifact#",
+    encode item.artifact.artifactId,
+    " task=",
+    item.artifact.taskId,
+    " kind=",
+    item.artifact.kind,
+    " score=",
+    encode item.score,
+    " matched=",
+    item.matchedText,
+    " excerpt=",
+    item.excerpt.text
+  ]
+
+artifactSearchPromptSection : Str -> [SwarmArtifactSearchResult] -> Str
+artifactSearchPromptSection title matches =
+  promptListSection title (map artifactSearchPromptLine matches)
+
+renderContextPackPrompt : SwarmContextPack -> Str
+renderContextPackPrompt pack =
+  textJoin "\n" [
+    "Swarm context pack:",
+    textConcat [
+      "task: ",
+      pack.task.taskId,
+      " status=",
+      pack.task.status,
+      " ready=",
+      promptBoolText pack.task.ready,
+      " attempts=",
+      encode pack.task.attempts
+    ],
+    textConcat [
+      "objective: ",
+      pack.task.objectiveId,
+      " manager-action=",
+      pack.managerAction.action,
+      " manager-task=",
+      pack.managerAction.taskId,
+      " manager-task-status=",
+      pack.managerAction.taskStatus
+    ],
+    textConcat ["ready tasks: ", textJoin ", " pack.readyTaskIds],
+    promptListSection "dependency task ids:" pack.dependencyTaskIds,
+    promptListSection "dependency task statuses:" pack.dependencyTaskStatuses,
+    promptListSection "dependency task ready:" (map promptBoolText pack.dependencyTaskReady),
+    textConcat [
+      "mailbox: runs=",
+      encode pack.mailboxSummary.runCount,
+      " artifacts=",
+      encode pack.mailboxSummary.artifactCount,
+      " memory=",
+      encode pack.mailboxSummary.memoryCount,
+      " latest-run=",
+      pack.mailboxSummary.latestRunName,
+      "/",
+      pack.mailboxSummary.latestRunStatus,
+      " latest-verifier=",
+      pack.mailboxSummary.latestVerifier,
+      "/",
+      pack.mailboxSummary.latestVerifierStatus
+    ],
+    memorySearchPromptSection "task memory matches:" pack.taskMemoryMatches,
+    memorySearchPromptSection "objective memory matches:" pack.objectiveMemoryMatches,
+    memorySearchPromptSection "benchmark history matches:" pack.benchmarkMemoryMatches,
+    artifactSearchPromptSection "artifact search matches:" pack.artifactSearchMatches,
+    artifactSearchPromptSection "semantic index artifact matches:" pack.semanticArtifactMatches,
+    promptListSection "semantic index entry ids:" pack.semanticIndexEntryIds,
+    promptListSection "semantic index edit files:" pack.semanticIndexEditFiles,
+    promptListSection "semantic index artifact refs:" pack.semanticIndexArtifactRefs,
+    promptListSection "semantic index surface ids:" pack.semanticIndexSurfaceIds,
+    promptListSection "semantic index query texts:" pack.semanticIndexQueryTexts,
+    runTracePromptSection "run trace:" pack.runTrace,
+    promptListSection "artifact kinds:" pack.artifactKinds,
+    promptListSection "artifact paths:" pack.artifactPaths,
+    artifactExcerptPromptSection "artifact excerpts:" pack.artifactExcerpts
+  ]
+
+taskContextPromptSection : TaskHandle -> Str -> Int -> Str
+taskContextPromptSection handle query limit =
+  match taskContextPack handle query limit {
+    Ok pack -> renderContextPackPrompt pack,
+    Err message -> textConcat ["Swarm context pack unavailable: ", message]
+  }
+
+contextPackQuery : Str
+contextPackQuery = "autonomous swarm verifier feedback capability evidence"
+
+contextPackLimit : Int
+contextPackLimit = 8
+
+builderContextSection : Int -> Str
+builderContextSection attempt =
+  taskContextPromptSection (builderHandle attempt) contextPackQuery contextPackLimit
+
+verifierContextSection : Int -> Str
+verifierContextSection attempt =
+  taskContextPromptSection (verifierHandle attempt) contextPackQuery contextPackLimit
+
+builderPrompt : Int -> Str
+builderPrompt attempt = textJoin "\n" [
+  "You are the builder subagent for the Clasp repository.",
+  "Read AGENTS.md first if it exists.",
+  textConcat ["Read the task file at ", taskFile, "."],
+  taskFileContentSection,
+  "Drive the repository toward the full task goal. Prefer coherent capability-closing changes over tiny local patches.",
+  "Work only in the current checkout. Add or update tests. Run the narrowest checks that cover your changes. Do not run bash scripts/verify-all.sh.",
+  "Capability categories to close:",
+  capabilityChecklistText,
+  "Prefer closing at least one whole failing capability category this attempt, not just one complaint line.",
+  builderPolicySection,
+  builderFeedbackSection,
+  builderContextSection attempt,
+  "Return JSON matching the provided output schema.",
+  "Include the required feedback object in your final JSON.",
+  textConcat ["Attempt: ", encode attempt]
+]
+
+verifierPrompt : Int -> Str
+verifierPrompt attempt = textJoin "\n" [
+  "You are the verifier subagent for the Clasp repository.",
+  "Read AGENTS.md first if it exists.",
+  textConcat ["Read the task file at ", taskFile, "."],
+  taskFileContentSection,
+  "Evaluate the whole repository against the autonomous swarm confidence goal and required capability categories.",
+  verifierPolicySection,
+  verifierContextSection attempt,
+  textConcat ["Attempt: ", encode attempt]
+]
+
+writeLoopState : AttemptStatus -> Str
+writeLoopState state = attemptWriteStatus loopSpec state
+
+readLoopState : AttemptStatus
+readLoopState = attemptReadStatus loopSpec
+
+syntheticFailureReport : Str -> Str -> VerifierReport
+syntheticFailureReport summary detail =
+  VerifierReport {
+    verdict = "fail",
+    summary = summary,
+    findings = [detail],
+    tests_run = emptyTexts,
+    follow_up = ["Retry the failed step after inspecting the persisted swarm run artifacts."],
+    capability_statuses = emptyCapabilityStatuses
+  }
+
+readVerifierReportPath : Str -> VerifierReport
+readVerifierReportPath path = match readFile path {
+  Ok raw ->
+    match tryDecode VerifierReport raw {
+      Ok report -> report,
+      Err message ->
+        syntheticFailureReport
+          (textConcat ["invalid verifier report: ", message])
+          message
+    },
+  Err message ->
+    syntheticFailureReport
+      (textConcat ["missing verifier report: ", message])
+      message
+}
+
+readVerifierReport : Int -> VerifierReport
+readVerifierReport attempt = readVerifierReportPath (verifierReportPath attempt)
+
+writeFeedback : VerifierReport -> Str
+writeFeedback report = match writeFile feedbackPath (encode report) {
+  Ok written -> "",
+  Err message -> message
+}
+
+verifierReportMemoryValue : Int -> VerifierReport -> Str
+verifierReportMemoryValue attempt report =
+  textJoin "\n" [
+    textConcat ["attempt=", encode attempt, " verdict=", report.verdict],
+    report.summary,
+    textJoin "\n" report.findings,
+    textJoin "\n" report.follow_up
+  ]
+
+rememberVerifierFeedback : Int -> VerifierReport -> Str
+rememberVerifierFeedback attempt report =
+  match memoryPut swarmStateRoot objectiveId "" actorName "verifier-feedback" (verifierReportMemoryValue attempt report) {
+    Ok memoryValue -> "",
+    Err message -> message
+  }
+
+writeFeedbackAndMemory : Int -> VerifierReport -> Str
+writeFeedbackAndMemory attempt report = {
+  let feedbackError = writeFeedback report in
+  if feedbackError != "" then
+    feedbackError
+  else
+    rememberVerifierFeedback attempt report
+}
+
+writePromptFile : Str -> Str -> Str
+writePromptFile path prompt =
+  match writeFile path prompt {
+    Ok written -> "",
+    Err message -> textConcat ["prompt-write-error:", message]
+  }
+
+taskInObjective : SwarmTask -> Bool
+taskInObjective task = task.objectiveId == objectiveId
+
+taskCompleted : SwarmTask -> Bool
+taskCompleted task = task.status == "completed"
+
+taskIdOf : SwarmTask -> Str
+taskIdOf task = task.taskId
+
+objectiveProjectedStatusFrom : Str -> SwarmObjective -> Str
+objectiveProjectedStatusFrom current objective =
+  if objective.objectiveId == objectiveId then
+    objective.projectedStatus
+  else
+    current
+
+mergeDecisionDetailFrom : Str -> SwarmEvent -> Str
+mergeDecisionDetailFrom current event =
+  if event.kind == "mergegate_decision" then
+    event.detail
+  else
+    current
+
+statusVerifierTaskId : AttemptStatus -> Str
+statusVerifierTaskId state =
+  if state.lastVerifierTaskId == "" then
+    verifierTaskId state.attempt
+  else
+    state.lastVerifierTaskId
+
+statusApprovalCount : AttemptStatus -> Int
+statusApprovalCount state =
+  if state.lastVerifierTaskId == "" then
+    0
+  else
+    match approvals (taskHandle swarmStateRoot (statusVerifierTaskId state) actorName) {
+      Ok approvalValues -> length approvalValues,
+      Err message -> 0
+    }
+
+statusMergeDecisionDetail : AttemptStatus -> Str
+statusMergeDecisionDetail state =
+  if state.lastVerifierTaskId == "" then
+    ""
+  else
+    match tail (taskHandle swarmStateRoot (statusVerifierTaskId state) actorName) 20 {
+      Ok eventValues -> fold mergeDecisionDetailFrom "" eventValues,
+      Err message -> ""
+    }
+
+statusFeedbackSummary : Str
+statusFeedbackSummary =
+  if fileExists feedbackPath then
+    (readVerifierReportPath feedbackPath).summary
+  else
+    ""
+
+loopAgentBackend : AgentBackendSpec
+loopAgentBackend =
+  agentBackendSpec agentBin agentModel agentReasoning agentSandbox workspaceRoot agentCommandTemplate
+
+statusView : AttemptStatus -> StatusView
+statusView state =
+  match objectives swarmStateRoot {
+    Ok objectiveValues ->
+      match tasks swarmStateRoot {
+        Ok taskValues ->
+          let scopedTasks = filter taskInObjective taskValues in
+          let readyTaskIds = match ready objectiveRef {
+            Ok readyTasks -> map taskIdOf readyTasks,
+            Err message -> emptyTexts
+          } in
+          let approvalCountValue = statusApprovalCount state in
+          let mergeDecisionDetailValue = statusMergeDecisionDetail state in
+          let projectedStatusValue = fold objectiveProjectedStatusFrom "missing" objectiveValues in
+          StatusView {
+            state = state,
+            agentBackend = agentBackendSummary loopAgentBackend,
+            objectiveProjectedStatus = projectedStatusValue,
+            taskCount = length scopedTasks,
+            allTaskIds = map taskIdOf scopedTasks,
+            completedTaskIds = map taskIdOf (filter taskCompleted scopedTasks),
+            readyTaskIds = readyTaskIds,
+            approvalCount = approvalCountValue,
+            mergeDecisionDetail = mergeDecisionDetailValue,
+            mergeGateSatisfied =
+              if approvalCountValue == 0 then
+                false
+              else
+                if mergeDecisionDetailValue == "" then
+                  false
+                else
+                  projectedStatusValue == "completed",
+            feedbackSummary = statusFeedbackSummary,
+            previousVerifierFeedback = attemptPreviousVerifierFeedback loopSpec,
+            retryDecision = attemptRetryDecisionFromStatus loopSpec state,
+            terminalOutcome = attemptOutcomeFromStatus loopSpec state
+          },
+        Err message ->
+          let approvalCountValue = statusApprovalCount state in
+          let mergeDecisionDetailValue = statusMergeDecisionDetail state in
+          StatusView {
+            state = state,
+            agentBackend = agentBackendSummary loopAgentBackend,
+            objectiveProjectedStatus = textConcat ["task-error:", message],
+            taskCount = 0,
+            allTaskIds = emptyTexts,
+            completedTaskIds = emptyTexts,
+            readyTaskIds = emptyTexts,
+            approvalCount = approvalCountValue,
+            mergeDecisionDetail = mergeDecisionDetailValue,
+            mergeGateSatisfied = false,
+            feedbackSummary = statusFeedbackSummary,
+            previousVerifierFeedback = attemptPreviousVerifierFeedback loopSpec,
+            retryDecision = attemptRetryDecisionFromStatus loopSpec state,
+            terminalOutcome = attemptOutcomeFromStatus loopSpec state
+          }
+      },
+    Err message ->
+      let approvalCountValue = statusApprovalCount state in
+      let mergeDecisionDetailValue = statusMergeDecisionDetail state in
+      StatusView {
+        state = state,
+        agentBackend = agentBackendSummary loopAgentBackend,
+        objectiveProjectedStatus = textConcat ["objective-error:", message],
+        taskCount = 0,
+        allTaskIds = emptyTexts,
+        completedTaskIds = emptyTexts,
+        readyTaskIds = emptyTexts,
+        approvalCount = approvalCountValue,
+        mergeDecisionDetail = mergeDecisionDetailValue,
+        mergeGateSatisfied = false,
+        feedbackSummary = statusFeedbackSummary,
+        previousVerifierFeedback = attemptPreviousVerifierFeedback loopSpec,
+        retryDecision = attemptRetryDecisionFromStatus loopSpec state,
+        terminalOutcome = attemptOutcomeFromStatus loopSpec state
+      }
+  }
+
+statusOutput : Str
+statusOutput = encode (statusView readLoopState)
+
+codexReasoningConfig : Str
+codexReasoningConfig = agentBackendReasoningConfig loopAgentBackend
+
+templateReplace : Str -> Str -> Str -> Str
+templateReplace value needle replacement = agentBackendTemplateReplace value needle replacement
+
+renderAgentCommandArg : Str -> Str -> Str -> Str -> Str -> Str -> Str
+renderAgentCommandArg role schemaPath reportPath promptPath prompt value = {
+  let request = agentCommandRequest role schemaPath reportPath promptPath prompt in
+  agentBackendRenderArg loopAgentBackend request value
+}
+
+renderAgentCommand : Str -> Str -> Str -> Str -> Str -> [Str]
+renderAgentCommand role schemaPath reportPath promptPath prompt = {
+  let request = agentCommandRequest role schemaPath reportPath promptPath prompt in
+  agentBackendRenderTemplate loopAgentBackend request
+}
+
+codexCommandDefault : Str -> Str -> Str -> [Str]
+codexCommandDefault schemaPath reportPath prompt =
+  agentBackendCodexCommand loopAgentBackend (agentCommandRequest "agent" schemaPath reportPath "" prompt)
+
+agentCommand : Str -> Str -> Str -> Str -> Str -> [Str]
+agentCommand role schemaPath reportPath promptPath prompt =
+  agentBackendCommand loopAgentBackend (agentCommandRequest role schemaPath reportPath promptPath prompt)
+
+codexCommand : Str -> Str -> Str -> [Str]
+codexCommand schemaPath reportPath prompt = agentCommand "agent" schemaPath reportPath "" prompt
+
+builderCommand : Int -> SwarmCommand
+builderCommand attempt = commandSpec "." (agentCommand "builder" builderSchemaPath (builderReportPath attempt) (builderPromptPath attempt) (builderPrompt attempt))
+
+verifierCommand : Int -> SwarmCommand
+verifierCommand attempt = commandSpec "." (agentCommand "verifier" verifierSchemaPath (verifierReportPath attempt) (verifierPromptPath attempt) (verifierPrompt attempt))
+
+runBuilderCommand : Int -> Result SwarmRun
+runBuilderCommand attempt =
+  toolRunWithOptionalLimits (builderHandle attempt) (builderCommand attempt) builderTimeoutMs builderMemoryLimitMb
+
+runVerifierCommand : Int -> Result SwarmRun
+runVerifierCommand attempt =
+  verifierRunWithOptionalLimits (verifierHandle attempt) "autonomous-confidence" (verifierCommand attempt) verifierTimeoutMs verifierMemoryLimitMb
+
+runFailureDetail : Str -> SwarmRun -> Str
+runFailureDetail role run =
+  textConcat [
+    role,
+    " run failed: status=",
+    run.status,
+    " exit=",
+    encode run.exitCode,
+    " timedOut=",
+    promptBoolText run.timedOut,
+    " memoryLimitMb=",
+    encode run.memoryLimitMb,
+    " stdout=",
+    run.stdoutArtifactPath,
+    " stderr=",
+    run.stderrArtifactPath
+  ]
+
+ensureLoopReady : Str
+ensureLoopReady =
+  if taskFile == "" then
+    "config-error:missing-task-file"
+  else if workspaceRoot == "" then
+    "config-error:missing-workspace-root"
+  else if managedAgentRuntimeReady == false then
+    "config-error:managed-job-required"
+  else {
+    let backendError = agentBackendValidationMessage loopAgentBackend in
+    if backendError != "" then
+      textConcat ["config-error:", backendError]
+    else {
+      let rootError = attemptEnsureRoot loopSpec in
+      if rootError != "" then
+        rootError
+      else
+        match mkdirAll workspaceRoot {
+          Ok workspaceCreated ->
+            ensurePolicies,
+          Err message ->
+            textConcat ["workspace-root-error:", message]
+        }
+    }
+}
+
+ensureAttemptTasks : Int -> Str
+ensureAttemptTasks attempt =
+  attemptEnsureAttemptTasks
+    loopSpec
+    attempt
+    (textConcat ["Run builder attempt ", encode attempt, " directly from ordinary Clasp code."])
+    (textConcat ["Run verifier attempt ", encode attempt, " directly from ordinary Clasp code."])
+
+finalizeWithReport : Int -> Str -> Bool -> VerifierReport -> Str
+finalizeWithReport attempt verdict completed report = {
+  let feedbackError = writeFeedbackAndMemory attempt report in
+  if feedbackError != "" then
+    textConcat ["feedback-error:", feedbackError]
+  else {
+    let outcome = attemptTerminalOutcome loopSpec attempt verdict completed in
+    let finalState = attemptStatusFromTerminalOutcome loopSpec outcome in
+    let stateError = attemptPersistTerminalOutcome loopSpec outcome in
+    if stateError != "" then
+      textConcat ["state-error:", stateError]
+    else
+      encode (statusView finalState)
+  }
+}
+
+continueAfterFailure : Int -> VerifierReport -> Str
+continueAfterFailure attempt report = {
+  let feedbackError = writeFeedbackAndMemory attempt report in
+  if feedbackError != "" then
+    textConcat ["feedback-error:", feedbackError]
+  else {
+    let decision = attemptRetryDecision loopSpec attempt report.summary in
+    if decision.terminal then
+      finalizeWithReport attempt "fail" false report
+    else
+      let retryState = attemptRetryStatus loopSpec decision in
+      let stateError = writeLoopState retryState in
+      if stateError != "" then
+        textConcat ["state-error:", stateError]
+      else
+        runAttempt retryState
+  }
+}
+
+finishAfterApproval : Int -> VerifierReport -> Str
+finishAfterApproval attempt report =
+  match policySet (verifierHandle attempt) mergegateName requiredApprovals requiredVerifiers {
+    Err message ->
+      continueAfterFailure attempt (syntheticFailureReport "merge policy setup failed" message),
+    Ok policy ->
+      match approve (verifierHandle attempt) approvalName {
+        Err message ->
+          continueAfterFailure attempt (syntheticFailureReport "approval failed" message),
+        Ok approvalValue ->
+          match mergegateDecide (verifierHandle attempt) mergegateName requiredVerifiers {
+            Err message ->
+              continueAfterFailure attempt (syntheticFailureReport "mergegate decision failed" message),
+            Ok decision ->
+              if decision.verdict == "pass" then
+                finalizeWithReport attempt "pass" true report
+              else
+                continueAfterFailure attempt (syntheticFailureReport "mergegate did not pass" decision.verdict)
+          }
+      }
+  }
+
+verifyTaskReady : Int -> Str
+verifyTaskReady attempt = match ready objectiveRef {
+  Ok readyTasks ->
+    if attemptTaskListHasId (verifierTaskId attempt) readyTasks then
+      ""
+    else
+      textConcat ["verifier-not-ready:", verifierTaskId attempt],
+  Err message ->
+    message
+}
+
+runVerifierAttempt : Int -> Str
+runVerifierAttempt attempt = {
+  let stateError =
+    writeLoopState
+      (attemptStatusForPhase loopSpec attempt "verifier-running" "pending" false false) in
+  if stateError != "" then
+    textConcat ["state-error:", stateError]
+  else
+    match lease (verifierHandle attempt) {
+      Err message ->
+        continueAfterFailure attempt (syntheticFailureReport "verifier lease failed" message),
+      Ok leaseValue ->
+        let promptError = writePromptFile (verifierPromptPath attempt) (verifierPrompt attempt) in
+        if promptError != "" then
+          continueAfterFailure attempt (syntheticFailureReport "verifier prompt write failed" promptError)
+        else
+          match runVerifierCommand attempt {
+            Err message ->
+              continueAfterFailure attempt (syntheticFailureReport "verifier run failed" message),
+            Ok runValue ->
+              match finishToolRun (verifierHandle attempt) runValue {
+                Err message ->
+                  continueAfterFailure attempt (syntheticFailureReport "verifier task status update failed" message),
+                Ok statusValue ->
+                  if runPassed runValue then
+                    if fileExists (verifierReportPath attempt) then {
+                      let report = readVerifierReport attempt in
+                      if report.verdict == "pass" then
+                        finishAfterApproval attempt report
+                      else
+                        continueAfterFailure attempt report
+                    } else
+                      continueAfterFailure
+                        attempt
+                        (syntheticFailureReport
+                          "verifier step failed before producing a durable report"
+                          runValue.stderrArtifactPath)
+                  else
+                    continueAfterFailure
+                      attempt
+                      (syntheticFailureReport
+                        "verifier run failed"
+                        (runFailureDetail "verifier" runValue))
+              }
+          }
+    }
+}
+
+runBuilderAttempt : Int -> Str
+runBuilderAttempt attempt = {
+  let prepError = ensureLoopReady in
+  if prepError != "" then
+    prepError
+  else {
+    let taskError = ensureAttemptTasks attempt in
+    if taskError != "" then
+      textConcat ["task-error:", taskError]
+    else {
+      let stateError =
+        writeLoopState
+          (attemptStatusForPhase loopSpec attempt "builder-running" "pending" false false) in
+      if stateError != "" then
+        textConcat ["state-error:", stateError]
+      else
+        match lease (builderHandle attempt) {
+          Err message ->
+            continueAfterFailure attempt (syntheticFailureReport "builder lease failed" message),
+          Ok leaseValue ->
+            let promptError = writePromptFile (builderPromptPath attempt) (builderPrompt attempt) in
+            if promptError != "" then
+              continueAfterFailure attempt (syntheticFailureReport "builder prompt write failed" promptError)
+            else
+              match runBuilderCommand attempt {
+                Err message ->
+                  continueAfterFailure attempt (syntheticFailureReport "builder run failed" message),
+                Ok runValue ->
+                  match finishToolRun (builderHandle attempt) runValue {
+                    Err message ->
+                      continueAfterFailure attempt (syntheticFailureReport "builder task status update failed" message),
+                    Ok statusValue ->
+                      if runPassed runValue then
+                        if fileExists (builderReportPath attempt) then {
+                          let readyError = verifyTaskReady attempt in
+                          if readyError != "" then
+                            continueAfterFailure attempt (syntheticFailureReport "verifier task did not become ready" readyError)
+                          else
+                            runVerifierAttempt attempt
+                        } else
+                          continueAfterFailure
+                            attempt
+                            (syntheticFailureReport
+                              "builder step failed before producing a durable report"
+                              runValue.stderrArtifactPath)
+                      else
+                        continueAfterFailure
+                          attempt
+                          (syntheticFailureReport
+                            "builder run failed"
+                            (runFailureDetail "builder" runValue))
+                  }
+              }
+        }
+    }
+  }
+}
+attemptLimitForState : AttemptStatus -> Int
+attemptLimitForState state =
+  if state.maxAttempts == 0 then
+    maxAttempts
+  else
+    state.maxAttempts
+
+runAttempt : AttemptStatus -> Str
+runAttempt state =
+  if state.attempt > attemptLimitForState state then
+    finalizeWithReport state.attempt "fail" false (syntheticFailureReport "attempt limit reached" "No verifier pass report was produced before the configured attempt limit.")
+  else
+    runBuilderAttempt state.attempt
+
+resumeLoop : AttemptStatus -> Str
+resumeLoop state =
+  if state.final then
+    encode (statusView state)
+  else
+    runAttempt state
+
+main : Str
+main =
+  if commandName == "status" then
+    statusOutput
+  else
+    resumeLoop readLoopState

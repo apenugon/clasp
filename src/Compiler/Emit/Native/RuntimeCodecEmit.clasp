@@ -1,0 +1,71 @@
+module Compiler.Emit.Native.RuntimeCodecEmit
+
+import Compiler.Checker.Types
+import Compiler.Checker.TypeOps
+import Compiler.Emit.Native.Core
+import Compiler.Emit.NativeMetadata
+import Compiler.Json
+
+emitNativeJsonCodecImage : TypeText -> Str
+emitNativeJsonCodecImage typ = {
+  let suffix = nativeCodecSuffixForType typ;
+  jsonObject [jsonFieldText "type" (renderType typ), jsonFieldText "encode" (textConcat ["$encode_", suffix]), jsonFieldText "decode" (textConcat ["$decode_", suffix])]
+}
+
+emitNativeBinaryCodecImage : TypeText -> Str
+emitNativeBinaryCodecImage typ = {
+  let suffix = nativeCodecSuffixForType typ;
+  jsonObject [jsonFieldText "type" (renderType typ), jsonFieldText "encode" (textConcat ["$encode_binary_", suffix]), jsonFieldText "decode" (textConcat ["$decode_binary_", suffix]), jsonFieldText "framing" "length_prefixed"]
+}
+
+emitNativeJsonCodecText : TypeText -> Str
+emitNativeJsonCodecText typ = {
+  let suffix = nativeCodecSuffixForType typ;
+  textConcat [renderType typ, "{encode=$encode_", suffix, ", decode=$decode_", suffix, "}"]
+}
+
+emitNativeBinaryCodecText : TypeText -> Str
+emitNativeBinaryCodecText typ = {
+  let suffix = nativeCodecSuffixForType typ;
+  textConcat [renderType typ, "{encode=$encode_binary_", suffix, ", decode=$decode_binary_", suffix, ", framing=length_prefixed}"]
+}
+
+emitNativeJsonCodecImagesFromTypes : [TypeText] -> [Str]
+emitNativeJsonCodecImagesFromTypes codecTypes = {
+  let mut rendered = emptyRenderedTexts;
+  for codecType in codecTypes {
+    rendered = appendNativeRenderedText rendered (emitNativeJsonCodecImage codecType);
+    rendered
+  };
+  rendered
+}
+
+emitNativeJsonCodecTextsFromTypes : [TypeText] -> [Str]
+emitNativeJsonCodecTextsFromTypes codecTypes = {
+  let mut rendered = emptyRenderedTexts;
+  for codecType in codecTypes {
+    rendered = appendNativeRenderedText rendered (emitNativeJsonCodecText codecType);
+    rendered
+  };
+  rendered
+}
+
+emitNativeBinaryCodecImagesFromTypes : [TypeText] -> [Str]
+emitNativeBinaryCodecImagesFromTypes codecTypes = {
+  let mut rendered = emptyRenderedTexts;
+  for codecType in codecTypes {
+    rendered = appendNativeRenderedText rendered (emitNativeBinaryCodecImage codecType);
+    rendered
+  };
+  rendered
+}
+
+emitNativeBinaryCodecTextsFromTypes : [TypeText] -> [Str]
+emitNativeBinaryCodecTextsFromTypes codecTypes = {
+  let mut rendered = emptyRenderedTexts;
+  for codecType in codecTypes {
+    rendered = appendNativeRenderedText rendered (emitNativeBinaryCodecText codecType);
+    rendered
+  };
+  rendered
+}

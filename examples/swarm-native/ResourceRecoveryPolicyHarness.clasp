@@ -1,0 +1,176 @@
+module Main
+
+import ResourceRecoveryPolicy
+
+appendPolicyFailure : Str -> Str -> Str
+appendPolicyFailure failures failure =
+  if failure == "" then
+    failures
+  else if failures == "" then
+    failure
+  else
+    textConcat [failures, "\n", failure]
+
+checkText : Str -> Str -> Str -> Str
+checkText name actual expected =
+  if actual == expected then
+    ""
+  else
+    textConcat [name, ": expected ", expected, " got ", actual]
+
+boolText : Bool -> Str
+boolText value =
+  if value then
+    "true"
+  else
+    "false"
+
+checkBool : Str -> Bool -> Bool -> Str
+checkBool name actual expected =
+  if actual == expected then
+    ""
+  else
+    textConcat [name, ": expected ", boolText expected, " got ", boolText actual]
+
+checkIncludes : Str -> Str -> Str -> Str
+checkIncludes name actual expected =
+  if resourceRecoveryTextIncludes actual expected then
+    ""
+  else
+    textConcat [name, ": missing ", expected]
+
+memoryPressureMessage : Str
+memoryPressureMessage =
+  "manager resource guard blocked child launch: memory external agent reserve unmet: availableMb=4096:requiredMb=32768:externalAgentRssMb=2048:externalAgentReservedMb=4096"
+
+diskPressureMessage : Str
+diskPressureMessage =
+  "manager resource guard blocked workspace materialization: disk reserve unmet: path=.:availableMb=1024:requiredMb=16384"
+
+memoryActionMessage : Str
+memoryActionMessage =
+  "{\"recommendedAction\":{\"type\":\"reduce-memory-pressure\",\"reason\":\"host-available-memory-reserve\",\"phase\":\"watch\"}}"
+
+memoryAdmissionMessage : Str
+memoryAdmissionMessage =
+  "Planner resource health:\nmemory-admission: status=blocked reason=projected-child-memory-reserve availableMb=49152 requiredMb=53248 headroomMb=4096 projectedActiveChildren=2 externalAgentReservedMb=0 action=lower-concurrency-or-child-memory-budget"
+
+externalAdmissionMessage : Str
+externalAdmissionMessage =
+  "Planner resource health:\nmemory-admission: status=blocked reason=external-agent-memory-reserve availableMb=53248 requiredMb=57344 headroomMb=8192 projectedActiveChildren=1 externalAgentReservedMb=4096 action=wait-for-external-agent-pressure-or-lower-concurrency"
+
+concurrencyAdmissionMessage : Str
+concurrencyAdmissionMessage =
+  "Planner resource health:\nmemory-concurrency-admission: status=reduced reason=configured-concurrency-exceeds-memory-capacity configuredMaxChildren=4 admittedChildCapacity=1 effectiveMaxChildren=1 availableMb=53248 requiredMb=77824 headroomMb=8192 childReserveMb=8192 externalAgentReservedMb=0 action=lower-concurrency-to-admitted-child-capacity"
+
+diskActionMessage : Str
+diskActionMessage =
+  "{\"recommendedAction\":{\"type\":\"recover-disk\",\"reason\":\"host-available-disk-headroom\",\"phase\":\"watch\",\"command\":\"bash scripts/clasp-clean-generated-state.sh --health --json\"}}"
+
+admissionActionMessage : Str
+admissionActionMessage =
+  "{\"recommendedAction\":{\"type\":\"repair-admission-lock\",\"reason\":\"admission-lock-open-failed\"}}"
+
+memoryEnforcerActionMessage : Str
+memoryEnforcerActionMessage =
+  "{\"recommendedAction\":{\"type\":\"repair-memory-enforcer\",\"reason\":\"systemd-scope-required-unavailable\"}}"
+
+oomKilledMessage : Str
+oomKilledMessage =
+  "child loop crashed: exit-status=137 stderr=Killed signal=SIGKILL reason=oom-kill"
+
+ordinaryRetryEvidence : Str
+ordinaryRetryEvidence =
+  "managerRetryCount=1\nlaunchOutcome=timeout"
+
+autonomousGateBlockerMessage : Str
+autonomousGateBlockerMessage =
+  "retryRecordLatest=phase=autonomous-launch-gate:attempt=0:status=autonomous-launch-gate-blocker:cause=autonomous launch gate blocked child launch\nretryRecordRecoveryTask=standalone-swarm-autonomous-launch-gate-repair\nretryRecordEvidence=manager-replan-blocker=autonomous-launch-gate\ncapability-gap=autonomous_launch_gate:autonomous-launch:checkpoint-current-worktree"
+
+main : Str
+main = {
+  let memoryAdmissionDecision = resourceRecoveryDecisionForMessage memoryAdmissionMessage;
+  let externalAdmissionDecision = resourceRecoveryDecisionForMessage externalAdmissionMessage;
+  let concurrencyAdmissionDecision = resourceRecoveryDecisionForMessage concurrencyAdmissionMessage;
+  let admissionActionDecision = resourceRecoveryDecisionForMessage admissionActionMessage;
+  let oomKilledDecision = resourceRecoveryDecisionForMessage oomKilledMessage;
+  let ordinaryRetryDecision = resourceRecoveryDecisionForEvidence "child-loop" "retrying" ordinaryRetryEvidence;
+  let autonomousGateDecision = resourceRecoveryDecisionForEvidence "autonomous-launch-gate" "autonomous-launch-gate-blocker" autonomousGateBlockerMessage;
+  let oomKilledEvidenceDecision = resourceRecoveryDecisionForEvidence "child-loop" "retrying" oomKilledMessage;
+  let admissionEvidenceDecision = resourceRecoveryDecisionForEvidence "child-loop" "retrying" memoryAdmissionMessage;
+  let mut failures = "";
+  failures = appendPolicyFailure failures (checkText "memory-task" (resourceRecoveryTaskIdForMessage memoryPressureMessage) "resource-memory-pressure-recovery");
+  failures = appendPolicyFailure failures (checkText "memory-kind" (resourceRecoveryKindForMessage memoryPressureMessage) "resource-pressure-kind=memory");
+  failures = appendPolicyFailure failures (checkIncludes "memory-guidance" (resourceRecoveryGuidanceForMessage memoryPressureMessage) "do not use generated-state cleanup as primary fix");
+  failures = appendPolicyFailure failures (checkText "disk-task" (resourceRecoveryTaskIdForMessage diskPressureMessage) "resource-disk-headroom-recovery");
+  failures = appendPolicyFailure failures (checkText "disk-kind" (resourceRecoveryKindForMessage diskPressureMessage) "resource-pressure-kind=disk");
+  failures = appendPolicyFailure failures (checkIncludes "disk-guidance" (resourceRecoveryGuidanceForMessage diskPressureMessage) "run cleanup apply only when safe");
+  failures = appendPolicyFailure failures (checkText "memory-action-task" (resourceRecoveryTaskIdForMessage memoryActionMessage) "resource-memory-pressure-recovery");
+  failures = appendPolicyFailure failures (checkText "memory-action-kind" (resourceRecoveryKindForMessage memoryActionMessage) "resource-pressure-kind=memory");
+  failures = appendPolicyFailure failures (checkIncludes "memory-action-guidance" (resourceRecoveryGuidanceForMessage memoryActionMessage) "lower concurrency or memory budgets");
+  failures = appendPolicyFailure failures (checkText "memory-admission-task" (resourceRecoveryTaskIdForMessage memoryAdmissionMessage) "resource-memory-pressure-recovery");
+  failures = appendPolicyFailure failures (checkText "memory-admission-kind" (resourceRecoveryKindForMessage memoryAdmissionMessage) "resource-pressure-kind=memory");
+  failures = appendPolicyFailure failures (checkIncludes "memory-admission-guidance" (resourceRecoveryGuidanceForMessage memoryAdmissionMessage) "lower concurrency or memory budgets");
+  failures = appendPolicyFailure failures (checkText "external-admission-task" (resourceRecoveryTaskIdForMessage externalAdmissionMessage) "resource-memory-pressure-recovery");
+  failures = appendPolicyFailure failures (checkText "external-admission-kind" (resourceRecoveryKindForMessage externalAdmissionMessage) "resource-pressure-kind=memory");
+  failures = appendPolicyFailure failures (checkIncludes "external-admission-guidance" (resourceRecoveryGuidanceForMessage externalAdmissionMessage) "wait for exact external-agent pressure");
+  failures = appendPolicyFailure failures (checkText "concurrency-admission-task" (resourceRecoveryTaskIdForMessage concurrencyAdmissionMessage) "resource-memory-pressure-recovery");
+  failures = appendPolicyFailure failures (checkText "concurrency-admission-kind" (resourceRecoveryKindForMessage concurrencyAdmissionMessage) "resource-pressure-kind=memory");
+  failures = appendPolicyFailure failures (checkIncludes "concurrency-admission-guidance" (resourceRecoveryGuidanceForMessage concurrencyAdmissionMessage) "lower concurrency or memory budgets");
+  failures = appendPolicyFailure failures (checkText "disk-action-task" (resourceRecoveryTaskIdForMessage diskActionMessage) "resource-disk-headroom-recovery");
+  failures = appendPolicyFailure failures (checkText "disk-action-kind" (resourceRecoveryKindForMessage diskActionMessage) "resource-pressure-kind=disk");
+  failures = appendPolicyFailure failures (checkIncludes "disk-action-guidance" (resourceRecoveryGuidanceForMessage diskActionMessage) "do not kill unrelated processes");
+  failures = appendPolicyFailure failures (checkText "admission-action-task" (resourceRecoveryTaskIdForMessage admissionActionMessage) "resource-admission-lock-recovery");
+  failures = appendPolicyFailure failures (checkText "admission-action-kind" (resourceRecoveryKindForMessage admissionActionMessage) "resource-control-plane-kind=admission-lock");
+  failures = appendPolicyFailure failures (checkIncludes "admission-action-guidance" (resourceRecoveryGuidanceForMessage admissionActionMessage) "do not start unmanaged agents");
+  failures = appendPolicyFailure failures (checkText "memory-enforcer-action-task" (resourceRecoveryTaskIdForMessage memoryEnforcerActionMessage) "resource-memory-enforcer-recovery");
+  failures = appendPolicyFailure failures (checkText "memory-enforcer-action-kind" (resourceRecoveryKindForMessage memoryEnforcerActionMessage) "resource-control-plane-kind=memory-enforcer");
+  failures = appendPolicyFailure failures (checkIncludes "memory-enforcer-action-guidance" (resourceRecoveryGuidanceForMessage memoryEnforcerActionMessage) "do not bypass memory enforcement");
+  failures = appendPolicyFailure failures (checkText "oom-kill-task" (resourceRecoveryTaskIdForMessage oomKilledMessage) "resource-memory-pressure-recovery");
+  failures = appendPolicyFailure failures (checkText "oom-kill-kind" (resourceRecoveryKindForMessage oomKilledMessage) "resource-pressure-kind=memory");
+  failures = appendPolicyFailure failures (checkIncludes "oom-kill-guidance" (resourceRecoveryGuidanceForMessage oomKilledMessage) "lower concurrency or memory budgets");
+  failures = appendPolicyFailure failures (checkText "ordinary-retry-task" (resourceRecoveryActionTaskIdForEvidence "child-loop" "retrying" ordinaryRetryEvidence) "retry-recovery-review");
+  failures = appendPolicyFailure failures (checkText "ordinary-retry-kind" (resourceRecoveryActionKindForEvidence "child-loop" "retrying" ordinaryRetryEvidence) "retry-recovery-kind=child-loop");
+  failures = appendPolicyFailure failures (checkIncludes "ordinary-retry-guidance" (resourceRecoveryActionGuidanceForEvidence "child-loop" "retrying" ordinaryRetryEvidence) "Inspect retry record paths");
+  failures = appendPolicyFailure failures (checkText "autonomous-gate-task" (resourceRecoveryActionTaskIdForEvidence "autonomous-launch-gate" "autonomous-launch-gate-blocker" autonomousGateBlockerMessage) "standalone-swarm-autonomous-launch-gate-repair");
+  failures = appendPolicyFailure failures (checkText "autonomous-gate-kind" (resourceRecoveryActionKindForEvidence "autonomous-launch-gate" "autonomous-launch-gate-blocker" autonomousGateBlockerMessage) "autonomous-launch-gate");
+  failures = appendPolicyFailure failures (checkIncludes "autonomous-gate-guidance" (resourceRecoveryActionGuidanceForEvidence "autonomous-launch-gate" "autonomous-launch-gate-blocker" autonomousGateBlockerMessage) "do not start unmanaged child loops");
+  failures = appendPolicyFailure failures (checkText "resource-action-evidence-task" (resourceRecoveryActionTaskIdForEvidence "resource-guard" "external-resource-blocker" memoryEnforcerActionMessage) "resource-memory-enforcer-recovery");
+  failures = appendPolicyFailure failures (checkText "resource-action-evidence-kind" (resourceRecoveryActionKindForEvidence "resource-guard" "external-resource-blocker" memoryEnforcerActionMessage) "resource-control-plane-kind=memory-enforcer");
+  failures = appendPolicyFailure failures (checkIncludes "resource-action-evidence-guidance" (resourceRecoveryActionGuidanceForEvidence "resource-guard" "external-resource-blocker" memoryEnforcerActionMessage) "do not bypass memory enforcement");
+  failures = appendPolicyFailure failures (checkText "admission-evidence-task" (resourceRecoveryActionTaskIdForEvidence "child-loop" "retrying" memoryAdmissionMessage) "resource-memory-pressure-recovery");
+  failures = appendPolicyFailure failures (checkText "admission-evidence-kind" (resourceRecoveryActionKindForEvidence "child-loop" "retrying" memoryAdmissionMessage) "resource-pressure-kind=memory");
+  failures = appendPolicyFailure failures (checkText "memory-decision-task" memoryAdmissionDecision.taskId "resource-memory-pressure-recovery");
+  failures = appendPolicyFailure failures (checkText "memory-decision-kind" memoryAdmissionDecision.kind "resource-pressure-kind=memory");
+  failures = appendPolicyFailure failures (checkText "memory-decision-pressure-kind" memoryAdmissionDecision.pressureKind "memory");
+  failures = appendPolicyFailure failures (checkBool "memory-decision-resource-policy" memoryAdmissionDecision.resourcePolicy true);
+  failures = appendPolicyFailure failures (checkBool "memory-decision-memory-admission" memoryAdmissionDecision.memoryAdmission true);
+  failures = appendPolicyFailure failures (checkText "external-decision-pressure-kind" externalAdmissionDecision.pressureKind "memory");
+  failures = appendPolicyFailure failures (checkBool "external-decision-memory-admission" externalAdmissionDecision.memoryAdmission true);
+  failures = appendPolicyFailure failures (checkIncludes "external-decision-guidance" externalAdmissionDecision.guidance "wait for exact external-agent pressure");
+  failures = appendPolicyFailure failures (checkText "concurrency-decision-pressure-kind" concurrencyAdmissionDecision.pressureKind "memory");
+  failures = appendPolicyFailure failures (checkBool "concurrency-decision-memory-admission" concurrencyAdmissionDecision.memoryAdmission true);
+  failures = appendPolicyFailure failures (checkIncludes "concurrency-decision-guidance" concurrencyAdmissionDecision.guidance "lower concurrency or memory budgets");
+  failures = appendPolicyFailure failures (checkText "admission-action-decision-control-plane-kind" admissionActionDecision.controlPlaneKind "admission-lock");
+  failures = appendPolicyFailure failures (checkText "admission-action-decision-pressure-kind" admissionActionDecision.pressureKind "control-plane");
+  failures = appendPolicyFailure failures (checkText "oom-kill-decision-task" oomKilledDecision.taskId "resource-memory-pressure-recovery");
+  failures = appendPolicyFailure failures (checkText "oom-kill-decision-pressure-kind" oomKilledDecision.pressureKind "memory");
+  failures = appendPolicyFailure failures (checkBool "oom-kill-decision-resource-policy" oomKilledDecision.resourcePolicy true);
+  failures = appendPolicyFailure failures (checkBool "oom-kill-decision-memory-admission" oomKilledDecision.memoryAdmission false);
+  failures = appendPolicyFailure failures (checkText "ordinary-retry-decision-task" ordinaryRetryDecision.taskId "retry-recovery-review");
+  failures = appendPolicyFailure failures (checkText "ordinary-retry-decision-pressure-kind" ordinaryRetryDecision.pressureKind "retry");
+  failures = appendPolicyFailure failures (checkBool "ordinary-retry-decision-retry-review" ordinaryRetryDecision.retryReview true);
+  failures = appendPolicyFailure failures (checkBool "ordinary-retry-decision-resource-policy" ordinaryRetryDecision.resourcePolicy false);
+  failures = appendPolicyFailure failures (checkText "autonomous-gate-decision-task" autonomousGateDecision.taskId "standalone-swarm-autonomous-launch-gate-repair");
+  failures = appendPolicyFailure failures (checkText "autonomous-gate-decision-pressure-kind" autonomousGateDecision.pressureKind "autonomous-launch-gate");
+  failures = appendPolicyFailure failures (checkBool "autonomous-gate-decision-retry-review" autonomousGateDecision.retryReview false);
+  failures = appendPolicyFailure failures (checkBool "autonomous-gate-decision-resource-policy" autonomousGateDecision.resourcePolicy false);
+  failures = appendPolicyFailure failures (checkText "admission-evidence-decision-task" admissionEvidenceDecision.taskId "resource-memory-pressure-recovery");
+  failures = appendPolicyFailure failures (checkBool "admission-evidence-decision-memory-admission" admissionEvidenceDecision.memoryAdmission true);
+  failures = appendPolicyFailure failures (checkText "oom-kill-evidence-decision-task" oomKilledEvidenceDecision.taskId "resource-memory-pressure-recovery");
+  failures = appendPolicyFailure failures (checkBool "oom-kill-evidence-decision-resource-policy" oomKilledEvidenceDecision.resourcePolicy true);
+  if failures == "" then
+    "resource-recovery-policy-ok"
+  else
+    failures
+}

@@ -1,0 +1,22 @@
+module StandaloneSwarmHarness
+
+harnessStatus : Str
+harnessStatus = "open"
+
+standaloneSwarmHarnessChecks : [Str]
+standaloneSwarmHarnessChecks = [
+  "readinessStatus = \"open\"",
+  "verifierStatus = \"open\"",
+  "routingStatus = \"open\"",
+  "standalone-swarm-fixed-after-feedback",
+  "backendConfigRepair=agent-backend",
+  "plannerBackendConfigRepair=agent-backend"
+]
+
+standaloneSwarmHarnessProbeText : Str
+standaloneSwarmHarnessProbeText =
+  textJoin "\n" [
+    textConcat ["harnessStatus=", harnessStatus],
+    textConcat ["checks=", textJoin " | " standaloneSwarmHarnessChecks],
+    "standaloneSwarmHarness=canonical-source-edit-surface"
+  ]

@@ -8,6 +8,7 @@ import GoalManagerTaskReportIO
 import GoalManagerTaskSet
 import GoalManagerPlannerMaterialize
 import GoalManagerWatch
+import GoalManagerPreludeProject
 import GoalManagerPrelude
 import GoalManagerConfig
 import GoalManagerTypes
@@ -277,6 +278,7 @@ retryRecoveryWaitingReasonForTask taskId =
         relatedTaskIds = emptyTexts,
         details = [
           textConcat [taskId, ":", retryRecoverySummaryText (latestRetryRecoveryRecord taskId)],
+          textConcat [taskId, ":", retryRecoveryActionSummaryText (latestRetryRecoveryRecord taskId)],
           textConcat [taskId, ":retryRecordPath=", retryRecoveryRecordsPath taskId]
         ]
       }
@@ -342,6 +344,9 @@ statusView state =
       let waitingReasons = statusWaitingReasons state plannedTaskIds trackedTasks in
       StatusView {
         state = state,
+        plannerBackend = managerPlannerBackendSummary,
+        plannerBackendPolicy = managerPlannerBackendPolicySummary,
+        plannerBackendCapability = managerPlannerBackendCapabilitySummary,
         plannerSummary = plannerSummaryOrEmpty state.wave,
         objectiveProjectedStatus = objectiveProjectedStatus,
         plannedTaskIds = plannedTaskIds,
@@ -361,6 +366,9 @@ statusView state =
       let waitingReasons = statusWaitingReasons state plannedTaskIds emptyTasks in
       StatusView {
         state = state,
+        plannerBackend = managerPlannerBackendSummary,
+        plannerBackendPolicy = managerPlannerBackendPolicySummary,
+        plannerBackendCapability = managerPlannerBackendCapabilitySummary,
         plannerSummary = plannerSummaryOrEmpty state.wave,
         objectiveProjectedStatus = textConcat ["task-error:", message],
         plannedTaskIds = plannedTaskIds,

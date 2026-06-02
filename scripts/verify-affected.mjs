@@ -244,43 +244,89 @@ function collectGitFallback() {
   };
 }
 
+const nativeIncrementalLimitedParallelEnv = [
+  "CLASP_NATIVE_JOBS_MAX=2",
+  "CLASP_NATIVE_BUNDLE_JOBS=2",
+  "CLASP_NATIVE_IMAGE_SECTION_JOBS=2",
+  "CLASP_NATIVE_IMAGE_SECTION_JOBS_MAX=2",
+  "CLASP_NATIVE_IMAGE_MODULE_DECL_FRESH_PROCESS=1",
+  "CLASP_NATIVE_IMAGE_MODULE_DECL_CHUNK_SIZE=8",
+  "CLASP_NATIVE_EXPORT_HOST_IDLE_TIMEOUT_SECS=5",
+].join(" ");
+
 const COMMANDS = {
   verifyFast: "bash scripts/verify-fast.sh",
   selfhost: "bash scripts/test-selfhost.sh",
   sourceVerify: "bash src/scripts/verify.sh",
   nativeDiagnostics: "bash scripts/test-native-claspc-diagnostics.sh",
+  nativeIncrementalGuard: "bash scripts/test-native-incremental-guard.sh",
+  nativeIncrementalCli: "bash scripts/measure-native-incremental.sh --scenario native-cli-body-change --assert",
+  nativeIncrementalSelfhost:
+    `${nativeIncrementalLimitedParallelEnv} bash scripts/measure-native-incremental.sh --scenario selfhost-body-change --assert`,
+  nativeIncrementalCompilerModule:
+    `${nativeIncrementalLimitedParallelEnv} CLASP_NATIVE_INCREMENTAL_COMPILER_MODULE_IMAGE_PROBE=0 bash scripts/measure-native-incremental.sh --scenario selfhost-compiler-module-body-change --assert --max-duration compilerCheckBodyChange=10`,
   intBuiltins: "bash scripts/test-int-builtins.sh",
   dictBuiltins: "bash scripts/test-dict-builtins.sh",
+  tryDecode: "bash scripts/test-try-decode.sh",
+  modelBoundary: "bash scripts/test-model-boundary.sh",
+  serviceDecode: "bash scripts/test-service-decode.sh",
   nativeClaspc: "bash scripts/test-native-claspc.sh",
   nativeRuntime: "bash scripts/test-native-runtime.sh",
   swarmReady: "bash scripts/test-swarm-ready-gate.sh",
-  swarmReadyBenchmark: "bash scripts/test-swarm-ready-benchmark.sh",
+  standaloneSwarmSurfaces: "bash scripts/test-standalone-swarm-surfaces.sh",
+  swarmReadyBenchmark: "CLASP_SWARM_READY_BENCHMARK_TIMEOUT_SECS=700 bash scripts/test-swarm-ready-benchmark.sh",
+  swarmCapabilityAudit: "bash scripts/test-swarm-capability-audit.sh",
+  swarmPolicyHelpers: "bash scripts/test-swarm-policy-helpers.sh",
+  swarmDestructivePolicy: "bash scripts/test-swarm-destructive-policy.sh",
+  swarmFilesystemKernelPolicy: "bash scripts/test-swarm-filesystem-kernel-policy.sh",
   swarmMemory: "bash scripts/test-swarm-memory.sh",
+  swarmPriority: "bash scripts/test-swarm-priority.sh",
+  swarmSpawnPolicy: "bash scripts/test-swarm-spawn-policy.sh",
   swarmContextPack: "bash scripts/test-swarm-context-pack.sh",
   swarmSemanticSummaryIndex: "bash scripts/test-swarm-semantic-summary-index.sh",
+  swarmPreflight: "bash scripts/test-swarm-preflight.sh",
+  taskManifest: "bash scripts/test-task-manifest.sh",
+  swarmControl: "bash scripts/test-swarm-control.sh",
+  localSourceEditWorkspace: "bash scripts/test-local-source-edit-workspace.sh",
+  localAgentCapabilityClosure: "bash scripts/test-local-agent-capability-closure.sh static",
   agentCommandTemplate: "bash scripts/test-agent-command-template.sh",
+  agentBackendStatic: "bash scripts/test-agent-backend-static.sh",
+  agentErgonomics: "bash scripts/test-agent-ergonomics-helpers.sh static",
   monitoredLoop: "bash scripts/test-monitored-loop.sh",
   monitoredStep: "bash scripts/test-monitored-step.sh",
   monitoredRunLog: "bash scripts/test-monitored-run-log.sh",
   monitoredWorkflow: "bash scripts/test-monitored-workflow.sh",
   codexLoopProgram: "bash scripts/test-codex-loop-program.sh",
   hostRuntime: "bash scripts/test-host-runtime.sh",
+  resourceGuardPolicy: "bash scripts/test-resource-guard-policy.sh",
+  resourceRecoveryPolicy: "bash scripts/test-resource-recovery-policy.sh static",
+  goalManagerResourceHealth: "bash scripts/test-goal-manager-resource-health.sh static",
+  goalManagerGeneratedCleanupHealth: "bash scripts/test-goal-manager-generated-cleanup-health.sh static",
   agentLoopScenario: "bash examples/agent-loop-scenario/scripts/verify.sh",
   safeWorkspace: "bash scripts/test-safe-workspace.sh",
+  safeWorkspaceStatic: "bash scripts/test-safe-workspace-static.sh",
   safeSubprocess: "bash scripts/test-safe-subprocess.sh",
+  managedJob: "bash scripts/test-managed-job.sh",
+  resolveClaspc: "bash scripts/test-resolve-claspc.sh",
+  generatedStateCleanup: "bash scripts/test-generated-state-cleanup.sh",
+  generatedStateCleanupPlanStatic: "bash scripts/test-generated-state-cleanup-plan-static.sh",
+  generatedStateCleanupPlan: "bash scripts/test-generated-state-cleanup-plan.sh",
   runtimeSliceProcess: "bash scripts/verify-runtime-slice.sh process",
   runtimeSliceWorkflow: "bash scripts/verify-runtime-slice.sh workflow",
   runtimeSliceCodexLoop: "bash scripts/verify-runtime-slice.sh codex-loop",
   runtimeSliceWorkspace: "bash scripts/verify-runtime-slice.sh workspace",
   runtimeSliceManagedLoop: "bash scripts/verify-runtime-slice.sh managed-loop",
-  runtimeSliceSwarmFeedbackLoop: "bash scripts/verify-runtime-slice.sh swarm-feedback-loop",
-  goalManagerFast: "bash scripts/test-goal-manager-fast.sh",
+  runtimeSliceSwarmFeedbackLoop:
+    "CLASP_RUNTIME_SLICE_TIMEOUT_SECS=700 CLASP_SWARM_FEEDBACK_LOOP_TIMEOUT_SECS=700 bash scripts/verify-runtime-slice.sh swarm-feedback-loop",
+  goalManagerFast: "CLASP_GOAL_MANAGER_FAST_CACHE_PROBE_ONLY=1 bash scripts/test-goal-manager-fast.sh",
   goalManagerAgentCommandTemplate: "bash scripts/test-goal-manager-agent-command-template.sh",
   goalManagerDefaultPlannerCommand: "bash scripts/test-goal-manager-default-planner-command.sh",
   goalManagerPlannerReportDecode: "bash scripts/test-goal-manager-planner-report-decode.sh",
+  goalManagerMailboxCapabilityDetails: "bash scripts/test-goal-manager-mailbox-capability-details.sh",
   feedbackLoopRouting: "bash scripts/test-feedback-loop-routing.sh",
   feedbackLoopRoutingLoop: "bash scripts/test-feedback-loop-routing.sh loop-routing",
   feedbackResumeSmoke: "bash scripts/test-feedback-loop-resume.sh smoke",
+  verifyAllSmoke: "bash scripts/test-verify-all-smoke.sh",
   verifyAllRegression: "bash scripts/test-verify-all.sh",
   verifyAffectedRegression: "bash scripts/test-verify-affected.sh",
   compilerSliceRegression: "bash scripts/test-verify-compiler-slice.sh",
@@ -290,6 +336,8 @@ const COMMANDS = {
   runtimeSliceRegression: "bash scripts/test-verify-runtime-slice.sh",
   promotedSourceExportCacheRegression: "bash scripts/test-promoted-source-export-cache.sh",
   promotedSourceExportCacheNodeCheck: "node --check scripts/generate-promoted-source-export-cache.mjs",
+  promotedModuleSummaryCacheRegression: "bash scripts/test-promoted-module-summary-cache.sh",
+  promotedModuleSummaryCacheNodeCheck: "node --check scripts/generate-promoted-module-summary-cache.mjs",
   benchmarkCheckpointNodeCheck: "node --check scripts/benchmark-checkpoint.mjs",
   benchmarkCheckpointRegression: "bash scripts/test-benchmark-checkpoint.sh",
   runBenchmarkNodeCheck: "node --check benchmarks/run-benchmark.mjs",
@@ -303,19 +351,34 @@ const planSurfaceLimit = parsePositiveInt(process.env.CLASP_VERIFY_AFFECTED_PLAN
 const plannerReportDecodeFiles = new Set([
   "examples/swarm-native/GoalManager.clasp",
   "examples/swarm-native/GoalManager.scratch.clasp",
+  "examples/swarm-native/GoalManagerBenchmarkCheckpoint.clasp",
+  "examples/swarm-native/GoalManagerBenchmarkCommand.clasp",
+  "examples/swarm-native/GoalManagerBenchmarkRuntime.clasp",
+  "examples/swarm-native/GoalManagerMailboxIO.clasp",
   "examples/swarm-native/GoalManagerPlannerIO.clasp",
   "examples/swarm-native/GoalManagerPreludeDecode.clasp",
-  "examples/swarm-native/GoalManagerProgram2.clasp",
   "examples/swarm-native/GoalManagerReportIO.clasp",
+  "examples/swarm-native/GoalManagerRuntime.clasp",
+  "examples/swarm-native/GoalManagerWatch.clasp",
   "examples/swarm-native/PlannerReportDecodeHarness.clasp",
   "scripts/test-goal-manager-planner-report-decode.sh",
 ]);
+const retiredGoalManagerProgramFiles = new Set([
+  "examples/swarm-native/GoalManagerProgram.clasp",
+  "examples/swarm-native/GoalManagerProgram2.clasp",
+]);
+const focusedPlannerReportDecodeFiles = new Set(
+  [...plannerReportDecodeFiles].filter(
+    (file) => file.startsWith("examples/swarm-native/") && file !== "examples/swarm-native/GoalManager.clasp",
+  ),
+);
 const ignoredChangedFiles = new Set([
   ".workspace-ready",
   ".clasp-agents",
   ".clasp-loops",
   ".clasp-manager-workspace-ready",
   ".clasp-manager-workspace-manifest.json",
+  ".clasp-managed-job-admission.lock",
   ".clasp-swarm",
   ".clasp-task-baselines",
   ".clasp-task-workspaces",
@@ -344,6 +407,25 @@ const ignoredChangedFilePrefixes = [
 const hostRuntimeDocFiles = new Set([
   "docs/autonomous-swarm-build-plan.md",
   "docs/clasp-spec-v0.md",
+]);
+const swarmTaskManifestFiles = new Set([
+  "agents/swarm/task.schema.json",
+  "agents/swarm/task-template.md",
+  "scripts/clasp-swarm-validate-task.mjs",
+  "scripts/test-task-manifest.sh",
+]);
+const swarmControlScriptFiles = new Set([
+  "scripts/clasp-builder.sh",
+  "scripts/clasp-swarm-common.sh",
+  "scripts/clasp-swarm-lane.sh",
+  "scripts/clasp-swarm-start.sh",
+  "scripts/clasp-swarm-status.sh",
+  "scripts/clasp-verifier.sh",
+  "scripts/test-swarm-control.sh",
+]);
+const swarmPreflightScriptFiles = new Set([
+  "scripts/clasp-swarm-preflight.sh",
+  "scripts/test-swarm-preflight.sh",
 ]);
 
 function isIgnoredChangedFile(file) {
@@ -459,6 +541,15 @@ function isPromotedSourceExportCacheFile(file) {
     file === "scripts/test-promoted-source-export-cache.sh" ||
     file === "src/stage1.compiler.source-export-cache-v1.json" ||
     file === "src/stage1.promoted-project.native.image.json"
+  );
+}
+
+function isPromotedModuleSummaryCacheFile(file) {
+  return (
+    file === "scripts/generate-promoted-module-summary-cache.mjs" ||
+    file === "scripts/test-promoted-module-summary-cache.sh" ||
+    file === "src/stage1.compiler.module-summary-cache-v2.json" ||
+    file === "src/stage1.compiler.native.image.json"
   );
 }
 
@@ -718,11 +809,114 @@ function buildPlanExplanations(changedFiles, routePlan, semanticContexts) {
     });
 }
 
+function commandUsesExplicitStaticMode(command) {
+  return /(^|\s)bash\s+[^;&|]+\.sh\s+static($|\s)/.test(command);
+}
+
+function commandUsesStaticHarnessName(command) {
+  return /(^|\s)bash\s+['"]?[^;&|'" ]*-static\.sh['"]?($|\s)/.test(command);
+}
+
+function commandUsesCacheProbeOnlyMode(command) {
+  return /(^|\s)CLASP_[A-Z0-9_]*CACHE_PROBE_ONLY=1\s+bash\s+[^;&|]+\.sh($|\s)/.test(command);
+}
+
+function commandUsesVerifierSmokeHarness(command) {
+  return /(^|\s)bash\s+scripts\/test-verify-all-smoke\.sh($|\s)/.test(command);
+}
+
+function commandStaticProfile(compilerStateAccess = "none") {
+  return {
+    resourceClass: "static",
+    oomRisk: "low",
+    requiresManagedGuard: false,
+    executionAdvice: "safe-direct",
+    compilerStateAccess,
+  };
+}
+
+function commandResourceProfile(id, command) {
+  if (commandUsesCacheProbeOnlyMode(command)) {
+    return commandStaticProfile("temporary-cache-probe");
+  }
+
+  if (
+    command.startsWith("bash -n ") ||
+    command.startsWith("node --check ") ||
+    command.startsWith("cc -fsyntax-only ") ||
+    commandUsesExplicitStaticMode(command) ||
+    commandUsesStaticHarnessName(command) ||
+    commandUsesVerifierSmokeHarness(command) ||
+    command === COMMANDS.swarmReady ||
+    command === COMMANDS.swarmCapabilityAudit ||
+    command === COMMANDS.swarmPreflight ||
+    command === COMMANDS.resourceGuardPolicy
+  ) {
+    return commandStaticProfile("none");
+  }
+
+  if (
+    command.includes("verify-all.sh") ||
+    command.includes("test-selfhost.sh") ||
+    command.includes("src/scripts/verify.sh") ||
+    command.includes("test-native-claspc.sh") ||
+    command.includes("measure-native-incremental.sh") ||
+    command.includes("test-swarm-ready-benchmark.sh") ||
+    command.includes("promote-selfhost") ||
+    id.includes("native-claspc") ||
+    id.includes("selfhost")
+  ) {
+    return {
+      resourceClass: "heavy",
+      oomRisk: "guarded",
+      requiresManagedGuard: true,
+      executionAdvice: "run-under-managed-job-with-memory-and-disk-admission",
+      compilerStateAccess: "compiler-build-or-cache",
+    };
+  }
+
+  if (
+    command.includes("verify-runtime-slice.sh") ||
+    command.includes("test-swarm-memory.sh") ||
+    command.includes("test-swarm-context-pack.sh") ||
+    command.includes("test-swarm-policy-helpers.sh") ||
+    command.includes("test-swarm-destructive-policy.sh") ||
+    command.includes("test-swarm-filesystem-kernel-policy.sh") ||
+    command.includes("test-swarm-priority.sh") ||
+    command.includes("test-swarm-spawn-policy.sh") ||
+    command.includes("test-goal-manager") ||
+    command.includes("test-verify-affected.sh") ||
+    command.includes("test-verify-all.sh")
+  ) {
+    return {
+      resourceClass: "focused",
+      oomRisk: "guarded",
+      requiresManagedGuard: true,
+      executionAdvice: "prefer-managed-job-for-agent-runs",
+      compilerStateAccess: "possible-compiler-or-runtime-state",
+    };
+  }
+
+  return {
+    resourceClass: "focused",
+    oomRisk: "moderate",
+    requiresManagedGuard: true,
+    executionAdvice: "prefer-managed-job-for-agent-runs",
+    compilerStateAccess: "unknown",
+  };
+}
+
 function addSelected(selectedByCommand, id, command, reason, file) {
   if (!selectedByCommand.has(command)) {
+    const profile = commandResourceProfile(id, command);
     selectedByCommand.set(command, {
       id,
       command,
+      resourceClass: profile.resourceClass,
+      oomRisk: profile.oomRisk,
+      requiresManagedGuard: profile.requiresManagedGuard,
+      executionAdvice: profile.executionAdvice,
+      compilerStateAccess: profile.compilerStateAccess,
       reasons: [],
       matchedFiles: [],
     });
@@ -734,6 +928,161 @@ function addSelected(selectedByCommand, id, command, reason, file) {
   if (file && !selected.matchedFiles.includes(file)) {
     selected.matchedFiles.push(file);
   }
+}
+
+function buildCommandResourceSummary(selectedCommands) {
+  const byResourceClass = {};
+  const byOomRisk = {};
+  let requiresManagedGuard = false;
+  let staticCommandCount = 0;
+  let focusedCommandCount = 0;
+  let heavyCommandCount = 0;
+  let safeDirectCommandCount = 0;
+  let managedGuardCommandCount = 0;
+  let compilerStateFreeCommandCount = 0;
+  let compilerStateTouchingCommandCount = 0;
+
+  for (const selectedCommand of selectedCommands) {
+    const resourceClass = selectedCommand.resourceClass || "unknown";
+    const oomRisk = selectedCommand.oomRisk || "unknown";
+    const compilerStateAccess = selectedCommand.compilerStateAccess || "unknown";
+    byResourceClass[resourceClass] = (byResourceClass[resourceClass] || 0) + 1;
+    byOomRisk[oomRisk] = (byOomRisk[oomRisk] || 0) + 1;
+    if (resourceClass === "static") {
+      staticCommandCount += 1;
+    }
+    if (resourceClass === "focused") {
+      focusedCommandCount += 1;
+    }
+    if (resourceClass === "heavy") {
+      heavyCommandCount += 1;
+    }
+    if (selectedCommand.requiresManagedGuard) {
+      requiresManagedGuard = true;
+      managedGuardCommandCount += 1;
+    } else {
+      safeDirectCommandCount += 1;
+    }
+    if (compilerStateAccess === "none") {
+      compilerStateFreeCommandCount += 1;
+    } else {
+      compilerStateTouchingCommandCount += 1;
+    }
+  }
+
+  let overallAdvice = "safe-direct";
+  if (heavyCommandCount > 0) {
+    overallAdvice = "run-under-managed-job-with-memory-and-disk-admission";
+  } else if (requiresManagedGuard) {
+    overallAdvice = "prefer-managed-job-for-agent-runs";
+  }
+
+  return {
+    commandCount: selectedCommands.length,
+    staticCommandCount,
+    focusedCommandCount,
+    heavyCommandCount,
+    safeDirectCommandCount,
+    managedGuardCommandCount,
+    compilerStateFreeCommandCount,
+    compilerStateTouchingCommandCount,
+    canRunWithoutCompilerState: compilerStateTouchingCommandCount === 0,
+    requiresManagedGuard,
+    byResourceClass,
+    byOomRisk,
+    overallAdvice,
+  };
+}
+
+function affectedVerificationPlanRecommendation(summary) {
+  if (summary.commandCount === 0) {
+    return "affected-verification-plan:repair-plan-json";
+  }
+  if (summary.heavyCommandCount > 0) {
+    return "affected-verification-plan:run-managed-memory-disk-admission";
+  }
+  if (summary.requiresManagedGuard) {
+    return "affected-verification-plan:run-managed-focused";
+  }
+  if (summary.canRunWithoutCompilerState) {
+    return "affected-verification-plan:safe-direct-compiler-state-free";
+  }
+  return "affected-verification-plan:safe-direct-compiler-state-access";
+}
+
+function affectedVerificationLaunchMode(summary) {
+  if (summary.commandCount === 0) {
+    return "invalid-plan";
+  }
+  if (summary.heavyCommandCount > 0) {
+    return "heavy-managed";
+  }
+  if (summary.requiresManagedGuard) {
+    return "focused-managed";
+  }
+  if (summary.canRunWithoutCompilerState) {
+    return "direct-compiler-state-free";
+  }
+  return "direct-compiler-state-access";
+}
+
+function affectedVerificationLaunchRecommendation(mode) {
+  switch (mode) {
+    case "direct-compiler-state-free":
+      return "affected-verification-launch:direct-compiler-state-free";
+    case "direct-compiler-state-access":
+      return "affected-verification-launch:direct-compiler-state-access-preflight";
+    case "heavy-managed":
+      return "affected-verification-launch:managed-heavy-memory-disk";
+    case "focused-managed":
+      return "affected-verification-launch:managed-focused";
+    default:
+      return "affected-verification-launch:repair-plan-json";
+  }
+}
+
+function affectedVerificationLaunchBlockingGaps(mode) {
+  switch (mode) {
+    case "direct-compiler-state-free":
+      return [];
+    case "direct-compiler-state-access":
+      return ["affected verifier plan touches compiler/cache state before launch"];
+    case "heavy-managed":
+      return ["affected verifier plan requires managed memory/disk admission before launch"];
+    case "focused-managed":
+      return ["affected verifier plan requires managed guard before launch"];
+    default:
+      return ["affected verifier plan has no selected commands"];
+  }
+}
+
+function buildAffectedVerificationLaunchPolicy(summary) {
+  const mode = affectedVerificationLaunchMode(summary);
+  const valid = summary.commandCount > 0;
+  const canRunDirect = valid && !summary.requiresManagedGuard && summary.heavyCommandCount === 0;
+  const ready = canRunDirect && summary.canRunWithoutCompilerState;
+  const recommendation = affectedVerificationLaunchRecommendation(mode);
+  const verificationPlanRecommendation = affectedVerificationPlanRecommendation(summary);
+  return {
+    valid,
+    ready,
+    mode,
+    canRunDirect,
+    canRunWithoutCompilerState: summary.canRunWithoutCompilerState,
+    requiresManagedGuard: summary.requiresManagedGuard,
+    recommendation,
+    verificationPlanRecommendation,
+    blockingGaps: affectedVerificationLaunchBlockingGaps(mode),
+    requiredClosure: ready ? [] : [verificationPlanRecommendation],
+    evidence: [
+      `affected-launch-mode=${mode}`,
+      `affected-launch-ready=${ready ? "true" : "false"}`,
+      `affected-launch-can-run-direct=${canRunDirect ? "true" : "false"}`,
+      `affected-launch-can-run-without-compiler-state=${summary.canRunWithoutCompilerState ? "true" : "false"}`,
+      `affected-launch-requires-managed=${summary.requiresManagedGuard ? "true" : "false"}`,
+      `affected-launch-recommendation=${recommendation}`,
+    ],
+  };
 }
 
 function isVerificationScript(file) {
@@ -811,48 +1160,194 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
       file === "scripts/verify-compiler-slice.sh" || file === "scripts/test-verify-compiler-slice.sh";
     const isRuntimeSliceVerificationScript =
       file === "scripts/verify-runtime-slice.sh" || file === "scripts/test-verify-runtime-slice.sh";
+    const isManagedJobSafetyPath =
+      file === "scripts/run-managed-job.sh" ||
+      file === "scripts/stop-managed-job.sh" ||
+      file === "scripts/test-managed-job.sh" ||
+      file === "scripts/clasp-clean-generated-state.sh" ||
+      file === "scripts/test-generated-state-cleanup.sh";
+    const isResolveClaspcSafetyPath =
+      file === "scripts/resolve-claspc.sh" || file === "scripts/test-resolve-claspc.sh";
+    const isGeneratedStateCleanupPlanStaticTestPath = file === "scripts/test-generated-state-cleanup-plan-static.sh";
+    const isGeneratedStateCleanupPlanRuntimeTestPath = file === "scripts/test-generated-state-cleanup-plan.sh";
+    const isSafeWorkspaceStaticTestPath = file === "scripts/test-safe-workspace-static.sh";
+    const isGeneratedStateIgnorePath = file === ".gitignore";
+    const isGeneratedStateCleanupPlanPath = file === "examples/swarm-native/GeneratedStateCleanupPlan.clasp";
+    const isLocalRoutingPath =
+      file === "examples/swarm-native/LocalRouting.clasp" ||
+      file === "examples/swarm-native/LocalRoutingHarness.clasp";
+    const isStandaloneSwarmSurfacePath =
+      file === "src/StandaloneSwarmReadiness.clasp" ||
+      file === "src/StandaloneSwarmVerifier.clasp" ||
+      file === "examples/swarm-native/StandaloneSwarmHarness.clasp" ||
+      file === "examples/swarm-native/StandaloneSwarmRouting.clasp" ||
+      file === "examples/swarm-native/StandaloneSwarmClosureReport.clasp" ||
+      file === "examples/swarm-native/StandaloneSwarmClosureReportHarness.clasp" ||
+      file === "scripts/standalone-swarm-readiness.sh" ||
+      file === "scripts/standalone-swarm-verify.sh" ||
+      file === "scripts/test-standalone-swarm-surfaces.sh" ||
+      file === "docs/standalone-swarm-readiness.md" ||
+      file === "runtime/standalone_swarm_probe.rs";
     const isJsEmitterDeterminismPath =
       file === "src/Compiler/Emit/JavaScript.clasp" || file === "scripts/test-js-emitter-determinism.sh";
     const isSourceNativeVerifyScript = file === "src/scripts/verify.sh";
+    const isIterationSpeedEvidencePath = file === "docs/iteration-speed-loop-evidence.md";
+    const isNativeIncrementalGuardPath =
+      file === "scripts/native-incremental-guard.mjs" ||
+      file === "scripts/test-native-incremental-guard.sh";
     const compilerSlice = compilerSliceForFile(file);
+    const isTryDecodePath =
+      file === "scripts/test-try-decode.sh" ||
+      file === "runtime/clasp_runtime.rs" ||
+      file === "src/Compiler/Checker.clasp" ||
+      file === "src/Compiler/Lower.clasp" ||
+      file === "src/Compiler/Emit/JavaScript.clasp" ||
+      file === "src/Compiler/Emit/Native.clasp" ||
+      file === "src/Compiler/Emit/NativeJson.clasp";
+    const isModelBoundaryPath =
+      file === "examples/swarm-native/ModelBoundary.clasp" ||
+      file === "examples/swarm-native/ModelBoundaryHarness.clasp" ||
+      file === "scripts/test-model-boundary.sh";
+    const isServiceDecodePath =
+      file === "examples/swarm-native/Service.clasp" ||
+      file === "examples/swarm-native/ServiceDecodeHarness.clasp" ||
+      file === "scripts/test-service-decode.sh";
     const isBenchmarkCheckpoint = isBenchmarkCheckpointFile(file);
     const isBenchmarkPrepCache = isBenchmarkPrepCacheFile(file);
     const isPromotedSourceExportCache = isPromotedSourceExportCacheFile(file);
+    const isPromotedModuleSummaryCache = isPromotedModuleSummaryCacheFile(file);
     const isSwarmMemoryPath =
       file === "runtime/swarm.rs" ||
       file === "runtime/clasp_runtime.rs" ||
       file === "examples/swarm-native/Swarm.clasp" ||
       file === "examples/swarm-native/MemoryHarness.clasp" ||
+      file === "examples/swarm-native/WeightedMemoryHarness.clasp" ||
+      file === "examples/swarm-native/EmbeddingProviderHarness.clasp" ||
       file === "src/Compiler/Checker.clasp" ||
-      file === "docs/autonomous-swarm-runtime-requirements.md" ||
       file === "scripts/test-swarm-memory.sh";
+    const isSwarmPriorityPath =
+      file === "runtime/swarm.rs" ||
+      file === "runtime/clasp_runtime.rs" ||
+      file === "examples/swarm-native/Swarm.clasp" ||
+      file === "examples/swarm-native/PriorityHarness.clasp" ||
+      file === "scripts/test-swarm-priority.sh";
+    const isFocusedSwarmPriorityHarness = file === "examples/swarm-native/PriorityHarness.clasp";
+    const isSwarmCapabilityAuditPath =
+      file === "examples/swarm-native/SwarmCapabilityAudit.clasp" ||
+      file === "docs/autonomous-swarm-runtime-requirements.md" ||
+      file === "scripts/test-swarm-capability-audit.sh";
+    const isSwarmSpawnPolicyPath =
+      file === "runtime/swarm.rs" ||
+      file === "runtime/clasp_runtime.rs" ||
+      file === "examples/swarm-native/Swarm.clasp" ||
+      file === "examples/swarm-native/SpawnPolicyHarness.clasp" ||
+      file === "scripts/test-swarm-spawn-policy.sh";
+    const isFocusedSwarmSpawnPolicyHarness = file === "examples/swarm-native/SpawnPolicyHarness.clasp";
+    const isSwarmPolicyHelperPath =
+      file === "runtime/swarm.rs" ||
+      file === "runtime/clasp_runtime.rs" ||
+      file === "examples/swarm-native/Swarm.clasp" ||
+      file === "examples/swarm-native/CapabilityPolicyHarness.clasp" ||
+      file === "examples/swarm-native/PolicyHarness.clasp" ||
+      file === "examples/swarm-native/GoalManagerTaskPolicyHarness.clasp" ||
+      file === "scripts/clasp-network-egress-backend.mjs" ||
+      file === "scripts/clasp-network-egress-enforcer.mjs" ||
+      file === "scripts/clasp-network-egress-kernel-backend.mjs" ||
+      file === "scripts/clasp-network-egress-guard.c" ||
+      file === "scripts/clasp-filesystem-write-enforcer.mjs" ||
+      file === "scripts/clasp-filesystem-write-guard.c" ||
+      file === "scripts/test-swarm-policy-helpers.sh";
+    const isSwarmDestructivePolicyPath =
+      file === "runtime/swarm.rs" ||
+      file === "examples/swarm-native/DestructivePolicyHarness.clasp" ||
+      file === "examples/swarm-native/FilesystemKernelPolicyHarness.clasp" ||
+      file === "scripts/clasp-filesystem-write-enforcer.mjs" ||
+      file === "scripts/clasp-filesystem-write-kernel-backend.mjs" ||
+      file === "scripts/clasp-filesystem-write-guard.c" ||
+      file === "scripts/test-swarm-destructive-policy.sh" ||
+      file === "scripts/test-swarm-filesystem-kernel-policy.sh";
+    const isFocusedSwarmPolicyHelperHarness =
+      file === "examples/swarm-native/CapabilityPolicyHarness.clasp" ||
+      file === "examples/swarm-native/PolicyHarness.clasp" ||
+      file === "examples/swarm-native/GoalManagerTaskPolicyHarness.clasp";
     const isSwarmContextPackPath =
       file === "examples/swarm-native/Swarm.clasp" ||
       file === "examples/swarm-native/ContextPackHarness.clasp" ||
       file === "examples/swarm-native/SemanticSummaryIndex.clasp" ||
       file === "examples/swarm-native/SemanticSummaryIndexHarness.clasp" ||
-      file === "docs/autonomous-swarm-runtime-requirements.md" ||
       file === "docs/autonomous-swarm-near-term-roadmap.md" ||
       file === "scripts/test-swarm-context-pack.sh" ||
       file === "scripts/test-swarm-semantic-summary-index.sh";
+    const isAgentBackendApiPath =
+      file === "examples/swarm-native/AgentBackend.clasp";
+    const isAgentBackendHarnessPath =
+      file === "examples/swarm-native/AgentBackendHarness.clasp";
+    const isAgentBackendStaticTestPath = file === "scripts/test-agent-backend-static.sh";
+    const isAgentErgonomicsPath =
+      file === "examples/swarm-native/AgentErgonomics.clasp" ||
+      file === "examples/swarm-native/AgentErgonomicsHarness.clasp" ||
+      file === "scripts/test-agent-ergonomics-helpers.sh";
+    const isLocalSourceEditWorkspacePath =
+      file === "examples/swarm-native/LocalSourceEdit.clasp" ||
+      file === "examples/swarm-native/LocalSourceEditHarness.clasp" ||
+      file === "scripts/test-local-source-edit-workspace.sh";
+    const isLocalAgentCapabilityClosurePath =
+      file === "scripts/test-local-agent-capability-closure.sh";
+    const isRetiredGoalManagerProgramFile = retiredGoalManagerProgramFiles.has(file);
     const isSwarmFeedbackLoopProgramPath =
       file === "examples/swarm-native/FeedbackLoop.clasp" ||
       file === "examples/swarm-native/AttemptLoop.clasp" ||
-      file === "examples/swarm-native/LocalAgent.clasp";
+      file === "examples/swarm-native/LocalAgent.clasp" ||
+      isAgentBackendApiPath ||
+      isAgentBackendHarnessPath;
     const isGoalManagerPlannerPromptPath =
+      file === "examples/swarm-native/GoalManagerConfig.clasp" ||
+      file === "examples/swarm-native/GoalManagerAgentBackendConfig.clasp" ||
       file === "examples/swarm-native/GoalManagerBootstrapPlanner.clasp" ||
+      file === "examples/swarm-native/GoalManagerPlannerInputFingerprint.clasp" ||
+      file === "examples/swarm-native/GoalManagerPlannerInputTypes.clasp" ||
+      file === "examples/swarm-native/GoalManagerPlannerInputState.clasp" ||
+      file === "examples/swarm-native/PlannerInputFingerprintHarness.clasp" ||
       file === "examples/swarm-native/LocalPlanner.clasp" ||
+      isAgentBackendApiPath ||
       file === "scripts/test-goal-manager-agent-command-template.sh" ||
       file === "scripts/test-goal-manager-default-planner-command.sh" ||
       file === "scripts/test-goal-manager-fixture-manager.mjs";
+    const isHostResourcesPath =
+      file === "examples/swarm-native/HostResources.clasp" ||
+      file === "examples/swarm-native/HostResourcesHarness.clasp";
+    const isGoalManagerResourceHealthPath =
+      file === "examples/swarm-native/GoalManagerResourceContext.clasp" ||
+      file === "examples/swarm-native/GoalManagerResourceHealth.clasp" ||
+      file === "examples/swarm-native/GoalManagerResourceHealthHarness.clasp" ||
+      file === "examples/swarm-native/ResourceRecoveryPolicy.clasp" ||
+      file === "examples/swarm-native/ResourceRecoveryPolicyHarness.clasp" ||
+      file === "examples/swarm-native/ResourceGuardPolicy.clasp" ||
+      file === "examples/swarm-native/ResourceGuardPolicyHarness.clasp" ||
+      file === "scripts/test-resource-recovery-policy.sh" ||
+      file === "scripts/test-goal-manager-resource-health.sh";
+    const isGoalManagerGeneratedCleanupHealthPath =
+      file === "examples/swarm-native/GoalManagerGeneratedCleanupHealth.clasp" ||
+      file === "examples/swarm-native/GoalManagerGeneratedCleanupHealthHarness.clasp" ||
+      file === "scripts/test-goal-manager-generated-cleanup-health.sh";
+    const isGoalManagerMailboxCapabilityDetailsPath =
+      file === "examples/swarm-native/GoalManagerCapabilityMailbox.clasp" ||
+      file === "examples/swarm-native/GoalManagerMailboxMessages.clasp" ||
+      file === "examples/swarm-native/GoalManagerMailboxCapabilityHarness.clasp" ||
+      file === "scripts/test-goal-manager-mailbox-capability-details.sh";
+    const isResourceGuardPolicyTestPath =
+      file === "scripts/test-resource-guard-policy.sh";
 
-    if (file.startsWith("src/") && !isPromotedSourceExportCache && !isSourceNativeVerifyScript) {
+    if (file.startsWith("src/") && !isPromotedSourceExportCache && !isPromotedModuleSummaryCache && !isSourceNativeVerifyScript && !isStandaloneSwarmSurfacePath) {
       matched = true;
       reason(file, "source", "source/compiler path uses selfhost and hosted compiler verification");
       addSelected(selectedByCommand, "selfhost", COMMANDS.selfhost, "source/compiler path", file);
       addSelected(selectedByCommand, "source-verify", COMMANDS.sourceVerify, "source/compiler path", file);
       addSelected(selectedByCommand, "int-builtins", COMMANDS.intBuiltins, "source/compiler path", file);
       addSelected(selectedByCommand, "dict-builtins", COMMANDS.dictBuiltins, "source/compiler path", file);
+      if (isTryDecodePath) {
+        addSelected(selectedByCommand, "try-decode", COMMANDS.tryDecode, "safe decode compiler path", file);
+      }
     }
 
     if (compilerSlice) {
@@ -919,11 +1414,13 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
       );
     }
 
-    if (file.startsWith("runtime/")) {
+    if (file.startsWith("runtime/") && !isStandaloneSwarmSurfacePath) {
       matched = true;
       reason(file, "runtime", "runtime path uses native runtime and native claspc coverage");
       addSelected(selectedByCommand, "int-builtins", COMMANDS.intBuiltins, "runtime path", file);
       addSelected(selectedByCommand, "dict-builtins", COMMANDS.dictBuiltins, "runtime path", file);
+      addSelected(selectedByCommand, "try-decode", COMMANDS.tryDecode, "runtime path", file);
+      addSelected(selectedByCommand, "safe-workspace-static", COMMANDS.safeWorkspaceStatic, "runtime host workspace contract", file);
       addSelected(selectedByCommand, "native-runtime", COMMANDS.nativeRuntime, "runtime path", file);
       addSelected(selectedByCommand, "native-claspc", COMMANDS.nativeClaspc, "runtime path", file);
     }
@@ -941,6 +1438,131 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
         );
       }
       addSelected(selectedByCommand, "swarm-memory", COMMANDS.swarmMemory, "swarm memory path", file);
+    }
+
+    if (isSwarmPriorityPath) {
+      matched = true;
+      reason(file, "swarm-priority", "swarm priority paths use focused native CLI and ordinary Clasp scheduling coverage");
+      if (file.endsWith(".sh")) {
+        addSelected(
+          selectedByCommand,
+          `bash-syntax:${file}`,
+          `bash -n ${shellQuote(file)}`,
+          "swarm priority shell syntax",
+          file,
+        );
+      }
+      addSelected(selectedByCommand, "swarm-priority", COMMANDS.swarmPriority, "swarm priority path", file);
+      if (isFocusedSwarmPriorityHarness) {
+        addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "swarm priority harness structural gate", file);
+      }
+    }
+
+    if (isSwarmSpawnPolicyPath) {
+      matched = true;
+      reason(file, "swarm-spawn-policy", "swarm spawn policy paths use focused native CLI and ordinary Clasp bounded child-spawn coverage");
+      if (file.endsWith(".sh")) {
+        addSelected(
+          selectedByCommand,
+          `bash-syntax:${file}`,
+          `bash -n ${shellQuote(file)}`,
+          "swarm spawn policy shell syntax",
+          file,
+        );
+      }
+      addSelected(selectedByCommand, "swarm-spawn-policy", COMMANDS.swarmSpawnPolicy, "swarm spawn policy path", file);
+      if (isFocusedSwarmSpawnPolicyHarness) {
+        addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "swarm spawn policy harness structural gate", file);
+      }
+    }
+
+    if (isSwarmPolicyHelperPath) {
+      matched = true;
+      reason(file, "swarm-policy-helpers", "swarm policy helper paths use focused ordinary Clasp capability coverage");
+      if (file.endsWith(".sh")) {
+        addSelected(
+          selectedByCommand,
+          `bash-syntax:${file}`,
+          `bash -n ${shellQuote(file)}`,
+          "swarm policy helper shell syntax",
+          file,
+        );
+      }
+      if (file.endsWith(".mjs")) {
+        addSelected(
+          selectedByCommand,
+          `node-syntax:${file}`,
+          `node --check ${shellQuote(file)}`,
+          "swarm policy helper node syntax",
+          file,
+        );
+      }
+      if (file.endsWith(".c")) {
+        addSelected(
+          selectedByCommand,
+          `c-syntax:${file}`,
+          `cc -fsyntax-only ${shellQuote(file)}`,
+          "swarm policy helper C guard syntax",
+          file,
+        );
+      }
+      addSelected(
+        selectedByCommand,
+        "swarm-policy-helpers",
+        COMMANDS.swarmPolicyHelpers,
+        "swarm policy helper path",
+        file,
+      );
+      if (isFocusedSwarmPolicyHelperHarness) {
+        addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "swarm policy helper harness structural gate", file);
+      }
+    }
+
+    if (isSwarmDestructivePolicyPath) {
+      matched = true;
+      reason(file, "swarm-destructive-policy", "filesystem mediator paths use focused destructive filesystem policy coverage");
+      if (file.endsWith(".sh")) {
+        addSelected(
+          selectedByCommand,
+          `bash-syntax:${file}`,
+          `bash -n ${shellQuote(file)}`,
+          "swarm destructive policy shell syntax",
+          file,
+        );
+      }
+      if (file.endsWith(".mjs")) {
+        addSelected(
+          selectedByCommand,
+          `node-syntax:${file}`,
+          `node --check ${shellQuote(file)}`,
+          "filesystem mediator node syntax",
+          file,
+        );
+      }
+      if (file.endsWith(".c")) {
+        addSelected(
+          selectedByCommand,
+          `c-syntax:${file}`,
+          `cc -fsyntax-only ${shellQuote(file)}`,
+          "filesystem write guard C syntax",
+          file,
+        );
+      }
+      addSelected(
+        selectedByCommand,
+        "swarm-destructive-policy",
+        COMMANDS.swarmDestructivePolicy,
+        "swarm destructive filesystem policy path",
+        file,
+      );
+      addSelected(
+        selectedByCommand,
+        "swarm-filesystem-kernel-policy",
+        COMMANDS.swarmFilesystemKernelPolicy,
+        "swarm kernel filesystem policy path",
+        file,
+      );
+      addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "swarm destructive policy structural gate", file);
     }
 
     if (isSwarmContextPackPath) {
@@ -995,6 +1617,55 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
         file,
       );
       addSelected(selectedByCommand, "dict-builtins", COMMANDS.dictBuiltins, "dictionary builtin harness", file);
+    }
+
+    if (file === "scripts/test-try-decode.sh") {
+      matched = true;
+      reason(file, "try-decode-harness", "tryDecode harness uses shell syntax plus focused JS/native safe decode coverage");
+      addSelected(
+        selectedByCommand,
+        `bash-syntax:${file}`,
+        `bash -n ${shellQuote(file)}`,
+        "tryDecode shell syntax",
+        file,
+      );
+      addSelected(selectedByCommand, "try-decode", COMMANDS.tryDecode, "tryDecode harness", file);
+    }
+
+    if (isModelBoundaryPath) {
+      matched = true;
+      reason(
+        file,
+        "model-boundary",
+        "model boundary paths use focused typed Prompt plus untrusted-output validation coverage",
+      );
+      if (file.endsWith(".sh")) {
+        addSelected(
+          selectedByCommand,
+          `bash-syntax:${file}`,
+          `bash -n ${shellQuote(file)}`,
+          "model boundary shell syntax",
+          file,
+        );
+      }
+      addSelected(selectedByCommand, "model-boundary", COMMANDS.modelBoundary, "model boundary path", file);
+      addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "model boundary path", file);
+    }
+
+    if (isServiceDecodePath) {
+      matched = true;
+      reason(file, "service-decode", "service runtime boundary paths use focused malformed host JSON recovery coverage");
+      if (file.endsWith(".sh")) {
+        addSelected(
+          selectedByCommand,
+          `bash-syntax:${file}`,
+          `bash -n ${shellQuote(file)}`,
+          "service decode shell syntax",
+          file,
+        );
+      }
+      addSelected(selectedByCommand, "service-decode", COMMANDS.serviceDecode, "service decode path", file);
+      addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "service decode path", file);
     }
 
     if (file === "scripts/test-native-claspc-diagnostics.sh") {
@@ -1056,7 +1727,66 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
         "swarm feedback-loop program",
         file,
       );
+      if (isAgentBackendApiPath || isAgentBackendHarnessPath) {
+        addSelected(
+          selectedByCommand,
+          "agent-backend-static",
+          COMMANDS.agentBackendStatic,
+          "agent backend policy contract",
+          file,
+        );
+      }
       addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "swarm feedback-loop program", file);
+    }
+
+    if (isLocalSourceEditWorkspacePath) {
+      matched = true;
+      reason(
+        file,
+        "local-source-edit-workspace",
+        "standalone source-edit paths use focused workspace-confined source-patch coverage plus the structural swarm gate",
+      );
+      if (file.endsWith(".sh")) {
+        addSelected(
+          selectedByCommand,
+          `bash-syntax:${file}`,
+          `bash -n ${shellQuote(file)}`,
+          "local source edit workspace shell syntax",
+          file,
+        );
+      }
+      addSelected(
+        selectedByCommand,
+        "local-source-edit-workspace",
+        COMMANDS.localSourceEditWorkspace,
+        "standalone source-edit workspace path",
+        file,
+      );
+      addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "standalone source-edit workspace path", file);
+    }
+
+    if (isLocalAgentCapabilityClosurePath) {
+      matched = true;
+      reason(
+        file,
+        "local-agent-capability-closure",
+        "standalone local-agent source-edit behavior uses repo-scale source-patch coverage plus the structural swarm gate",
+      );
+      addSelected(
+        selectedByCommand,
+        `bash-syntax:${file}`,
+        `bash -n ${shellQuote(file)}`,
+        "local agent capability closure shell syntax",
+        file,
+      );
+      addSelected(
+        selectedByCommand,
+        "local-agent-capability-closure",
+        COMMANDS.localAgentCapabilityClosure,
+        "standalone local-agent source-edit behavior",
+        file,
+      );
+      addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "standalone local-agent source-edit behavior", file);
     }
 
     if (isGoalManagerPlannerPromptPath) {
@@ -1098,10 +1828,207 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
         "GoalManager planner prompt path",
         file,
       );
+      if (isAgentBackendApiPath) {
+        addSelected(
+          selectedByCommand,
+          "agent-backend-static",
+          COMMANDS.agentBackendStatic,
+          "agent backend policy contract",
+          file,
+        );
+      }
       addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "GoalManager planner prompt path", file);
     }
 
-    if (file.startsWith("examples/swarm-native/") && !isSwarmFeedbackLoopProgramPath && !isGoalManagerPlannerPromptPath) {
+    if (isRetiredGoalManagerProgramFile) {
+      matched = true;
+      reason(file, "retired-goal-manager-monolith", "retired GoalManager monolith paths use the ready-gate absence check");
+      addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "retired GoalManager monolith path", file);
+    }
+
+    if (isHostResourcesPath) {
+      matched = true;
+      reason(file, "host-resources", "host resource paths use focused ordinary runtime binding coverage plus the structural swarm gate");
+      addSelected(selectedByCommand, "host-runtime", COMMANDS.hostRuntime, "host resources path", file);
+      addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "host resources path", file);
+    }
+
+    if (isGoalManagerResourceHealthPath) {
+      matched = true;
+      reason(file, "goal-manager-resource-health", "GoalManager resource guard path uses focused manager resource-health coverage plus the structural swarm gate");
+      addSelected(selectedByCommand, "resource-guard-policy", COMMANDS.resourceGuardPolicy, "GoalManager resource guard path", file);
+      addSelected(selectedByCommand, "resource-recovery-policy", COMMANDS.resourceRecoveryPolicy, "GoalManager resource guard path", file);
+      addSelected(selectedByCommand, "goal-manager-resource-health", COMMANDS.goalManagerResourceHealth, "GoalManager resource guard path", file);
+      addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "GoalManager resource guard path", file);
+    }
+
+    if (isGoalManagerGeneratedCleanupHealthPath) {
+      matched = true;
+      reason(file, "goal-manager-generated-cleanup-health", "GoalManager generated cleanup health uses the small cleanup-health contract plus the structural swarm gate");
+      addSelected(
+        selectedByCommand,
+        "goal-manager-generated-cleanup-health",
+        COMMANDS.goalManagerGeneratedCleanupHealth,
+        "GoalManager generated cleanup health path",
+        file,
+      );
+      addSelected(
+        selectedByCommand,
+        "generated-state-cleanup-plan-static",
+        COMMANDS.generatedStateCleanupPlanStatic,
+        "GoalManager generated cleanup health path",
+        file,
+      );
+      addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "GoalManager generated cleanup health path", file);
+    }
+
+    if (isGoalManagerMailboxCapabilityDetailsPath) {
+      matched = true;
+      reason(file, "goal-manager-mailbox-capability-details", "GoalManager mailbox capability-detail path uses focused mailbox capability propagation coverage plus the structural swarm gate");
+      addSelected(
+        selectedByCommand,
+        "goal-manager-mailbox-capability-details",
+        COMMANDS.goalManagerMailboxCapabilityDetails,
+        "GoalManager mailbox capability-detail path",
+        file,
+      );
+      addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "GoalManager mailbox capability-detail path", file);
+    }
+
+    if (isResourceGuardPolicyTestPath) {
+      matched = true;
+      reason(file, "resource-guard-policy-harness", "resource guard policy harness uses shell syntax plus focused policy coverage");
+      addSelected(
+        selectedByCommand,
+        `shell-syntax:${file}`,
+        `bash -n ${shellQuote(file)}`,
+        "resource guard policy shell syntax",
+        file,
+      );
+      addSelected(selectedByCommand, "resource-guard-policy", COMMANDS.resourceGuardPolicy, "resource guard policy harness", file);
+      addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "resource guard policy harness", file);
+    }
+
+    if (isGeneratedStateCleanupPlanPath) {
+      matched = true;
+      reason(file, "generated-state-cleanup-plan", "Clasp generated-state cleanup planner uses focused shell cleanup, fast cleanup-plan contract coverage, and structural swarm coverage");
+      addSelected(
+        selectedByCommand,
+        "generated-state-cleanup",
+        COMMANDS.generatedStateCleanup,
+        "Clasp generated-state cleanup planner",
+        file,
+      );
+      addSelected(
+        selectedByCommand,
+        "generated-state-cleanup-plan-static",
+        COMMANDS.generatedStateCleanupPlanStatic,
+        "Clasp generated-state cleanup planner",
+        file,
+      );
+      addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "Clasp generated-state cleanup planner", file);
+    }
+
+    if (isGeneratedStateCleanupPlanRuntimeTestPath) {
+      matched = true;
+      reason(file, "generated-state-cleanup-plan-runtime-test", "Clasp generated-state cleanup plan runtime test uses shell syntax plus the fast static cleanup-plan contract");
+      addSelected(
+        selectedByCommand,
+        `bash-syntax:${file}`,
+        `bash -n ${shellQuote(file)}`,
+        "generated-state cleanup plan shell syntax",
+        file,
+      );
+      addSelected(
+        selectedByCommand,
+        "generated-state-cleanup-plan-static",
+        COMMANDS.generatedStateCleanupPlanStatic,
+        "Clasp generated-state cleanup plan runtime regression",
+        file,
+      );
+      addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "generated-state cleanup plan structural gate", file);
+    }
+
+    if (isGeneratedStateCleanupPlanStaticTestPath) {
+      matched = true;
+      reason(file, "generated-state-cleanup-plan-static-test", "Clasp generated-state cleanup plan static test uses shell syntax plus fast contract coverage");
+      addSelected(
+        selectedByCommand,
+        `bash-syntax:${file}`,
+        `bash -n ${shellQuote(file)}`,
+        "generated-state cleanup plan static shell syntax",
+        file,
+      );
+      addSelected(
+        selectedByCommand,
+        "generated-state-cleanup-plan-static",
+        COMMANDS.generatedStateCleanupPlanStatic,
+        "Clasp generated-state cleanup plan static contract",
+        file,
+      );
+      addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "generated-state cleanup plan structural gate", file);
+    }
+
+    if (isLocalRoutingPath) {
+      matched = true;
+      reason(file, "local-routing", "local routing policy uses focused agent-template coverage plus the structural swarm gate");
+      addSelected(
+        selectedByCommand,
+        "agent-command-template",
+        COMMANDS.agentCommandTemplate,
+        "local routing policy",
+        file,
+      );
+      addSelected(
+        selectedByCommand,
+        "goal-manager-agent-command-template",
+        COMMANDS.goalManagerAgentCommandTemplate,
+        "local routing policy",
+        file,
+      );
+      addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "local routing policy", file);
+    }
+
+    if (isStandaloneSwarmSurfacePath) {
+      matched = true;
+      reason(
+        file,
+        "standalone-swarm-surfaces",
+        "standalone swarm source surfaces use focused surface coverage plus the structural swarm gate",
+      );
+      if (file.endsWith(".sh")) {
+        addSelected(
+          selectedByCommand,
+          `bash-syntax:${file}`,
+          `bash -n ${shellQuote(file)}`,
+          "standalone swarm surface shell syntax",
+          file,
+        );
+      }
+      addSelected(
+        selectedByCommand,
+        "standalone-swarm-surfaces",
+        COMMANDS.standaloneSwarmSurfaces,
+        "standalone swarm source surfaces",
+        file,
+      );
+      addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "standalone swarm source surfaces", file);
+    }
+
+    if (file === "examples/swarm-native/SwarmCapabilityAudit.clasp" || file === "docs/autonomous-swarm-runtime-requirements.md") {
+      matched = true;
+      reason(file, "swarm-capability-audit", "swarm capability audit uses focused lightweight audit coverage plus the structural swarm gate");
+      addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "swarm capability audit structural gate", file);
+      addSelected(
+        selectedByCommand,
+        "swarm-capability-audit",
+        COMMANDS.swarmCapabilityAudit,
+        "swarm capability audit program",
+        file,
+      );
+    }
+
+    if (file.startsWith("examples/swarm-native/") && !isSwarmFeedbackLoopProgramPath && !isGoalManagerPlannerPromptPath && !isModelBoundaryPath && !isServiceDecodePath && !isFocusedSwarmPriorityHarness && !isFocusedSwarmPolicyHelperHarness && !focusedPlannerReportDecodeFiles.has(file) && !isRetiredGoalManagerProgramFile && !isHostResourcesPath && !isGoalManagerResourceHealthPath && !isGoalManagerGeneratedCleanupHealthPath && !isGoalManagerMailboxCapabilityDetailsPath && !isGeneratedStateCleanupPlanPath && !isLocalRoutingPath && !isStandaloneSwarmSurfacePath && !isSwarmCapabilityAuditPath && !isAgentErgonomicsPath && !isLocalSourceEditWorkspacePath && !isLocalAgentCapabilityClosurePath) {
       matched = true;
       reason(file, "swarm-native", "native swarm example path uses native claspc, ready-gate, managed-loop, memory, and context-pack coverage");
       addSelected(selectedByCommand, "native-claspc", COMMANDS.nativeClaspc, "swarm native path", file);
@@ -1116,6 +2043,8 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
         );
       }
       addSelected(selectedByCommand, "swarm-memory", COMMANDS.swarmMemory, "swarm native path", file);
+      addSelected(selectedByCommand, "swarm-priority", COMMANDS.swarmPriority, "swarm native path", file);
+      addSelected(selectedByCommand, "swarm-spawn-policy", COMMANDS.swarmSpawnPolicy, "swarm native path", file);
       addSelected(selectedByCommand, "swarm-context-pack", COMMANDS.swarmContextPack, "swarm native path", file);
       addSelected(selectedByCommand, "monitored-loop", COMMANDS.monitoredLoop, "swarm native path", file);
       addSelected(selectedByCommand, "runtime-slice:managed-loop", COMMANDS.runtimeSliceManagedLoop, "swarm native path", file);
@@ -1123,7 +2052,7 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
 
     if (plannerReportDecodeFiles.has(file)) {
       matched = true;
-      reason(file, "goal-manager-planner-report-decode", "planner report decoding uses focused malformed/current/legacy report coverage");
+      reason(file, "goal-manager-planner-report-decode", "GoalManager durable JSON decoding uses focused malformed/current/legacy report and resume-state coverage");
       addSelected(
         selectedByCommand,
         "goal-manager-planner-report-decode",
@@ -1131,6 +2060,7 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
         "planner report decode path",
         file,
       );
+      addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "planner report decode path", file);
       if (file.endsWith(".sh")) {
         addSelected(
           selectedByCommand,
@@ -1174,7 +2104,8 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
 
     if (file.startsWith("examples/safe-workspace/")) {
       matched = true;
-      reason(file, "safe-workspace", "safe workspace example path uses focused ordinary-program root-bounded file API coverage");
+      reason(file, "safe-workspace", "safe workspace example path uses fast host-binding contract coverage plus focused ordinary-program root-bounded file API coverage");
+      addSelected(selectedByCommand, "safe-workspace-static", COMMANDS.safeWorkspaceStatic, "safe workspace host-binding contract", file);
       addSelected(selectedByCommand, "safe-workspace", COMMANDS.safeWorkspace, "safe workspace path", file);
     }
 
@@ -1286,6 +2217,38 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
       );
     }
 
+    if (isPromotedModuleSummaryCache) {
+      matched = true;
+      reason(
+        file,
+        "promoted-module-summary-cache",
+        "promoted module-summary cache paths use generator syntax plus focused freshness coverage",
+      );
+      if (file.endsWith(".sh")) {
+        addSelected(
+          selectedByCommand,
+          `bash-syntax:${file}`,
+          `bash -n ${shellQuote(file)}`,
+          "promoted module-summary cache shell syntax",
+          file,
+        );
+      }
+      addSelected(
+        selectedByCommand,
+        "promoted-module-summary-cache-node-check",
+        COMMANDS.promotedModuleSummaryCacheNodeCheck,
+        "promoted module-summary cache generator syntax",
+        file,
+      );
+      addSelected(
+        selectedByCommand,
+        "promoted-module-summary-cache-regression",
+        COMMANDS.promotedModuleSummaryCacheRegression,
+        "promoted module-summary cache freshness regression",
+        file,
+      );
+    }
+
     if (isAgentFeedbackJsonFile(file)) {
       matched = true;
       reason(file, "agent-feedback", "agent feedback artifact uses focused JSON parse coverage");
@@ -1367,6 +2330,218 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
       addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "swarm-ready gate harness", file);
     }
 
+    if (file === "scripts/test-selfhost.sh") {
+      matched = true;
+      reason(file, "selfhost-harness", "selfhost harness uses shell syntax plus focused selfhost coverage");
+      addSelected(
+        selectedByCommand,
+        `bash-syntax:${file}`,
+        `bash -n ${shellQuote(file)}`,
+        "selfhost harness shell syntax",
+        file,
+      );
+      addSelected(selectedByCommand, "selfhost", COMMANDS.selfhost, "selfhost harness", file);
+    }
+
+    if (file === "scripts/test-native-claspc.sh") {
+      matched = true;
+      reason(file, "native-claspc-harness", "native claspc harness uses shell syntax plus focused native compiler coverage");
+      addSelected(
+        selectedByCommand,
+        `bash-syntax:${file}`,
+        `bash -n ${shellQuote(file)}`,
+        "native claspc harness shell syntax",
+        file,
+      );
+      addSelected(selectedByCommand, "native-claspc", COMMANDS.nativeClaspc, "native claspc harness", file);
+    }
+
+    if (swarmPreflightScriptFiles.has(file)) {
+      matched = true;
+      reason(
+        file,
+        "swarm-preflight",
+        "swarm launch preflight files use shell syntax plus the preflight-only admission fixture",
+      );
+      addSelected(
+        selectedByCommand,
+        `bash-syntax:${file}`,
+        `bash -n ${shellQuote(file)}`,
+        "swarm preflight shell syntax",
+        file,
+      );
+      addSelected(selectedByCommand, "swarm-preflight", COMMANDS.swarmPreflight, "swarm launch preflight path", file);
+      addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "swarm launch preflight structural gate", file);
+    }
+
+    if (swarmTaskManifestFiles.has(file) || swarmControlScriptFiles.has(file)) {
+      matched = true;
+      reason(
+        file,
+        "swarm-control",
+        "swarm control-plane files use syntax checks plus focused task manifest and swarm-control coverage",
+      );
+      if (file.endsWith(".sh")) {
+        addSelected(
+          selectedByCommand,
+          `bash-syntax:${file}`,
+          `bash -n ${shellQuote(file)}`,
+          "swarm control shell syntax",
+          file,
+        );
+      }
+      if (file.endsWith(".mjs")) {
+        addSelected(
+          selectedByCommand,
+          `node-check:${file}`,
+          `node --check ${shellQuote(file)}`,
+          "swarm control node syntax",
+          file,
+        );
+      }
+      if (swarmTaskManifestFiles.has(file)) {
+        addSelected(selectedByCommand, "task-manifest", COMMANDS.taskManifest, "swarm task manifest path", file);
+      }
+      addSelected(selectedByCommand, "swarm-control", COMMANDS.swarmControl, "swarm control-plane path", file);
+    }
+
+    if (isIterationSpeedEvidencePath || isNativeIncrementalGuardPath) {
+      matched = true;
+      reason(
+        file,
+        "native-incremental-guard",
+        "iteration-speed evidence and guard changes use focused incremental cache guard coverage",
+      );
+      if (file.endsWith(".mjs")) {
+        addSelected(
+          selectedByCommand,
+          `node-check:${file}`,
+          `node --check ${shellQuote(file)}`,
+          "native incremental guard node syntax",
+          file,
+        );
+      }
+      if (file.endsWith(".sh")) {
+        addSelected(
+          selectedByCommand,
+          `bash-syntax:${file}`,
+          `bash -n ${shellQuote(file)}`,
+          "native incremental guard shell syntax",
+          file,
+        );
+      }
+      addSelected(
+        selectedByCommand,
+        "native-incremental-guard",
+        COMMANDS.nativeIncrementalGuard,
+        "native incremental guard regression",
+        file,
+      );
+    }
+
+    if (file === "scripts/measure-native-incremental.sh") {
+      matched = true;
+      reason(
+        file,
+        "native-incremental-measure",
+        "incremental cache measurement uses shell syntax plus focused native CLI and selfhost scenarios",
+      );
+      addSelected(
+        selectedByCommand,
+        `bash-syntax:${file}`,
+        `bash -n ${shellQuote(file)}`,
+        "native incremental measurement shell syntax",
+        file,
+      );
+      addSelected(
+        selectedByCommand,
+        "native-incremental-cli",
+        COMMANDS.nativeIncrementalCli,
+        "native incremental CLI cache scenario",
+        file,
+      );
+      addSelected(
+        selectedByCommand,
+        "native-incremental-selfhost",
+        COMMANDS.nativeIncrementalSelfhost,
+        "selfhost incremental cache scenario",
+        file,
+      );
+      addSelected(
+        selectedByCommand,
+        "native-incremental-compiler-module",
+        COMMANDS.nativeIncrementalCompilerModule,
+        "large compiler-module incremental cache scenario",
+        file,
+      );
+    }
+
+    if (isManagedJobSafetyPath) {
+      matched = true;
+      reason(
+        file,
+        "managed-job-safety",
+        "managed job launch/stop guardrails use shell syntax plus focused managed-job and ready-gate coverage",
+      );
+      addSelected(
+        selectedByCommand,
+        `bash-syntax:${file}`,
+        `bash -n ${shellQuote(file)}`,
+        "managed job safety shell syntax",
+        file,
+      );
+      addSelected(selectedByCommand, "managed-job", COMMANDS.managedJob, "managed job safety regression", file);
+      addSelected(
+        selectedByCommand,
+        "generated-state-cleanup",
+        COMMANDS.generatedStateCleanup,
+        "generated state cleanup regression",
+        file,
+      );
+      addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "managed job safety structural gate", file);
+    }
+
+    if (isResolveClaspcSafetyPath) {
+      matched = true;
+      reason(
+        file,
+        "resolve-claspc-safety",
+        "claspc resolver rebuild guardrails use shell syntax plus focused fake-cargo managed-build coverage",
+      );
+      addSelected(
+        selectedByCommand,
+        `bash-syntax:${file}`,
+        `bash -n ${shellQuote(file)}`,
+        "resolve-claspc safety shell syntax",
+        file,
+      );
+      addSelected(
+        selectedByCommand,
+        "resolve-claspc",
+        COMMANDS.resolveClaspc,
+        "resolve-claspc managed rebuild regression",
+        file,
+      );
+      addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "resolve-claspc safety structural gate", file);
+    }
+
+    if (isGeneratedStateIgnorePath) {
+      matched = true;
+      reason(
+        file,
+        "generated-state-ignore",
+        "generated-state ignore changes use focused cleanup and structural ready-gate coverage",
+      );
+      addSelected(
+        selectedByCommand,
+        "generated-state-cleanup",
+        COMMANDS.generatedStateCleanup,
+        "generated-state ignore regression",
+        file,
+      );
+      addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "generated-state ignore structural gate", file);
+    }
+
     if (file === "scripts/test-swarm-ready-benchmark.sh") {
       matched = true;
       reason(file, "swarm-ready-benchmark-harness", "swarm-ready benchmark uses shell syntax plus focused native runtime coverage");
@@ -1382,6 +2557,26 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
         "swarm-ready-benchmark",
         COMMANDS.swarmReadyBenchmark,
         "swarm-ready benchmark harness",
+        file,
+      );
+    }
+
+    if (file === "scripts/test-swarm-capability-audit.sh") {
+      matched = true;
+      reason(file, "swarm-capability-audit-harness", "swarm capability audit harness uses shell syntax plus focused lightweight audit coverage");
+      addSelected(
+        selectedByCommand,
+        `bash-syntax:${file}`,
+        `bash -n ${shellQuote(file)}`,
+        "swarm capability audit shell syntax",
+        file,
+      );
+      addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "swarm capability audit harness", file);
+      addSelected(
+        selectedByCommand,
+        "swarm-capability-audit",
+        COMMANDS.swarmCapabilityAudit,
+        "swarm capability audit harness",
         file,
       );
     }
@@ -1403,6 +2598,52 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
         "agent command template harness",
         file,
       );
+    }
+
+    if (isAgentBackendStaticTestPath) {
+      matched = true;
+      reason(file, "agent-backend-static-test", "agent backend static contract uses shell syntax plus standalone backend policy coverage");
+      addSelected(
+        selectedByCommand,
+        `bash-syntax:${file}`,
+        `bash -n ${shellQuote(file)}`,
+        "agent backend static shell syntax",
+        file,
+      );
+      addSelected(
+        selectedByCommand,
+        "agent-backend-static",
+        COMMANDS.agentBackendStatic,
+        "agent backend static contract",
+        file,
+      );
+      addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "agent backend static contract", file);
+    }
+
+    if (isAgentErgonomicsPath) {
+      matched = true;
+      reason(
+        file,
+        "agent-ergonomics",
+        "agent ergonomics helpers use focused Result/workspace/process coverage plus the structural swarm gate",
+      );
+      if (file.endsWith(".sh")) {
+        addSelected(
+          selectedByCommand,
+          `bash-syntax:${file}`,
+          `bash -n ${shellQuote(file)}`,
+          "agent ergonomics shell syntax",
+          file,
+        );
+      }
+      addSelected(
+        selectedByCommand,
+        "agent-ergonomics",
+        COMMANDS.agentErgonomics,
+        "agent ergonomics helper contract",
+        file,
+      );
+      addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "agent ergonomics helper contract", file);
     }
 
     if (file === "scripts/test-feedback-loop-resume.sh") {
@@ -1520,7 +2761,22 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
         "safe workspace shell syntax",
         file,
       );
+      addSelected(selectedByCommand, "safe-workspace-static", COMMANDS.safeWorkspaceStatic, "safe workspace host-binding contract", file);
       addSelected(selectedByCommand, "runtime-slice:workspace", COMMANDS.runtimeSliceWorkspace, "safe workspace harness", file);
+    }
+
+    if (isSafeWorkspaceStaticTestPath) {
+      matched = true;
+      reason(file, "safe-workspace-static-test", "safe workspace static contract uses shell syntax plus fast host-binding coverage");
+      addSelected(
+        selectedByCommand,
+        `bash-syntax:${file}`,
+        `bash -n ${shellQuote(file)}`,
+        "safe workspace static shell syntax",
+        file,
+      );
+      addSelected(selectedByCommand, "safe-workspace-static", COMMANDS.safeWorkspaceStatic, "safe workspace static contract", file);
+      addSelected(selectedByCommand, "swarm-ready", COMMANDS.swarmReady, "safe workspace static contract", file);
     }
 
     if (file === "scripts/test-safe-subprocess.sh") {
@@ -1621,6 +2877,23 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
         "selfhost native verifier mode regression",
         file,
       );
+    } else if (file === "scripts/test-verify-all-smoke.sh") {
+      matched = true;
+      reason(file, "verify-all-smoke-script", "verify-all smoke harness uses shell syntax plus direct fast-verifier contract coverage");
+      addSelected(
+        selectedByCommand,
+        `bash-syntax:${file}`,
+        `bash -n ${shellQuote(file)}`,
+        "verify-all smoke shell syntax",
+        file,
+      );
+      addSelected(
+        selectedByCommand,
+        "verify-all-smoke",
+        COMMANDS.verifyAllSmoke,
+        "verify-all smoke contract",
+        file,
+      );
     } else if (isVerificationScript(file)) {
       matched = true;
       reason(file, "verification-script", "verification script path uses syntax and regression coverage");
@@ -1687,6 +2960,11 @@ function runCommand(commandRecord) {
   return {
     id: commandRecord.id,
     command: commandRecord.command,
+    resourceClass: commandRecord.resourceClass,
+    oomRisk: commandRecord.oomRisk,
+    requiresManagedGuard: commandRecord.requiresManagedGuard,
+    executionAdvice: commandRecord.executionAdvice,
+    compilerStateAccess: commandRecord.compilerStateAccess,
     reasons: commandRecord.reasons,
     matchedFiles: commandRecord.matchedFiles,
     exitStatus,
@@ -1722,6 +3000,8 @@ function buildErrorReport(message) {
     semanticContextArtifacts: [],
     semanticContextByChangedFile: [],
     selectedCommands: [],
+    commandResourceSummary: buildCommandResourceSummary([]),
+    affectedVerificationLaunchPolicy: buildAffectedVerificationLaunchPolicy(buildCommandResourceSummary([])),
     routingReasons: [],
     unmatchedFiles: [],
     verificationFallbackMode: "none",
@@ -1780,6 +3060,8 @@ function main() {
   }
   const semanticContexts = collectSemanticContexts(changedFiles);
   const routePlan = routeChangedFiles(changedFiles, inputFallbackMode);
+  const commandResourceSummary = buildCommandResourceSummary(routePlan.selectedCommands);
+  const affectedVerificationLaunchPolicy = buildAffectedVerificationLaunchPolicy(commandResourceSummary);
   const planExplanations = args.planOnly ? buildPlanExplanations(changedFiles, routePlan, semanticContexts) : [];
   const commandRecords = [];
   let exitStatus = 0;
@@ -1806,6 +3088,8 @@ function main() {
     semanticContextArtifacts: semanticContexts.artifacts,
     semanticContextByChangedFile: semanticContexts.byChangedFile,
     selectedCommands: routePlan.selectedCommands,
+    commandResourceSummary,
+    affectedVerificationLaunchPolicy,
     routingReasons: routePlan.routingReasons,
     unmatchedFiles: routePlan.unmatchedFiles,
     verificationFallbackMode: routePlan.verificationFallbackMode,

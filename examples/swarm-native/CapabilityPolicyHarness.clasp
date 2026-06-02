@@ -1,0 +1,226 @@
+module Main
+
+foreign swarmObjectiveCreateRaw : Str -> Str -> Str -> Int -> Int -> Result Str = "swarmObjectiveCreateJson"
+foreign swarmTaskCreateRaw : Str -> Str -> Str -> Str -> [Str] -> Int -> Int -> Result Str = "swarmTaskCreateJson"
+foreign swarmPolicySetWithFilesystemAccessRaw : Str -> Str -> Str -> [Str] -> [Str] -> [Str] -> [Str] -> [Str] -> Str -> [Str] -> Result Str = "swarmPolicySetWithFilesystemAccessJson"
+
+record SwarmRoot = { path : Str }
+record ObjectiveHandle = { root : SwarmRoot, objectiveId : Str }
+record TaskHandle = { root : SwarmRoot, taskId : Str, actor : Str }
+record SwarmObjective = { objectiveId : Str }
+record SwarmTask = { taskId : Str, status : Str }
+
+record SwarmTaskCapabilities = {
+  processes : [Str],
+  filesystemRoots : [Str],
+  readonlyFilesystemRoots : [Str],
+  networkAccess : Str,
+  networkDestinations : [Str],
+  approvals : [Str],
+  verifiers : [Str]
+}
+
+record SwarmPolicy = {
+  taskId : Str,
+  mergegateName : Str,
+  requiredApprovals : [Str],
+  requiredVerifiers : [Str],
+  allowedProcesses : [Str],
+  allowedWorkspaceRoots : [Str],
+  allowedReadonlyRoots : [Str],
+  networkAccess : Str,
+  allowedNetworkDestinations : [Str],
+  capabilities : SwarmTaskCapabilities
+}
+
+record SwarmAccessPolicy = {
+  allowedProcesses : [Str],
+  allowedWorkspaceRoots : [Str],
+  allowedReadonlyRoots : [Str],
+  networkAccess : Str,
+  allowedNetworkDestinations : [Str]
+}
+
+record SwarmVerificationPolicy = {
+  mergegateName : Str,
+  requiredApprovals : [Str],
+  requiredVerifiers : [Str],
+  access : SwarmAccessPolicy
+}
+
+record CapabilityPolicyHarnessReport = {
+  taskId : Str,
+  mergegateName : Str,
+  policy : SwarmPolicy,
+  configuredCapabilities : SwarmTaskCapabilities,
+  accessPolicy : SwarmAccessPolicy,
+  verificationPolicy : SwarmVerificationPolicy
+}
+
+emptyTexts : [Str]
+emptyTexts = []
+
+swarmNetworkAllowlisted : Str
+swarmNetworkAllowlisted = "allowlisted"
+
+swarmRoot : Str -> SwarmRoot
+swarmRoot path = SwarmRoot { path = path }
+
+objectiveHandle : SwarmRoot -> Str -> ObjectiveHandle
+objectiveHandle root objectiveId = ObjectiveHandle { root = root, objectiveId = objectiveId }
+
+taskHandle : SwarmRoot -> Str -> Str -> TaskHandle
+taskHandle root taskId actor = TaskHandle { root = root, taskId = taskId, actor = actor }
+
+swarmTaskCapabilities : [Str] -> [Str] -> [Str] -> Str -> [Str] -> [Str] -> [Str] -> SwarmTaskCapabilities
+swarmTaskCapabilities processes filesystemRoots readonlyFilesystemRoots networkAccess networkDestinations approvals verifiers =
+  SwarmTaskCapabilities {
+    processes = processes,
+    filesystemRoots = filesystemRoots,
+    readonlyFilesystemRoots = readonlyFilesystemRoots,
+    networkAccess = networkAccess,
+    networkDestinations = networkDestinations,
+    approvals = approvals,
+    verifiers = verifiers
+  }
+
+swarmTaskCapabilitiesAllowNetworkDestinations : [Str] -> [Str] -> [Str] -> [Str] -> [Str] -> [Str] -> SwarmTaskCapabilities
+swarmTaskCapabilitiesAllowNetworkDestinations processes filesystemRoots readonlyFilesystemRoots networkDestinations approvals verifiers =
+  swarmTaskCapabilities processes filesystemRoots readonlyFilesystemRoots swarmNetworkAllowlisted networkDestinations approvals verifiers
+
+swarmAccessPolicyForTaskCapabilities : SwarmTaskCapabilities -> SwarmAccessPolicy
+swarmAccessPolicyForTaskCapabilities capabilities =
+  SwarmAccessPolicy {
+    allowedProcesses = capabilities.processes,
+    allowedWorkspaceRoots = capabilities.filesystemRoots,
+    allowedReadonlyRoots = capabilities.readonlyFilesystemRoots,
+    networkAccess = capabilities.networkAccess,
+    allowedNetworkDestinations = capabilities.networkDestinations
+  }
+
+swarmVerificationPolicyForTaskCapabilities : Str -> SwarmTaskCapabilities -> SwarmVerificationPolicy
+swarmVerificationPolicyForTaskCapabilities mergegateName capabilities =
+  SwarmVerificationPolicy {
+    mergegateName = mergegateName,
+    requiredApprovals = capabilities.approvals,
+    requiredVerifiers = capabilities.verifiers,
+    access = swarmAccessPolicyForTaskCapabilities capabilities
+  }
+
+objectiveResult : Result Str -> Result SwarmObjective
+objectiveResult value = match value {
+  Ok raw -> Ok (decode SwarmObjective raw),
+  Err message -> Err message
+}
+
+taskResult : Result Str -> Result SwarmTask
+taskResult value = match value {
+  Ok raw -> Ok (decode SwarmTask raw),
+  Err message -> Err message
+}
+
+policyResult : Result Str -> Result SwarmPolicy
+policyResult value = match value {
+  Ok raw -> Ok (decode SwarmPolicy raw),
+  Err message -> Err message
+}
+
+objectiveCreate : SwarmRoot -> Str -> Str -> Int -> Int -> Result SwarmObjective
+objectiveCreate root objectiveId detail maxTasks maxRuns =
+  objectiveResult (swarmObjectiveCreateRaw root.path objectiveId detail maxTasks maxRuns)
+
+taskCreate : ObjectiveHandle -> Str -> Str -> [Str] -> Int -> Int -> Result SwarmTask
+taskCreate handle taskId detail dependencies maxRuns leaseTimeoutMs =
+  taskResult (swarmTaskCreateRaw handle.root.path handle.objectiveId taskId detail dependencies maxRuns leaseTimeoutMs)
+
+policySetWithTaskCapabilities : TaskHandle -> Str -> SwarmTaskCapabilities -> Result SwarmPolicy
+policySetWithTaskCapabilities handle mergegateName capabilities =
+  policyResult (swarmPolicySetWithFilesystemAccessRaw handle.root.path handle.taskId mergegateName capabilities.approvals capabilities.verifiers capabilities.processes capabilities.filesystemRoots capabilities.readonlyFilesystemRoots capabilities.networkAccess capabilities.networkDestinations)
+
+stateRootPath : Str
+stateRootPath =
+  if textJoin "" argv == "" then
+    "swarm-capability-policy-state"
+  else
+    pathJoin argv
+
+workspaceRoot : Str
+workspaceRoot = pathJoin [stateRootPath, "workspace"]
+
+readonlyRoot : Str
+readonlyRoot = pathJoin [stateRootPath, "readonly-dependencies"]
+
+root : SwarmRoot
+root = swarmRoot stateRootPath
+
+objectiveId : Str
+objectiveId = "capability-policy-objective"
+
+taskId : Str
+taskId = "capability-policy-task"
+
+actorName : Str
+actorName = "manager"
+
+mergegateName : Str
+mergegateName = "capability-policy"
+
+objective : ObjectiveHandle
+objective = objectiveHandle root objectiveId
+
+task : TaskHandle
+task = taskHandle root taskId actorName
+
+capabilities : SwarmTaskCapabilities
+capabilities =
+  swarmTaskCapabilitiesAllowNetworkDestinations
+    ["bash"]
+    [workspaceRoot]
+    [readonlyRoot]
+    ["api.openai.com:443"]
+    ["review"]
+    ["typed-policy-smoke"]
+
+errorText : Str -> Str
+errorText message = textConcat ["error:", message]
+
+main : Str
+main =
+  match mkdirAll stateRootPath {
+    Ok stateRootValue ->
+      match mkdirAll workspaceRoot {
+        Ok workspaceValue ->
+          match mkdirAll readonlyRoot {
+            Ok readonlyValue ->
+              match objectiveCreate root objectiveId "Exercise first-class task capability policy helpers." 1 1 {
+                Ok objectiveValue ->
+                  match taskCreate objective taskId "Set policy from explicit task capabilities." emptyTexts 1 60000 {
+                    Ok taskValue ->
+                      match policySetWithTaskCapabilities task mergegateName capabilities {
+                        Ok policyValue ->
+                          encode (CapabilityPolicyHarnessReport {
+                            taskId = policyValue.taskId,
+                            mergegateName = policyValue.mergegateName,
+                            policy = policyValue,
+                            configuredCapabilities = capabilities,
+                            accessPolicy = swarmAccessPolicyForTaskCapabilities capabilities,
+                            verificationPolicy = swarmVerificationPolicyForTaskCapabilities mergegateName capabilities
+                          }),
+                        Err message ->
+                          errorText message
+                      },
+                    Err message ->
+                      errorText message
+                  },
+                Err message ->
+                  errorText message
+              },
+            Err message ->
+              errorText message
+          },
+        Err message ->
+          errorText message
+      },
+    Err message ->
+      errorText message
+  }

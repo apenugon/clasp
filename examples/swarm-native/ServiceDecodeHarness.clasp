@@ -1,0 +1,35 @@
+module Main
+
+import Service
+
+validWatchedProcessJson : Str
+validWatchedProcessJson = "{\"pid\":7,\"running\":false,\"completed\":true,\"exitCode\":0,\"stdoutPath\":\"out.log\",\"stderrPath\":\"err.log\",\"heartbeatPath\":\"heartbeat.json\",\"updatedAtMs\":10}"
+
+renderWatchedProcessDecode : Result WatchedProcess -> Str
+renderWatchedProcessDecode result = match result {
+  Ok process -> textConcat ["ok:", encode process.pid, ":", encode process.completed],
+  Err message -> textConcat ["err:", message]
+}
+
+renderServiceStatusDecode : Result ServiceStatus -> Str
+renderServiceStatusDecode result = match result {
+  Ok status -> textConcat ["ok:", status.status],
+  Err message -> textConcat ["err:", message]
+}
+
+renderServiceUpgradeDecode : Result ServiceUpgradeTransaction -> Str
+renderServiceUpgradeDecode result = match result {
+  Ok transaction -> textConcat ["ok:", transaction.phase],
+  Err message -> textConcat ["err:", message]
+}
+
+main : Str
+main =
+  textJoin
+    "\n"
+    [
+      textConcat ["watched-valid=", renderWatchedProcessDecode (watchedProcessFromRaw (Ok validWatchedProcessJson))],
+      textConcat ["watched-invalid=", renderWatchedProcessDecode (watchedProcessFromRaw (Ok "{\"pid\":\"bad\"}"))],
+      textConcat ["status-invalid=", renderServiceStatusDecode (serviceStatusFromRaw (Ok "{\"serviceRoot\":42}"))],
+      textConcat ["upgrade-invalid=", renderServiceUpgradeDecode (serviceUpgradeFromRaw (Ok "{\"generation\":\"bad\"}"))]
+    ]

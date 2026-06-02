@@ -1,6 +1,96 @@
 module Main
 
-import Swarm
+foreign swarmObjectiveCreateRaw : Str -> Str -> Str -> Int -> Int -> Result Str = "swarmObjectiveCreateJson"
+foreign swarmTaskCreateRaw : Str -> Str -> Str -> Str -> [Str] -> Int -> Int -> Result Str = "swarmTaskCreateJson"
+foreign swarmMemoryPutRaw : Str -> Str -> Str -> Str -> Str -> Str -> Result Str = "swarmMemoryPutJson"
+foreign swarmMemoryQueryRaw : Str -> Str -> Str -> Str -> Int -> Result Str = "swarmMemoryQueryJson"
+foreign swarmMemorySearchRaw : Str -> Str -> Str -> Str -> Int -> Result Str = "swarmMemorySearchJson"
+
+record SwarmRoot = { path : Str }
+record ObjectiveHandle = { root : SwarmRoot, objectiveId : Str }
+record TaskHandle = { root : SwarmRoot, taskId : Str, actor : Str }
+
+record SwarmObjective = {
+  createdAtMs : Int,
+  deadlineAtMs : Int,
+  objectiveId : Str,
+  detail : Str,
+  maxRuns : Int,
+  maxTasks : Int,
+  projectedStatus : Str,
+  status : Str,
+  taskCount : Int,
+  runCount : Int,
+  updatedAtMs : Int
+}
+
+record SwarmTask = {
+  attempts : Int,
+  taskId : Str,
+  status : Str,
+  objectiveId : Str,
+  detail : Str,
+  dependencies : [Str],
+  ready : Bool,
+  blockedBy : [Str],
+  createdAtMs : Int,
+  deadlineAtMs : Int,
+  heartbeatSeen : Bool,
+  lastError : Str,
+  lastHeartbeatAtMs : Int,
+  leaseActor : Str,
+  leaseExpired : Bool,
+  leaseTimeoutMs : Int,
+  maxRuns : Int,
+  priority : Int,
+  objectiveDeadlineAtMs : Int,
+  updatedAtMs : Int
+}
+
+record SwarmMemory = {
+  actor : Str,
+  createdAtMs : Int,
+  memoryId : Int,
+  objectiveId : Str,
+  taskId : Str,
+  key : Str,
+  value : Str,
+  updatedAtMs : Int
+}
+
+record SwarmMemorySearchResult = {
+  memory : SwarmMemory,
+  score : Int,
+  matchedText : Str
+}
+
+record SwarmSparseEmbedding = {
+  model : Str,
+  dimensions : [Str]
+}
+
+record SwarmEmbeddedMemoryValue = {
+  text : Str,
+  embedding : SwarmSparseEmbedding
+}
+
+record SwarmEmbeddedMemory = {
+  memory : SwarmMemory,
+  text : Str,
+  embedding : SwarmSparseEmbedding
+}
+
+record SwarmEmbeddedMemorySearchResult = {
+  memory : SwarmMemory,
+  text : Str,
+  score : Int,
+  matchedDimensions : [Str],
+  model : Str
+}
+
+record SwarmMailbox = {
+  memory : [SwarmMemory]
+}
 
 record MemoryHarnessReport = {
   objectiveMemory : SwarmMemory,
@@ -11,8 +101,153 @@ record MemoryHarnessReport = {
   searchValues : [Str],
   searchScores : [Int],
   mailboxValues : [Str],
-  mailboxMemoryCount : Int
+  mailboxMemoryCount : Int,
+  semanticMemoryCount : Int,
+  semanticDecodedCount : Int,
+  semanticSkippedInvalidCount : Int,
+  semanticEncodedHasEmbedding : Bool,
+  semanticSearchTexts : [Str],
+  semanticSearchScores : [Int],
+  semanticTopMatchedDimensions : [Str],
+  semanticTopModel : Str
 }
+
+emptyTaskDependencies : [Str]
+emptyTaskDependencies = []
+
+swarmRoot : Str -> SwarmRoot
+swarmRoot path = SwarmRoot { path = path }
+
+objectiveHandle : SwarmRoot -> Str -> ObjectiveHandle
+objectiveHandle root objectiveId = ObjectiveHandle { root = root, objectiveId = objectiveId }
+
+taskHandle : SwarmRoot -> Str -> Str -> TaskHandle
+taskHandle root taskId actor = TaskHandle { root = root, taskId = taskId, actor = actor }
+
+objectiveResultError : Str -> Result SwarmObjective
+objectiveResultError message = Err message
+
+taskResultError : Str -> Result SwarmTask
+taskResultError message = Err message
+
+memoryResultError : Str -> Result SwarmMemory
+memoryResultError message = Err message
+
+memoryListResultError : Str -> Result [SwarmMemory]
+memoryListResultError message = Err message
+
+memorySearchResultListError : Str -> Result [SwarmMemorySearchResult]
+memorySearchResultListError message = Err message
+
+embeddedMemoryResultError : Str -> Result SwarmEmbeddedMemory
+embeddedMemoryResultError message = Err message
+
+mailboxResultError : Str -> Result SwarmMailbox
+mailboxResultError message = Err message
+
+objectiveResult : Result Str -> Result SwarmObjective
+objectiveResult value = match value {
+  Ok raw -> Ok (decode SwarmObjective raw),
+  Err message -> objectiveResultError message
+}
+
+taskResult : Result Str -> Result SwarmTask
+taskResult value = match value {
+  Ok raw -> Ok (decode SwarmTask raw),
+  Err message -> taskResultError message
+}
+
+memoryResult : Result Str -> Result SwarmMemory
+memoryResult value = match value {
+  Ok raw -> Ok (decode SwarmMemory raw),
+  Err message -> memoryResultError message
+}
+
+memoryListResult : Result Str -> Result [SwarmMemory]
+memoryListResult value = match value {
+  Ok raw -> Ok (decode [SwarmMemory] raw),
+  Err message -> memoryListResultError message
+}
+
+memorySearchResultListResult : Result Str -> Result [SwarmMemorySearchResult]
+memorySearchResultListResult value = match value {
+  Ok raw -> Ok (decode [SwarmMemorySearchResult] raw),
+  Err message -> memorySearchResultListError message
+}
+
+embeddedMemoryFromMemory : SwarmMemory -> Result SwarmEmbeddedMemory
+embeddedMemoryFromMemory memory =
+  match tryDecode SwarmEmbeddedMemoryValue memory.value {
+    Ok value ->
+      Ok (SwarmEmbeddedMemory {
+        memory = memory,
+        text = value.text,
+        embedding = value.embedding
+      }),
+    Err message ->
+      embeddedMemoryResultError message
+  }
+
+embeddedMemoriesFromMemory : [SwarmMemory] -> [SwarmEmbeddedMemory]
+embeddedMemoriesFromMemory memories = {
+  let mut decoded = [];
+  for memory in memories {
+    match embeddedMemoryFromMemory memory {
+      Ok embedded -> {
+        decoded = append decoded [embedded];
+        decoded
+      },
+      Err message ->
+        decoded
+    }
+  };
+  decoded
+}
+
+objectiveCreate : SwarmRoot -> Str -> Str -> Int -> Int -> Result SwarmObjective
+objectiveCreate root objectiveId detail maxTasks maxRuns =
+  objectiveResult (swarmObjectiveCreateRaw root.path objectiveId detail maxTasks maxRuns)
+
+taskCreate : ObjectiveHandle -> Str -> Str -> [Str] -> Int -> Int -> Result SwarmTask
+taskCreate handle taskId detail dependencies maxRuns leaseTimeoutMs =
+  taskResult (swarmTaskCreateRaw handle.root.path handle.objectiveId taskId detail dependencies maxRuns leaseTimeoutMs)
+
+memoryPut : SwarmRoot -> Str -> Str -> Str -> Str -> Str -> Result SwarmMemory
+memoryPut root objectiveId taskId actor key value =
+  memoryResult (swarmMemoryPutRaw root.path objectiveId taskId actor key value)
+
+memoryQuery : SwarmRoot -> Str -> Str -> Str -> Int -> Result [SwarmMemory]
+memoryQuery root objectiveId taskId key limit =
+  memoryListResult (swarmMemoryQueryRaw root.path objectiveId taskId key limit)
+
+memorySearch : SwarmRoot -> Str -> Str -> Str -> Int -> Result [SwarmMemorySearchResult]
+memorySearch root objectiveId taskId query limit =
+  memorySearchResultListResult (swarmMemorySearchRaw root.path objectiveId taskId query limit)
+
+objectiveMemoryPut : ObjectiveHandle -> Str -> Str -> Str -> Result SwarmMemory
+objectiveMemoryPut handle actor key value =
+  memoryPut handle.root handle.objectiveId "" actor key value
+
+taskMemoryPut : TaskHandle -> Str -> Str -> Result SwarmMemory
+taskMemoryPut handle key value =
+  memoryPut handle.root "" handle.taskId handle.actor key value
+
+objectiveMemory : ObjectiveHandle -> Str -> Int -> Result [SwarmMemory]
+objectiveMemory handle key limit =
+  memoryQuery handle.root handle.objectiveId "" key limit
+
+taskMemory : TaskHandle -> Str -> Int -> Result [SwarmMemory]
+taskMemory handle key limit =
+  memoryQuery handle.root "" handle.taskId key limit
+
+taskMailbox : TaskHandle -> Int -> Result SwarmMailbox
+taskMailbox handle limit =
+  match taskMemory handle "" limit {
+    Ok memoryValue ->
+      Ok (SwarmMailbox { memory = memoryValue }),
+    Err message ->
+      mailboxResultError message
+  }
 
 stateRootPath : Str
 stateRootPath =
@@ -39,6 +274,181 @@ searchMemoryValue item = item.memory.value
 searchScore : SwarmMemorySearchResult -> Int
 searchScore item = item.score
 
+swarmSparseEmbedding : Str -> [Str] -> SwarmSparseEmbedding
+swarmSparseEmbedding model dimensions =
+  SwarmSparseEmbedding {
+    model = model,
+    dimensions = dimensions
+  }
+
+swarmEmbeddedMemoryValue : Str -> SwarmSparseEmbedding -> SwarmEmbeddedMemoryValue
+swarmEmbeddedMemoryValue text embedding =
+  SwarmEmbeddedMemoryValue {
+    text = text,
+    embedding = embedding
+  }
+
+swarmEmbeddedMemoryText : Str -> SwarmSparseEmbedding -> Str
+swarmEmbeddedMemoryText text embedding =
+  encode (swarmEmbeddedMemoryValue text embedding)
+
+textListHas : Str -> [Str] -> Bool
+textListHas wanted values = {
+  let mut found = false;
+  for value in values {
+    if found then
+      found
+    else if value == wanted then {
+      found = true;
+      found
+    } else
+      found
+  };
+  found
+}
+
+swarmSparseEmbeddingMatchedDimensions : SwarmSparseEmbedding -> SwarmSparseEmbedding -> [Str]
+swarmSparseEmbeddingMatchedDimensions query candidate = {
+  let mut matches = [];
+  for dimension in query.dimensions {
+    if textListHas dimension candidate.dimensions then {
+      matches = append matches [dimension];
+      matches
+    } else
+      matches
+  };
+  matches
+}
+
+swarmEmbeddedMemorySearchResult : SwarmSparseEmbedding -> SwarmEmbeddedMemory -> SwarmEmbeddedMemorySearchResult
+swarmEmbeddedMemorySearchResult query embedded = {
+  let matched = swarmSparseEmbeddingMatchedDimensions query embedded.embedding;
+  SwarmEmbeddedMemorySearchResult {
+    memory = embedded.memory,
+    text = embedded.text,
+    score = if query.model == embedded.embedding.model then length matched else 0,
+    matchedDimensions = matched,
+    model = embedded.embedding.model
+  }
+}
+
+swarmEmbeddedMemorySearchInsert : [SwarmEmbeddedMemorySearchResult] -> SwarmEmbeddedMemorySearchResult -> [SwarmEmbeddedMemorySearchResult]
+swarmEmbeddedMemorySearchInsert ranked candidate = {
+  let mut next = [];
+  let mut inserted = false;
+  for existing in ranked {
+    if inserted then {
+      next = append next [existing];
+      next
+    } else if candidate.score > existing.score then {
+      next = append next [candidate, existing];
+      inserted = true;
+      next
+    } else {
+      next = append next [existing];
+      next
+    }
+  };
+  if inserted then
+    next
+  else
+    append next [candidate]
+}
+
+swarmEmbeddedMemorySearchLimit : Int -> [SwarmEmbeddedMemorySearchResult] -> [SwarmEmbeddedMemorySearchResult]
+swarmEmbeddedMemorySearchLimit limit ranked = {
+  let mut kept = [];
+  for item in ranked {
+    if length kept < limit then {
+      kept = append kept [item];
+      kept
+    } else
+      kept
+  };
+  kept
+}
+
+swarmEmbeddedMemorySearch : SwarmSparseEmbedding -> [SwarmEmbeddedMemory] -> Int -> [SwarmEmbeddedMemorySearchResult]
+swarmEmbeddedMemorySearch query candidates limit = {
+  let mut ranked = [];
+  for candidate in candidates {
+    let result = swarmEmbeddedMemorySearchResult query candidate;
+    if result.score > 0 then {
+      ranked = swarmEmbeddedMemorySearchLimit limit (swarmEmbeddedMemorySearchInsert ranked result);
+      ranked
+    } else
+      ranked
+  };
+  ranked
+}
+
+swarmEmbeddedMemorySearchFromMemory : SwarmSparseEmbedding -> [SwarmMemory] -> Int -> [SwarmEmbeddedMemorySearchResult]
+swarmEmbeddedMemorySearchFromMemory query memories limit =
+  swarmEmbeddedMemorySearch query (embeddedMemoriesFromMemory memories) limit
+
+embeddedText : SwarmEmbeddedMemory -> Str
+embeddedText item = item.text
+
+embeddedSearchText : SwarmEmbeddedMemorySearchResult -> Str
+embeddedSearchText item = item.text
+
+embeddedSearchScore : SwarmEmbeddedMemorySearchResult -> Int
+embeddedSearchScore item = item.score
+
+firstSearchMatchedDimensions : [SwarmEmbeddedMemorySearchResult] -> [Str]
+firstSearchMatchedDimensions values = {
+  let mut matched = [];
+  let mut found = false;
+  for value in values {
+    if found then
+      found
+    else {
+      matched = value.matchedDimensions;
+      found = true;
+      found
+    }
+  };
+  matched
+}
+
+firstSearchModel : [SwarmEmbeddedMemorySearchResult] -> Str
+firstSearchModel values = {
+  let mut model = "";
+  let mut found = false;
+  for value in values {
+    if found then
+      found
+    else {
+      model = value.model;
+      found = true;
+      found
+    }
+  };
+  model
+}
+
+semanticQueryEmbedding : SwarmSparseEmbedding
+semanticQueryEmbedding =
+  swarmSparseEmbedding "sparse-semantic-v1" ["compiler", "runtime", "verification"]
+
+semanticCompilerMemoryText : Str
+semanticCompilerMemoryText =
+  swarmEmbeddedMemoryText
+    "compiler runtime verifier lesson"
+    (swarmSparseEmbedding "sparse-semantic-v1" ["compiler", "runtime", "verification", "swarm"])
+
+semanticRuntimeMemoryText : Str
+semanticRuntimeMemoryText =
+  swarmEmbeddedMemoryText
+    "runtime guard lesson"
+    (swarmSparseEmbedding "sparse-semantic-v1" ["runtime", "resource-guard"])
+
+semanticModelMismatchMemoryText : Str
+semanticModelMismatchMemoryText =
+  swarmEmbeddedMemoryText
+    "same words from incompatible model"
+    (swarmSparseEmbedding "other-model" ["compiler", "runtime", "verification"])
+
 errorText : Str -> Str
 errorText message = textConcat ["error:", message]
 
@@ -48,7 +458,7 @@ main =
     Ok rootCreated ->
       match objectiveCreate root objective.objectiveId "Persist and retrieve swarm memory from ordinary Clasp." 1 4 {
         Ok objectiveValue ->
-          match taskCreate objective task.taskId "Record a memory item and read it through the mailbox." [] 4 60000 {
+          match taskCreate objective task.taskId "Record a memory item and read it through the mailbox." emptyTaskDependencies 4 60000 {
             Ok taskValue ->
               match objectiveMemoryPut objective "planner" "lesson" "prefer-durable-objective-memory" {
                 Ok objectiveMemoryValue ->
@@ -64,17 +474,53 @@ main =
                                     Ok searchValues ->
                                       match taskMailbox task 10 {
                                         Ok mailboxValue ->
-                                          encode (MemoryHarnessReport {
-                                            objectiveMemory = objectiveMemoryValue,
-                                            taskMemory = taskMemoryValue,
-                                            objectiveValues = map memoryValue objectiveMemoryValues,
-                                            taskValues = map memoryValue taskMemoryValues,
-                                            allValues = map memoryValue allMemoryValues,
-                                            searchValues = map searchMemoryValue searchValues,
-                                            searchScores = map searchScore searchValues,
-                                            mailboxValues = map memoryValue mailboxValue.memory,
-                                            mailboxMemoryCount = length mailboxValue.memory
-                                          }),
+                                          match objectiveMemoryPut objective "planner" "semantic-embedding" semanticCompilerMemoryText {
+                                            Ok semanticCompilerMemory ->
+                                              match taskMemoryPut task "semantic-embedding" semanticRuntimeMemoryText {
+                                                Ok semanticRuntimeMemory ->
+                                                  match objectiveMemoryPut objective "planner" "semantic-embedding" semanticModelMismatchMemoryText {
+                                                    Ok semanticMismatchMemory ->
+                                                      match objectiveMemoryPut objective "planner" "semantic-embedding" "not-json" {
+                                                        Ok semanticInvalidMemory ->
+                                                          match memoryQuery root "" "" "semantic-embedding" 10 {
+                                                            Ok semanticMemoryValues -> {
+                                                              let decodedValues = embeddedMemoriesFromMemory semanticMemoryValues;
+                                                              let semanticSearchValues = swarmEmbeddedMemorySearchFromMemory semanticQueryEmbedding semanticMemoryValues 10;
+                                                              encode (MemoryHarnessReport {
+                                                                objectiveMemory = objectiveMemoryValue,
+                                                                taskMemory = taskMemoryValue,
+                                                                objectiveValues = map memoryValue objectiveMemoryValues,
+                                                                taskValues = map memoryValue taskMemoryValues,
+                                                                allValues = map memoryValue allMemoryValues,
+                                                                searchValues = map searchMemoryValue searchValues,
+                                                                searchScores = map searchScore searchValues,
+                                                                mailboxValues = map memoryValue mailboxValue.memory,
+                                                                mailboxMemoryCount = length mailboxValue.memory,
+                                                                semanticMemoryCount = length semanticMemoryValues,
+                                                                semanticDecodedCount = length decodedValues,
+                                                                semanticSkippedInvalidCount = intSubtract (length semanticMemoryValues) (length decodedValues),
+                                                                semanticEncodedHasEmbedding = length (textSplit semanticCompilerMemoryText "\"embedding\"") > 1,
+                                                                semanticSearchTexts = map embeddedSearchText semanticSearchValues,
+                                                                semanticSearchScores = map embeddedSearchScore semanticSearchValues,
+                                                                semanticTopMatchedDimensions = firstSearchMatchedDimensions semanticSearchValues,
+                                                                semanticTopModel = firstSearchModel semanticSearchValues
+                                                              })
+                                                            },
+                                                            Err message ->
+                                                              errorText message
+                                                          },
+                                                        Err message ->
+                                                          errorText message
+                                                      },
+                                                    Err message ->
+                                                      errorText message
+                                                  },
+                                                Err message ->
+                                                  errorText message
+                                              },
+                                            Err message ->
+                                              errorText message
+                                          },
                                         Err message ->
                                           errorText message
                                       },

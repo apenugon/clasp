@@ -1,0 +1,26 @@
+module Main
+
+import StandaloneSwarmClosureReport
+
+validClosureReportJson : Str
+validClosureReportJson =
+  "{\"schemaVersion\":1,\"kind\":\"standalone-swarm-verifier-report\",\"mode\":\"closure\",\"status\":\"closed\",\"workspaceRoot\":\"/workspace\",\"builderReport\":\"/workspace/builder.json\",\"verifierReport\":\"/workspace/verifier.json\",\"proofPath\":\"/workspace/notes/direct-source-edit.txt\",\"workspaceFingerprintManifest\":\"notes/direct-source-edit-manifest.json\",\"workspaceFingerprintManifestSha256\":\"abc123\",\"requiredSurfaceCount\":8,\"evidence\":[\"fixed-standalone-swarm-markers\",\"direct-source-edit-proof\",\"workspace-fingerprint-manifest\",\"local-agent-builder-report\",\"local-agent-verifier-report\",\"typed-local-verifier-gate\"]}"
+
+invalidClosureReportJson : Str
+invalidClosureReportJson =
+  "{\"schemaVersion\":1,\"kind\":\"standalone-swarm-verifier-report\",\"mode\":\"closure\",\"status\":\"closed\",\"workspaceRoot\":\"/workspace\",\"builderReport\":\"\",\"verifierReport\":\"/workspace/verifier.json\",\"proofPath\":\"/workspace/notes/direct-source-edit.txt\",\"workspaceFingerprintManifest\":\"\",\"workspaceFingerprintManifestSha256\":\"\",\"requiredSurfaceCount\":8,\"evidence\":[\"fixed-standalone-swarm-markers\",\"direct-source-edit-proof\"]}"
+
+manifestMissingClosureReportJson : Str
+manifestMissingClosureReportJson =
+  "{\"schemaVersion\":1,\"kind\":\"standalone-swarm-verifier-report\",\"mode\":\"closure\",\"status\":\"closed\",\"workspaceRoot\":\"/workspace\",\"builderReport\":\"/workspace/builder.json\",\"verifierReport\":\"/workspace/verifier.json\",\"proofPath\":\"/workspace/notes/direct-source-edit.txt\",\"workspaceFingerprintManifest\":\"\",\"workspaceFingerprintManifestSha256\":\"\",\"requiredSurfaceCount\":8,\"evidence\":[\"fixed-standalone-swarm-markers\",\"direct-source-edit-proof\",\"local-agent-builder-report\",\"local-agent-verifier-report\",\"typed-local-verifier-gate\"]}"
+
+main : Str
+main =
+  let manifestMissingDecision = standaloneSwarmClosureDecisionFromRaw manifestMissingClosureReportJson in
+  textJoin "\n" [
+    standaloneSwarmClosureDecisionSummary (standaloneSwarmClosureDecisionFromRaw validClosureReportJson),
+    standaloneSwarmClosureDecisionSummary (standaloneSwarmClosureDecisionFromRaw invalidClosureReportJson),
+    standaloneSwarmClosureDecisionSummary manifestMissingDecision,
+    textConcat ["standalone-swarm-closure-repair-kind=", standaloneSwarmClosureRepairKindForDecision manifestMissingDecision],
+    standaloneSwarmClosureRepairPromptForDecision manifestMissingDecision
+  ]

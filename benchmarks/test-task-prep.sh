@@ -5,6 +5,11 @@ project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 workspace_root="$project_root/benchmarks/workspaces/task-prep-check"
 results_root="$project_root/benchmarks/results"
 
+export CLASP_BENCHMARK_NPM_INSTALL_CACHE_ROOT="${CLASP_BENCHMARK_NPM_INSTALL_CACHE_ROOT:-$project_root/.clasp-verify/cache/benchmark-npm-install}"
+export CLASP_BENCHMARK_NPM_INSTALL_CACHE_MODE="${CLASP_BENCHMARK_NPM_INSTALL_CACHE_MODE:-link}"
+export CLASP_BENCHMARK_PREP_COMPILER_FINGERPRINT_CACHE="${CLASP_BENCHMARK_PREP_COMPILER_FINGERPRINT_CACHE:-$project_root/.clasp-verify/cache/benchmark-prep-compiler-fingerprint-v1.json}"
+export CLASP_BENCHMARK_PREP_CACHE_MODE="${CLASP_BENCHMARK_PREP_CACHE_MODE:-link}"
+
 mkdir -p "$workspace_root"
 
 list_output="$(node "$project_root/benchmarks/run-benchmark.mjs" list)"

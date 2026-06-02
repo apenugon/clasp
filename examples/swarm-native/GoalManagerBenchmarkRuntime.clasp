@@ -2,6 +2,7 @@ module GoalManagerBenchmarkRuntime
 
 import GoalManagerCounters
 import GoalManagerWatch
+import GoalManagerResourceHealth
 import GoalManagerPreludeProject
 import GoalManagerPrelude
 import GoalManagerConfig
@@ -12,9 +13,16 @@ import Swarm
 benchmarkCheckpointError : Str -> Result BenchmarkCheckpoint
 benchmarkCheckpointError message = Err message
 
+benchmarkCheckpointFromRaw : Str -> Result BenchmarkCheckpoint
+benchmarkCheckpointFromRaw raw =
+  match tryDecode BenchmarkCheckpoint raw {
+    Ok checkpoint -> Ok checkpoint,
+    Err message -> benchmarkCheckpointError (textConcat ["benchmark checkpoint decode failed: ", message])
+  }
+
 readBenchmarkCheckpointPath : Str -> Result BenchmarkCheckpoint
 readBenchmarkCheckpointPath path = match readFile path {
-  Ok raw -> Ok (decode BenchmarkCheckpoint raw),
+  Ok raw -> benchmarkCheckpointFromRaw raw,
   Err message -> benchmarkCheckpointError message
 }
 
@@ -93,14 +101,33 @@ pollWatchedProcess heartbeatPath pollMs remainingMs =
       }
   }
 
+benchmarkHeartbeatProcess : Str -> Result WatchedProcess
+benchmarkHeartbeatProcess heartbeatRaw =
+  match tryDecode WatchedProcess heartbeatRaw {
+    Ok process -> Ok process,
+    Err message -> watchedProcessError (textConcat ["benchmark heartbeat decode failed: ", message])
+  }
+
 benchmarkHeartbeatCompleted : Str -> Bool
-benchmarkHeartbeatCompleted heartbeatRaw = (decode WatchedProcess heartbeatRaw).completed
+benchmarkHeartbeatCompleted heartbeatRaw =
+  match benchmarkHeartbeatProcess heartbeatRaw {
+    Ok process -> process.completed,
+    Err message -> false
+  }
 
 benchmarkHeartbeatRunning : Str -> Bool
-benchmarkHeartbeatRunning heartbeatRaw = (decode WatchedProcess heartbeatRaw).running
+benchmarkHeartbeatRunning heartbeatRaw =
+  match benchmarkHeartbeatProcess heartbeatRaw {
+    Ok process -> process.running,
+    Err message -> false
+  }
 
 benchmarkHeartbeatSucceeded : Str -> Bool
-benchmarkHeartbeatSucceeded heartbeatRaw = (decode WatchedProcess heartbeatRaw).exitCode == 0
+benchmarkHeartbeatSucceeded heartbeatRaw =
+  match benchmarkHeartbeatProcess heartbeatRaw {
+    Ok process -> process.exitCode == 0,
+    Err message -> false
+  }
 
 pollBenchmarkResult : Str -> Str -> Str -> Int -> Int -> Result ProcessResult
 pollBenchmarkResult heartbeatPath stdoutPath stderrPath pollMs remainingMs =
@@ -108,7 +135,9 @@ pollBenchmarkResult heartbeatPath stdoutPath stderrPath pollMs remainingMs =
     match readFile heartbeatPath {
       Err message -> processResultError message,
       Ok heartbeatRaw ->
-        let process = decode WatchedProcess heartbeatRaw in
+        match benchmarkHeartbeatProcess heartbeatRaw {
+        Err message -> processResultError message,
+        Ok process ->
         if process.completed then
           Ok (ProcessResult { exitCode = process.exitCode, stdout = readProcessOutputText stdoutPath, stderr = readProcessOutputText stderrPath })
         else if process.running == false then
@@ -125,6 +154,7 @@ pollBenchmarkResult heartbeatPath stdoutPath stderrPath pollMs remainingMs =
           }
         }
     }
+    }
   else if remainingMs <= 0 then
     processResultError "timeout"
   else {
@@ -137,15 +167,20 @@ pollBenchmarkResult heartbeatPath stdoutPath stderrPath pollMs remainingMs =
 
 runBenchmarkCommand : Int -> Int -> Result ProcessResult
 runBenchmarkCommand wave benchmarkRuns =
-  match spawnWatchedProcess
-    benchmarkCwd
-    (benchmarkStdoutPathFor wave)
-    (benchmarkStderrPathFor wave)
-    (benchmarkHeartbeatPathFor wave)
-    benchmarkWatchPollMs
-    (benchmarkCommandArgs wave benchmarkRuns) {
-    Err message ->
-      processResultError message,
-    Ok launched ->
-      pollBenchmarkResult launched.heartbeatPath launched.stdoutPath launched.stderrPath benchmarkWatchPollMs benchmarkTimeoutMs
-  }
+  let benchmarkResourceError = managerBenchmarkLaunchResourceError in
+  if benchmarkResourceError != "" then
+    processResultError benchmarkResourceError
+  else
+    match spawnWatchedProcessWithLimits
+      benchmarkCwd
+      (benchmarkStdoutPathFor wave)
+      (benchmarkStderrPathFor wave)
+      (benchmarkHeartbeatPathFor wave)
+      benchmarkWatchPollMs
+      benchmarkMemoryLimitMb
+      (benchmarkCommandArgs wave benchmarkRuns) {
+      Err message ->
+        processResultError message,
+      Ok launched ->
+        pollBenchmarkResult launched.heartbeatPath launched.stdoutPath launched.stderrPath benchmarkWatchPollMs benchmarkTimeoutMs
+    }

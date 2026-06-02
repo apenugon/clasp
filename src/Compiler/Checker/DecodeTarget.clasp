@@ -1,0 +1,69 @@
+module Compiler.Checker.DecodeTarget
+
+import Compiler.Ast
+import Compiler.Checker.TypeOps
+import Compiler.Checker.Types
+
+decodeTargetTypeFromExpr : HostedExprAst -> DecodeTargetTypeResult
+decodeTargetTypeFromExpr expr = match expr {
+  HostedName name ->
+    DecodeTargetType (typeFromHostedTypeAst (HostedTypeName name)),
+  HostedList values -> {
+    let itemExpr = firstHostedExpr values;
+    let extraExpr = firstHostedExpr (remainingHostedExprs values);
+    if expressionSummary itemExpr == "" then {
+      DecodeTargetTypeError "Builtin `decode` expects a type as its first argument."
+    } else if expressionSummary extraExpr == "" then {
+      match decodeTargetTypeFromExpr itemExpr {
+        DecodeTargetType itemType ->
+          DecodeTargetType (TList itemType),
+        DecodeTargetTypeError message ->
+          DecodeTargetTypeError message
+      }
+    } else {
+      DecodeTargetTypeError "Builtin `decode` expects a type as its first argument."
+    }
+  },
+  HostedString value ->
+    DecodeTargetTypeError "Builtin `decode` expects a type as its first argument.",
+  HostedInt value ->
+    DecodeTargetTypeError "Builtin `decode` expects a type as its first argument.",
+  HostedBool value ->
+    DecodeTargetTypeError "Builtin `decode` expects a type as its first argument.",
+  HostedCall callee args ->
+    DecodeTargetTypeError "Builtin `decode` expects a type as its first argument.",
+  HostedConstructor constructorName args -> {
+    let extraExpr = firstHostedExpr args;
+    if expressionSummary extraExpr == "" then DecodeTargetType (typeFromHostedTypeAst (HostedTypeName constructorName)) else DecodeTargetTypeError "Builtin `decode` expects a type as its first argument."
+  },
+  HostedMatch subject branches ->
+    DecodeTargetTypeError "Builtin `decode` expects a type as its first argument.",
+  HostedRecord recordName fields ->
+    DecodeTargetTypeError "Builtin `decode` expects a type as its first argument.",
+  HostedFieldAccess subject fieldName ->
+    DecodeTargetTypeError "Builtin `decode` expects a type as its first argument.",
+  HostedLet binder value body ->
+    DecodeTargetTypeError "Builtin `decode` expects a type as its first argument.",
+  HostedMutableLet binder value body ->
+    DecodeTargetTypeError "Builtin `decode` expects a type as its first argument.",
+  HostedAssign binder value body ->
+    DecodeTargetTypeError "Builtin `decode` expects a type as its first argument.",
+  HostedFor binder iterable loopBody body ->
+    DecodeTargetTypeError "Builtin `decode` expects a type as its first argument.",
+  HostedReturn value ->
+    DecodeTargetTypeError "Builtin `decode` expects a type as its first argument.",
+  HostedIf condition thenBranch elseBranch ->
+    DecodeTargetTypeError "Builtin `decode` expects a type as its first argument.",
+  HostedEqual left right ->
+    DecodeTargetTypeError "Builtin `decode` expects a type as its first argument.",
+  HostedNotEqual left right ->
+    DecodeTargetTypeError "Builtin `decode` expects a type as its first argument.",
+  HostedLessThan left right ->
+    DecodeTargetTypeError "Builtin `decode` expects a type as its first argument.",
+  HostedLessThanOrEqual left right ->
+    DecodeTargetTypeError "Builtin `decode` expects a type as its first argument.",
+  HostedGreaterThan left right ->
+    DecodeTargetTypeError "Builtin `decode` expects a type as its first argument.",
+  HostedGreaterThanOrEqual left right ->
+    DecodeTargetTypeError "Builtin `decode` expects a type as its first argument."
+}

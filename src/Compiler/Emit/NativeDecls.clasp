@@ -2,6 +2,11 @@ module Compiler.Emit.NativeDecls
 
 import Compiler.Ast
 import Compiler.Checker
+import Compiler.Checker.Bindings
+import Compiler.Checker.Builtins
+import Compiler.Checker.ModulePass
+import Compiler.Checker.TypeOps
+import Compiler.Checker.Types
 import Compiler.Json
 import Compiler.Lower
 import Compiler.Emit.NativeJson
@@ -160,3 +165,7 @@ emitNativeModuleImageNamedDecls modl selectedNames = jsonArray (emitNativeDeclJs
 
 emitNativeSourceModuleImageDecls : HostedModuleAst -> HostedModuleAst -> Str
 emitNativeSourceModuleImageDecls mergedModule sourceModule = jsonArray (emitNativeDeclJsonsFromAllDeclarations mergedModule (moduleDeclarations sourceModule))
+
+emitNativeSourceModuleImageNamedDecls : HostedModuleAst -> HostedModuleAst -> [Str] -> Str
+emitNativeSourceModuleImageNamedDecls mergedModule sourceModule selectedNames =
+  jsonArray (emitNativeDeclJsonsFromDeclarations mergedModule (moduleDeclarations sourceModule) selectedNames)

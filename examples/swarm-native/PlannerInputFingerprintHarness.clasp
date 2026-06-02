@@ -1,0 +1,6 @@
+module Main
+
+import GoalManagerPlannerInputFingerprint
+
+main : Str
+main = plannerInputFingerprintSourceFor 2 "benchmark-summary-harness"

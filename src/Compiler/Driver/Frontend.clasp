@@ -1,6 +1,8 @@
 module Compiler.Driver.Frontend
 
 import Compiler.Checker
+import Compiler.Checker.ModuleSummary
+import Compiler.Checker.Types
 import Compiler.CheckedCore
 import Compiler.Emit.JavaScript
 import Compiler.Lower

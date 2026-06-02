@@ -1,0 +1,219 @@
+module Main
+
+record ModelBoundaryRequest = {
+  provider : Str,
+  model : Str,
+  prompt : Prompt,
+  outputSchema : Str,
+  outputVersion : Str
+}
+
+record UntrustedModelOutput = {
+  provider : Str,
+  model : Str,
+  schemaName : Str,
+  schemaVersion : Str,
+  status : Str,
+  rawText : Str,
+  transport : Str,
+  trusted : Bool
+}
+
+record PlannedTask = { taskId : Str, role : Str, detail : Str, dependencies : [Str], taskPrompt : Str, coordinationFocus : [Str] }
+
+record PlannerReport = {
+  objectiveSummary : Str,
+  strategy : Str,
+  tasks : [PlannedTask],
+  testsRun : [Str],
+  residualRisks : [Str]
+}
+
+record TrustedPlannerModelOutput = {
+  provider : Str,
+  model : Str,
+  schemaName : Str,
+  schemaVersion : Str,
+  trust : Str,
+  report : PlannerReport
+}
+
+record ModelBoundaryHarnessReport = {
+  requestProvider : Str,
+  requestModel : Str,
+  requestSchema : Str,
+  requestTrustPolicy : Str,
+  promptText : Str,
+  untrustedTrusted : Bool,
+  validAccepted : Bool,
+  validTrust : Str,
+  validTaskCount : Int,
+  invalidRejected : Bool,
+  invalidReason : Str,
+  schemaRejected : Bool,
+  schemaReason : Str,
+  statusRejected : Bool,
+  statusReason : Str,
+  pretrustedRejected : Bool,
+  pretrustedReason : Str,
+  evidence : [Str]
+}
+
+modelBoundaryTextIncludes : Str -> Str -> Bool
+modelBoundaryTextIncludes value needle =
+  length (textSplit value needle) > 1
+
+plannerReportRawHasRequiredFields : Str -> Bool
+plannerReportRawHasRequiredFields raw =
+  if modelBoundaryTextIncludes raw "\"objectiveSummary\"" then
+    if modelBoundaryTextIncludes raw "\"strategy\"" then
+      if modelBoundaryTextIncludes raw "\"tasks\"" then
+        if modelBoundaryTextIncludes raw "\"testsRun\"" then
+          modelBoundaryTextIncludes raw "\"residualRisks\""
+        else
+          false
+      else
+        false
+    else
+      false
+  else
+    false
+
+plannerReportShapeError : PlannerReport -> Str
+plannerReportShapeError report =
+  if report.objectiveSummary == "" then
+    "planner-report-empty-objective"
+  else if report.strategy == "" then
+    "planner-report-empty-strategy"
+  else if length report.tasks == 0 then
+    "planner-report-empty-tasks"
+  else
+    ""
+
+trustedPlannerModelOk : UntrustedModelOutput -> PlannerReport -> Result TrustedPlannerModelOutput
+trustedPlannerModelOk output report =
+  Ok
+    (TrustedPlannerModelOutput {
+      provider = output.provider,
+      model = output.model,
+      schemaName = output.schemaName,
+      schemaVersion = output.schemaVersion,
+      trust = "validated",
+      report = report
+    })
+
+trustedPlannerModelError : Str -> Result TrustedPlannerModelOutput
+trustedPlannerModelError message =
+  Err message
+
+validatePlannerModelOutput : ModelBoundaryRequest -> UntrustedModelOutput -> Result TrustedPlannerModelOutput
+validatePlannerModelOutput request output =
+  if output.trusted then
+    trustedPlannerModelError "model-boundary-rejects-pretrusted-output"
+  else if output.status != "completed" then
+    trustedPlannerModelError (textConcat ["model-output-status-not-completed:", output.status])
+  else if output.provider != request.provider then
+    trustedPlannerModelError "model-output-provider-mismatch"
+  else if output.model != request.model then
+    trustedPlannerModelError "model-output-model-mismatch"
+  else if output.schemaName != request.outputSchema then
+    trustedPlannerModelError "model-output-schema-mismatch"
+  else if output.schemaVersion != request.outputVersion then
+    trustedPlannerModelError "model-output-schema-version-mismatch"
+  else
+    match tryDecode PlannerReport output.rawText {
+      Err message ->
+        trustedPlannerModelError (textConcat ["model-output-decode-failed:", message]),
+      Ok report -> {
+        if plannerReportRawHasRequiredFields output.rawText == false then
+          trustedPlannerModelError "model-output-missing-planner-fields"
+        else
+          let shapeError = plannerReportShapeError report in
+          if shapeError == "" then
+            trustedPlannerModelOk output report
+          else
+            trustedPlannerModelError shapeError
+      }
+    }
+
+plannerPrompt : Prompt
+plannerPrompt =
+  appendPrompt
+    (systemPrompt "You are a planner for an ordinary Clasp swarm.")
+    (userPrompt "Return a PlannerReport JSON object with one safe, bounded task.")
+
+validPlannerRaw : Str
+validPlannerRaw =
+  "{\"objectiveSummary\":\"Improve Clasp swarm readiness.\",\"strategy\":\"Use one bounded task and verify the result.\",\"tasks\":[{\"taskId\":\"model-boundary\",\"role\":\"provider-boundary\",\"detail\":\"Validate typed model output before trusting it.\",\"dependencies\":[],\"taskPrompt\":\"Add a provider-neutral typed model boundary scaffold.\",\"coordinationFocus\":[\"model-boundary\",\"tryDecode\"]}],\"testsRun\":[\"model-boundary-fixture\"],\"residualRisks\":[]}"
+
+invalidPlannerRaw : Str
+invalidPlannerRaw =
+  "{\"objectiveSummary\":\"Missing task list\",\"strategy\":\"This should fail schema validation.\"}"
+
+main : Str
+main = {
+  let request =
+    ModelBoundaryRequest {
+      provider = "fixture-llm",
+      model = "local-model-boundary-test",
+      prompt = plannerPrompt,
+      outputSchema = "PlannerReport",
+      outputVersion = "v1"
+    };
+  let validOutput =
+    UntrustedModelOutput {
+      provider = request.provider,
+      model = request.model,
+      schemaName = request.outputSchema,
+      schemaVersion = request.outputVersion,
+      status = "completed",
+      rawText = validPlannerRaw,
+      transport = "fixture-json",
+      trusted = false
+    };
+  let invalidOutput = with validOutput { rawText = invalidPlannerRaw };
+  let schemaOutput = with validOutput { schemaName = "BuilderReport" };
+  let failedOutput = with validOutput { status = "failed" };
+  let alreadyTrustedOutput = with validOutput { trusted = true };
+  let validResult = validatePlannerModelOutput request validOutput;
+  let invalidResult = validatePlannerModelOutput request invalidOutput;
+  let schemaResult = validatePlannerModelOutput request schemaOutput;
+  let statusResult = validatePlannerModelOutput request failedOutput;
+  let pretrustedResult = validatePlannerModelOutput request alreadyTrustedOutput;
+  let validAccepted = match validResult { Ok trusted -> trusted.trust == "validated", Err message -> false };
+  let validTrust = match validResult { Ok trusted -> trusted.trust, Err message -> "" };
+  let validTaskCount = match validResult { Ok trusted -> length trusted.report.tasks, Err message -> 0 };
+  let invalidRejected = match invalidResult { Ok trusted -> false, Err message -> true };
+  let invalidReason = match invalidResult { Ok trusted -> "", Err message -> message };
+  let schemaRejected = match schemaResult { Ok trusted -> false, Err message -> true };
+  let schemaReason = match schemaResult { Ok trusted -> "", Err message -> message };
+  let statusRejected = match statusResult { Ok trusted -> false, Err message -> true };
+  let statusReason = match statusResult { Ok trusted -> "", Err message -> message };
+  let pretrustedRejected = match pretrustedResult { Ok trusted -> false, Err message -> true };
+  let pretrustedReason = match pretrustedResult { Ok trusted -> "", Err message -> message };
+  encode
+    (ModelBoundaryHarnessReport {
+      requestProvider = request.provider,
+      requestModel = request.model,
+      requestSchema = request.outputSchema,
+      requestTrustPolicy = "untrusted-until-tryDecode",
+      promptText = promptText request.prompt,
+      untrustedTrusted = validOutput.trusted,
+      validAccepted = validAccepted,
+      validTrust = validTrust,
+      validTaskCount = validTaskCount,
+      invalidRejected = invalidRejected,
+      invalidReason = invalidReason,
+      schemaRejected = schemaRejected,
+      schemaReason = schemaReason,
+      statusRejected = statusRejected,
+      statusReason = statusReason,
+      pretrustedRejected = pretrustedRejected,
+      pretrustedReason = pretrustedReason,
+      evidence = [
+        "Prompt is carried as typed Prompt until request summary rendering.",
+        "Raw model text is represented as UntrustedModelOutput with trusted=false.",
+        "Planner output becomes trusted only after tryDecode PlannerReport and shape validation."
+      ]
+    })
+}

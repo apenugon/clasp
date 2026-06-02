@@ -1,0 +1,497 @@
+module AgentHandoffHarness
+
+foreign workspaceReadFileRaw : Str -> Str -> Result Str = "workspaceReadFile"
+foreign workspaceWriteFileRaw : Str -> Str -> Str -> Result Str = "workspaceWriteFile"
+foreign workspaceAppendFileRaw : Str -> Str -> Str -> Result Str = "workspaceAppendFile"
+foreign workspaceMkdirAllRaw : Str -> Str -> Result Str = "workspaceMkdirAll"
+
+record AgentEvent = {
+  kind : Str,
+  role : Str,
+  status : Str,
+  detail : Str
+}
+
+record AgentHandoffTask = {
+  taskId : Str,
+  role : Str,
+  status : Str,
+  inputPath : Str,
+  outputPath : Str,
+  resultPath : Str,
+  detail : Str,
+  updatedAtMs : Int
+}
+
+record AgentHandoffSnapshot = {
+  workflowId : Str,
+  status : Str,
+  currentTaskId : Str,
+  snapshotPath : Str,
+  eventLogPath : Str,
+  tasks : [AgentHandoffTask],
+  completedTaskIds : [Str],
+  updatedAtMs : Int
+}
+
+type AgentHandoffClaim = AgentHandoffClaimed AgentHandoffSnapshot AgentHandoffTask | AgentHandoffDrained AgentHandoffSnapshot
+
+record HandoffStepRun = {
+  snapshot : AgentHandoffSnapshot,
+  taskId : Str,
+  role : Str,
+  ok : Bool,
+  detail : Str
+}
+
+record HandoffDemoReport = {
+  workflowId : Str,
+  finalStatus : Str,
+  workspaceRoot : Str,
+  snapshotPath : Str,
+  eventLogPath : Str,
+  builderArtifactPath : Str,
+  verifierArtifactPath : Str,
+  builderResultPath : Str,
+  verifierResultPath : Str,
+  recoveredCorruptSnapshot : Bool,
+  restoredAfterBuilder : Bool,
+  resumedTaskId : Str,
+  completedTaskIds : [Str],
+  tasks : [AgentHandoffTask],
+  builderOutput : Str,
+  verifierOutput : Str,
+  summary : Str
+}
+
+emptyAgentHandoffTasks : [AgentHandoffTask]
+emptyAgentHandoffTasks = []
+
+emptyAgentTaskIds : [Str]
+emptyAgentTaskIds = []
+
+workflowId : Str
+workflowId = "ordinary-clasp-agent-handoff"
+
+snapshotPath : Str
+snapshotPath = "handoff/workflow-snapshot.json"
+
+eventLogPath : Str
+eventLogPath = "handoff/workflow-events.jsonl"
+
+inputPath : Str
+inputPath = "inputs/task.txt"
+
+builderArtifactPath : Str
+builderArtifactPath = "artifacts/builder-note.txt"
+
+verifierArtifactPath : Str
+verifierArtifactPath = "artifacts/verifier-note.txt"
+
+builderResultPath : Str
+builderResultPath = "artifacts/builder-result.json"
+
+verifierResultPath : Str
+verifierResultPath = "artifacts/verifier-result.json"
+
+workspaceReadText : Str -> Str -> Result Str
+workspaceReadText root relative = workspaceReadFileRaw root relative
+
+workspaceWriteText : Str -> Str -> Str -> Result Str
+workspaceWriteText root relative contents = workspaceWriteFileRaw root relative contents
+
+workspaceAppendText : Str -> Str -> Str -> Result Str
+workspaceAppendText root relative contents = workspaceAppendFileRaw root relative contents
+
+workspaceMkdirAll : Str -> Str -> Result Str
+workspaceMkdirAll root relative = workspaceMkdirAllRaw root relative
+
+agentEvent : Str -> Str -> Str -> Str -> AgentEvent
+agentEvent kind role status detail =
+  AgentEvent {
+    kind = kind,
+    role = role,
+    status = status,
+    detail = detail
+  }
+
+agentEventLine : AgentEvent -> Str
+agentEventLine value = textConcat [encode value, "\n"]
+
+agentReadTextOrEmpty : Str -> Str -> Str
+agentReadTextOrEmpty root relative =
+  match workspaceReadText root relative {
+    Ok value -> value,
+    Err message -> ""
+  }
+
+agentWriteTextStatus : Str -> Str -> Str -> Str
+agentWriteTextStatus root relative value =
+  match workspaceWriteText root relative value {
+    Ok path -> "",
+    Err message -> textConcat ["workspace-write-error:", message]
+  }
+
+agentAppendTextStatus : Str -> Str -> Str -> Str
+agentAppendTextStatus root relative value =
+  match workspaceAppendText root relative value {
+    Ok path -> "",
+    Err message -> textConcat ["workspace-append-error:", message]
+  }
+
+agentAppendEvent : Str -> Str -> AgentEvent -> Str
+agentAppendEvent root relative value =
+  agentAppendTextStatus root relative (agentEventLine value)
+
+agentEnsureDirStatus : Str -> Str -> Str
+agentEnsureDirStatus root relative =
+  match workspaceMkdirAll root relative {
+    Ok path -> "",
+    Err message -> textConcat ["workspace-mkdir-error:", message]
+  }
+
+agentHandoffTask : Str -> Str -> Str -> Str -> Str -> AgentHandoffTask
+agentHandoffTask taskId role inputPathValue outputPathValue resultPathValue =
+  AgentHandoffTask {
+    taskId = taskId,
+    role = role,
+    status = "pending",
+    inputPath = inputPathValue,
+    outputPath = outputPathValue,
+    resultPath = resultPathValue,
+    detail = "",
+    updatedAtMs = timeUnixMs
+  }
+
+emptyAgentHandoffTask : AgentHandoffTask
+emptyAgentHandoffTask =
+  AgentHandoffTask {
+    taskId = "",
+    role = "",
+    status = "none",
+    inputPath = "",
+    outputPath = "",
+    resultPath = "",
+    detail = "",
+    updatedAtMs = 0
+  }
+
+agentHandoffHasStatus : [AgentHandoffTask] -> Str -> Bool
+agentHandoffHasStatus tasks status =
+  {
+    let mut found = false;
+    for task in tasks {
+      found =
+        if found then
+          true
+        else
+          task.status == status;
+      found
+    };
+    found
+  }
+
+agentHandoffProjectedStatus : [AgentHandoffTask] -> Str
+agentHandoffProjectedStatus tasks =
+  if agentHandoffHasStatus tasks "completed-fail" then
+    "failed"
+  else if agentHandoffHasStatus tasks "runtime-error" then
+    "failed"
+  else if agentHandoffHasStatus tasks "running" then
+    "running"
+  else if agentHandoffHasStatus tasks "pending" then
+    "pending"
+  else
+    "completed"
+
+agentHandoffSnapshot : Str -> Str -> Str -> [AgentHandoffTask] -> AgentHandoffSnapshot
+agentHandoffSnapshot workflowIdValue snapshotPathValue eventLogPathValue tasks =
+  AgentHandoffSnapshot {
+    workflowId = workflowIdValue,
+    status = agentHandoffProjectedStatus tasks,
+    currentTaskId = "",
+    snapshotPath = snapshotPathValue,
+    eventLogPath = eventLogPathValue,
+    tasks = tasks,
+    completedTaskIds = emptyAgentTaskIds,
+    updatedAtMs = timeUnixMs
+  }
+
+agentHandoffPersist : Str -> AgentHandoffSnapshot -> Str
+agentHandoffPersist root snapshot =
+  agentWriteTextStatus root snapshot.snapshotPath (encode snapshot)
+
+agentHandoffLoad : Str -> Str -> AgentHandoffSnapshot -> AgentHandoffSnapshot
+agentHandoffLoad root snapshotPathValue fallback =
+  match workspaceReadText root snapshotPathValue {
+    Ok raw ->
+      match tryDecode AgentHandoffSnapshot raw {
+        Ok snapshot -> snapshot,
+        Err message -> fallback
+      },
+    Err message -> fallback
+  }
+
+agentHandoffAppendEvent : Str -> AgentHandoffSnapshot -> Str -> Str -> Str -> Str -> Str
+agentHandoffAppendEvent root snapshot kind role status detail =
+  agentAppendEvent root snapshot.eventLogPath (agentEvent kind role status detail)
+
+agentHandoffTaskWithStatus : AgentHandoffTask -> Str -> Str -> AgentHandoffTask
+agentHandoffTaskWithStatus task status detail =
+  with task {
+    status = status,
+    detail = detail,
+    updatedAtMs = timeUnixMs
+  }
+
+agentHandoffClaimNext : AgentHandoffSnapshot -> AgentHandoffClaim
+agentHandoffClaimNext snapshot =
+  {
+    let mut claimed = emptyAgentHandoffTask;
+    let mut claimedFound = false;
+    let mut updatedTasks = emptyAgentHandoffTasks;
+    for task in snapshot.tasks {
+      if claimedFound then {
+        updatedTasks = append updatedTasks [task];
+        updatedTasks
+      } else if task.status == "pending" then {
+        let running = agentHandoffTaskWithStatus task "running" "claimed";
+        claimed = running;
+        claimedFound = true;
+        updatedTasks = append updatedTasks [running];
+        updatedTasks
+      } else {
+        updatedTasks = append updatedTasks [task];
+        updatedTasks
+      }
+    };
+    let nextSnapshot =
+      AgentHandoffSnapshot {
+        workflowId = snapshot.workflowId,
+        status = agentHandoffProjectedStatus updatedTasks,
+        currentTaskId =
+          if claimedFound then
+            claimed.taskId
+          else
+            "",
+        snapshotPath = snapshot.snapshotPath,
+        eventLogPath = snapshot.eventLogPath,
+        tasks = updatedTasks,
+        completedTaskIds = snapshot.completedTaskIds,
+        updatedAtMs = timeUnixMs
+      };
+    if claimedFound then
+      AgentHandoffClaimed nextSnapshot claimed
+    else
+      AgentHandoffDrained nextSnapshot
+  }
+
+agentHandoffCompleteTask : AgentHandoffSnapshot -> Str -> Str -> Str -> AgentHandoffSnapshot
+agentHandoffCompleteTask snapshot taskId status detail =
+  {
+    let mut updatedTasks = emptyAgentHandoffTasks;
+    for task in snapshot.tasks {
+      updatedTasks =
+        if task.taskId == taskId then
+          append updatedTasks [agentHandoffTaskWithStatus task status detail]
+        else
+          append updatedTasks [task];
+      updatedTasks
+    };
+    let completedTaskIds =
+      if status == "completed-pass" then
+        append snapshot.completedTaskIds [taskId]
+      else
+        snapshot.completedTaskIds;
+    AgentHandoffSnapshot {
+      workflowId = snapshot.workflowId,
+      status = agentHandoffProjectedStatus updatedTasks,
+      currentTaskId = "",
+      snapshotPath = snapshot.snapshotPath,
+      eventLogPath = snapshot.eventLogPath,
+      tasks = updatedTasks,
+      completedTaskIds = completedTaskIds,
+      updatedAtMs = timeUnixMs
+    }
+  }
+
+firstTextOrEmpty : [Str] -> Str
+firstTextOrEmpty values = {
+  let mut first = "";
+  let mut found = false;
+  for value in values {
+    if found then
+      found
+    else {
+      first = value;
+      found = true;
+      found
+    }
+  };
+  first
+}
+
+workspaceRoot : Str
+workspaceRoot = {
+  let configured = firstTextOrEmpty argv;
+  if configured == "" then "agent-handoff-state" else configured
+}
+
+builderTask : AgentHandoffTask
+builderTask =
+  agentHandoffTask
+    "handoff-builder"
+    "builder"
+    inputPath
+    builderArtifactPath
+    builderResultPath
+
+verifierTask : AgentHandoffTask
+verifierTask =
+  agentHandoffTask
+    "handoff-verifier"
+    "verifier"
+    builderArtifactPath
+    verifierArtifactPath
+    verifierResultPath
+
+initialSnapshot : AgentHandoffSnapshot
+initialSnapshot =
+  agentHandoffSnapshot workflowId snapshotPath eventLogPath [builderTask, verifierTask]
+
+emptyStepRun : AgentHandoffSnapshot -> HandoffStepRun
+emptyStepRun snapshot =
+  HandoffStepRun {
+    snapshot = snapshot,
+    taskId = "",
+    role = "",
+    ok = false,
+    detail = "no task available"
+  }
+
+stepResultJson : AgentHandoffTask -> Str -> Str -> Str
+stepResultJson task status detail =
+  encode
+    (agentEvent "task-result" task.role status (textConcat [task.taskId, ":", detail]))
+
+builderOutputText : Str -> Str
+builderOutputText inputText =
+  textConcat ["builder accepted input: ", inputText]
+
+verifierOutputText : Str -> Str
+verifierOutputText builderText =
+  textConcat ["verifier resumed from builder artifact: ", builderText]
+
+completeClaimedTask : AgentHandoffSnapshot -> AgentHandoffTask -> Str -> Str -> HandoffStepRun
+completeClaimedTask claimed task outputText resultDetail = {
+  let wroteArtifact = agentWriteTextStatus workspaceRoot task.outputPath outputText;
+  let status =
+    if wroteArtifact == "" then
+      "completed-pass"
+    else
+      "runtime-error";
+  let detail =
+    if wroteArtifact == "" then
+      resultDetail
+    else
+      wroteArtifact;
+  let wroteResult = agentWriteTextStatus workspaceRoot task.resultPath (stepResultJson task status detail);
+  let completed = agentHandoffCompleteTask claimed task.taskId status detail;
+  let event = agentHandoffAppendEvent workspaceRoot completed "task-completed" task.role status detail;
+  let persisted = agentHandoffPersist workspaceRoot completed;
+  HandoffStepRun {
+    snapshot = completed,
+    taskId = task.taskId,
+    role = task.role,
+    ok = status == "completed-pass",
+    detail = detail
+  }
+}
+
+runBuilderStep : AgentHandoffSnapshot -> HandoffStepRun
+runBuilderStep snapshot =
+  match agentHandoffClaimNext snapshot {
+    AgentHandoffClaimed claimed task -> {
+      let claimedEvent = agentHandoffAppendEvent workspaceRoot claimed "task-claimed" task.role "running" task.taskId;
+      let persistedClaim = agentHandoffPersist workspaceRoot claimed;
+      let inputText = agentReadTextOrEmpty workspaceRoot task.inputPath;
+      completeClaimedTask claimed task (builderOutputText inputText) task.outputPath
+    },
+    AgentHandoffDrained drained -> emptyStepRun drained
+  }
+
+runVerifierStep : AgentHandoffSnapshot -> HandoffStepRun
+runVerifierStep snapshot =
+  match agentHandoffClaimNext snapshot {
+    AgentHandoffClaimed claimed task -> {
+      let claimedEvent = agentHandoffAppendEvent workspaceRoot claimed "task-claimed" task.role "running" task.taskId;
+      let persistedClaim = agentHandoffPersist workspaceRoot claimed;
+      let builderText = agentReadTextOrEmpty workspaceRoot task.inputPath;
+      completeClaimedTask claimed task (verifierOutputText builderText) task.outputPath
+    },
+    AgentHandoffDrained drained -> emptyStepRun drained
+  }
+
+handoffReport : AgentHandoffSnapshot -> Bool -> Bool -> Str -> HandoffDemoReport
+handoffReport finalSnapshot recoveredCorruptSnapshot restoredAfterBuilder resumedTaskId =
+  HandoffDemoReport {
+    workflowId = workflowId,
+    finalStatus = finalSnapshot.status,
+    workspaceRoot = workspaceRoot,
+    snapshotPath = snapshotPath,
+    eventLogPath = eventLogPath,
+    builderArtifactPath = builderArtifactPath,
+    verifierArtifactPath = verifierArtifactPath,
+    builderResultPath = builderResultPath,
+    verifierResultPath = verifierResultPath,
+    recoveredCorruptSnapshot = recoveredCorruptSnapshot,
+    restoredAfterBuilder = restoredAfterBuilder,
+    resumedTaskId = resumedTaskId,
+    completedTaskIds = finalSnapshot.completedTaskIds,
+    tasks = finalSnapshot.tasks,
+    builderOutput = agentReadTextOrEmpty workspaceRoot builderArtifactPath,
+    verifierOutput = agentReadTextOrEmpty workspaceRoot verifierArtifactPath,
+    summary =
+      textConcat [
+        "workflow=",
+        workflowId,
+        " status=",
+        finalSnapshot.status,
+        " resumed=",
+        resumedTaskId
+      ]
+  }
+
+runHandoffScenario : Str
+runHandoffScenario = {
+  let corruptedSeed = agentWriteTextStatus workspaceRoot snapshotPath "{not-json";
+  let recoveredSnapshot = agentHandoffLoad workspaceRoot snapshotPath initialSnapshot;
+  let recoveredCorruptSnapshot =
+    if recoveredSnapshot.workflowId == workflowId then
+      if recoveredSnapshot.status == "pending" then
+        length recoveredSnapshot.completedTaskIds == 0
+      else
+        false
+    else
+      false;
+  let seededInput = agentWriteTextStatus workspaceRoot inputPath "handoff input from planner\n";
+  let created = agentHandoffAppendEvent workspaceRoot initialSnapshot "handoff-created" "planner" "pending" "builder-to-verifier queue";
+  let persistedInitial = agentHandoffPersist workspaceRoot initialSnapshot;
+  let restoredForBuilder = agentHandoffLoad workspaceRoot snapshotPath initialSnapshot;
+  let builderRun = runBuilderStep restoredForBuilder;
+  let restoredForVerifier = agentHandoffLoad workspaceRoot snapshotPath initialSnapshot;
+  let restoredAfterBuilder = length restoredForVerifier.completedTaskIds == 1;
+  let verifierRun = runVerifierStep restoredForVerifier;
+  let finalSnapshot = verifierRun.snapshot;
+  let closed = agentHandoffAppendEvent workspaceRoot finalSnapshot "handoff-completed" "supervisor" finalSnapshot.status snapshotPath;
+  let persistedFinal = agentHandoffPersist workspaceRoot finalSnapshot;
+  encode (handoffReport finalSnapshot recoveredCorruptSnapshot restoredAfterBuilder verifierRun.taskId)
+}
+
+main : Str
+main = {
+  let madeHandoff = agentEnsureDirStatus workspaceRoot "handoff";
+  let madeArtifacts = agentEnsureDirStatus workspaceRoot "artifacts";
+  let madeInputs = agentEnsureDirStatus workspaceRoot "inputs";
+  runHandoffScenario
+}

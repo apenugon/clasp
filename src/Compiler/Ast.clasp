@@ -1373,6 +1373,72 @@ isTopLevel parenDepth bracketDepth braceDepth = if isZeroDepth parenDepth then i
 splitTopLevel : Str -> Str -> [Str]
 splitTopLevel value separator = astTextSplitTopLevel value separator
 
+topLevelRepeatedSeparatorOnly : Str -> Str -> Bool
+topLevelRepeatedSeparatorOnly value separator = {
+  let mut parenDepth = ZeroDepth;
+  let mut bracketDepth = ZeroDepth;
+  let mut braceDepth = ZeroDepth;
+  let mut inString = false;
+  let mut escapeNext = false;
+  let mut pendingSeparator = false;
+  let mut foundRepeatedSeparator = false;
+  for char in textChars value {
+    if pendingSeparator then {
+      if char == separator then {
+        pendingSeparator = false;
+        foundRepeatedSeparator = true;
+        foundRepeatedSeparator
+      } else {
+        return false
+      }
+    } else if inString then {
+      if escapeNext then {
+        escapeNext = false;
+        foundRepeatedSeparator
+      } else if char == "\\" then {
+        escapeNext = true;
+        foundRepeatedSeparator
+      } else if char == "\"" then {
+        inString = false;
+        foundRepeatedSeparator
+      } else {
+        foundRepeatedSeparator
+      }
+    } else if char == "\"" then {
+      inString = true;
+      foundRepeatedSeparator
+    } else if char == "(" then {
+      parenDepth = increaseDepth parenDepth;
+      foundRepeatedSeparator
+    } else if char == ")" then {
+      parenDepth = decreaseDepth parenDepth;
+      foundRepeatedSeparator
+    } else if char == "[" then {
+      bracketDepth = increaseDepth bracketDepth;
+      foundRepeatedSeparator
+    } else if char == "]" then {
+      bracketDepth = decreaseDepth bracketDepth;
+      foundRepeatedSeparator
+    } else if char == "{" then {
+      braceDepth = increaseDepth braceDepth;
+      foundRepeatedSeparator
+    } else if char == "}" then {
+      braceDepth = decreaseDepth braceDepth;
+      foundRepeatedSeparator
+    } else if char == separator then {
+      if isTopLevel parenDepth bracketDepth braceDepth then {
+        pendingSeparator = true;
+        foundRepeatedSeparator
+      } else {
+        foundRepeatedSeparator
+      }
+    } else {
+      foundRepeatedSeparator
+    }
+  };
+  if pendingSeparator then false else foundRepeatedSeparator
+}
+
 firstText : [Str] -> Str
 firstText values = {
   for value in values {
@@ -2185,6 +2251,9 @@ recordUpdateBuiltinName = "__recordUpdate"
 recordUpdatePlaceholderName : Str
 recordUpdatePlaceholderName = "__record_update__"
 
+blockSequenceDiscardName : Str
+blockSequenceDiscardName = "__clasp_block_discard__"
+
 parseRecordBinderNames : Str -> [Str]
 parseRecordBinderNames rawValue = match unwrapDelimited (trimSpaces rawValue) "{" "}" {
   ParsedText payload -> {
@@ -2379,6 +2448,75 @@ parseLetExpr value = match textPrefix value "let " {
     MissingLet value
 }
 
+parseAssignmentExprWithMutable : Str -> [Str] -> BlockExprParseResult
+parseAssignmentExprWithMutable rawValue mutableBinders = {
+  let value = normalizeLayoutText rawValue;
+  match textSplitFirst value " = " {
+    Ok payload -> {
+      let binder = trimSpaces (firstSegment payload);
+      if containsBlockName mutableBinders binder then {
+        ParsedBlockExpr (HostedAssign binder (parseExprWithMutable (remainingSegments payload) mutableBinders) (HostedName binder))
+      } else {
+        MissingBlockExpr value
+      }
+    },
+    Err missingValue ->
+      MissingBlockExpr value
+  }
+}
+
+parseLetExprWithMutable : Str -> [Str] -> LetParseResult
+parseLetExprWithMutable value mutableBinders = match textPrefix value "let " {
+  Ok tail -> {
+    let parts = splitTopLevel tail " ";
+    let binder = firstText parts;
+    let destructuredFields = parseRecordBinderNames binder;
+    let afterBinder = remainingTexts parts;
+    if binder == "" then {
+      MissingLet value
+    } else if firstText afterBinder == "=" then {
+      match splitLetParts (remainingTexts afterBinder) {
+        FoundLetParts valueTokens bodyTokens ->
+          if firstText valueTokens == "" then MissingLet value else if firstText bodyTokens == "" then MissingLet value else {
+            let valueExpr = parseExpr (textJoin " " valueTokens);
+            let bodyExpr = parseExprWithMutable (textJoin " " bodyTokens) mutableBinders;
+            if firstText destructuredFields == "" then ParsedLet binder valueExpr bodyExpr else ParsedLet recordDestructureTempName valueExpr (buildRecordDestructureBindings recordDestructureTempName destructuredFields bodyExpr)
+          },
+        MissingLetParts ->
+          MissingLet value
+      }
+    } else {
+      MissingLet value
+    }
+  },
+  Err notLet ->
+    MissingLet value
+}
+
+parseExprWithMutable : Str -> [Str] -> HostedExprAst
+parseExprWithMutable rawValue mutableBinders = {
+  let value = normalizeLayoutText rawValue;
+  match parseLetExprWithMutable value mutableBinders {
+    ParsedLet binder valueExpr bodyExpr ->
+      HostedLet binder valueExpr bodyExpr,
+    MissingLet notLet ->
+      match parseAssignmentExprWithMutable value mutableBinders {
+        ParsedBlockExpr assignmentExpr ->
+          assignmentExpr,
+        MissingBlockExpr notAssign ->
+          parseExpr value
+      }
+  }
+}
+
+parseBlockStatementExpr : Str -> [Str] -> BlockExprParseResult
+parseBlockStatementExpr value mutableBinders = match parseLetExprWithMutable value mutableBinders {
+  ParsedLet binder valueExpr bodyExpr ->
+    ParsedBlockExpr (HostedLet binder valueExpr bodyExpr),
+  MissingLet notLet ->
+    parseAssignmentExprWithMutable value mutableBinders
+}
+
 parseForBlockBinding : Str -> [Str] -> ForBlockParseResult
 parseForBlockBinding value mutableBinders = match textPrefix value "for " {
   Ok tail ->
@@ -2497,15 +2635,20 @@ parseBlockBinding rawValue mutableBinders = {
     Err notMutableBinding ->
       match textPrefix value "let " {
         Ok tail ->
-          match textSplitFirst tail " = " {
-            Ok payload ->
-              ParsedBlockBinding (HostedBlockLetBinding (trimSpaces (firstSegment payload)) (parseExpr (remainingSegments payload))),
-            Err missingValue ->
-              match parseForBlockBinding value mutableBinders {
-                ParsedForBlock binder iterable loopBody ->
-                  ParsedBlockBinding (HostedBlockForBinding binder iterable loopBody),
-                MissingForBlock missingFor ->
-                  MissingBlockBinding value
+          match parseLetExprWithMutable value mutableBinders {
+            ParsedLet binder valueExpr bodyExpr ->
+              MissingBlockBinding value,
+            MissingLet notInlineLet ->
+              match textSplitFirst tail " = " {
+                Ok payload ->
+                  ParsedBlockBinding (HostedBlockLetBinding (trimSpaces (firstSegment payload)) (parseExpr (remainingSegments payload))),
+                Err missingValue ->
+                  match parseForBlockBinding value mutableBinders {
+                    ParsedForBlock binder iterable loopBody ->
+                      ParsedBlockBinding (HostedBlockForBinding binder iterable loopBody),
+                    MissingForBlock missingFor ->
+                      MissingBlockBinding value
+                  }
               }
           },
         Err notBinding ->
@@ -2587,7 +2730,17 @@ parseBlockExprSegments segments mutableBinders = {
             }
         },
       MissingBlockBinding missing ->
-        MissingBlockExpr missing
+        match parseBlockStatementExpr segment mutableBinders {
+          ParsedBlockExpr statementExpr ->
+            match parseBlockExprSegments remaining mutableBinders {
+              ParsedBlockExpr body ->
+                ParsedBlockExpr (HostedLet blockSequenceDiscardName statementExpr body),
+              MissingBlockExpr bodyMissing ->
+                MissingBlockExpr bodyMissing
+            },
+          MissingBlockExpr statementMissing ->
+            MissingBlockExpr statementMissing
+        }
     }
   } else {
     ParsedBlockExpr (parseExpr segment)
@@ -2737,7 +2890,23 @@ parseComparisonOrFallbackExpr value = match parseComparisonExpr value {
   ParsedBinaryExpr expr ->
     expr,
   MissingBinaryExpr missing ->
+    parseArithmeticOrFallbackExpr value
+}
+
+parseArithmeticOrFallbackExpr : Str -> HostedExprAst
+parseArithmeticOrFallbackExpr value = match parseSubtractionExpr value {
+  ParsedBinaryExpr expr ->
+    expr,
+  MissingBinaryExpr missing ->
     parseNonBinaryExpr value
+}
+
+parseEqualityOrFallbackExpr : Str -> HostedExprAst
+parseEqualityOrFallbackExpr value = match parseEqualityExpr value {
+  ParsedBinaryExpr expr ->
+    expr,
+  MissingBinaryExpr missing ->
+    parseComparisonOrFallbackExpr value
 }
 
 startsWithOperatorPrefix : Str -> Str -> Bool
@@ -2797,16 +2966,39 @@ parseBinaryComparisonChain operator values = {
   let firstValue = firstText values;
   let secondValue = firstText (remainingTexts values);
   let remaining = remainingTexts (remainingTexts values);
-  let combined = if operator == "<=" then HostedLessThanOrEqual (parseNonBinaryExpr firstValue) (parseNonBinaryExpr secondValue) else if operator == ">=" then HostedGreaterThanOrEqual (parseNonBinaryExpr firstValue) (parseNonBinaryExpr secondValue) else if operator == "<" then HostedLessThan (parseNonBinaryExpr firstValue) (parseNonBinaryExpr secondValue) else HostedGreaterThan (parseNonBinaryExpr firstValue) (parseNonBinaryExpr secondValue);
+  let combined = if operator == "<=" then HostedLessThanOrEqual (parseArithmeticOrFallbackExpr firstValue) (parseArithmeticOrFallbackExpr secondValue) else if operator == ">=" then HostedGreaterThanOrEqual (parseArithmeticOrFallbackExpr firstValue) (parseArithmeticOrFallbackExpr secondValue) else if operator == "<" then HostedLessThan (parseArithmeticOrFallbackExpr firstValue) (parseArithmeticOrFallbackExpr secondValue) else HostedGreaterThan (parseArithmeticOrFallbackExpr firstValue) (parseArithmeticOrFallbackExpr secondValue);
   if firstText remaining == "" then combined else parseBinaryComparisonChainFromLeft operator combined remaining
 }
 
 parseBinaryComparisonChainFromLeft : Str -> HostedExprAst -> [Str] -> HostedExprAst
 parseBinaryComparisonChainFromLeft operator leftExpr values = {
-  let rightExpr = parseNonBinaryExpr (firstText values);
+  let rightExpr = parseArithmeticOrFallbackExpr (firstText values);
   let combined = if operator == "<=" then HostedLessThanOrEqual leftExpr rightExpr else if operator == ">=" then HostedGreaterThanOrEqual leftExpr rightExpr else if operator == "<" then HostedLessThan leftExpr rightExpr else HostedGreaterThan leftExpr rightExpr;
   let remaining = remainingTexts values;
   if firstText remaining == "" then combined else parseBinaryComparisonChainFromLeft operator combined remaining
+}
+
+parseBinarySubtractionChain : [Str] -> HostedExprAst
+parseBinarySubtractionChain values = {
+  let firstValue = firstText values;
+  let secondValue = firstText (remainingTexts values);
+  let remaining = remainingTexts (remainingTexts values);
+  let combined = HostedCall "intSubtract" [parseNonBinaryExpr firstValue, parseNonBinaryExpr secondValue];
+  if firstText remaining == "" then combined else parseBinarySubtractionChainFromLeft combined remaining
+}
+
+parseBinarySubtractionChainFromLeft : HostedExprAst -> [Str] -> HostedExprAst
+parseBinarySubtractionChainFromLeft leftExpr values = {
+  let rightExpr = parseNonBinaryExpr (firstText values);
+  let combined = HostedCall "intSubtract" [leftExpr, rightExpr];
+  let remaining = remainingTexts values;
+  if firstText remaining == "" then combined else parseBinarySubtractionChainFromLeft combined remaining
+}
+
+parseSubtractionExpr : Str -> BinaryExprParseResult
+parseSubtractionExpr value = {
+  let subtractParts = splitTopLevel value "-";
+  if hasAdditionalText subtractParts then ParsedBinaryExpr (parseBinarySubtractionChain subtractParts) else MissingBinaryExpr value
 }
 
 parseComparisonExpr : Str -> BinaryExprParseResult
@@ -2856,6 +3048,76 @@ parseEqualityExpr value = {
   }
 }
 
+parseLogicalAndOrFallbackExpr : Str -> HostedExprAst
+parseLogicalAndOrFallbackExpr value = match parseLogicalAndExpr value {
+  ParsedBinaryExpr expr ->
+    expr,
+  MissingBinaryExpr missing ->
+    parseEqualityOrFallbackExpr value
+}
+
+parseBinaryLogicalAndChain : [Str] -> HostedExprAst
+parseBinaryLogicalAndChain values = {
+  let firstValue = firstText values;
+  let secondValue = firstText (remainingTexts values);
+  let remaining = remainingTexts (remainingTexts values);
+  let combined = HostedIf (parseEqualityOrFallbackExpr firstValue) (parseEqualityOrFallbackExpr secondValue) (HostedBool false);
+  if firstText remaining == "" then combined else parseBinaryLogicalAndChainFromLeft combined remaining
+}
+
+parseBinaryLogicalAndChainFromLeft : HostedExprAst -> [Str] -> HostedExprAst
+parseBinaryLogicalAndChainFromLeft leftExpr values = {
+  let rightExpr = parseEqualityOrFallbackExpr (firstText values);
+  let combined = HostedIf leftExpr rightExpr (HostedBool false);
+  let remaining = remainingTexts values;
+  if firstText remaining == "" then combined else parseBinaryLogicalAndChainFromLeft combined remaining
+}
+
+parseLogicalAndExpr : Str -> BinaryExprParseResult
+parseLogicalAndExpr value = {
+  if topLevelRepeatedSeparatorOnly value "&" then {
+    let andParts = splitTopLevel value "&";
+    if hasAdditionalText andParts then {
+      ParsedBinaryExpr (parseBinaryLogicalAndChain andParts)
+    } else {
+      MissingBinaryExpr value
+    }
+  } else {
+    MissingBinaryExpr value
+  }
+}
+
+parseBinaryLogicalOrChain : [Str] -> HostedExprAst
+parseBinaryLogicalOrChain values = {
+  let firstValue = firstText values;
+  let secondValue = firstText (remainingTexts values);
+  let remaining = remainingTexts (remainingTexts values);
+  let combined = HostedIf (parseLogicalAndOrFallbackExpr firstValue) (HostedBool true) (parseLogicalAndOrFallbackExpr secondValue);
+  if firstText remaining == "" then combined else parseBinaryLogicalOrChainFromLeft combined remaining
+}
+
+parseBinaryLogicalOrChainFromLeft : HostedExprAst -> [Str] -> HostedExprAst
+parseBinaryLogicalOrChainFromLeft leftExpr values = {
+  let rightExpr = parseLogicalAndOrFallbackExpr (firstText values);
+  let combined = HostedIf leftExpr (HostedBool true) rightExpr;
+  let remaining = remainingTexts values;
+  if firstText remaining == "" then combined else parseBinaryLogicalOrChainFromLeft combined remaining
+}
+
+parseLogicalOrExpr : Str -> BinaryExprParseResult
+parseLogicalOrExpr value = {
+  if topLevelRepeatedSeparatorOnly value "|" then {
+    let orParts = splitTopLevel value "|";
+    if hasAdditionalText orParts then {
+      ParsedBinaryExpr (parseBinaryLogicalOrChain orParts)
+    } else {
+      MissingBinaryExpr value
+    }
+  } else {
+    MissingBinaryExpr value
+  }
+}
+
 parseExpr : Str -> HostedExprAst
 parseExpr rawValue = {
   let value = normalizeLayoutText rawValue;
@@ -2887,11 +3149,21 @@ parseExpr rawValue = {
                             ParsedIf condition thenBranch elseBranch ->
                               HostedIf condition thenBranch elseBranch,
                             MissingIf notIf ->
-                              match parseEqualityExpr value {
+                              match parseLogicalOrExpr value {
                                 ParsedBinaryExpr expr ->
                                   expr,
-                                MissingBinaryExpr notEquality ->
-                                  parseComparisonOrFallbackExpr value
+                                MissingBinaryExpr notLogical ->
+                                  match parseLogicalAndExpr value {
+                                    ParsedBinaryExpr expr ->
+                                      expr,
+                                    MissingBinaryExpr notLogicalAnd ->
+                                      match parseEqualityExpr value {
+                                        ParsedBinaryExpr expr ->
+                                          expr,
+                                        MissingBinaryExpr notEquality ->
+                                          parseComparisonOrFallbackExpr value
+                                      }
+                                  }
                               }
                           }
                       }

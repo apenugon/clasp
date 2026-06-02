@@ -1,0 +1,298 @@
+module Compiler.SemanticArtifacts.SurfaceIndex
+
+import Compiler.Ast
+import Compiler.Checker
+import Compiler.Checker.Types
+import Compiler.Json
+import Compiler.Project
+import Compiler.SemanticArtifacts.Base
+import Compiler.SemanticArtifacts.Names
+import Compiler.SemanticArtifacts.Uses
+import Compiler.SemanticArtifacts.Impact
+
+semanticContextVerificationGuidance : Str
+semanticContextVerificationGuidance =
+  jsonObject
+    [ jsonFieldRaw "focusedCommands" (semanticJsonTextArray ["bash scripts/verify-affected.sh --changed-file <source.clasp>", "bash scripts/test-selfhost.sh"])
+    , jsonFieldRaw "scenarioCommands" (semanticJsonTextArray ["bash examples/lead-app/scripts/verify.sh"])
+    , jsonFieldText "fullCommand" "bash scripts/verify-all.sh"
+    , jsonFieldRaw "requiresFullBeforeDone" "true"
+    ]
+
+semanticRouteVerificationGuidance : HostedRouteDeclAst -> [Str] -> Str
+semanticRouteVerificationGuidance routeDecl affectedSurfaces =
+  jsonObject
+    [ jsonFieldText "scope" "route"
+    , jsonFieldText "routeId" (semanticRouteNodeId routeDecl)
+    , jsonFieldRaw "requiredSurfaces" (semanticJsonTextArray affectedSurfaces)
+    , jsonFieldRaw "focusedCommands" (semanticJsonTextArray ["bash scripts/verify-affected.sh --changed-file <source.clasp>", "bash scripts/test-selfhost.sh"])
+    , jsonFieldRaw "scenarioCommands" (semanticJsonTextArray ["bash examples/lead-app/scripts/verify.sh"])
+    , jsonFieldText "fullCommand" "bash scripts/verify-all.sh"
+    , jsonFieldRaw "requiresFullBeforeDone" "true"
+    ]
+
+semanticContextSurfaceIndexSchemaFieldEntry : HostedModuleAst -> Str -> HostedRecordFieldDeclAst -> Str
+semanticContextSurfaceIndexSchemaFieldEntry modl schemaName field = {
+  let referencedSurfaces = semanticHostedTypeSurfaceIds modl (recordFieldDeclType field);
+  jsonObject
+    [ jsonFieldText "id" (semanticSchemaFieldNodeId schemaName field)
+    , jsonFieldText "name" (recordFieldDeclName field)
+    , jsonFieldText "schema" schemaName
+    , jsonFieldText "schemaId" (textConcat ["schema:", schemaName])
+    , jsonFieldText "type" (renderHostedType (recordFieldDeclType field))
+    , jsonFieldText "classification" (recordFieldDeclClassification field)
+    , jsonFieldRaw "referencedSurfaces" (semanticJsonTextArray referencedSurfaces)
+    , jsonFieldRaw "referencedSchemas" (semanticJsonTextArray (semanticSurfaceIdsWithPrefix referencedSurfaces "schema:"))
+    , jsonFieldRaw "referencedTypes" (semanticJsonTextArray (semanticSurfaceIdsWithPrefix referencedSurfaces "type:"))
+    ]
+}
+
+semanticContextSurfaceIndexSchemaFieldsForRecord : HostedModuleAst -> HostedRecordDeclAst -> [Str]
+semanticContextSurfaceIndexSchemaFieldsForRecord modl recordDecl = {
+  let mut entries = emptyRenderedTexts;
+  for field in recordDeclFields recordDecl {
+    entries = appendRenderedText entries (semanticContextSurfaceIndexSchemaFieldEntry modl (recordDeclName recordDecl) field);
+    entries
+  };
+  entries
+}
+
+semanticContextSurfaceIndexSchemas : HostedModuleAst -> [Str]
+semanticContextSurfaceIndexSchemas modl = {
+  let mut entries = emptyRenderedTexts;
+  for recordDecl in moduleRecordDeclarations modl {
+    let affectedSurfaces = semanticSchemaAffectedSurfaces modl recordDecl;
+    entries =
+      appendRenderedText
+        entries
+        (jsonObject
+          [ jsonFieldText "id" (semanticSchemaNodeId recordDecl)
+          , jsonFieldText "name" (recordDeclName recordDecl)
+          , jsonFieldText "kind" "record"
+          , jsonFieldRaw "params" (semanticJsonTextArray (recordDeclParams recordDecl))
+          , jsonFieldRaw "fieldIds" (semanticJsonTextArray (semanticSchemaFieldNodeIds recordDecl))
+          , jsonFieldRaw "fields" (jsonArray (semanticContextSurfaceIndexSchemaFieldsForRecord modl recordDecl))
+          , jsonFieldRaw "affectedSurfaces" (semanticJsonTextArray affectedSurfaces)
+          , jsonFieldRaw "affectedRoutes" (semanticJsonTextArray (semanticSurfaceIdsWithPrefix affectedSurfaces "route:"))
+          , jsonFieldRaw "affectedTools" (semanticJsonTextArray (semanticSurfaceIdsWithPrefix affectedSurfaces "tool:"))
+          , jsonFieldRaw "affectedForeignBoundaries" (semanticJsonTextArray (semanticSurfaceIdsWithPrefix affectedSurfaces "foreign:"))
+          , jsonFieldRaw "affectedDeclarations" (semanticJsonTextArray (semanticSurfaceIdsWithPrefix affectedSurfaces "decl:"))
+          ]);
+    entries
+  };
+  entries
+}
+
+semanticContextSurfaceIndexSchemaFields : HostedModuleAst -> [Str]
+semanticContextSurfaceIndexSchemaFields modl = {
+  let mut entries = emptyRenderedTexts;
+  for recordDecl in moduleRecordDeclarations modl {
+    entries = append entries (semanticContextSurfaceIndexSchemaFieldsForRecord modl recordDecl);
+    entries
+  };
+  entries
+}
+
+semanticContextSurfaceIndexConstructorEntry : HostedModuleAst -> Str -> HostedConstructorDeclAst -> Str
+semanticContextSurfaceIndexConstructorEntry modl typeName constructorDecl = {
+  let payloadSurfaces = semanticHostedTypesSurfaceIds modl (constructorDeclPayloadTypes constructorDecl);
+  jsonObject
+    [ jsonFieldText "id" (semanticConstructorNodeId typeName constructorDecl)
+    , jsonFieldText "name" (constructorDeclName constructorDecl)
+    , jsonFieldText "type" typeName
+    , jsonFieldText "typeId" (textConcat ["type:", typeName])
+    , jsonFieldText "wireName" (constructorDeclName constructorDecl)
+    , jsonFieldRaw "payloadTypes" (semanticJsonTextArray (renderHostedTypeList (constructorDeclPayloadTypes constructorDecl)))
+    , jsonFieldRaw "payloadSurfaces" (semanticJsonTextArray payloadSurfaces)
+    , jsonFieldRaw "payloadSchemas" (semanticJsonTextArray (semanticSurfaceIdsWithPrefix payloadSurfaces "schema:"))
+    , jsonFieldRaw "payloadTypeSurfaces" (semanticJsonTextArray (semanticSurfaceIdsWithPrefix payloadSurfaces "type:"))
+    ]
+}
+
+semanticContextSurfaceIndexTypeConstructors : HostedModuleAst -> HostedTypeDeclAst -> [Str]
+semanticContextSurfaceIndexTypeConstructors modl typeDecl = {
+  let mut entries = emptyRenderedTexts;
+  for constructorDecl in typeDeclConstructors typeDecl {
+    entries = appendRenderedText entries (semanticContextSurfaceIndexConstructorEntry modl (typeDeclName typeDecl) constructorDecl);
+    entries
+  };
+  entries
+}
+
+semanticConstructorWireNames : HostedTypeDeclAst -> [Str]
+semanticConstructorWireNames typeDecl = {
+  let mut names = emptyRenderedTexts;
+  for constructorDecl in typeDeclConstructors typeDecl {
+    names = appendRenderedText names (constructorDeclName constructorDecl);
+    names
+  };
+  names
+}
+
+semanticTypeAffectedSurfaces : HostedModuleAst -> HostedTypeDeclAst -> [Str]
+semanticTypeAffectedSurfaces modl typeDecl = {
+  let typeName = typeDeclName typeDecl;
+  let mut surfaces = [semanticTypeNodeId typeDecl];
+  surfaces = semanticAppendUniqueTexts surfaces (semanticConstructorNodeIds typeDecl);
+  for recordDecl in moduleRecordDeclarations modl {
+    if semanticRecordDeclUsesTypeName recordDecl typeName then {
+      surfaces = semanticAppendUniqueTexts surfaces (semanticSchemaAffectedSurfaces modl recordDecl);
+      surfaces
+    } else {
+      surfaces
+    }
+  };
+  surfaces = semanticAppendUniqueTexts surfaces (semanticRouteIdsForSchemaName modl typeName);
+  surfaces = semanticAppendUniqueTexts surfaces (semanticHookIdsForSchemaName modl typeName);
+  surfaces = semanticAppendUniqueTexts surfaces (semanticToolIdsForSchemaName modl typeName);
+  surfaces = semanticAppendUniqueTexts surfaces (semanticForeignIdsForTypeName modl typeName);
+  surfaces = semanticAppendUniqueTexts surfaces (semanticWorkflowIdsForSchemaName modl typeName);
+  surfaces
+}
+
+semanticContextSurfaceIndexTypes : HostedModuleAst -> [Str]
+semanticContextSurfaceIndexTypes modl = {
+  let mut entries = emptyRenderedTexts;
+  for typeDecl in moduleTypeDeclarations modl {
+    let affectedSurfaces = semanticTypeAffectedSurfaces modl typeDecl;
+    entries =
+      appendRenderedText
+        entries
+        (jsonObject
+          [ jsonFieldText "id" (semanticTypeNodeId typeDecl)
+          , jsonFieldText "name" (typeDeclName typeDecl)
+          , jsonFieldText "kind" "type"
+          , jsonFieldRaw "params" (semanticJsonTextArray (typeDeclParams typeDecl))
+          , jsonFieldRaw "constructorIds" (semanticJsonTextArray (semanticConstructorNodeIds typeDecl))
+          , jsonFieldRaw "wireConstructorNames" (semanticJsonTextArray (semanticConstructorWireNames typeDecl))
+          , jsonFieldRaw "constructors" (jsonArray (semanticContextSurfaceIndexTypeConstructors modl typeDecl))
+          , jsonFieldRaw "affectedSurfaces" (semanticJsonTextArray affectedSurfaces)
+          , jsonFieldRaw "affectedSchemas" (semanticJsonTextArray (semanticSurfaceIdsWithPrefix affectedSurfaces "schema:"))
+          , jsonFieldRaw "affectedSchemaFields" (semanticJsonTextArray (semanticSurfaceIdsWithPrefix affectedSurfaces "schema-field:"))
+          , jsonFieldRaw "affectedRoutes" (semanticJsonTextArray (semanticSurfaceIdsWithPrefix affectedSurfaces "route:"))
+          , jsonFieldRaw "affectedTools" (semanticJsonTextArray (semanticSurfaceIdsWithPrefix affectedSurfaces "tool:"))
+          , jsonFieldRaw "affectedForeignBoundaries" (semanticJsonTextArray (semanticSurfaceIdsWithPrefix affectedSurfaces "foreign:"))
+          ]);
+    entries
+  };
+  entries
+}
+
+semanticContextSurfaceIndexRoutes : HostedModuleAst -> [Str]
+semanticContextSurfaceIndexRoutes modl = {
+  let mut entries = emptyRenderedTexts;
+  for routeDecl in moduleRouteDeclarations modl {
+    let affectedSurfaces = semanticRouteAffectedSurfaces modl routeDecl;
+    entries =
+      appendRenderedText
+        entries
+        (jsonObject
+          [ jsonFieldText "id" (semanticRouteNodeId routeDecl)
+          , jsonFieldText "name" (routeDeclName routeDecl)
+          , jsonFieldText "identity" (routeDeclIdentity routeDecl)
+          , jsonFieldText "method" (routeDeclMethod routeDecl)
+          , jsonFieldText "path" (routeDeclPath routeDecl)
+          , jsonFieldText "requestType" (routeDeclRequestType routeDecl)
+          , jsonFieldText "responseType" (routeDeclResponseType routeDecl)
+          , jsonFieldText "responseKind" (semanticRouteResponseKind (routeDeclResponseType routeDecl))
+          , jsonFieldText "handler" (routeDeclHandlerName routeDecl)
+          , jsonFieldText "requestSchemaId" (textConcat ["schema:", routeDeclRequestType routeDecl])
+          , jsonFieldText "responseSchemaId" (textConcat ["schema:", routeDeclResponseType routeDecl])
+          , jsonFieldText "handlerId" (textConcat ["decl:", routeDeclHandlerName routeDecl])
+          , jsonFieldRaw "affectedSurfaces" (semanticJsonTextArray affectedSurfaces)
+          , jsonFieldRaw "affectedRoutes" (semanticJsonTextArray (semanticSurfaceIdsWithPrefix affectedSurfaces "route:"))
+          , jsonFieldRaw "affectedSchemas" (semanticJsonTextArray (semanticSurfaceIdsWithPrefix affectedSurfaces "schema:"))
+          , jsonFieldRaw "affectedDeclarations" (semanticJsonTextArray (semanticSurfaceIdsWithPrefix affectedSurfaces "decl:"))
+          , jsonFieldRaw "affectedForeignBoundaries" (semanticJsonTextArray (semanticSurfaceIdsWithPrefix affectedSurfaces "foreign:"))
+          , jsonFieldRaw "verificationGuidance" (semanticRouteVerificationGuidance routeDecl affectedSurfaces)
+          ]);
+    entries
+  };
+  entries
+}
+
+semanticContextSurfaceIndexWorkflows : [HostedWorkflowDeclAst] -> [Str]
+semanticContextSurfaceIndexWorkflows workflowDecls = {
+  let mut entries = emptyRenderedTexts;
+  for workflowDecl in workflowDecls {
+    entries =
+      appendRenderedText
+        entries
+        (jsonObject
+          [ jsonFieldText "id" (semanticWorkflowNodeId workflowDecl)
+          , jsonFieldText "name" (workflowDeclName workflowDecl)
+          , jsonFieldText "identity" (workflowDeclIdentity workflowDecl)
+          , jsonFieldText "stateType" (renderHostedType (workflowDeclStateTypeAst workflowDecl))
+          ]);
+    entries
+  };
+  entries
+}
+
+semanticContextSurfaceIndexTools : [HostedToolDeclAst] -> [Str]
+semanticContextSurfaceIndexTools toolDecls = {
+  let mut entries = emptyRenderedTexts;
+  for toolDecl in toolDecls {
+    entries =
+      appendRenderedText
+        entries
+        (jsonObject
+          [ jsonFieldText "id" (semanticToolNodeId toolDecl)
+          , jsonFieldText "name" (toolDeclName toolDecl)
+          , jsonFieldText "server" (toolDeclServerName toolDecl)
+          , jsonFieldText "operation" (toolDeclOperation toolDecl)
+          , jsonFieldText "requestType" (toolDeclRequestType toolDecl)
+          , jsonFieldText "responseType" (toolDeclResponseType toolDecl)
+          ]);
+    entries
+  };
+  entries
+}
+
+semanticContextSurfaceIndexAgents : [HostedAgentDeclAst] -> [Str]
+semanticContextSurfaceIndexAgents agentDecls = {
+  let mut entries = emptyRenderedTexts;
+  for agentDecl in agentDecls {
+    entries =
+      appendRenderedText
+        entries
+        (jsonObject
+          [ jsonFieldText "id" (semanticAgentNodeId agentDecl)
+          , jsonFieldText "name" (agentDeclName agentDecl)
+          , jsonFieldText "role" (agentDeclRoleName agentDecl)
+          ]);
+    entries
+  };
+  entries
+}
+
+semanticContextSurfaceIndexForeignBoundaries : [HostedForeignDeclAst] -> [Str]
+semanticContextSurfaceIndexForeignBoundaries foreignDecls = {
+  let mut entries = emptyRenderedTexts;
+  for foreignDecl in foreignDecls {
+    entries =
+      appendRenderedText
+        entries
+        (jsonObject
+          [ jsonFieldText "id" (semanticForeignNodeId foreignDecl)
+          , jsonFieldText "name" (foreignDeclName foreignDecl)
+          , jsonFieldText "runtimeName" (foreignDeclRuntimeName foreignDecl)
+          , jsonFieldText "type" (renderHostedType (foreignDeclTypeAst foreignDecl))
+          ]);
+    entries
+  };
+  entries
+}
+
+semanticContextSurfaceIndex : HostedModuleAst -> Str
+semanticContextSurfaceIndex modl =
+  jsonObject
+    [ jsonFieldRaw "schemas" (jsonArray (semanticContextSurfaceIndexSchemas modl))
+    , jsonFieldRaw "schemaFields" (jsonArray (semanticContextSurfaceIndexSchemaFields modl))
+    , jsonFieldRaw "types" (jsonArray (semanticContextSurfaceIndexTypes modl))
+    , jsonFieldRaw "routes" (jsonArray (semanticContextSurfaceIndexRoutes modl))
+    , jsonFieldRaw "workflows" (jsonArray (semanticContextSurfaceIndexWorkflows (moduleWorkflowDeclarations modl)))
+    , jsonFieldRaw "tools" (jsonArray (semanticContextSurfaceIndexTools (moduleToolDeclarations modl)))
+    , jsonFieldRaw "agents" (jsonArray (semanticContextSurfaceIndexAgents (moduleAgentDeclarations modl)))
+    , jsonFieldRaw "foreignBoundaries" (jsonArray (semanticContextSurfaceIndexForeignBoundaries (moduleForeignDeclarations modl)))
+    ]

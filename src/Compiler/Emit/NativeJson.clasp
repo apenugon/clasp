@@ -2,6 +2,8 @@ module Compiler.Emit.NativeJson
 
 import Compiler.Ast
 import Compiler.Checker
+import Compiler.Checker.TypeOps
+import Compiler.Checker.Types
 import Compiler.Json
 import Compiler.Lower
 
@@ -96,6 +98,8 @@ emitNativeExprJson expr = match expr {
     jsonObject [jsonFieldText "kind" "intrinsic", jsonFieldText "name" "encode", jsonFieldRaw "value" (emitNativeExprJson value)],
   LowerDecode targetType value ->
     jsonObject [jsonFieldText "kind" "intrinsic", jsonFieldText "name" "decode", jsonFieldText "type" (renderType targetType), jsonFieldRaw "value" (emitNativeExprJson value)],
+  LowerTryDecode targetType value ->
+    jsonObject [jsonFieldText "kind" "intrinsic", jsonFieldText "name" "tryDecode", jsonFieldText "type" (renderType targetType), jsonFieldRaw "value" (emitNativeExprJson value)],
   LowerIf condition thenBranch elseBranch ->
     jsonObject [jsonFieldText "kind" "if", jsonFieldRaw "condition" (emitNativeExprJson condition), jsonFieldRaw "thenBranch" (emitNativeExprJson thenBranch), jsonFieldRaw "elseBranch" (emitNativeExprJson elseBranch)],
   LowerEqual left right ->

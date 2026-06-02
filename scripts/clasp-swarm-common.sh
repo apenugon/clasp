@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ulimit -c 0 >/dev/null 2>&1 || true
+
 CLASP_SWARM_GIT_COMPLETION_CACHE_KEY=""
 CLASP_SWARM_GIT_COMPLETION_CACHE_FILE=""
 
@@ -34,13 +36,36 @@ clasp_swarm_lane_dirs() {
 
 clasp_swarm_task_files() {
   local lane_dir="$1"
-  local task_file=""
+  local manifest_rows=""
 
-  while IFS= read -r task_file; do
-    [[ -n "$task_file" ]] || continue
-    clasp_swarm_validate_task_manifest "$task_file" >/dev/null
-    printf '%s\n' "$task_file"
-  done < <(find "$lane_dir" -maxdepth 1 -type f -name '*.md' | sort)
+  if ! manifest_rows="$(clasp_swarm_lane_task_manifest_rows "$lane_dir")"; then
+    return 1
+  fi
+  if [[ -z "$manifest_rows" ]]; then
+    return 0
+  fi
+
+  awk -F '\t' '{ print $1 }' <<< "$manifest_rows"
+}
+
+clasp_swarm_task_manifest_rows() {
+  if [[ "$#" -eq 0 ]]; then
+    return 0
+  fi
+
+  node "$(clasp_swarm_project_root)/scripts/clasp-swarm-validate-task.mjs" --print-summary-tsv "$@"
+}
+
+clasp_swarm_lane_task_manifest_rows() {
+  local lane_dir="$1"
+  local task_files=()
+
+  mapfile -t task_files < <(find "$lane_dir" -maxdepth 1 -type f -name '*.md' | sort)
+  if [[ "${#task_files[@]}" -eq 0 ]]; then
+    return 0
+  fi
+
+  clasp_swarm_task_manifest_rows "${task_files[@]}"
 }
 
 clasp_swarm_lane_name() {
@@ -248,6 +273,33 @@ clasp_swarm_git_completion_stamp() {
   clasp_swarm_git_completion_field "$1" "$2" 3 "${3:-main}" "${4:-agents/swarm-trunk}"
 }
 
+clasp_swarm_completion_dir_uses_git_fallback() {
+  local markers_dir="$1"
+  local repo_root="$2"
+  local mode="${CLASP_SWARM_GIT_COMPLETION_FALLBACK:-auto}"
+  local canonical_markers=""
+  local canonical_global=""
+  local global_markers_dir="$repo_root/.clasp-swarm/completed"
+
+  case "$mode" in
+    1|true|TRUE|True|yes|YES|Yes|on|ON|On|always|ALWAYS|Always)
+      return 0
+      ;;
+    0|false|FALSE|False|no|NO|No|off|OFF|Off|never|NEVER|Never)
+      return 1
+      ;;
+  esac
+
+  if [[ -d "$markers_dir" && -d "$global_markers_dir" ]]; then
+    canonical_markers="$(cd "$markers_dir" && pwd -P)"
+    canonical_global="$(cd "$global_markers_dir" && pwd -P)"
+    [[ "$canonical_markers" == "$canonical_global" ]]
+    return
+  fi
+
+  [[ "$markers_dir" == "$global_markers_dir" ]]
+}
+
 clasp_swarm_task_is_completed() {
   local markers_dir="$1"
   local task_ref="$2"
@@ -257,6 +309,10 @@ clasp_swarm_task_is_completed() {
 
   if clasp_swarm_completion_marker_exists "$markers_dir" "$task_ref"; then
     return 0
+  fi
+
+  if ! clasp_swarm_completion_dir_uses_git_fallback "$markers_dir" "$repo_root"; then
+    return 1
   fi
 
   clasp_swarm_git_completion_marker_exists "$repo_root" "$task_ref" "$main_branch" "$trunk_branch"
@@ -392,12 +448,19 @@ clasp_swarm_assert_prompt_size() {
 
 clasp_swarm_allow_unmanaged_agent_runtime() {
   case "${CLASP_ALLOW_UNMANAGED_AGENT_RUNTIME:-}" in
-    1|true|yes)
-      return 0
+    1|true|yes|fixture|test)
+      [[ -n "${CLASP_TEST_CODEX_MODE:-}" ]] && return 0
+      ;;
+    dangerous)
+      case "${CLASP_UNMANAGED_AGENT_RUNTIME_DANGER_ACCEPTED:-}" in
+        1|true|yes)
+          return 0
+          ;;
+      esac
       ;;
   esac
 
-  [[ -n "${CLASP_TEST_CODEX_MODE:-}" ]]
+  return 1
 }
 
 clasp_swarm_require_managed_agent_runtime() {
@@ -413,8 +476,92 @@ clasp_swarm_require_managed_agent_runtime() {
 
   printf '%s refuses to launch agent work outside the managed-job memory guard.\n' "$label" >&2
   printf 'Use %s or wrap the command with scripts/run-managed-job.sh.\n' "$managed_launcher" >&2
-  printf 'Set CLASP_ALLOW_UNMANAGED_AGENT_RUNTIME=1 only for lightweight tests or fixtures.\n' >&2
+  printf 'Set CLASP_ALLOW_UNMANAGED_AGENT_RUNTIME=1 only together with CLASP_TEST_CODEX_MODE for lightweight fixtures.\n' >&2
+  printf 'For emergency operator bypass, set CLASP_ALLOW_UNMANAGED_AGENT_RUNTIME=dangerous and CLASP_UNMANAGED_AGENT_RUNTIME_DANGER_ACCEPTED=1.\n' >&2
   return 1
+}
+
+clasp_swarm_managed_job_status() {
+  local job_dir="$1"
+
+  sed -n '1p' "$job_dir/status" 2>/dev/null || true
+}
+
+clasp_swarm_managed_job_exit_status() {
+  local job_dir="$1"
+
+  sed -n '1p' "$job_dir/exit-status" 2>/dev/null || true
+}
+
+clasp_swarm_managed_job_status_is_terminal() {
+  local status="$1"
+
+  case "$status" in
+    completed|failed|stopped|memory-exceeded|disk-exceeded|memory-enforcer-unavailable|admission-lock-unavailable)
+      return 0
+      ;;
+  esac
+
+  return 1
+}
+
+clasp_swarm_wait_managed_job_immediate_terminal_status() {
+  local job_dir="$1"
+  local poll_iterations="${CLASP_MANAGED_JOB_LAUNCH_SETTLE_ITERATIONS:-600}"
+  local poll_sleep_secs="${CLASP_MANAGED_JOB_LAUNCH_SETTLE_SLEEP_SECS:-0.05}"
+  local status=""
+
+  if ! [[ "$poll_iterations" =~ ^[0-9]+$ ]] || (( poll_iterations < 1 )); then
+    poll_iterations=600
+  fi
+  if ! [[ "$poll_sleep_secs" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+    poll_sleep_secs=0.05
+  fi
+
+  for _ in $(seq 1 "$poll_iterations"); do
+    status="$(clasp_swarm_managed_job_status "$job_dir")"
+    if clasp_swarm_managed_job_status_is_terminal "$status"; then
+      return 0
+    fi
+    if [[ -f "$job_dir/exit-status" ]]; then
+      return 0
+    fi
+    if [[ -f "$job_dir/preflight-complete" ]]; then
+      return 1
+    fi
+    sleep "$poll_sleep_secs"
+  done
+
+  return 1
+}
+
+clasp_swarm_print_managed_job_terminal_report() {
+  local label="$1"
+  local job_dir="$2"
+  local status=""
+  local exit_status=""
+
+  status="$(clasp_swarm_managed_job_status "$job_dir")"
+  exit_status="$(clasp_swarm_managed_job_exit_status "$job_dir")"
+  printf '%s managed job reached terminal status before launch settled: status=%s exit_status=%s job=%s\n' \
+    "$label" "${status:-unknown}" "${exit_status:-unknown}" "$job_dir" >&2
+
+  if [[ -f "$job_dir/memory-exceeded" ]]; then
+    printf '%s memory-exceeded:\n' "$label" >&2
+    sed 's/^/  /' "$job_dir/memory-exceeded" >&2 || true
+  fi
+  if [[ -f "$job_dir/disk-exceeded" ]]; then
+    printf '%s disk-exceeded:\n' "$label" >&2
+    sed 's/^/  /' "$job_dir/disk-exceeded" >&2 || true
+  fi
+  if [[ -f "$job_dir/memory-enforcer-error" ]]; then
+    printf '%s memory-enforcer-error:\n' "$label" >&2
+    sed 's/^/  /' "$job_dir/memory-enforcer-error" >&2 || true
+  fi
+  if [[ -f "$job_dir/admission-error" ]]; then
+    printf '%s admission-error:\n' "$label" >&2
+    sed 's/^/  /' "$job_dir/admission-error" >&2 || true
+  fi
 }
 
 clasp_swarm_spawn_detached() {
@@ -474,6 +621,15 @@ clasp_swarm_task_batch_label() {
   node "$(clasp_swarm_project_root)/scripts/clasp-swarm-validate-task.mjs" --print-field batchLabel "$task_file"
 }
 
+clasp_swarm_task_batch_labels() {
+  if [[ "$#" -eq 0 ]]; then
+    return 0
+  fi
+
+  clasp_swarm_task_manifest_rows "$@" |
+    awk -F '\t' '$3 != "" { print $3 }'
+}
+
 clasp_swarm_task_dependency_labels() {
   local task_file="$1"
 
@@ -486,6 +642,14 @@ clasp_swarm_validate_task_manifest() {
   node "$(clasp_swarm_project_root)/scripts/clasp-swarm-validate-task.mjs" "$task_file"
 }
 
+clasp_swarm_validate_task_manifests() {
+  if [[ "$#" -eq 0 ]]; then
+    return 0
+  fi
+
+  node "$(clasp_swarm_project_root)/scripts/clasp-swarm-validate-task.mjs" "$@"
+}
+
 clasp_swarm_batch_is_complete() {
   local batch_label="$1"
   local lane_dir="$2"
@@ -493,14 +657,17 @@ clasp_swarm_batch_is_complete() {
   local wave_dir=""
   local scan_lane=""
   local task_file=""
+  local task_key=""
   local task_batch=""
+  local task_dependencies=""
+  local task_dependency_labels=""
+  local manifest_row=""
   local found=0
   local project_root=""
   local main_branch="${CLASP_SWARM_MAIN_BRANCH:-main}"
   local trunk_branch="${CLASP_SWARM_TRUNK_BRANCH:-agents/swarm-trunk}"
   local scan_lanes=()
-  local task_files=()
-  local task_files_output=""
+  local manifest_rows=""
 
   [[ -n "$batch_label" ]] || return 1
 
@@ -516,28 +683,63 @@ clasp_swarm_batch_is_complete() {
   fi
 
   for scan_lane in "${scan_lanes[@]}"; do
-    task_files=()
-    if ! task_files_output="$(clasp_swarm_task_files "$scan_lane")"; then
+    manifest_rows=""
+    if ! manifest_rows="$(clasp_swarm_lane_task_manifest_rows "$scan_lane")"; then
       return 1
     fi
-    if [[ -n "$task_files_output" ]]; then
-      mapfile -t task_files <<< "$task_files_output"
-    fi
 
-    for task_file in "${task_files[@]}"; do
-      task_batch="$(clasp_swarm_task_batch_label "$task_file")"
+    while IFS= read -r manifest_row; do
+      IFS=$'\037' read -r task_file task_key task_batch task_dependencies task_dependency_labels <<< "${manifest_row//$'\t'/$'\037'}"
+      [[ -n "$task_file" ]] || continue
       if [[ "$task_batch" != "$batch_label" ]]; then
         continue
       fi
 
       found=1
-      if ! clasp_swarm_task_is_completed "$completed_root" "$task_file" "$project_root" "$main_branch" "$trunk_branch"; then
+      if ! clasp_swarm_task_is_completed "$completed_root" "$task_key" "$project_root" "$main_branch" "$trunk_branch"; then
         return 1
       fi
-    done
+    done <<< "$manifest_rows"
   done
 
   [[ "$found" == "1" ]]
+}
+
+clasp_swarm_manifest_dependencies_met() {
+  local dependencies_csv="$1"
+  local dependency_labels_csv="$2"
+  local lane_dir="$3"
+  local completed_root="$4"
+  local project_root="$5"
+  local main_branch="$6"
+  local trunk_branch="$7"
+  local dep=""
+  local dependency_label=""
+  local dependencies=()
+  local dependency_labels=()
+
+  if [[ -n "$dependencies_csv" ]]; then
+    IFS=',' read -r -a dependencies <<< "$dependencies_csv"
+  fi
+  if [[ -n "$dependency_labels_csv" ]]; then
+    IFS=',' read -r -a dependency_labels <<< "$dependency_labels_csv"
+  fi
+
+  for dep in "${dependencies[@]}"; do
+    [[ -z "$dep" ]] && continue
+    if ! clasp_swarm_task_is_completed "$completed_root" "$dep" "$project_root" "$main_branch" "$trunk_branch"; then
+      return 1
+    fi
+  done
+
+  for dependency_label in "${dependency_labels[@]}"; do
+    [[ -z "$dependency_label" ]] && continue
+    if ! clasp_swarm_batch_is_complete "$dependency_label" "$lane_dir" "$completed_root"; then
+      return 1
+    fi
+  done
+
+  return 0
 }
 
 clasp_swarm_task_dependencies_met() {
@@ -579,30 +781,28 @@ clasp_swarm_select_next_ready_task() {
   local task_id=""
   local first_pending=""
   local task_batch=""
+  local task_dependencies=""
+  local task_dependency_labels=""
+  local manifest_row=""
   local project_root=""
   local main_branch="${CLASP_SWARM_MAIN_BRANCH:-main}"
   local trunk_branch="${CLASP_SWARM_TRUNK_BRANCH:-agents/swarm-trunk}"
-  local task_files=()
-  local task_files_output=""
+  local manifest_rows=""
 
   project_root="$(clasp_swarm_project_root)"
 
-  if ! task_files_output="$(clasp_swarm_task_files "$lane_dir")"; then
+  if ! manifest_rows="$(clasp_swarm_lane_task_manifest_rows "$lane_dir")"; then
     return 1
   fi
-  if [[ -n "$task_files_output" ]]; then
-    mapfile -t task_files <<< "$task_files_output"
-  fi
 
-  for task_file in "${task_files[@]}"; do
+  while IFS= read -r manifest_row; do
+    IFS=$'\037' read -r task_file task_id task_batch task_dependencies task_dependency_labels <<< "${manifest_row//$'\t'/$'\037'}"
+    [[ -n "$task_file" ]] || continue
     if [[ -n "$batch_filter" ]]; then
-      task_batch="$(clasp_swarm_task_batch_label "$task_file")"
       if [[ "$task_batch" != "$batch_filter" ]]; then
         continue
       fi
     fi
-
-    task_id="$(clasp_swarm_completion_key "$task_file")"
 
     if clasp_swarm_task_is_completed "$completed_root" "$task_id" "$project_root" "$main_branch" "$trunk_branch"; then
       continue
@@ -617,7 +817,7 @@ clasp_swarm_select_next_ready_task() {
       return 0
     fi
 
-    if clasp_swarm_task_dependencies_met "$task_file" "$lane_dir" "$global_completed_root"; then
+    if clasp_swarm_manifest_dependencies_met "$task_dependencies" "$task_dependency_labels" "$lane_dir" "$global_completed_root" "$project_root" "$main_branch" "$trunk_branch"; then
       printf '%s\n' "$task_file"
       return 0
     fi
@@ -625,7 +825,7 @@ clasp_swarm_select_next_ready_task() {
     if [[ -z "$first_pending" ]]; then
       first_pending="$task_file"
     fi
-  done
+  done <<< "$manifest_rows"
 
   if [[ -n "$first_pending" ]]; then
     printf '__WAIT__:%s\n' "$first_pending"

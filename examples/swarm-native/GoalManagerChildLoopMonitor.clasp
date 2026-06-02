@@ -6,6 +6,7 @@ import GoalManagerCounters
 import GoalManagerPrelude
 import GoalManagerConfig
 import GoalManagerTypes
+import ResourceRecoveryPolicy
 import Swarm
 
 taskManagerRetryPath : Str -> Str
@@ -138,6 +139,41 @@ retryRecoverySummaryText record =
     record.cause
   ]
 
+retryRecoveryEvidenceText : RetryRecoveryRecord -> Str
+retryRecoveryEvidenceText record = textJoin "\n" record.evidence
+
+retryRecoveryActionTaskId : RetryRecoveryRecord -> Str
+retryRecoveryActionTaskId record =
+  resourceRecoveryActionTaskIdForEvidence
+    record.phase
+    record.retryableStatus
+    (retryRecoveryEvidenceText record)
+
+retryRecoveryActionKind : RetryRecoveryRecord -> Str
+retryRecoveryActionKind record =
+  resourceRecoveryActionKindForEvidence
+    record.phase
+    record.retryableStatus
+    (retryRecoveryEvidenceText record)
+
+retryRecoveryActionGuidance : RetryRecoveryRecord -> Str
+retryRecoveryActionGuidance record =
+  resourceRecoveryActionGuidanceForEvidence
+    record.phase
+    record.retryableStatus
+    (retryRecoveryEvidenceText record)
+
+retryRecoveryActionSummaryText : RetryRecoveryRecord -> Str
+retryRecoveryActionSummaryText record =
+  textConcat [
+    "recoveryTask=",
+    retryRecoveryActionTaskId record,
+    ":kind=",
+    retryRecoveryActionKind record,
+    ":guidance=",
+    retryRecoveryActionGuidance record
+  ]
+
 retryRecoveryMailboxDetails : Str -> [Str]
 retryRecoveryMailboxDetails taskId =
   if length (readRetryRecoveryRecords taskId) == 0 then
@@ -149,6 +185,9 @@ retryRecoveryMailboxDetails taskId =
         [
           textConcat ["retryRecordPath=", retryRecoveryRecordsPath taskId],
           textConcat ["retryRecordLatest=", retryRecoverySummaryText latest],
+          textConcat ["retryRecordRecoveryTask=", retryRecoveryActionTaskId latest],
+          textConcat ["retryRecordRecoveryKind=", retryRecoveryActionKind latest],
+          textConcat ["retryRecordRecoveryGuidance=", retryRecoveryActionGuidance latest],
           textConcat ["retryRecordRun=", latest.runStatus, ":exitCode=", encode latest.exitCode],
           textConcat ["retryRecordStdout=", latest.stdoutPath],
           textConcat ["retryRecordStderr=", latest.stderrPath],
@@ -234,6 +273,7 @@ childLoopMonitorSpecForTaskId taskId =
     childLoopAwaitTimeoutMs
     (readChildLoopManagerRetries taskId)
     childLoopMaxManagerRetries
+    0
     emptyTexts
 
 awaitChildLoopOutcome : [Str] -> MonitoredLoopOutcome
@@ -263,6 +303,8 @@ awaitChildLoopProcess taskIds = {
     watchedProcessError outcome.message
   else if outcome.status == "retry-exhausted" then
     watchedProcessError outcome.message
+  else if outcome.status == "output-limit" then
+    watchedProcessError "output-limit"
   else if outcome.status == "timeout" then
     watchedProcessError "timeout"
   else

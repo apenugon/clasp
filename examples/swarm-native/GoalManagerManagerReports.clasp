@@ -11,7 +11,6 @@ import GoalManagerCounters
 import GoalManagerTaskSet
 import GoalManagerPlannerMaterialize
 import GoalManagerPlannerRoles
-import GoalManagerMailboxMessages
 import GoalManagerPrelude
 import GoalManagerConfig
 import GoalManagerTypes
@@ -361,6 +360,9 @@ statusView state =
       let waitingReasons = statusWaitingReasons state plannedTaskIds trackedTasks in
       StatusView {
         state = state,
+        plannerBackend = managerPlannerBackendSummary,
+        plannerBackendPolicy = managerPlannerBackendPolicySummary,
+        plannerBackendCapability = managerPlannerBackendCapabilitySummary,
         plannerSummary = plannerSummaryOrEmpty state.wave,
         objectiveProjectedStatus = objectiveProjectedStatus,
         plannedTaskIds = plannedTaskIds,
@@ -380,6 +382,9 @@ statusView state =
       let waitingReasons = statusWaitingReasons state plannedTaskIds emptyTasks in
       StatusView {
         state = state,
+        plannerBackend = managerPlannerBackendSummary,
+        plannerBackendPolicy = managerPlannerBackendPolicySummary,
+        plannerBackendCapability = managerPlannerBackendCapabilitySummary,
         plannerSummary = plannerSummaryOrEmpty state.wave,
         objectiveProjectedStatus = textConcat ["task-error:", message],
         plannedTaskIds = plannedTaskIds,

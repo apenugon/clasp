@@ -1,0 +1,300 @@
+module Main
+
+foreign swarmObjectiveCreateRaw : Str -> Str -> Str -> Int -> Int -> Result Str = "swarmObjectiveCreateJson"
+foreign swarmTaskCreateRaw : Str -> Str -> Str -> Str -> [Str] -> Int -> Int -> Result Str = "swarmTaskCreateJson"
+foreign swarmPolicySetWithNetworkAccessRaw : Str -> Str -> Str -> [Str] -> [Str] -> [Str] -> [Str] -> Str -> [Str] -> Result Str = "swarmPolicySetWithNetworkAccessJson"
+foreign swarmLeaseRaw : Str -> Str -> Str -> Result Str = "swarmLeaseJson"
+foreign swarmToolRunWithLimitsRaw : Str -> Str -> Str -> Str -> Int -> Int -> [Str] -> Result Str = "swarmToolRunWithLimitsJson"
+foreign swarmApproveRaw : Str -> Str -> Str -> Str -> Result Str = "swarmApproveJson"
+foreign swarmTailRaw : Str -> Str -> Int -> Result Str = "swarmTailJson"
+
+record SwarmRoot = { path : Str }
+record ObjectiveHandle = { root : SwarmRoot, objectiveId : Str }
+record TaskHandle = { root : SwarmRoot, taskId : Str, actor : Str }
+record SwarmObjective = { objectiveId : Str }
+record SwarmTask = { taskId : Str, status : Str }
+record SwarmTaskUpdate = { task : SwarmTask }
+
+record SwarmPolicy = {
+  taskId : Str,
+  mergegateName : Str,
+  requiredApprovals : [Str],
+  allowedProcesses : [Str],
+  allowedWorkspaceRoots : [Str]
+}
+
+record SwarmRun = {
+  exitCode : Int,
+  status : Str
+}
+
+record SwarmEvent = {
+  kind : Str
+}
+
+record DestructivePolicyReport = {
+  taskId : Str,
+  requiredApprovals : [Str],
+  allowedProcesses : [Str],
+  allowedWorkspaceRoots : [Str],
+  destructiveApprovalBlocked : Bool,
+  outsideTargetBlocked : Bool,
+  shellOutsideTargetBlocked : Bool,
+  shellDynamicTargetBlocked : Bool,
+  opaqueOutsideWriteBlocked : Bool,
+  opaqueOutsideWritePrevented : Bool,
+  filesystemMediationStarted : Bool,
+  outsideTargetSurvived : Bool,
+  approvedRunStatus : Str,
+  approvedRunExitCode : Int,
+  eventKinds : [Str]
+}
+
+swarmRoot : Str -> SwarmRoot
+swarmRoot path = SwarmRoot { path = path }
+
+objectiveHandle : SwarmRoot -> Str -> ObjectiveHandle
+objectiveHandle root objectiveId = ObjectiveHandle { root = root, objectiveId = objectiveId }
+
+taskHandle : SwarmRoot -> Str -> Str -> TaskHandle
+taskHandle root taskId actor = TaskHandle { root = root, taskId = taskId, actor = actor }
+
+objectiveResult : Result Str -> Result SwarmObjective
+objectiveResult value = match value {
+  Ok raw -> Ok (decode SwarmObjective raw),
+  Err message -> Err message
+}
+
+taskResult : Result Str -> Result SwarmTask
+taskResult value = match value {
+  Ok raw -> Ok (decode SwarmTask raw),
+  Err message -> Err message
+}
+
+taskUpdateResult : Result Str -> Result SwarmTaskUpdate
+taskUpdateResult value = match value {
+  Ok raw -> Ok (decode SwarmTaskUpdate raw),
+  Err message -> Err message
+}
+
+policyResult : Result Str -> Result SwarmPolicy
+policyResult value = match value {
+  Ok raw -> Ok (decode SwarmPolicy raw),
+  Err message -> Err message
+}
+
+runResult : Result Str -> Result SwarmRun
+runResult value = match value {
+  Ok raw -> Ok (decode SwarmRun raw),
+  Err message -> Err message
+}
+
+eventListResult : Result Str -> Result [SwarmEvent]
+eventListResult value = match value {
+  Ok raw -> Ok (decode [SwarmEvent] raw),
+  Err message -> Err message
+}
+
+objectiveCreate : SwarmRoot -> Str -> Str -> Int -> Int -> Result SwarmObjective
+objectiveCreate root objectiveId detail maxTasks maxRuns =
+  objectiveResult (swarmObjectiveCreateRaw root.path objectiveId detail maxTasks maxRuns)
+
+taskCreate : ObjectiveHandle -> Str -> Str -> [Str] -> Int -> Int -> Result SwarmTask
+taskCreate handle taskId detail dependencies maxRuns leaseTimeoutMs =
+  taskResult (swarmTaskCreateRaw handle.root.path handle.objectiveId taskId detail dependencies maxRuns leaseTimeoutMs)
+
+policySet : TaskHandle -> Result SwarmPolicy
+policySet handle =
+  policyResult (swarmPolicySetWithNetworkAccessRaw handle.root.path handle.taskId "destructive-policy" ["destructive-action"] [] ["rm", "bash", "node"] [workspaceRoot] "ambient" [])
+
+lease : TaskHandle -> Result SwarmTaskUpdate
+lease handle =
+  taskUpdateResult (swarmLeaseRaw handle.root.path handle.taskId handle.actor)
+
+toolRun : TaskHandle -> Result SwarmRun
+toolRun handle =
+  runResult (swarmToolRunWithLimitsRaw handle.root.path handle.taskId handle.actor workspaceRoot 5000 256 ["rm", "-f", "destructive-target.txt"])
+
+toolRunOutsideTarget : TaskHandle -> Result SwarmRun
+toolRunOutsideTarget handle =
+  runResult (swarmToolRunWithLimitsRaw handle.root.path handle.taskId handle.actor workspaceRoot 5000 256 ["rm", "-f", outsideTargetPath])
+
+toolRunShellOutsideTarget : TaskHandle -> Result SwarmRun
+toolRunShellOutsideTarget handle =
+  runResult (swarmToolRunWithLimitsRaw handle.root.path handle.taskId handle.actor workspaceRoot 5000 256 ["bash", "-lc", textConcat ["rm -f ", outsideTargetPath]])
+
+toolRunShellDynamicTarget : TaskHandle -> Result SwarmRun
+toolRunShellDynamicTarget handle =
+  runResult (swarmToolRunWithLimitsRaw handle.root.path handle.taskId handle.actor workspaceRoot 5000 256 ["bash", "-lc", "rm -f \"$PWD/../outside-workspace/destructive-target.txt\""])
+
+toolRunOpaqueOutsideWrite : TaskHandle -> Result SwarmRun
+toolRunOpaqueOutsideWrite handle =
+  runResult (swarmToolRunWithLimitsRaw handle.root.path handle.taskId handle.actor workspaceRoot 5000 256 ["node", "-e", "require('fs').writeFileSync(process.argv[1], 'bad')", opaqueOutsideWritePath])
+
+approve : TaskHandle -> Result Str
+approve handle =
+  swarmApproveRaw handle.root.path handle.taskId handle.actor "destructive-action"
+
+tail : TaskHandle -> Result [SwarmEvent]
+tail handle =
+  eventListResult (swarmTailRaw handle.root.path handle.taskId 12)
+
+stateRootPath : Str
+stateRootPath =
+  if textJoin "" argv == "" then
+    "swarm-destructive-policy-state"
+  else
+    pathJoin argv
+
+workspaceRoot : Str
+workspaceRoot = pathJoin [stateRootPath, "workspace"]
+
+outsideWorkspaceRoot : Str
+outsideWorkspaceRoot = pathJoin [stateRootPath, "outside-workspace"]
+
+insideTargetPath : Str
+insideTargetPath = pathJoin [workspaceRoot, "destructive-target.txt"]
+
+outsideTargetPath : Str
+outsideTargetPath = pathJoin [outsideWorkspaceRoot, "destructive-target.txt"]
+
+opaqueOutsideWritePath : Str
+opaqueOutsideWritePath = pathJoin [outsideWorkspaceRoot, "opaque-write-target.txt"]
+
+root : SwarmRoot
+root = swarmRoot stateRootPath
+
+objectiveId : Str
+objectiveId = "destructive-policy-objective"
+
+taskId : Str
+taskId = "destructive-policy-task"
+
+actorName : Str
+actorName = "manager"
+
+objective : ObjectiveHandle
+objective = objectiveHandle root objectiveId
+
+task : TaskHandle
+task = taskHandle root taskId actorName
+
+textIncludes : Str -> Str -> Bool
+textIncludes value needle = length (textSplit value needle) > 1
+
+eventKind : SwarmEvent -> Str
+eventKind event = event.kind
+
+resultBlockedBy : Result SwarmRun -> Str -> Bool
+resultBlockedBy result needle = match result {
+  Ok run -> false,
+  Err message -> textIncludes message needle
+}
+
+runFailed : Result SwarmRun -> Bool
+runFailed result = match result {
+  Ok run -> run.status == "failed",
+  Err message -> textIncludes message "filesystem"
+}
+
+eventsContainKind : [SwarmEvent] -> Str -> Bool
+eventsContainKind events kind = {
+  let mut found = false;
+  for event in events {
+    if found then
+      found
+    else {
+      found = event.kind == kind;
+      found
+    }
+  };
+  found
+}
+
+errorText : Str -> Str
+errorText message = textConcat ["error:", message]
+
+main : Str
+main =
+  match mkdirAll stateRootPath {
+    Ok stateRootValue ->
+      match mkdirAll workspaceRoot {
+        Ok workspaceValue ->
+          match mkdirAll outsideWorkspaceRoot {
+            Ok outsideWorkspaceValue ->
+              match writeFile insideTargetPath "keep" {
+                Ok insideTargetValue ->
+                  match writeFile outsideTargetPath "keep" {
+                    Ok outsideTargetValue ->
+                      match objectiveCreate root objectiveId "Exercise approval-required destructive action policy." 1 2 {
+                        Ok objectiveValue ->
+                          match taskCreate objective taskId "Run destructive command only after approval." [] 2 60000 {
+                            Ok taskValue ->
+                              match policySet task {
+                                Ok policyValue ->
+                                  match lease task {
+                                    Ok leaseValue ->
+                                      let blockedResult = toolRun task in
+                                      match approve task {
+                                        Ok approvalValue ->
+                                          let outsideResult = toolRunOutsideTarget task in
+                                          let shellOutsideResult = toolRunShellOutsideTarget task in
+                                          let shellDynamicResult = toolRunShellDynamicTarget task in
+                                          let opaqueOutsideWriteResult = toolRunOpaqueOutsideWrite task in
+                                          match toolRun task {
+                                            Ok approvedRun ->
+                                              match tail task {
+                                                Ok events ->
+                                                  encode (DestructivePolicyReport {
+                                                    taskId = policyValue.taskId,
+                                                    requiredApprovals = policyValue.requiredApprovals,
+                                                    allowedProcesses = policyValue.allowedProcesses,
+                                                    allowedWorkspaceRoots = policyValue.allowedWorkspaceRoots,
+                                                    destructiveApprovalBlocked = resultBlockedBy blockedResult "destructive action approval",
+                                                    outsideTargetBlocked = resultBlockedBy outsideResult "destructive filesystem target",
+                                                    shellOutsideTargetBlocked = resultBlockedBy shellOutsideResult "destructive filesystem target",
+                                                    shellDynamicTargetBlocked = resultBlockedBy shellDynamicResult "destructive filesystem target",
+                                                    opaqueOutsideWriteBlocked = runFailed opaqueOutsideWriteResult,
+                                                    opaqueOutsideWritePrevented = fileExists opaqueOutsideWritePath == false,
+                                                    filesystemMediationStarted = eventsContainKind events "filesystem_mediation_started",
+                                                    outsideTargetSurvived = fileExists outsideTargetPath,
+                                                    approvedRunStatus = approvedRun.status,
+                                                    approvedRunExitCode = approvedRun.exitCode,
+                                                    eventKinds = map eventKind events
+                                                  }),
+                                                Err message ->
+                                                  errorText message
+                                              },
+                                            Err message ->
+                                              errorText message
+                                          },
+                                        Err message ->
+                                          errorText message
+                                      },
+                                    Err message ->
+                                      errorText message
+                                  },
+                                Err message ->
+                                  errorText message
+                              },
+                            Err message ->
+                              errorText message
+                          },
+                        Err message ->
+                          errorText message
+                      },
+                    Err message ->
+                      errorText message
+                  },
+                Err message ->
+                  errorText message
+              },
+            Err message ->
+              errorText message
+          },
+        Err message ->
+          errorText message
+      },
+    Err message ->
+      errorText message
+  }

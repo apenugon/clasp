@@ -1,0 +1,41 @@
+module Compiler.Emit.JavaScript.MetadataBindings
+
+import Compiler.Ast
+import Compiler.Emit.JavaScript.MetadataCore
+import Compiler.Emit.JavaScript.Util
+
+emitFrontendModuleBindings : HostedModuleAst -> [Str]
+emitFrontendModuleBindings modl = {
+  let includeMetadata = hasMetadataDeclarations (moduleDeclarations modl);
+  let mut rendered = [
+    "export const __claspTraceCollector = Object.freeze({",
+    "  version: 1,",
+    "  create(seed = []) { return $claspCreateTraceCollector(seed); }",
+    "});",
+    "",
+    "export const __claspModule = Object.freeze({",
+    textConcat ["  name: ", emitJsString (moduleNameOf modl), ","]
+  ];
+  rendered = if includeMetadata then append rendered [
+    "  metadata: __claspMetadata,",
+    "  metadataByKey: $claspMetadataMap,"
+  ] else rendered;
+  rendered = append rendered [
+    "  version: 1",
+    "});",
+    "",
+    "export const __claspBindings = Object.freeze({",
+    "  kind: \"clasp-generated-bindings\",",
+    "  version: 1,",
+    "  module: __claspModule,"
+  ];
+  rendered = if includeMetadata then append rendered [
+    "  metadata: __claspMetadata,"
+  ] else rendered;
+  append rendered [
+    "  schemas: __claspSchemas,",
+    "  traces: __claspTraceCollector",
+    "});",
+    ""
+  ]
+}

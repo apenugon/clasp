@@ -1,0 +1,539 @@
+module Compiler.Emit.Native.RuntimeBindings
+
+import Compiler.Ast
+import Compiler.Emit.Native.Core
+import Compiler.Json
+
+type NativeRuntimeBindingSpec = NativeRuntimeBindingSpec Str Str Str
+
+nativeRuntimeBindingSpecName : NativeRuntimeBindingSpec -> Str
+nativeRuntimeBindingSpecName spec = match spec {
+  NativeRuntimeBindingSpec name runtimeName bindingType ->
+    name
+}
+
+nativeRuntimeBindingSpecRuntimeName : NativeRuntimeBindingSpec -> Str
+nativeRuntimeBindingSpecRuntimeName spec = match spec {
+  NativeRuntimeBindingSpec name runtimeName bindingType ->
+    runtimeName
+}
+
+nativeRuntimeBindingSpecType : NativeRuntimeBindingSpec -> Str
+nativeRuntimeBindingSpecType spec = match spec {
+  NativeRuntimeBindingSpec name runtimeName bindingType ->
+    bindingType
+}
+
+appendUniqueTextValue : [Str] -> Str -> [Str]
+appendUniqueTextValue values value = if containsText values value then values else append values [value]
+
+appendUniqueTextValues : [Str] -> [Str] -> [Str]
+appendUniqueTextValues existing additions = {
+  let mut merged = existing;
+  for value in additions {
+    merged = appendUniqueTextValue merged value;
+    merged
+  };
+  merged
+}
+
+builtinCoreRuntimeBindingSpecs : [NativeRuntimeBindingSpec]
+builtinCoreRuntimeBindingSpecs = {
+[
+  NativeRuntimeBindingSpec "intAdd" "intAdd" "Int -> Int -> Int",
+  NativeRuntimeBindingSpec "intSubtract" "intSubtract" "Int -> Int -> Int",
+  NativeRuntimeBindingSpec "textConcat" "textConcat" "[Str] -> Str",
+  NativeRuntimeBindingSpec "textJoin" "textJoin" "Str -> [Str] -> Str",
+  NativeRuntimeBindingSpec "textSplit" "textSplit" "Str -> Str -> [Str]",
+  NativeRuntimeBindingSpec "textChars" "textChars" "Str -> [Str]",
+  NativeRuntimeBindingSpec "textFingerprint64Hex" "textFingerprint64Hex" "Str -> Str",
+  NativeRuntimeBindingSpec "not" "not" "Bool -> Bool",
+  NativeRuntimeBindingSpec "textPrefix" "textPrefix" "Str -> Str -> Result Str",
+  NativeRuntimeBindingSpec "textSplitFirst" "textSplitFirst" "Str -> Str -> Result Str",
+  NativeRuntimeBindingSpec "dictEmpty" "dictEmpty" "Dict Str a",
+  NativeRuntimeBindingSpec "dictSet" "dictSet" "Str -> a -> Dict Str a -> Dict Str a",
+  NativeRuntimeBindingSpec "dictGet" "dictGet" "Str -> Dict Str a -> Result a",
+  NativeRuntimeBindingSpec "dictHas" "dictHas" "Str -> Dict Str a -> Bool",
+  NativeRuntimeBindingSpec "dictRemove" "dictRemove" "Str -> Dict Str a -> Dict Str a",
+  NativeRuntimeBindingSpec "dictKeys" "dictKeys" "Dict Str a -> [Str]",
+  NativeRuntimeBindingSpec "dictValues" "dictValues" "Dict Str a -> [a]"
+]
+}
+
+builtinUiRuntimeBindingSpecs : [NativeRuntimeBindingSpec]
+builtinUiRuntimeBindingSpecs = {
+[
+  NativeRuntimeBindingSpec "text" "viewText" "Str -> View",
+  NativeRuntimeBindingSpec "element" "viewElement" "Str -> View -> View",
+  NativeRuntimeBindingSpec "styled" "viewStyled" "Str -> View -> View",
+  NativeRuntimeBindingSpec "link" "viewLink" "Str -> View -> View",
+  NativeRuntimeBindingSpec "form" "viewForm" "Str -> Str -> View -> View",
+  NativeRuntimeBindingSpec "input" "viewInput" "Str -> Str -> Str -> View",
+  NativeRuntimeBindingSpec "submit" "viewSubmit" "Str -> View"
+]
+}
+
+builtinPromptRuntimeBindingSpecs : [NativeRuntimeBindingSpec]
+builtinPromptRuntimeBindingSpecs = {
+[
+  NativeRuntimeBindingSpec "systemPrompt" "systemPrompt" "Str -> Prompt",
+  NativeRuntimeBindingSpec "assistantPrompt" "assistantPrompt" "Str -> Prompt",
+  NativeRuntimeBindingSpec "userPrompt" "userPrompt" "Str -> Prompt",
+  NativeRuntimeBindingSpec "appendPrompt" "appendPrompt" "Prompt -> Prompt -> Prompt",
+  NativeRuntimeBindingSpec "promptText" "promptText" "Prompt -> Str"
+]
+}
+
+builtinWebRuntimeBindingSpecs : [NativeRuntimeBindingSpec]
+builtinWebRuntimeBindingSpecs = {
+[
+  NativeRuntimeBindingSpec "page" "page" "Str -> View -> Page",
+  NativeRuntimeBindingSpec "redirect" "redirect" "Str -> Redirect",
+  NativeRuntimeBindingSpec "principal" "principal" "Str -> Principal",
+  NativeRuntimeBindingSpec "tenant" "tenant" "Str -> Tenant",
+  NativeRuntimeBindingSpec "resourceIdentity" "resourceIdentity" "Str -> Str -> ResourceIdentity",
+  NativeRuntimeBindingSpec "authSession" "authSession" "Str -> Principal -> Tenant -> ResourceIdentity -> AuthSession",
+  NativeRuntimeBindingSpec "argv" "argv" "[Str]",
+  NativeRuntimeBindingSpec "timeUnixMs" "timeUnixMs" "Int",
+  NativeRuntimeBindingSpec "envVar" "envVar" "Str -> Result Str",
+  NativeRuntimeBindingSpec "pathJoin" "pathJoin" "[Str] -> Str",
+  NativeRuntimeBindingSpec "pathDirname" "pathDirname" "Str -> Str",
+  NativeRuntimeBindingSpec "pathBasename" "pathBasename" "Str -> Str",
+  NativeRuntimeBindingSpec "fileExists" "fileExists" "Str -> Bool",
+  NativeRuntimeBindingSpec "readFile" "readFile" "Str -> Result Str",
+  NativeRuntimeBindingSpec "listDir" "listDir" "Str -> Result [Str]"
+]
+}
+
+builtinSwarmRuntimeBindingSpecs : [NativeRuntimeBindingSpec]
+builtinSwarmRuntimeBindingSpecs = {
+[
+  NativeRuntimeBindingSpec "swarmBootstrapJson" "swarmBootstrapJson" "Str -> Str -> Str -> Result Str",
+  NativeRuntimeBindingSpec "swarmStartJson" "swarmStartJson" "Str -> Str -> Str -> Result Str",
+  NativeRuntimeBindingSpec "swarmLeaseJson" "swarmLeaseJson" "Str -> Str -> Str -> Result Str",
+  NativeRuntimeBindingSpec "swarmReleaseJson" "swarmReleaseJson" "Str -> Str -> Str -> Result Str",
+  NativeRuntimeBindingSpec "swarmHeartbeatJson" "swarmHeartbeatJson" "Str -> Str -> Str -> Result Str",
+  NativeRuntimeBindingSpec "swarmCompleteJson" "swarmCompleteJson" "Str -> Str -> Str -> Result Str",
+  NativeRuntimeBindingSpec "swarmFailJson" "swarmFailJson" "Str -> Str -> Str -> Result Str",
+  NativeRuntimeBindingSpec "swarmRetryJson" "swarmRetryJson" "Str -> Str -> Str -> Result Str",
+  NativeRuntimeBindingSpec "swarmStopJson" "swarmStopJson" "Str -> Str -> Str -> Result Str",
+  NativeRuntimeBindingSpec "swarmResumeJson" "swarmResumeJson" "Str -> Str -> Str -> Result Str",
+  NativeRuntimeBindingSpec "swarmStatusJson" "swarmStatusJson" "Str -> Str -> Result Str",
+  NativeRuntimeBindingSpec "swarmHistoryJson" "swarmHistoryJson" "Str -> Str -> Result Str",
+  NativeRuntimeBindingSpec "swarmTasksJson" "swarmTasksJson" "Str -> Result Str",
+  NativeRuntimeBindingSpec "swarmSummaryJson" "swarmSummaryJson" "Str -> Result Str",
+  NativeRuntimeBindingSpec "swarmTailJson" "swarmTailJson" "Str -> Str -> Int -> Result Str",
+  NativeRuntimeBindingSpec "swarmReadyJson" "swarmReadyJson" "Str -> Str -> Result Str",
+  NativeRuntimeBindingSpec "swarmManagerNextJson" "swarmManagerNextJson" "Str -> Str -> Result Str",
+  NativeRuntimeBindingSpec "swarmObjectiveCreateJson" "swarmObjectiveCreateJson" "Str -> Str -> Str -> Int -> Int -> Result Str",
+  NativeRuntimeBindingSpec "swarmObjectiveStatusJson" "swarmObjectiveStatusJson" "Str -> Str -> Result Str",
+  NativeRuntimeBindingSpec "swarmObjectivesJson" "swarmObjectivesJson" "Str -> Result Str",
+  NativeRuntimeBindingSpec "swarmTaskCreateJson" "swarmTaskCreateJson" "Str -> Str -> Str -> Str -> [Str] -> Int -> Int -> Result Str",
+  NativeRuntimeBindingSpec "swarmPolicySetJson" "swarmPolicySetJson" "Str -> Str -> Str -> [Str] -> [Str] -> Result Str",
+  NativeRuntimeBindingSpec "swarmToolRunJson" "swarmToolRunJson" "Str -> Str -> Str -> Str -> [Str] -> Result Str",
+  NativeRuntimeBindingSpec "swarmVerifierRunJson" "swarmVerifierRunJson" "Str -> Str -> Str -> Str -> Str -> [Str] -> Result Str",
+  NativeRuntimeBindingSpec "swarmApproveJson" "swarmApproveJson" "Str -> Str -> Str -> Str -> Result Str",
+  NativeRuntimeBindingSpec "swarmApprovalsJson" "swarmApprovalsJson" "Str -> Str -> Result Str",
+  NativeRuntimeBindingSpec "swarmMergegateDecideJson" "swarmMergegateDecideJson" "Str -> Str -> Str -> Str -> [Str] -> Result Str",
+  NativeRuntimeBindingSpec "swarmRunsJson" "swarmRunsJson" "Str -> Str -> Result Str",
+  NativeRuntimeBindingSpec "swarmArtifactsJson" "swarmArtifactsJson" "Str -> Str -> Result Str"
+]
+}
+
+builtinProcessRuntimeBindingSpecs : [NativeRuntimeBindingSpec]
+builtinProcessRuntimeBindingSpecs = {
+[
+  NativeRuntimeBindingSpec "runCommandJson" "runCommandJson" "Str -> [Str] -> Result Str",
+  NativeRuntimeBindingSpec "runCommandTimeoutJson" "runCommandTimeoutJson" "Str -> Int -> [Str] -> Result Str",
+  NativeRuntimeBindingSpec "spawnCommandJson" "spawnCommandJson" "Str -> Str -> Str -> Str -> Int -> [Str] -> Result Str",
+  NativeRuntimeBindingSpec "spawnCommandWithLimitsJson" "spawnCommandWithLimitsJson" "Str -> Str -> Str -> Str -> Int -> Int -> [Str] -> Result Str",
+  NativeRuntimeBindingSpec "watchCommandJson" "watchCommandJson" "Str -> Str -> Str -> Str -> Int -> [Str] -> Result Str",
+  NativeRuntimeBindingSpec "watchCommandWithLimitsJson" "watchCommandWithLimitsJson" "Str -> Str -> Str -> Str -> Int -> Int -> [Str] -> Result Str",
+  NativeRuntimeBindingSpec "reconcileWatchedProcessJson" "reconcileWatchedProcessJson" "Str -> Result Str",
+  NativeRuntimeBindingSpec "awaitWatchedProcessJson" "awaitWatchedProcessJson" "Str -> Int -> Result Str",
+  NativeRuntimeBindingSpec "awaitWatchedProcessTimeoutJson" "awaitWatchedProcessTimeoutJson" "Str -> Int -> Int -> Result Str",
+  NativeRuntimeBindingSpec "handoffCommandJson" "handoffCommandJson" "Str -> Str -> Str -> Str -> Int -> Str -> Str -> Int -> Int -> [Str] -> Result Str",
+  NativeRuntimeBindingSpec "upgradeCommandJson" "upgradeCommandJson" "Str -> Str -> Str -> Str -> Str -> Str -> Int -> Int -> Int -> Int -> [Str] -> Result Str",
+  NativeRuntimeBindingSpec "superviseCommandJson" "superviseCommandJson" "Str -> Str -> Str -> Str -> Str -> Int -> Int -> Int -> Int -> [Str] -> Result Str",
+  NativeRuntimeBindingSpec "sleepMs" "sleepMs" "Int -> Result Str",
+  NativeRuntimeBindingSpec "writeFile" "writeFile" "Str -> Str -> Result Str",
+  NativeRuntimeBindingSpec "appendFile" "appendFile" "Str -> Str -> Result Str",
+  NativeRuntimeBindingSpec "mkdirAll" "mkdirAll" "Str -> Result Str"
+]
+}
+
+builtinDeadlineRuntimeBindingSpecs : [NativeRuntimeBindingSpec]
+builtinDeadlineRuntimeBindingSpecs = {
+[
+  NativeRuntimeBindingSpec "swarmObjectiveCreateWithDeadlineJson" "swarmObjectiveCreateWithDeadlineJson" "Str -> Str -> Str -> Int -> Int -> Int -> Result Str",
+  NativeRuntimeBindingSpec "swarmTaskCreateWithDeadlineJson" "swarmTaskCreateWithDeadlineJson" "Str -> Str -> Str -> Str -> [Str] -> Int -> Int -> Int -> Result Str"
+]
+}
+
+hasRuntimeBindingSpec : [NativeRuntimeBindingSpec] -> Str -> Bool
+hasRuntimeBindingSpec specs name = {
+  for spec in specs {
+    if nativeRuntimeBindingSpecName spec == name then return true else false
+  };
+  false
+}
+
+builtinRuntimeBindingName : Str -> Bool
+builtinRuntimeBindingName name = if hasRuntimeBindingSpec builtinCoreRuntimeBindingSpecs name then true else if hasRuntimeBindingSpec builtinUiRuntimeBindingSpecs name then true else if hasRuntimeBindingSpec builtinPromptRuntimeBindingSpecs name then true else if hasRuntimeBindingSpec builtinWebRuntimeBindingSpecs name then true else if hasRuntimeBindingSpec builtinSwarmRuntimeBindingSpecs name then true else if hasRuntimeBindingSpec builtinProcessRuntimeBindingSpecs name then true else hasRuntimeBindingSpec builtinDeadlineRuntimeBindingSpecs name
+
+collectRuntimeBindingNamesFromExprList : [HostedExprAst] -> [Str]
+collectRuntimeBindingNamesFromExprList exprs = {
+  let mut collected = emptyRenderedTexts;
+  for expr in exprs {
+    collected = appendUniqueTextValues collected (collectRuntimeBindingNamesFromExpr expr);
+    collected
+  };
+  collected
+}
+
+collectRuntimeBindingNamesFromRecordFields : [HostedRecordFieldExprAst] -> [Str]
+collectRuntimeBindingNamesFromRecordFields fields = {
+  let mut collected = emptyRenderedTexts;
+  for field in fields {
+    collected = appendUniqueTextValues collected (collectRuntimeBindingNamesFromExpr (recordExprFieldValue field));
+    collected
+  };
+  collected
+}
+
+collectRuntimeBindingNamesFromBranches : [HostedMatchBranchAst] -> [Str]
+collectRuntimeBindingNamesFromBranches branches = {
+  let mut collected = emptyRenderedTexts;
+  for branch in branches {
+    collected = appendUniqueTextValues collected (collectRuntimeBindingNamesFromExpr (branchBodyExpr branch));
+    collected
+  };
+  collected
+}
+
+collectRuntimeBindingNamesFromExpr : HostedExprAst -> [Str]
+collectRuntimeBindingNamesFromExpr expr = match expr {
+  HostedName name ->
+    if builtinRuntimeBindingName name then [name] else emptyRenderedTexts,
+  HostedString value ->
+    emptyRenderedTexts,
+  HostedInt value ->
+    emptyRenderedTexts,
+  HostedBool value ->
+    emptyRenderedTexts,
+  HostedList values ->
+    collectRuntimeBindingNamesFromExprList values,
+  HostedCall callee args -> {
+    let argNames = collectRuntimeBindingNamesFromExprList args;
+    if builtinRuntimeBindingName callee then appendUniqueTextValue argNames callee else argNames
+  },
+  HostedConstructor constructorName args ->
+    collectRuntimeBindingNamesFromExprList args,
+  HostedMatch subject branches -> {
+    let subjectNames = collectRuntimeBindingNamesFromExpr subject;
+    appendUniqueTextValues subjectNames (collectRuntimeBindingNamesFromBranches branches)
+  },
+  HostedRecord recordName fields ->
+    collectRuntimeBindingNamesFromRecordFields fields,
+  HostedFieldAccess subject fieldName ->
+    collectRuntimeBindingNamesFromExpr subject,
+  HostedLet binder value body -> {
+    let valueNames = collectRuntimeBindingNamesFromExpr value;
+    appendUniqueTextValues valueNames (collectRuntimeBindingNamesFromExpr body)
+  },
+  HostedMutableLet binder value body -> {
+    let valueNames = collectRuntimeBindingNamesFromExpr value;
+    appendUniqueTextValues valueNames (collectRuntimeBindingNamesFromExpr body)
+  },
+  HostedAssign binder value body -> {
+    let valueNames = collectRuntimeBindingNamesFromExpr value;
+    appendUniqueTextValues valueNames (collectRuntimeBindingNamesFromExpr body)
+  },
+  HostedFor binder iterable loopBody body -> {
+    let iterableNames = collectRuntimeBindingNamesFromExpr iterable;
+    let loopNames = collectRuntimeBindingNamesFromExpr loopBody;
+    appendUniqueTextValues (appendUniqueTextValues iterableNames loopNames) (collectRuntimeBindingNamesFromExpr body)
+  },
+  HostedReturn value ->
+    collectRuntimeBindingNamesFromExpr value,
+  HostedIf condition thenBranch elseBranch -> {
+    let conditionNames = collectRuntimeBindingNamesFromExpr condition;
+    let thenNames = collectRuntimeBindingNamesFromExpr thenBranch;
+    appendUniqueTextValues (appendUniqueTextValues conditionNames thenNames) (collectRuntimeBindingNamesFromExpr elseBranch)
+  },
+  HostedEqual left right -> {
+    let leftNames = collectRuntimeBindingNamesFromExpr left;
+    appendUniqueTextValues leftNames (collectRuntimeBindingNamesFromExpr right)
+  },
+  HostedNotEqual left right -> {
+    let leftNames = collectRuntimeBindingNamesFromExpr left;
+    appendUniqueTextValues leftNames (collectRuntimeBindingNamesFromExpr right)
+  },
+  HostedLessThan left right -> {
+    let leftNames = collectRuntimeBindingNamesFromExpr left;
+    appendUniqueTextValues leftNames (collectRuntimeBindingNamesFromExpr right)
+  },
+  HostedLessThanOrEqual left right -> {
+    let leftNames = collectRuntimeBindingNamesFromExpr left;
+    appendUniqueTextValues leftNames (collectRuntimeBindingNamesFromExpr right)
+  },
+  HostedGreaterThan left right -> {
+    let leftNames = collectRuntimeBindingNamesFromExpr left;
+    appendUniqueTextValues leftNames (collectRuntimeBindingNamesFromExpr right)
+  },
+  HostedGreaterThanOrEqual left right -> {
+    let leftNames = collectRuntimeBindingNamesFromExpr left;
+    appendUniqueTextValues leftNames (collectRuntimeBindingNamesFromExpr right)
+  }
+}
+
+collectModuleRuntimeBindingNames : HostedModuleAst -> [Str]
+collectModuleRuntimeBindingNames modl = {
+  let mut collected = emptyRenderedTexts;
+  for decl in moduleDeclarations modl {
+    collected = appendUniqueTextValues collected (collectRuntimeBindingNamesFromExpr (declBody decl));
+    collected
+  };
+  collected
+}
+
+lowercaseRuntimeChar : Str -> Str
+lowercaseRuntimeChar value = if value == "A" then "a" else if value == "B" then "b" else if value == "C" then "c" else if value == "D" then "d" else if value == "E" then "e" else if value == "F" then "f" else if value == "G" then "g" else if value == "H" then "h" else if value == "I" then "i" else if value == "J" then "j" else if value == "K" then "k" else if value == "L" then "l" else if value == "M" then "m" else if value == "N" then "n" else if value == "O" then "o" else if value == "P" then "p" else if value == "Q" then "q" else if value == "R" then "r" else if value == "S" then "s" else if value == "T" then "t" else if value == "U" then "u" else if value == "V" then "v" else if value == "W" then "w" else if value == "X" then "x" else if value == "Y" then "y" else if value == "Z" then "z" else value
+
+dropLastChar : Str -> Str
+dropLastChar value = {
+  let mut result = "";
+  let mut previous = "";
+  let mut seenChar = false;
+  for char in textChars value {
+    if seenChar then {
+      result = appendChar result previous;
+      previous = char;
+      result
+    } else {
+      previous = char;
+      seenChar = true;
+      result
+    }
+  };
+  result
+}
+
+normalizeRuntimeName : Str -> Str
+normalizeRuntimeName value = {
+  let mut normalized = "";
+  let mut seenText = false;
+  for char in textChars value {
+    if char == "_" then {
+      if seenText then {
+        if lastCharText normalized == "_" then normalized else {
+          normalized = appendChar normalized "_";
+          normalized
+        }
+      } else {
+        normalized
+      }
+    } else if isUppercaseChar char then {
+      if seenText then {
+        if lastCharText normalized == "_" then {
+          normalized = appendChar normalized (lowercaseRuntimeChar char);
+          normalized
+        } else {
+          normalized = textConcat [normalized, "_", lowercaseRuntimeChar char];
+          normalized
+        }
+      } else {
+        normalized = appendChar normalized (lowercaseRuntimeChar char);
+        seenText = true;
+        normalized
+      }
+    } else {
+      normalized = appendChar normalized char;
+      seenText = true;
+      normalized
+    }
+  };
+  if lastCharText normalized == "_" then dropLastChar normalized else normalized
+}
+
+nativeRuntimeBindingSymbol : Str -> Str
+nativeRuntimeBindingSymbol runtimeName = textConcat ["clasp_rt_", normalizeRuntimeName runtimeName]
+
+emitRuntimeBindingImage : Str -> Str -> Str -> Str
+emitRuntimeBindingImage name runtimeName bindingType =
+  jsonObject [
+    jsonFieldText "name" name,
+    jsonFieldText "runtime" runtimeName,
+    jsonFieldText "symbol" (nativeRuntimeBindingSymbol runtimeName),
+    jsonFieldText "type" bindingType
+  ]
+
+emitRuntimeBindingSpecImage : NativeRuntimeBindingSpec -> Str
+emitRuntimeBindingSpecImage spec =
+  emitRuntimeBindingImage (nativeRuntimeBindingSpecName spec) (nativeRuntimeBindingSpecRuntimeName spec) (nativeRuntimeBindingSpecType spec)
+
+emitBuiltinRuntimeBindingImageFromSpecs : [NativeRuntimeBindingSpec] -> Str -> Str
+emitBuiltinRuntimeBindingImageFromSpecs specs name = {
+  for spec in specs {
+    if nativeRuntimeBindingSpecName spec == name then return emitRuntimeBindingSpecImage spec else ""
+  };
+  jsonObject emptyJsonFields
+}
+
+emitBuiltinRuntimeBindingImage : Str -> Str
+emitBuiltinRuntimeBindingImage name = {
+  let core = emitBuiltinRuntimeBindingImageFromSpecs builtinCoreRuntimeBindingSpecs name;
+  if core == jsonObject emptyJsonFields then {
+    let ui = emitBuiltinRuntimeBindingImageFromSpecs builtinUiRuntimeBindingSpecs name;
+    if ui == jsonObject emptyJsonFields then {
+      let prompt = emitBuiltinRuntimeBindingImageFromSpecs builtinPromptRuntimeBindingSpecs name;
+      if prompt == jsonObject emptyJsonFields then {
+        let web = emitBuiltinRuntimeBindingImageFromSpecs builtinWebRuntimeBindingSpecs name;
+        if web == jsonObject emptyJsonFields then {
+          let swarm = emitBuiltinRuntimeBindingImageFromSpecs builtinSwarmRuntimeBindingSpecs name;
+          if swarm == jsonObject emptyJsonFields then {
+            let process = emitBuiltinRuntimeBindingImageFromSpecs builtinProcessRuntimeBindingSpecs name;
+            if process == jsonObject emptyJsonFields then emitBuiltinRuntimeBindingImageFromSpecs builtinDeadlineRuntimeBindingSpecs name else process
+          } else swarm
+        } else web
+      } else prompt
+    } else ui
+  } else core
+}
+
+emitRuntimeBindingSpecText : NativeRuntimeBindingSpec -> Str
+emitRuntimeBindingSpecText spec =
+  textConcat [
+    nativeRuntimeBindingSpecName spec,
+    "{runtime=",
+    nativeRuntimeBindingSpecRuntimeName spec,
+    ", symbol=",
+    nativeRuntimeBindingSymbol (nativeRuntimeBindingSpecRuntimeName spec),
+    ", type=",
+    nativeRuntimeBindingSpecType spec,
+    "}"
+  ]
+
+emitBuiltinRuntimeBindingTextFromSpecs : [NativeRuntimeBindingSpec] -> Str -> Str
+emitBuiltinRuntimeBindingTextFromSpecs specs name = {
+  for spec in specs {
+    if nativeRuntimeBindingSpecName spec == name then return emitRuntimeBindingSpecText spec else ""
+  };
+  ""
+}
+
+emitBuiltinRuntimeBindingText : Str -> Str
+emitBuiltinRuntimeBindingText name = {
+  let core = emitBuiltinRuntimeBindingTextFromSpecs builtinCoreRuntimeBindingSpecs name;
+  if core == "" then {
+    let ui = emitBuiltinRuntimeBindingTextFromSpecs builtinUiRuntimeBindingSpecs name;
+    if ui == "" then {
+      let prompt = emitBuiltinRuntimeBindingTextFromSpecs builtinPromptRuntimeBindingSpecs name;
+      if prompt == "" then {
+        let web = emitBuiltinRuntimeBindingTextFromSpecs builtinWebRuntimeBindingSpecs name;
+        if web == "" then {
+          let swarm = emitBuiltinRuntimeBindingTextFromSpecs builtinSwarmRuntimeBindingSpecs name;
+          if swarm == "" then {
+            let process = emitBuiltinRuntimeBindingTextFromSpecs builtinProcessRuntimeBindingSpecs name;
+            if process == "" then emitBuiltinRuntimeBindingTextFromSpecs builtinDeadlineRuntimeBindingSpecs name else process
+          } else swarm
+        } else web
+      } else prompt
+    } else ui
+  } else core
+}
+
+emitNativeRuntimeBindingImage : HostedForeignDeclAst -> Str
+emitNativeRuntimeBindingImage foreignDecl =
+  emitRuntimeBindingImage (foreignDeclName foreignDecl) (foreignDeclRuntimeName foreignDecl) (renderHostedType (foreignDeclTypeAst foreignDecl))
+
+emitNativeMetadataField : Str -> Str -> Str
+emitNativeMetadataField name value = textConcat [name, "=", encode value]
+
+emitNativeRuntimeBindingText : HostedForeignDeclAst -> Str
+emitNativeRuntimeBindingText foreignDecl =
+  textConcat [
+    "runtimeBinding{",
+    emitNativeMetadataField "name" (foreignDeclName foreignDecl),
+    ", ",
+    emitNativeMetadataField "runtime" (foreignDeclRuntimeName foreignDecl),
+    ", ",
+    emitNativeMetadataField "symbol" (nativeRuntimeBindingSymbol (foreignDeclRuntimeName foreignDecl)),
+    ", ",
+    emitNativeMetadataField "type" (renderHostedType (foreignDeclTypeAst foreignDecl)),
+    "}"
+  ]
+
+appendRuntimeBindingSpecImages : [Str] -> [Str] -> [NativeRuntimeBindingSpec] -> [Str]
+appendRuntimeBindingSpecImages rendered bindingNames specs = {
+  let mut next = rendered;
+  for spec in specs {
+    if containsText bindingNames (nativeRuntimeBindingSpecName spec) then {
+      next = appendNativeRenderedText next (emitRuntimeBindingSpecImage spec);
+      next
+    } else {
+      next
+    }
+  };
+  next
+}
+
+appendRuntimeBindingSpecTexts : [Str] -> [Str] -> [NativeRuntimeBindingSpec] -> [Str]
+appendRuntimeBindingSpecTexts rendered bindingNames specs = {
+  let mut next = rendered;
+  for spec in specs {
+    if containsText bindingNames (nativeRuntimeBindingSpecName spec) then {
+      next = appendNativeRenderedText next (emitRuntimeBindingSpecText spec);
+      next
+    } else {
+      next
+    }
+  };
+  next
+}
+
+emitNativeBuiltinRuntimeBindingImages : [Str] -> [Str]
+emitNativeBuiltinRuntimeBindingImages bindingNames = {
+  let mut rendered = emptyRenderedTexts;
+  rendered = appendRuntimeBindingSpecImages rendered bindingNames builtinCoreRuntimeBindingSpecs;
+  rendered = appendRuntimeBindingSpecImages rendered bindingNames builtinUiRuntimeBindingSpecs;
+  rendered = appendRuntimeBindingSpecImages rendered bindingNames builtinPromptRuntimeBindingSpecs;
+  rendered = appendRuntimeBindingSpecImages rendered bindingNames builtinWebRuntimeBindingSpecs;
+  rendered = appendRuntimeBindingSpecImages rendered bindingNames builtinSwarmRuntimeBindingSpecs;
+  rendered = appendRuntimeBindingSpecImages rendered bindingNames builtinProcessRuntimeBindingSpecs;
+  rendered = appendRuntimeBindingSpecImages rendered bindingNames builtinDeadlineRuntimeBindingSpecs;
+  rendered
+}
+
+emitNativeBuiltinRuntimeBindingTexts : [Str] -> [Str]
+emitNativeBuiltinRuntimeBindingTexts bindingNames = {
+  let mut rendered = emptyRenderedTexts;
+  rendered = appendRuntimeBindingSpecTexts rendered bindingNames builtinCoreRuntimeBindingSpecs;
+  rendered = appendRuntimeBindingSpecTexts rendered bindingNames builtinUiRuntimeBindingSpecs;
+  rendered = appendRuntimeBindingSpecTexts rendered bindingNames builtinPromptRuntimeBindingSpecs;
+  rendered = appendRuntimeBindingSpecTexts rendered bindingNames builtinWebRuntimeBindingSpecs;
+  rendered = appendRuntimeBindingSpecTexts rendered bindingNames builtinSwarmRuntimeBindingSpecs;
+  rendered = appendRuntimeBindingSpecTexts rendered bindingNames builtinProcessRuntimeBindingSpecs;
+  rendered = appendRuntimeBindingSpecTexts rendered bindingNames builtinDeadlineRuntimeBindingSpecs;
+  rendered
+}
+
+emitNativeRuntimeBindingImages : HostedModuleAst -> [Str]
+emitNativeRuntimeBindingImages modl = {
+  let mut rendered = emitNativeBuiltinRuntimeBindingImages (collectModuleRuntimeBindingNames modl);
+  for foreignDecl in moduleForeignDeclarations modl {
+    rendered = appendNativeRenderedText rendered (emitNativeRuntimeBindingImage foreignDecl);
+    rendered
+  };
+  rendered
+}
+
+emitNativeRuntimeBindingTexts : HostedModuleAst -> [Str]
+emitNativeRuntimeBindingTexts modl = {
+  let mut rendered = emitNativeBuiltinRuntimeBindingTexts (collectModuleRuntimeBindingNames modl);
+  for foreignDecl in moduleForeignDeclarations modl {
+    rendered = appendNativeRenderedText rendered (emitNativeRuntimeBindingText foreignDecl);
+    rendered
+  };
+  rendered
+}

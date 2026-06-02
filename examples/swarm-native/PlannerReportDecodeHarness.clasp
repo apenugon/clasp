@@ -1,7 +1,337 @@
 module Main
 
-import GoalManagerReportIO
-import GoalManagerTypes
+record PlannerTaskSpec = { taskId : Str, role : Str, detail : Str, dependencies : [Str], taskPrompt : Str, coordinationFocus : [Str] }
+
+record PlannerReport = {
+  objectiveSummary : Str,
+  strategy : Str,
+  tasks : [PlannerTaskSpec],
+  testsRun : [Str],
+  residualRisks : [Str]
+}
+
+record LegacyPlannerTaskSpec = {
+  taskId : Str,
+  detail : Str,
+  dependencies : [Str],
+  taskPrompt : Str
+}
+
+record LegacyPlannerReport = {
+  objectiveSummary : Str,
+  strategy : Str,
+  tasks : [LegacyPlannerTaskSpec],
+  testsRun : [Str],
+  residualRisks : [Str]
+}
+
+record PlannerInputState = {
+  fingerprint : Str,
+  goalText : Str,
+  plannerPolicy : Str,
+  schemaPath : Str,
+  workspaceRoot : Str,
+  mailboxSummary : Str
+}
+
+record LegacyPlannerInputState = {
+  fingerprint : Str,
+  goalText : Str,
+  plannerPolicy : Str,
+  schemaPath : Str,
+  workspaceRoot : Str
+}
+
+record ChildLoopState = {
+  attempt : Int,
+  phase : Str,
+  verdict : Str,
+  completed : Bool,
+  builderRuns : Int,
+  verifierRuns : Int,
+  healthy : Bool,
+  needsAttention : Bool,
+  attentionReason : Str,
+  final : Bool
+}
+
+record WatchedProcess = {
+  pid : Int,
+  running : Bool,
+  completed : Bool,
+  exitCode : Int,
+  stdoutPath : Str,
+  stderrPath : Str,
+  heartbeatPath : Str,
+  updatedAtMs : Int
+}
+
+record SwarmMailboxMessage = {
+  source : Str,
+  taskId : Str,
+  wave : Int,
+  summary : Str,
+  details : [Str]
+}
+
+record BenchmarkSignal = {
+  suite : Str,
+  summary : Str,
+  passed : Bool,
+  meetsTarget : Bool,
+  scoreName : Str,
+  scoreValue : Int,
+  targetName : Str,
+  targetValue : Int
+}
+
+record BenchmarkCheckpoint = {
+  wave : Int,
+  suite : Str,
+  summary : Str,
+  passed : Bool,
+  meetsTarget : Bool,
+  scoreName : Str,
+  scoreValue : Int,
+  targetName : Str,
+  targetValue : Int,
+  command : [Str]
+}
+
+record PlannerReportBoundarySummary = {
+  schemaName : Str,
+  schemaVersion : Str,
+  trustPolicy : Str,
+  trust : Str,
+  accepted : Bool,
+  reason : Str,
+  format : Str
+}
+
+record TrustedPlannerReport = {
+  summary : PlannerReportBoundarySummary,
+  report : PlannerReport
+}
+
+emptyTexts : [Str]
+emptyTexts = []
+
+emptyPlannerTasks : [PlannerTaskSpec]
+emptyPlannerTasks = []
+
+emptySwarmMailboxMessages : [SwarmMailboxMessage]
+emptySwarmMailboxMessages = []
+
+plannerReportError : Str -> Result PlannerReport
+plannerReportError message = Err message
+
+plannerReportBoundarySummary : Str -> Bool -> Str -> PlannerReportBoundarySummary
+plannerReportBoundarySummary format accepted reason =
+  PlannerReportBoundarySummary {
+    schemaName = "PlannerReport",
+    schemaVersion = "v1",
+    trustPolicy = "untrusted-until-planner-report-decode",
+    trust = if accepted then "validated" else "untrusted",
+    accepted = accepted,
+    reason = reason,
+    format = format
+  }
+
+trustedPlannerReportOk : Str -> PlannerReport -> Result TrustedPlannerReport
+trustedPlannerReportOk format report =
+  Ok
+    (TrustedPlannerReport {
+      summary = plannerReportBoundarySummary format true "",
+      report = report
+    })
+
+trustedPlannerReportError : Str -> Result TrustedPlannerReport
+trustedPlannerReportError message = Err message
+
+defaultPlannerTaskRole : Str -> Str -> Str
+defaultPlannerTaskRole taskId detail =
+  if length (textSplit taskId "benchmark") > 1 then
+    "benchmark-operator"
+  else if length (textSplit taskId "verify") > 1 then
+    "verification-closer"
+  else if length (textSplit taskId "planner") > 1 then
+    "planner"
+  else if length (textSplit taskId "loop") > 1 then
+    "control-plane-hardener"
+  else if length (textSplit detail "benchmark") > 1 then
+    "benchmark-operator"
+  else
+    "generalist"
+
+legacyPlannerTaskToCurrent : LegacyPlannerTaskSpec -> PlannerTaskSpec
+legacyPlannerTaskToCurrent task =
+  PlannerTaskSpec {
+    taskId = task.taskId,
+    role = defaultPlannerTaskRole task.taskId task.detail,
+    detail = task.detail,
+    dependencies = task.dependencies,
+    taskPrompt = task.taskPrompt,
+    coordinationFocus = emptyTexts
+  }
+
+legacyPlannerReportToCurrent : LegacyPlannerReport -> PlannerReport
+legacyPlannerReportToCurrent report = {
+  let mut renderedTasks = emptyPlannerTasks;
+  for task in report.tasks {
+    renderedTasks = append renderedTasks [legacyPlannerTaskToCurrent task];
+    renderedTasks
+  };
+  PlannerReport {
+    objectiveSummary = report.objectiveSummary,
+    strategy = report.strategy,
+    tasks = renderedTasks,
+    testsRun = report.testsRun,
+    residualRisks = report.residualRisks
+  }
+}
+
+plannerReportRawContains : Str -> Str -> Bool
+plannerReportRawContains raw needle = length (textSplit raw needle) > 1
+
+plannerReportRawHasRequiredFields : Str -> Bool
+plannerReportRawHasRequiredFields raw =
+  if plannerReportRawContains raw "\"objectiveSummary\"" then
+    if plannerReportRawContains raw "\"strategy\"" then
+      if plannerReportRawContains raw "\"tasks\"" then
+        if plannerReportRawContains raw "\"testsRun\"" then
+          plannerReportRawContains raw "\"residualRisks\""
+        else
+          false
+      else
+        false
+    else
+      false
+  else
+    false
+
+plannerReportRawLooksCurrent : Str -> Bool
+plannerReportRawLooksCurrent raw =
+  if plannerReportRawHasRequiredFields raw then
+    if plannerReportRawContains raw "\"coordinationFocus\"" then
+      true
+    else if plannerReportRawContains raw "\"role\"" then
+      true
+    else if plannerReportRawContains raw "\"tasks\":[]" then
+      true
+    else
+      plannerReportRawContains raw "\"tasks\": []"
+  else
+    false
+
+plannerReportRawLooksLegacy : Str -> Bool
+plannerReportRawLooksLegacy raw =
+  if plannerReportRawHasRequiredFields raw then
+    plannerReportRawContains raw "\"taskPrompt\""
+  else
+    false
+
+trustedPlannerReportFromRaw : Str -> Result TrustedPlannerReport
+trustedPlannerReportFromRaw raw =
+  if plannerReportRawLooksCurrent raw then
+    match tryDecode PlannerReport raw {
+      Ok report -> trustedPlannerReportOk "current" report,
+      Err message -> trustedPlannerReportError (textConcat ["planner report decode failed: ", message])
+    }
+  else if plannerReportRawLooksLegacy raw then
+    match tryDecode LegacyPlannerReport raw {
+      Ok report -> trustedPlannerReportOk "legacy" (legacyPlannerReportToCurrent report),
+      Err message -> trustedPlannerReportError (textConcat ["legacy planner report decode failed: ", message])
+    }
+  else
+    trustedPlannerReportError "planner report missing required fields"
+
+plannerReportBoundarySummaryFromRaw : Str -> PlannerReportBoundarySummary
+plannerReportBoundarySummaryFromRaw raw =
+  match trustedPlannerReportFromRaw raw {
+    Ok trusted -> trusted.summary,
+    Err message -> plannerReportBoundarySummary "unknown" false message
+  }
+
+plannerReportFromRaw : Str -> Result PlannerReport
+plannerReportFromRaw raw =
+  match trustedPlannerReportFromRaw raw {
+    Ok trusted -> Ok trusted.report,
+    Err message -> plannerReportError message
+  }
+
+plannerInputStateError : Str -> Result PlannerInputState
+plannerInputStateError message = Err message
+
+legacyPlannerInputStateToCurrent : LegacyPlannerInputState -> PlannerInputState
+legacyPlannerInputStateToCurrent state =
+  PlannerInputState {
+    fingerprint = state.fingerprint,
+    goalText = state.goalText,
+    plannerPolicy = state.plannerPolicy,
+    schemaPath = state.schemaPath,
+    workspaceRoot = state.workspaceRoot,
+    mailboxSummary = ""
+  }
+
+plannerInputStateFromRaw : Str -> Result PlannerInputState
+plannerInputStateFromRaw raw =
+  if length (textSplit raw "\"mailboxSummary\":") > 1 then
+    match tryDecode PlannerInputState raw {
+      Ok state -> Ok state,
+      Err message -> plannerInputStateError (textConcat ["planner input state decode failed: ", message])
+    }
+  else
+    match tryDecode LegacyPlannerInputState raw {
+      Ok state -> Ok (legacyPlannerInputStateToCurrent state),
+      Err message -> plannerInputStateError (textConcat ["legacy planner input state decode failed: ", message])
+    }
+
+childLoopStateError : Str -> Result ChildLoopState
+childLoopStateError message = Err message
+
+childLoopStateFromRaw : Str -> Result ChildLoopState
+childLoopStateFromRaw raw =
+  match tryDecode ChildLoopState raw {
+    Ok state -> Ok state,
+    Err message -> childLoopStateError (textConcat ["child loop state decode failed: ", message])
+  }
+
+watchedProcessError : Str -> Result WatchedProcess
+watchedProcessError message = Err message
+
+watchedProcessFromRaw : Str -> Result WatchedProcess
+watchedProcessFromRaw raw =
+  match tryDecode WatchedProcess raw {
+    Ok process -> Ok process,
+    Err message -> watchedProcessError (textConcat ["watched process decode failed: ", message])
+  }
+
+mailboxMessagesFromRaw : Str -> [SwarmMailboxMessage]
+mailboxMessagesFromRaw raw =
+  match tryDecode [SwarmMailboxMessage] raw {
+    Ok messages -> messages,
+    Err message -> emptySwarmMailboxMessages
+  }
+
+benchmarkCheckpointError : Str -> Result BenchmarkCheckpoint
+benchmarkCheckpointError message = Err message
+
+benchmarkCheckpointFromRaw : Str -> Result BenchmarkCheckpoint
+benchmarkCheckpointFromRaw raw =
+  match tryDecode BenchmarkCheckpoint raw {
+    Ok checkpoint -> Ok checkpoint,
+    Err message -> benchmarkCheckpointError (textConcat ["benchmark checkpoint decode failed: ", message])
+  }
+
+benchmarkSignalError : Str -> Result BenchmarkSignal
+benchmarkSignalError message = Err message
+
+benchmarkSignalFromRaw : Str -> Result BenchmarkSignal
+benchmarkSignalFromRaw raw =
+  match tryDecode BenchmarkSignal raw {
+    Ok signal -> Ok signal,
+    Err message -> benchmarkSignalError (textConcat ["benchmark signal decode failed: ", message])
+  }
 
 reportStatus : Str -> Str -> Str
 reportStatus label raw =
@@ -12,13 +342,98 @@ reportStatus label raw =
     textConcat [label, "=ok:", encode (length report.tasks), ":", report.objectiveSummary]
   }
 
+trustStatus : Str -> Str -> Str
+trustStatus label raw = {
+  let summary = plannerReportBoundarySummaryFromRaw raw in
+  textConcat [
+    label,
+    "-trust=",
+    summary.trust,
+    ":",
+    encode summary.accepted,
+    ":",
+    summary.format,
+    ":",
+    summary.reason
+  ]
+}
+
+inputStatus : Str -> Str -> Str
+inputStatus label raw =
+  match plannerInputStateFromRaw raw {
+  Err message ->
+    textConcat [label, "=err:", message],
+  Ok state ->
+    textConcat [label, "=ok:", state.fingerprint, ":", state.mailboxSummary]
+  }
+
+childStatus : Str -> Str -> Str
+childStatus label raw =
+  match childLoopStateFromRaw raw {
+  Err message ->
+    textConcat [label, "=err:", message],
+  Ok state ->
+    textConcat [label, "=ok:", state.phase, ":", encode state.completed]
+  }
+
+watchedStatus : Str -> Str -> Str
+watchedStatus label raw =
+  match watchedProcessFromRaw raw {
+  Err message ->
+    textConcat [label, "=err:", message],
+  Ok process ->
+    textConcat [label, "=ok:", encode process.pid, ":", encode process.completed]
+  }
+
+mailboxStatus : Str -> Str -> Str
+mailboxStatus label raw =
+  textConcat [label, "=ok:", encode (length (mailboxMessagesFromRaw raw))]
+
+checkpointStatus : Str -> Str -> Str
+checkpointStatus label raw =
+  match benchmarkCheckpointFromRaw raw {
+  Err message ->
+    textConcat [label, "=err:", message],
+  Ok checkpoint ->
+    textConcat [label, "=ok:", checkpoint.summary, ":", encode checkpoint.meetsTarget]
+  }
+
+signalStatus : Str -> Str -> Str
+signalStatus label raw =
+  match benchmarkSignalFromRaw raw {
+  Err message ->
+    textConcat [label, "=err:", message],
+  Ok signal ->
+    textConcat [label, "=ok:", signal.summary, ":", encode signal.meetsTarget]
+  }
+
 main : Str
 main =
   textJoin
     "\n"
     [
       reportStatus "malformed-empty-tasks" "{\"tasks\":[]}",
+      trustStatus "malformed-empty-tasks" "{\"tasks\":[]}",
+      reportStatus "current-bad-tasks" "{\"objectiveSummary\":\"current bad\",\"strategy\":\"none\",\"tasks\":\"not-list\",\"testsRun\":[],\"residualRisks\":[],\"coordinationFocus\":[]}",
+      trustStatus "current-bad-tasks" "{\"objectiveSummary\":\"current bad\",\"strategy\":\"none\",\"tasks\":\"not-list\",\"testsRun\":[],\"residualRisks\":[],\"coordinationFocus\":[]}",
       reportStatus "current-empty-tasks" "{\"objectiveSummary\":\"current empty\",\"strategy\":\"none\",\"tasks\":[],\"testsRun\":[],\"residualRisks\":[]}",
+      trustStatus "current-empty-tasks" "{\"objectiveSummary\":\"current empty\",\"strategy\":\"none\",\"tasks\":[],\"testsRun\":[],\"residualRisks\":[]}",
       reportStatus "current-task" "{\"objectiveSummary\":\"current one\",\"strategy\":\"one\",\"tasks\":[{\"taskId\":\"ship\",\"role\":\"generalist\",\"detail\":\"ship it\",\"dependencies\":[],\"taskPrompt\":\"ship it\",\"coordinationFocus\":[]}],\"testsRun\":[],\"residualRisks\":[]}",
-      reportStatus "legacy-task" "{\"objectiveSummary\":\"legacy one\",\"strategy\":\"one\",\"tasks\":[{\"taskId\":\"ship\",\"detail\":\"ship it\",\"dependencies\":[],\"taskPrompt\":\"ship it\"}],\"testsRun\":[],\"residualRisks\":[]}"
+      trustStatus "current-task" "{\"objectiveSummary\":\"current one\",\"strategy\":\"one\",\"tasks\":[{\"taskId\":\"ship\",\"role\":\"generalist\",\"detail\":\"ship it\",\"dependencies\":[],\"taskPrompt\":\"ship it\",\"coordinationFocus\":[]}],\"testsRun\":[],\"residualRisks\":[]}",
+      reportStatus "legacy-task" "{\"objectiveSummary\":\"legacy one\",\"strategy\":\"one\",\"tasks\":[{\"taskId\":\"ship\",\"detail\":\"ship it\",\"dependencies\":[],\"taskPrompt\":\"ship it\"}],\"testsRun\":[],\"residualRisks\":[]}",
+      trustStatus "legacy-task" "{\"objectiveSummary\":\"legacy one\",\"strategy\":\"one\",\"tasks\":[{\"taskId\":\"ship\",\"detail\":\"ship it\",\"dependencies\":[],\"taskPrompt\":\"ship it\"}],\"testsRun\":[],\"residualRisks\":[]}",
+      inputStatus "planner-input-current" "{\"fingerprint\":\"abc\",\"goalText\":\"goal\",\"plannerPolicy\":\"policy\",\"schemaPath\":\"schema.json\",\"workspaceRoot\":\"workspace\",\"mailboxSummary\":\"mailbox\"}",
+      inputStatus "planner-input-legacy" "{\"fingerprint\":\"legacy\",\"goalText\":\"goal\",\"plannerPolicy\":\"policy\",\"schemaPath\":\"schema.json\",\"workspaceRoot\":\"workspace\"}",
+      inputStatus "planner-input-bad-current" "{\"fingerprint\":3,\"goalText\":\"goal\",\"plannerPolicy\":\"policy\",\"schemaPath\":\"schema.json\",\"workspaceRoot\":\"workspace\",\"mailboxSummary\":\"mailbox\"}",
+      inputStatus "planner-input-bad-legacy" "{\"fingerprint\":3}",
+      childStatus "child-loop-state-current" "{\"attempt\":1,\"phase\":\"verifier\",\"verdict\":\"pending\",\"completed\":false,\"builderRuns\":1,\"verifierRuns\":0,\"healthy\":true,\"needsAttention\":false,\"attentionReason\":\"\",\"final\":false}",
+      childStatus "child-loop-state-bad" "{\"attempt\":\"one\",\"phase\":\"verifier\"}",
+      watchedStatus "watched-process-current" "{\"pid\":42,\"running\":false,\"completed\":true,\"exitCode\":0,\"stdoutPath\":\"out\",\"stderrPath\":\"err\",\"heartbeatPath\":\"hb\",\"updatedAtMs\":1}",
+      watchedStatus "watched-process-bad" "{\"pid\":\"bad\",\"running\":false}",
+      mailboxStatus "mailbox-valid" "[{\"source\":\"verifier\",\"taskId\":\"task-1\",\"wave\":1,\"summary\":\"done\",\"details\":[]}]",
+      mailboxStatus "mailbox-bad" "{\"source\":\"not-list\"}",
+      checkpointStatus "benchmark-checkpoint-current" "{\"wave\":1,\"suite\":\"suite\",\"summary\":\"checkpoint\",\"passed\":true,\"meetsTarget\":true,\"scoreName\":\"score\",\"scoreValue\":10,\"targetName\":\"score\",\"targetValue\":5,\"command\":[]}",
+      checkpointStatus "benchmark-checkpoint-bad" "{\"wave\":\"one\",\"suite\":\"suite\"}",
+      signalStatus "benchmark-signal-current" "{\"suite\":\"suite\",\"summary\":\"signal\",\"passed\":true,\"meetsTarget\":true,\"scoreName\":\"score\",\"scoreValue\":10,\"targetName\":\"score\",\"targetValue\":5}",
+      signalStatus "benchmark-signal-bad" "{\"suite\":\"suite\",\"scoreValue\":\"bad\"}"
     ]

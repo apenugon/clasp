@@ -33,7 +33,7 @@ claspc_bin="$(
   CLASP_CLASPC= CLASPC_BIN= CLASP_PROJECT_ROOT="$project_root" \
     "$project_root/scripts/resolve-claspc.sh"
 )"
-demo_path="$project_root/examples/safe-workspace/Main.clasp"
+demo_path="$project_root/examples/safe-workspace/SafeWorkspaceHarness.clasp"
 
 timeout "$timeout_secs" "$claspc_bin" --json check "$demo_path" | grep -F '"status":"ok"' >/dev/null
 timeout "$timeout_secs" "$claspc_bin" run "$demo_path" -- "$workspace_root" "$outside_path" >"$output_path"
@@ -62,6 +62,28 @@ assert(report.appendedText === "event-one\nevent-two\n", "appendFile should pres
 assert(report.nestedListing === "result.txt", "nested listing should expose the written file");
 assert(report.rootListing.split(",").includes("logs"), "root listing should include logs");
 assert(report.rootListing.split(",").includes("nested"), "root listing should include nested");
+assert(report.treeListing.split(",").includes("logs/"), "tree listing should include the logs directory");
+assert(report.treeListing.split(",").includes("logs/events.jsonl"), "tree listing should include nested log files");
+assert(report.treeListing.split(",").includes("nested/"), "tree listing should include the nested directory");
+assert(report.treeListing.split(",").includes("nested/result.txt"), "tree listing should include nested files");
+startsWith(report.limitedTreeListing, "ERR:workspace_limit_exceeded", "bounded tree listing");
+startsWith(report.escapedTreeListing, "ERR:workspace_path_escape", "escaped tree listing");
+assert(report.searchListing.includes("nested/result.txt:1:workspace-text"), "workspace search should include matching source line");
+assert(report.defaultSearchListing.includes("logs/events.jsonl:2:event-two"), "default workspace search should find nested log text");
+startsWith(report.limitedSearchListing, "ERR:workspace_invalid_limit", "bounded search invalid limit");
+startsWith(report.escapedSearchListing, "ERR:workspace_path_escape", "escaped search listing");
+startsWith(report.emptySearchListing, "ERR:workspace_invalid_search", "empty search needle");
+assert(report.replaceCount === 1, "workspace replace should report the number of exact replacements");
+assert(report.replacedText === "workspace-updated", "workspace replace should persist the updated text");
+startsWith(report.missingReplaceResult, "ERR:workspace_replace_missing", "missing replacement target");
+startsWith(report.emptyReplaceResult, "ERR:workspace_invalid_replace", "empty replacement target");
+startsWith(report.limitedReplaceResult, "ERR:workspace_limit_exceeded", "replacement count limit");
+assert(report.nestedSizeMb >= 1, "nested size should be rounded up to at least one MB for non-empty content");
+assert(report.rootSizeMb >= report.nestedSizeMb, "root size should include nested content");
+assert(report.removeFileResult.endsWith(path.join("removable", "file.txt")), "removePath should return the removed file path");
+startsWith(report.removedRead, "ERR:workspace_missing", "removed file read");
+assert(report.removeDirResult.endsWith("removable"), "removePath should return the removed directory path");
+startsWith(report.removedDirListing, "ERR:workspace_missing", "removed directory listing");
 startsWith(report.parentEscape, "ERR:workspace_path_escape", "parent escape");
 startsWith(report.absoluteEscape, "ERR:workspace_path_escape", "absolute escape");
 assert(report.absoluteEscape.includes("absolute paths are not allowed"), "absolute escape should explain the relative-path contract");
@@ -69,13 +91,14 @@ startsWith(report.chainedEscape, "ERR:workspace_path_escape", "chained escape");
 startsWith(report.missingRead, "ERR:workspace_missing", "missing read");
 
 assert(
-  fs.readFileSync(path.join(workspaceRoot, "nested", "result.txt"), "utf8") === "workspace-text",
-  "workspace write should persist inside the root",
+  fs.readFileSync(path.join(workspaceRoot, "nested", "result.txt"), "utf8") === "workspace-updated",
+  "workspace replace should persist inside the root",
 );
 assert(
   fs.readFileSync(path.join(workspaceRoot, "logs", "events.jsonl"), "utf8") === "event-one\nevent-two\n",
   "workspace append should persist inside the root",
 );
+assert(!fs.existsSync(path.join(workspaceRoot, "removable")), "workspace remove should delete the removable subtree");
 assert(fs.readFileSync(outsidePath, "utf8") === "outside-secret", "absolute-path write attempt should not touch outside file");
 NODE
 

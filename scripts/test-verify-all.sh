@@ -16,9 +16,16 @@ unset CLASP_VERIFY_USE_CURRENT_SHELL
 unset CLASP_VERIFY_LOCK_TIMEOUT_SECS
 unset CLASP_VERIFY_ON_LOCK_TIMEOUT
 unset CLASP_VERIFY_REPORT_JSON
+unset CLASP_VERIFY_RESUME_REPORT_JSON
+unset CLASP_VERIFY_RESUME_REPORT_MODE
+unset CLASP_VERIFY_START_AT
+unset CLASP_VERIFY_START_AFTER
+unset CLASP_VERIFY_DIRECT_HOST_RESERVE
 unset CLASP_CLASPC
 unset CLASPC_BIN
 export CLASP_VERIFY_MANAGED=0
+export CLASP_VERIFY_DIRECT_HOST_RESERVE=0
+export CLASP_GOAL_MANAGER_COMPILE_MANAGED=0
 
 if [[ ! -d "$tmp_root" || ! -w "$tmp_root" ]]; then
   tmp_root="/tmp"
@@ -48,6 +55,7 @@ cp "$project_root/scripts/test-unsafe-quarantine.sh" "$test_root/scripts/test-un
 cp "$project_root/scripts/test-verify-compiler-slice.sh" "$test_root/scripts/test-verify-compiler-slice.sh"
 cp "$project_root/scripts/test-verify-runtime-slice.sh" "$test_root/scripts/test-verify-runtime-slice.sh"
 cp "$project_root/scripts/test-promoted-source-export-cache.sh" "$test_root/scripts/test-promoted-source-export-cache.sh"
+cp "$project_root/scripts/test-promote-selfhost-managed.sh" "$test_root/scripts/test-promote-selfhost-managed.sh"
 cp "$project_root/scripts/test-native-incremental-guard.sh" "$test_root/scripts/test-native-incremental-guard.sh"
 cp "$project_root/scripts/test-native-claspc-diagnostics.sh" "$test_root/scripts/test-native-claspc-diagnostics.sh"
 cp "$project_root/scripts/test-int-builtins.sh" "$test_root/scripts/test-int-builtins.sh"
@@ -55,6 +63,7 @@ cp "$project_root/scripts/test-dict-builtins.sh" "$test_root/scripts/test-dict-b
 cp "$project_root/scripts/test-native-claspc-smoke.sh" "$test_root/scripts/test-native-claspc-smoke.sh"
 cp "$project_root/scripts/test-source-run-cache.sh" "$test_root/scripts/test-source-run-cache.sh"
 cp "$project_root/scripts/test-native-claspc.sh" "$test_root/scripts/test-native-claspc.sh"
+cp "$project_root/scripts/test-native-export-host-content-scope.sh" "$test_root/scripts/test-native-export-host-content-scope.sh"
 cp "$project_root/scripts/test-native-runtime-smoke.sh" "$test_root/scripts/test-native-runtime-smoke.sh"
 cp "$project_root/scripts/test-verify-all-smoke.sh" "$test_root/scripts/test-verify-all-smoke.sh"
 cp "$project_root/scripts/test-record-update-parity.sh" "$test_root/scripts/test-record-update-parity.sh"
@@ -65,18 +74,35 @@ cp "$project_root/scripts/test-safe-subprocess.sh" "$test_root/scripts/test-safe
 cp "$project_root/scripts/run-managed-job.sh" "$test_root/scripts/run-managed-job.sh"
 cp "$project_root/scripts/stop-managed-job.sh" "$test_root/scripts/stop-managed-job.sh"
 cp "$project_root/scripts/test-managed-job.sh" "$test_root/scripts/test-managed-job.sh"
+cp "$project_root/scripts/test-resolve-claspc.sh" "$test_root/scripts/test-resolve-claspc.sh"
+cp "$project_root/scripts/test-resource-guard-policy.sh" "$test_root/scripts/test-resource-guard-policy.sh"
+cp "$project_root/scripts/test-resource-recovery-policy.sh" "$test_root/scripts/test-resource-recovery-policy.sh"
+cp "$project_root/scripts/test-goal-manager-resource-health.sh" "$test_root/scripts/test-goal-manager-resource-health.sh"
+cp "$project_root/scripts/test-goal-manager-generated-cleanup-health.sh" "$test_root/scripts/test-goal-manager-generated-cleanup-health.sh"
+cp "$project_root/scripts/clasp-clean-generated-state.sh" "$test_root/scripts/clasp-clean-generated-state.sh"
+cp "$project_root/scripts/test-generated-state-cleanup.sh" "$test_root/scripts/test-generated-state-cleanup.sh"
+cp "$project_root/scripts/test-generated-state-cleanup-plan.sh" "$test_root/scripts/test-generated-state-cleanup-plan.sh"
+cp "$project_root/scripts/test-generated-state-cleanup-plan-static.sh" "$test_root/scripts/test-generated-state-cleanup-plan-static.sh"
 cp "$project_root/scripts/test-monitored-workflow.sh" "$test_root/scripts/test-monitored-workflow.sh"
 cp "$project_root/scripts/test-codex-loop-program.sh" "$test_root/scripts/test-codex-loop-program.sh"
 cp "$project_root/scripts/test-agent-command-template.sh" "$test_root/scripts/test-agent-command-template.sh"
+cp "$project_root/scripts/test-agent-ergonomics-helpers.sh" "$test_root/scripts/test-agent-ergonomics-helpers.sh"
 cp "$project_root/scripts/test-goal-manager-agent-command-template.sh" "$test_root/scripts/test-goal-manager-agent-command-template.sh"
 cp "$project_root/scripts/test-goal-manager-default-planner-command.sh" "$test_root/scripts/test-goal-manager-default-planner-command.sh"
 cp "$project_root/scripts/test-goal-manager-fixture-manager.mjs" "$test_root/scripts/test-goal-manager-fixture-manager.mjs"
 cp "$project_root/scripts/test-host-runtime.sh" "$test_root/scripts/test-host-runtime.sh"
 cp "$project_root/scripts/test-safe-workspace.sh" "$test_root/scripts/test-safe-workspace.sh"
 cp "$project_root/scripts/test-goal-manager-child-loop-monitor.sh" "$test_root/scripts/test-goal-manager-child-loop-monitor.sh"
+cp "$project_root/scripts/test-goal-manager-mailbox-capability-details.sh" "$test_root/scripts/test-goal-manager-mailbox-capability-details.sh"
 cp "$project_root/scripts/test-goal-manager-fast.sh" "$test_root/scripts/test-goal-manager-fast.sh"
 cp "$project_root/scripts/test-swarm-ready-gate.sh" "$test_root/scripts/test-swarm-ready-gate.sh"
+cp "$project_root/scripts/test-standalone-swarm-surfaces.sh" "$test_root/scripts/test-standalone-swarm-surfaces.sh"
+cp "$project_root/scripts/standalone-swarm-readiness.sh" "$test_root/scripts/standalone-swarm-readiness.sh"
+cp "$project_root/scripts/standalone-swarm-verify.sh" "$test_root/scripts/standalone-swarm-verify.sh"
 cp "$project_root/scripts/test-swarm-ready-benchmark.sh" "$test_root/scripts/test-swarm-ready-benchmark.sh"
+cp "$project_root/scripts/test-swarm-policy-helpers.sh" "$test_root/scripts/test-swarm-policy-helpers.sh"
+cp "$project_root/scripts/test-swarm-destructive-policy.sh" "$test_root/scripts/test-swarm-destructive-policy.sh"
+cp "$project_root/scripts/test-swarm-filesystem-kernel-policy.sh" "$test_root/scripts/test-swarm-filesystem-kernel-policy.sh"
 cp "$project_root/scripts/test-swarm-native-feedback-loop.sh" "$test_root/scripts/test-swarm-native-feedback-loop.sh"
 cp "$project_root/scripts/test-feedback-loop-resume.sh" "$test_root/scripts/test-feedback-loop-resume.sh"
 cp "$project_root/scripts/test-feedback-loop-routing.sh" "$test_root/scripts/test-feedback-loop-routing.sh"
@@ -85,7 +111,15 @@ cp "$project_root/src/scripts/verify.sh" "$test_root/src/scripts/verify.sh"
 cp "$project_root/src/scripts/run-native-tool.sh" "$test_root/src/scripts/run-native-tool.sh"
 mkdir -p "$test_root/benchmarks"
 cp "$project_root/benchmarks/test-benchmark-prep-cache.sh" "$test_root/benchmarks/test-benchmark-prep-cache.sh"
-mkdir -p "$test_root/examples/swarm-native" "$test_root/runtime"
+mkdir -p "$test_root/examples/swarm-native" "$test_root/runtime" "$test_root/docs"
+cp "$project_root/src/StandaloneSwarmReadiness.clasp" "$test_root/src/StandaloneSwarmReadiness.clasp"
+cp "$project_root/src/StandaloneSwarmVerifier.clasp" "$test_root/src/StandaloneSwarmVerifier.clasp"
+cp "$project_root/examples/swarm-native/StandaloneSwarmHarness.clasp" "$test_root/examples/swarm-native/StandaloneSwarmHarness.clasp"
+cp "$project_root/examples/swarm-native/StandaloneSwarmRouting.clasp" "$test_root/examples/swarm-native/StandaloneSwarmRouting.clasp"
+cp "$project_root/examples/swarm-native/StandaloneSwarmClosureReport.clasp" "$test_root/examples/swarm-native/StandaloneSwarmClosureReport.clasp"
+cp "$project_root/examples/swarm-native/StandaloneSwarmClosureReportHarness.clasp" "$test_root/examples/swarm-native/StandaloneSwarmClosureReportHarness.clasp"
+cp "$project_root/docs/standalone-swarm-readiness.md" "$test_root/docs/standalone-swarm-readiness.md"
+cp "$project_root/runtime/standalone_swarm_probe.rs" "$test_root/runtime/standalone_swarm_probe.rs"
 printf 'module Main\n\nimport Service\nimport Swarm\n\nmain : Str\nmain = service\n' > "$test_root/examples/swarm-native/GoalManager.clasp"
 printf 'module Main\n\nimport Service\n\nmain : Str\nmain = service\n' > "$test_root/examples/swarm-native/GoalManager.wrapper.clasp"
 printf 'module Main\n\nimport Service\n\nmain : Str\nmain = service\n' > "$test_root/examples/swarm-native/GoalManagerProgram2.split.clasp"
@@ -106,11 +140,19 @@ fi
 grep -F 'bash scripts/test-native-claspc-diagnostics.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-source-run-cache.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-promoted-source-export-cache.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
+grep -F 'bash scripts/test-promote-selfhost-managed.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-int-builtins.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-dict-builtins.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-native-claspc-smoke.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-native-runtime-smoke.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-managed-job.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
+grep -F 'bash scripts/test-resolve-claspc.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
+grep -F 'bash scripts/test-resource-guard-policy.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
+grep -F 'bash scripts/test-resource-recovery-policy.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
+grep -F 'bash scripts/test-goal-manager-resource-health.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
+grep -F 'bash scripts/test-goal-manager-generated-cleanup-health.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
+grep -F 'bash scripts/test-swarm-policy-helpers.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
+grep -F 'bash scripts/test-swarm-preflight.sh' "$test_root/scripts/verify-fast.sh" >/dev/null
 if grep -F 'bash scripts/test-native-runtime.sh' "$test_root/scripts/verify-fast.sh" >/dev/null 2>&1; then
   printf 'fast verification should use native runtime smoke, not broad native runtime\n' >&2
   exit 1
@@ -143,6 +185,14 @@ function extract(name) {
 }
 const parallelCommands = extract("fast_parallel_verify_commands");
 const sequentialCommands = extract("fast_sequential_verify_commands");
+const fastCommands = [
+  ...parallelCommands.trim().split("\n"),
+  ...sequentialCommands.trim().split("\n"),
+].filter(Boolean);
+const duplicatedFastCommands = fastCommands.filter((command, index) => fastCommands.indexOf(command) !== index);
+if (duplicatedFastCommands.length > 0) {
+  throw new Error(`fast verification should not schedule duplicate commands: ${[...new Set(duplicatedFastCommands)].join(", ")}`);
+}
 if (parallelCommands.includes("bash scripts/test-native-claspc.sh")) {
   throw new Error("fast native claspc harness should not run in the parallel batch");
 }
@@ -159,7 +209,7 @@ NODE
 grep -F 'CLASP_GOAL_MANAGER_BUILD_XDG_CACHE_HOME' "$test_root/scripts/test-goal-manager-fast.sh" >/dev/null
 grep -F 'CLASP_GOAL_MANAGER_CACHE_DIR="$goal_manager_build_cache_dir"' "$test_root/scripts/test-goal-manager-fast.sh" >/dev/null
 grep -F 'CLASP_GOAL_MANAGER_SHARED_CACHE_PROJECT_ROOT' "$test_root/scripts/test-goal-manager-fast.sh" >/dev/null
-grep -F 'CLASP_GOAL_MANAGER_COMPILE_TIMEOUT_SECS="${CLASP_GOAL_MANAGER_COMPILE_TIMEOUT_SECS:-180}"' "$test_root/scripts/test-goal-manager-fast.sh" >/dev/null
+grep -F 'CLASP_GOAL_MANAGER_COMPILE_TIMEOUT_SECS="${CLASP_GOAL_MANAGER_COMPILE_TIMEOUT_SECS:-0}"' "$test_root/scripts/test-goal-manager-fast.sh" >/dev/null
 grep -F 'CLASP_GOAL_MANAGER_COMPILE_ATTEMPTS="${CLASP_GOAL_MANAGER_COMPILE_ATTEMPTS:-2}"' "$test_root/scripts/test-goal-manager-fast.sh" >/dev/null
 grep -F 'CLASP_GOAL_MANAGER_ALLOW_STALE_ON_COMPILE_FAILURE="${CLASP_GOAL_MANAGER_ALLOW_STALE_ON_COMPILE_FAILURE:-1}"' "$test_root/scripts/test-goal-manager-fast.sh" >/dev/null
 grep -F 'TaskWorkspaceRuntimeHarness.clasp' "$test_root/scripts/test-goal-manager-fast.sh" >/dev/null
@@ -176,6 +226,7 @@ grep -F 'test_native_interpreter.c' "$test_root/scripts/test-native-runtime-smok
 grep -F 'interpreted_call[main]=Hello from Clasp' "$test_root/scripts/test-native-runtime-smoke.sh" >/dev/null
 grep -F 'test-verify-all-smoke: ok' "$test_root/scripts/test-verify-all-smoke.sh" >/dev/null
 grep -F 'CLASP_VERIFY_USE_CURRENT_SHELL=1' "$test_root/scripts/test-verify-all-smoke.sh" >/dev/null
+grep -F 'CLASP_VERIFY_DIRECT_MEMORY_LIMIT_MB=512' "$test_root/scripts/test-verify-all-smoke.sh" >/dev/null
 grep -F 'bash scripts/test-verify-all.sh' "$test_root/scripts/test-verify-all-smoke.sh" >/dev/null
 grep -F 'setup_exhaustive_native_cases()' "$test_root/scripts/test-native-claspc.sh" >/dev/null
 grep -F 'CLASP_NATIVE_CLASPC_EXHAUSTIVE' "$test_root/scripts/test-native-claspc.sh" >/dev/null
@@ -197,35 +248,89 @@ grep -F 'env -u CLASP_CLASPC -u CLASPC_BIN CLASP_PROJECT_ROOT="$project_root"' "
 grep -F 'export CLASP_CLASPC="$resolved_claspc_bin"' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'export CLASPC_BIN="$resolved_claspc_bin"' "$test_root/scripts/verify-fast.sh" >/dev/null
 grep -F 'bash scripts/test-selfhost.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'CLASP_TEST_SELFHOST_SHARED_CACHE_HOME=.clasp-verify/cache/selfhost bash scripts/test-selfhost.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-source-run-cache.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-promoted-source-export-cache.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'bash scripts/test-promote-selfhost-managed.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-int-builtins.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-dict-builtins.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-codex-loop.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-record-update-parity.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'CLASP_VERIFY_REPORT_JSON' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'CLASP_VERIFY_MANAGED_MEMORY_MB' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'CLASP_VERIFY_DIRECT_MEMORY_LIMIT_MB' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'apply_direct_memory_limit' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'ulimit -v "$requested_kb"' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'CLASP_VERIFY_DIRECT_HOST_RESERVE' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'verify_memory_available_mb' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'preflight_direct_host_resources' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'direct verification memory guard tripped' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'direct verification disk guard tripped' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'CLASP_VERIFY_MANAGED_MIN_AVAILABLE_DISK_MB' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'CLASP_VERIFY_MANAGED_MIN_DISK_HEADROOM_MB' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'CLASP_VERIFY_MAX_PARALLEL_JOBS' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'CLASP_VERIFY_TEMP_CLEANUP' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'CLASP_VERIFY_TEMP_CLEANUP_MARGIN_MB' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'CLASP_VERIFY_START_AT' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'CLASP_VERIFY_START_AFTER' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'CLASP_VERIFY_RESUME_REPORT_JSON' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'CLASP_VERIFY_RESUME_REPORT_MODE' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'run-managed-job.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'stop-managed-job.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'clasp-clean-generated-state.sh" "${cleanup_args[@]}"' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F -- '--include-test-tmpdirs' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'CLASP_NATIVE_JOBS_MAX="${CLASP_NATIVE_JOBS_MAX:-1}"' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'export CLASP_VERIFY_TMPDIR="$verify_tmp_root"' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'verify_current_shell_ready()' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'command -v cargo' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'command -v rustc' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'bash -c "$command"' "$test_root/scripts/verify-all.sh" >/dev/null
+if grep -F 'bash -lc "$command"' "$test_root/scripts/verify-all.sh" >/dev/null 2>&1; then
+  printf 'verify-all should preserve the Nix environment when running subcommands\n' >&2
+  exit 1
+fi
+grep -F 'export CLASP_VERIFY_IN_NIX_DEVELOP=1' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'export CLASP_NATIVE_RUNTIME_NIX_REENTRY=1' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F '"finalVerdict"' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F '"firstFailedCommand"' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F '"resumeStartAtCommand"' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F '"resumeStartAfterCommand"' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F '"interruptedCommand"' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'command failed (exit %s)' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-native-claspc.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-swarm-ready-gate.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'bash scripts/test-standalone-swarm-surfaces.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'bash scripts/test-local-source-edit-workspace.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-swarm-ready-benchmark.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'bash scripts/test-swarm-policy-helpers.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'bash scripts/test-swarm-preflight.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'bash scripts/test-swarm-destructive-policy.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'bash scripts/test-swarm-filesystem-kernel-policy.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-swarm-native-feedback-loop.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-monitored-step.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-monitored-run-log.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-safe-subprocess.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-managed-job.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'bash scripts/test-resolve-claspc.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'bash scripts/test-resource-guard-policy.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'bash scripts/test-resource-recovery-policy.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'bash scripts/test-goal-manager-resource-health.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'bash scripts/test-goal-manager-generated-cleanup-health.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'bash scripts/test-generated-state-cleanup.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'bash scripts/test-generated-state-cleanup-plan-static.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+if grep -F 'bash scripts/test-generated-state-cleanup-plan.sh' "$test_root/scripts/verify-all.sh" >/dev/null 2>&1; then
+  printf 'verify-all should not run the slow generated-state cleanup plan runtime test by default\n' >&2
+  exit 1
+fi
 grep -F 'bash scripts/test-monitored-workflow.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-codex-loop-program.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash examples/agent-loop-scenario/scripts/verify.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-agent-command-template.sh' "$test_root/scripts/verify-all.sh" >/dev/null
-grep -F 'CLASP_AGENT_COMMAND_TEMPLATE_FEEDBACK=0 CLASP_AGENT_COMMAND_TEMPLATE_NATIVE=1 bash scripts/test-agent-command-template.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'bash scripts/test-agent-ergonomics-helpers.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'CLASP_AGENT_COMMAND_TEMPLATE_COMMON=0 CLASP_AGENT_COMMAND_TEMPLATE_FEEDBACK=0 CLASP_AGENT_COMMAND_TEMPLATE_NATIVE=1 bash scripts/test-agent-command-template.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-goal-manager-agent-command-template.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-goal-manager-default-planner-command.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'bash scripts/test-goal-manager-mailbox-capability-details.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash examples/browser-counter/scripts/verify.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-host-runtime.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-safe-workspace.sh' "$test_root/scripts/verify-all.sh" >/dev/null
@@ -238,6 +343,7 @@ grep -F 'bash examples/agent-metadata/scripts/verify.sh' "$test_root/scripts/ver
 grep -F 'bash examples/agent-task-scenario/scripts/verify.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-js-emitter-determinism.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-unsafe-quarantine.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'bash scripts/test-native-export-host-content-scope.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'parallel wait returned without a pid and no tracked jobs remain' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'local fallback_pid=""' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'wait "$finished_pid"' "$test_root/scripts/verify-all.sh" >/dev/null
@@ -320,6 +426,8 @@ grep -F 'feedback-loop-resume-script' "$test_root/scripts/test-verify-affected.s
 grep -F 'js-emitter-determinism' "$test_root/scripts/test-verify-affected.sh" >/dev/null
 grep -F 'record-update-parity-script' "$test_root/scripts/test-verify-affected.sh" >/dev/null
 grep -F 'runtime-slice-script' "$test_root/scripts/test-verify-affected.sh" >/dev/null
+grep -F 'swarm-policy-helpers-script' "$test_root/scripts/test-verify-affected.sh" >/dev/null
+grep -F 'swarm-policy-helpers-program' "$test_root/scripts/test-verify-affected.sh" >/dev/null
 grep -F 'CLASP_NATIVE_VERIFY_MODE=full bash src/scripts/verify.sh' "$test_root/scripts/verify-selfhost.sh" >/dev/null
 grep -F 'bash scripts/test-selfhost-incremental-full-verify.sh' "$test_root/scripts/verify-selfhost.sh" >/dev/null
 grep -F 'CLASP_VERIFY_PARALLEL_COMMANDS' "$test_root/scripts/verify-selfhost.sh" >/dev/null
@@ -338,6 +446,7 @@ grep -F 'CLASP_GOAL_MANAGER_COMPILE_ATTEMPTS' "$test_root/scripts/ensure-goal-ma
 grep -F 'CLASP_GOAL_MANAGER_COMPILE_MANAGED' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
 grep -F 'CLASP_GOAL_MANAGER_COMPILE_MEMORY_MB' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
 grep -F 'CLASP_GOAL_MANAGER_COMPILE_MIN_AVAILABLE_MEMORY_MB' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
+grep -F 'CLASP_GOAL_MANAGER_COMPILE_MIN_AVAILABLE_DISK_MB' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
 grep -F 'run_goal_manager_compile_managed()' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
 grep -F 'run-managed-job.sh" --jobs-root "$cache_root/compile-jobs"' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
 grep -F 'CLASP_GOAL_MANAGER_ALLOW_STALE_ON_COMPILE_FAILURE' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
@@ -353,6 +462,9 @@ grep -F 'goal-manager-source-content' "$test_root/scripts/ensure-goal-manager-bi
 grep -F 'goal-manager-source-dependencies' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
 grep -F 'goal-manager-build-mode' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
 grep -F 'CLASP_NATIVE_IMAGE_MONOLITHIC_DECL_THRESHOLD' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
+grep -F 'CLASP_NATIVE_IMAGE_MODULE_DECL_CHUNK_SIZE' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
+grep -F 'CLASP_NATIVE_IMAGE_MODULE_DECL_CHUNK_SIZE="${CLASP_NATIVE_IMAGE_MODULE_DECL_CHUNK_SIZE:-8}"' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'goal_manager_native_image_module_decl_chunk_size="${CLASP_NATIVE_IMAGE_MODULE_DECL_CHUNK_SIZE:-1}"' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
 grep -F 'goal-manager-source' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
 grep -F 'goal_manager_cache_path_id()' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
 grep -F 'goal_manager_metadata_path()' "$test_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
@@ -587,7 +699,7 @@ cmp -s "$goal_manager_binary_after_dependency_change" "$goal_manager_alias"
 
 goal_manager_binary_after_build_mode_change="$(
   CLASP_TEST_FAKE_FAST_CLASPC_LOG="$goal_manager_fast_log" \
-    CLASP_NATIVE_IMAGE_MONOLITHIC_DECL_THRESHOLD=1 \
+    CLASP_NATIVE_IMAGE_MONOLITHIC_DECL_THRESHOLD=2 \
     CLASP_GOAL_MANAGER_CLASPC_BIN="$test_root/bin/fake-fast-claspc" \
     CLASP_GOAL_MANAGER_CACHE_DIR="$goal_manager_cache" \
     "$bash_bin" "$test_root/scripts/ensure-goal-manager-binary.sh"
@@ -710,6 +822,8 @@ CLASP_TEST_NIX_ENV_CAPTURE="$env_capture" \
 CLASP_VERIFY_MANAGED=auto \
 CLASP_VERIFY_MANAGED_MEMORY_MB=256 \
 CLASP_VERIFY_MANAGED_MIN_AVAILABLE_MEMORY_MB=1 \
+CLASP_VERIFY_MANAGED_MIN_AVAILABLE_DISK_MB=0 \
+CLASP_VERIFY_MANAGED_MIN_DISK_HEADROOM_MB=0 \
 CLASP_VERIFY_FALLBACK_COMMANDS=$'sleep 0.2\nprintf managed-ok > '"$managed_capture" \
 CLASP_VERIFY_LOCK_FILE="$explicit_lock_file" \
 env \
@@ -719,6 +833,9 @@ env \
   -u CLASP_MANAGED_JOB_STOP_REQUEST \
   -u CLASP_MANAGED_JOB_MEMORY_MB \
   -u CLASP_MANAGED_JOB_MIN_AVAILABLE_MEMORY_MB \
+  -u CLASP_MANAGED_JOB_MIN_AVAILABLE_DISK_MB \
+  -u CLASP_MANAGED_JOB_MIN_DISK_HEADROOM_MB \
+  -u CLASP_MANAGED_JOB_DISK_RESERVE_PATH \
   "$bash_bin" "$test_root/scripts/verify-all.sh" >"$managed_stdout" 2>"$managed_stderr"
 
 [[ "$(< "$managed_capture")" == "managed-ok" ]]
@@ -883,6 +1000,9 @@ assert(report.finalVerdict === "passed", "fallback report should pass");
 assert(report.exitStatus === 0, "fallback report exit status should be zero");
 assert(report.firstFailedCommand === null, "fallback success should not record a failed command");
 assert(report.firstFailedExitStatus === null, "fallback success should not record a failed exit status");
+assert(report.interruptedCommand === null, "fallback success should not record an interrupted command");
+assert(report.resumeStartAtCommand === null, "fallback success should not need START_AT resume");
+assert(report.resumeStartAfterCommand === report.commands[0].command, "fallback success should expose START_AFTER for the last command");
 assert(report.mode === "fallback", `unexpected fallback mode: ${report.mode}`);
 assert(report.usedFallback === true, "fallback mode should be marked");
 assert(report.usedNested === false, "fallback mode should not be nested");
@@ -891,6 +1011,46 @@ assert(report.commandCount === 1 && report.commands.length === 1, "fallback repo
 assert(report.commands[0].phase === "fallback", "fallback command should be tagged with fallback phase");
 assert(Number.isInteger(report.commands[0].elapsedMs) && report.commands[0].elapsedMs >= 0, "fallback elapsedMs should be structural");
 NODE
+
+direct_memory_guard_capture="$test_root/direct-memory-guard.txt"
+direct_memory_guard_stderr="$test_root/direct-memory-guard.stderr"
+rm -f "$direct_memory_guard_capture" "$direct_memory_guard_stderr"
+set +e
+IN_NIX_SHELL= \
+CLASP_VERIFY_USE_CURRENT_SHELL=1 \
+CLASP_VERIFY_DIRECT_HOST_RESERVE=1 \
+CLASP_VERIFY_MANAGED_MIN_AVAILABLE_MEMORY_MB=999999999 \
+CLASP_VERIFY_MANAGED_MIN_AVAILABLE_DISK_MB=0 \
+CLASP_VERIFY_MANAGED_MIN_DISK_HEADROOM_MB=0 \
+CLASP_VERIFY_PARALLEL_COMMANDS= \
+CLASP_VERIFY_SEQUENTIAL_COMMANDS=$'printf direct-memory-guard-ran > '"$direct_memory_guard_capture" \
+CLASP_VERIFY_LOCK_FILE="$explicit_lock_file" \
+"$bash_bin" "$test_root/scripts/verify-all.sh" >/dev/null 2>"$direct_memory_guard_stderr"
+direct_memory_guard_status="$?"
+set -e
+[[ "$direct_memory_guard_status" == "75" ]]
+[[ ! -f "$direct_memory_guard_capture" ]]
+grep -F 'verify-all: direct verification memory guard tripped:' "$direct_memory_guard_stderr" >/dev/null
+
+direct_disk_guard_capture="$test_root/direct-disk-guard.txt"
+direct_disk_guard_stderr="$test_root/direct-disk-guard.stderr"
+rm -f "$direct_disk_guard_capture" "$direct_disk_guard_stderr"
+set +e
+IN_NIX_SHELL= \
+CLASP_VERIFY_USE_CURRENT_SHELL=1 \
+CLASP_VERIFY_DIRECT_HOST_RESERVE=1 \
+CLASP_VERIFY_MANAGED_MIN_AVAILABLE_MEMORY_MB=0 \
+CLASP_VERIFY_MANAGED_MIN_AVAILABLE_DISK_MB=999999999 \
+CLASP_VERIFY_MANAGED_MIN_DISK_HEADROOM_MB=0 \
+CLASP_VERIFY_PARALLEL_COMMANDS= \
+CLASP_VERIFY_SEQUENTIAL_COMMANDS=$'printf direct-disk-guard-ran > '"$direct_disk_guard_capture" \
+CLASP_VERIFY_LOCK_FILE="$explicit_lock_file" \
+"$bash_bin" "$test_root/scripts/verify-all.sh" >/dev/null 2>"$direct_disk_guard_stderr"
+direct_disk_guard_status="$?"
+set -e
+[[ "$direct_disk_guard_status" == "75" ]]
+[[ ! -f "$direct_disk_guard_capture" ]]
+grep -F 'verify-all: direct verification disk guard tripped:' "$direct_disk_guard_stderr" >/dev/null
 
 parallel_capture_one="$test_root/parallel-one.txt"
 parallel_capture_two="$test_root/parallel-two.txt"
@@ -923,6 +1083,149 @@ CLASP_VERIFY_SEQUENTIAL_COMMANDS='' \
 CLASP_VERIFY_LOCK_FILE="$explicit_lock_file" \
 "$bash_bin" "$test_root/scripts/verify-all.sh" >/dev/null
 [[ "$(< "$parallel_limit_capture")" == "onetwo" ]]
+
+resume_before="$test_root/resume-before.txt"
+resume_middle="$test_root/resume-middle.txt"
+resume_after="$test_root/resume-after.txt"
+resume_report="$test_root/resume-report.json"
+resume_before_command="printf resume-before > $resume_before"
+resume_middle_command="printf resume-middle > $resume_middle"
+resume_after_command="printf resume-after > $resume_after"
+resume_commands="$resume_before_command"$'\n'"$resume_middle_command"$'\n'"$resume_after_command"
+rm -f "$resume_before" "$resume_middle" "$resume_after" "$resume_report"
+IN_NIX_SHELL= \
+CLASP_VERIFY_USE_CURRENT_SHELL=1 \
+CLASP_VERIFY_PARALLEL_COMMANDS= \
+CLASP_VERIFY_SEQUENTIAL_COMMANDS="$resume_commands" \
+CLASP_VERIFY_START_AT="$resume_middle_command" \
+CLASP_VERIFY_LOCK_FILE="$explicit_lock_file" \
+CLASP_VERIFY_REPORT_JSON="$resume_report" \
+"$bash_bin" "$test_root/scripts/verify-all.sh" >/dev/null
+[[ ! -f "$resume_before" ]]
+[[ "$(< "$resume_middle")" == "resume-middle" ]]
+[[ "$(< "$resume_after")" == "resume-after" ]]
+node - "$resume_report" "$resume_middle_command" "$resume_after_command" <<'NODE'
+const fs = require("fs");
+const report = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const middleCommand = process.argv[3];
+const afterCommand = process.argv[4];
+function assert(condition, message) {
+  if (!condition) {
+    console.error(message);
+    process.exit(1);
+  }
+}
+assert(report.finalVerdict === "passed", "resume report should pass");
+assert(report.commandCount === 2, "resume START_AT should record only resumed commands");
+assert(report.commands[0].command === middleCommand, "resume START_AT should begin at the matching command");
+assert(report.commands[1].command === afterCommand, "resume START_AT should continue after the matching command");
+assert(report.resumeStartAtCommand === null, "successful resumed run should not need START_AT resume");
+assert(report.resumeStartAfterCommand === afterCommand, "successful resumed run should expose START_AFTER for the final command");
+NODE
+
+resume_after_before="$test_root/resume-after-before.txt"
+resume_after_middle="$test_root/resume-after-middle.txt"
+resume_after_after="$test_root/resume-after-after.txt"
+resume_after_before_command="printf resume-after-before > $resume_after_before"
+resume_after_middle_command="printf resume-after-middle > $resume_after_middle"
+resume_after_after_command="printf resume-after-after > $resume_after_after"
+resume_after_commands="$resume_after_before_command"$'\n'"$resume_after_middle_command"$'\n'"$resume_after_after_command"
+rm -f "$resume_after_before" "$resume_after_middle" "$resume_after_after"
+IN_NIX_SHELL= \
+CLASP_VERIFY_USE_CURRENT_SHELL=1 \
+CLASP_VERIFY_PARALLEL_COMMANDS= \
+CLASP_VERIFY_SEQUENTIAL_COMMANDS="$resume_after_commands" \
+CLASP_VERIFY_START_AFTER="$resume_after_middle_command" \
+CLASP_VERIFY_LOCK_FILE="$explicit_lock_file" \
+"$bash_bin" "$test_root/scripts/verify-all.sh" >/dev/null
+[[ ! -f "$resume_after_before" ]]
+[[ ! -f "$resume_after_middle" ]]
+[[ "$(< "$resume_after_after")" == "resume-after-after" ]]
+
+resume_missing_stderr="$test_root/resume-missing.stderr"
+if IN_NIX_SHELL= \
+  CLASP_VERIFY_USE_CURRENT_SHELL=1 \
+  CLASP_VERIFY_PARALLEL_COMMANDS= \
+  CLASP_VERIFY_SEQUENTIAL_COMMANDS="$resume_commands" \
+  CLASP_VERIFY_START_AT="missing resume command" \
+  CLASP_VERIFY_LOCK_FILE="$explicit_lock_file" \
+  "$bash_bin" "$test_root/scripts/verify-all.sh" >/dev/null 2>"$resume_missing_stderr"; then
+  printf 'verify-all unexpectedly succeeded for missing resume command\n' >&2
+  exit 1
+fi
+grep -F 'CLASP_VERIFY_START_AT command was not found: missing resume command' "$resume_missing_stderr" >/dev/null
+
+resume_report_auto_before="$test_root/resume-report-auto-before.txt"
+resume_report_auto_at="$test_root/resume-report-auto-at.txt"
+resume_report_auto_after="$test_root/resume-report-auto-after.txt"
+resume_report_auto_json="$test_root/resume-report-auto.json"
+resume_report_auto_before_command="printf resume-report-auto-before > $resume_report_auto_before"
+resume_report_auto_at_command="printf resume-report-auto-at > $resume_report_auto_at"
+resume_report_auto_after_command="printf resume-report-auto-after > $resume_report_auto_after"
+resume_report_auto_commands="$resume_report_auto_before_command"$'\n'"$resume_report_auto_at_command"$'\n'"$resume_report_auto_after_command"
+rm -f "$resume_report_auto_before" "$resume_report_auto_at" "$resume_report_auto_after" "$resume_report_auto_json"
+node - "$resume_report_auto_json" "$resume_report_auto_at_command" "$resume_report_auto_before_command" <<'NODE'
+const fs = require("fs");
+const [path, startAt, startAfter] = process.argv.slice(2);
+fs.writeFileSync(path, JSON.stringify({
+  resumeStartAtCommand: startAt,
+  resumeStartAfterCommand: startAfter,
+}));
+NODE
+IN_NIX_SHELL= \
+CLASP_VERIFY_USE_CURRENT_SHELL=1 \
+CLASP_VERIFY_PARALLEL_COMMANDS= \
+CLASP_VERIFY_SEQUENTIAL_COMMANDS="$resume_report_auto_commands" \
+CLASP_VERIFY_RESUME_REPORT_JSON="$resume_report_auto_json" \
+CLASP_VERIFY_LOCK_FILE="$explicit_lock_file" \
+"$bash_bin" "$test_root/scripts/verify-all.sh" >/dev/null
+[[ ! -f "$resume_report_auto_before" ]]
+[[ "$(< "$resume_report_auto_at")" == "resume-report-auto-at" ]]
+[[ "$(< "$resume_report_auto_after")" == "resume-report-auto-after" ]]
+
+resume_report_after_before="$test_root/resume-report-after-before.txt"
+resume_report_after_middle="$test_root/resume-report-after-middle.txt"
+resume_report_after_after="$test_root/resume-report-after-after.txt"
+resume_report_after_json="$test_root/resume-report-after.json"
+resume_report_after_before_command="printf resume-report-after-before > $resume_report_after_before"
+resume_report_after_middle_command="printf resume-report-after-middle > $resume_report_after_middle"
+resume_report_after_after_command="printf resume-report-after-after > $resume_report_after_after"
+resume_report_after_commands="$resume_report_after_before_command"$'\n'"$resume_report_after_middle_command"$'\n'"$resume_report_after_after_command"
+rm -f "$resume_report_after_before" "$resume_report_after_middle" "$resume_report_after_after" "$resume_report_after_json"
+node - "$resume_report_after_json" "$resume_report_after_middle_command" "$resume_report_after_before_command" <<'NODE'
+const fs = require("fs");
+const [path, startAfter, startAt] = process.argv.slice(2);
+fs.writeFileSync(path, JSON.stringify({
+  resumeStartAtCommand: startAt,
+  resumeStartAfterCommand: startAfter,
+}));
+NODE
+IN_NIX_SHELL= \
+CLASP_VERIFY_USE_CURRENT_SHELL=1 \
+CLASP_VERIFY_PARALLEL_COMMANDS= \
+CLASP_VERIFY_SEQUENTIAL_COMMANDS="$resume_report_after_commands" \
+CLASP_VERIFY_RESUME_REPORT_JSON="$resume_report_after_json" \
+CLASP_VERIFY_RESUME_REPORT_MODE=start-after \
+CLASP_VERIFY_LOCK_FILE="$explicit_lock_file" \
+"$bash_bin" "$test_root/scripts/verify-all.sh" >/dev/null
+[[ ! -f "$resume_report_after_before" ]]
+[[ ! -f "$resume_report_after_middle" ]]
+[[ "$(< "$resume_report_after_after")" == "resume-report-after-after" ]]
+
+resume_report_empty_json="$test_root/resume-report-empty.json"
+resume_report_empty_stderr="$test_root/resume-report-empty.stderr"
+printf '{}\n' >"$resume_report_empty_json"
+if IN_NIX_SHELL= \
+  CLASP_VERIFY_USE_CURRENT_SHELL=1 \
+  CLASP_VERIFY_PARALLEL_COMMANDS= \
+  CLASP_VERIFY_SEQUENTIAL_COMMANDS="$resume_commands" \
+  CLASP_VERIFY_RESUME_REPORT_JSON="$resume_report_empty_json" \
+  CLASP_VERIFY_LOCK_FILE="$explicit_lock_file" \
+  "$bash_bin" "$test_root/scripts/verify-all.sh" >/dev/null 2>"$resume_report_empty_stderr"; then
+  printf 'verify-all unexpectedly succeeded for empty resume report\n' >&2
+  exit 1
+fi
+grep -F "verify resume report has no auto resume command: $resume_report_empty_json" "$resume_report_empty_stderr" >/dev/null
 
 report_success="$test_root/report-success.json"
 report_success_parallel_one="$test_root/report-parallel-one.txt"
@@ -959,12 +1262,17 @@ assert(report.firstFailedPhase === null, "success should not record a failed pha
 assert(report.firstFailedGroup === null, "success should not record a failed group");
 assert(report.firstFailedCommand === null, "success should not record a failed command");
 assert(report.firstFailedExitStatus === null, "success should not record a failed exit status");
+assert(report.interruptedCommand === null, "success should not record an interrupted command");
+assert(report.resumeStartAtCommand === null, "success should not need START_AT resume");
 assert(report.mode === "normal", `unexpected success mode: ${report.mode}`);
 assert(report.usedFallback === false, "success should not use fallback");
 assert(report.usedNested === false, "success should not use nested verification");
 assert(report.lockHeld === true, "success report should observe the verify lock");
 assert(report.effectiveLockFile === lockFile, "success report should include effective lock file");
 assert(report.commandCount === 3 && report.commands.length === 3, "success report should contain all fake commands");
+assert(report.lastCompletedCommand === report.commands[2].command, "success report should expose the last completed command");
+assert(report.lastSuccessfulCommand === report.commands[2].command, "success report should expose the last successful command");
+assert(report.resumeStartAfterCommand === report.commands[2].command, "success report should expose START_AFTER for the last successful command");
 const phases = new Set(report.commands.map((command) => command.phase));
 const groups = new Set(report.commands.map((command) => command.group));
 assert(phases.has("parallel") && phases.has("sequential"), "success report should include parallel and sequential phases");
@@ -1017,6 +1325,11 @@ assert(report.commandCount === 2 && report.commands.length === 2, "failure repor
 assert(report.commands[0].exitStatus === 0, "first failure scenario command should pass");
 const failed = report.commands.find((command) => command.command === "false");
 assert(failed && failed.exitStatus !== 0, "failing command should be recorded with non-zero status");
+assert(report.lastCompletedCommand === "false", "failure report should expose the failed command as last completed");
+assert(report.lastSuccessfulCommand === report.commands[0].command, "failure report should expose the last successful command");
+assert(report.interruptedCommand === null, "completed command failure should not be marked interrupted");
+assert(report.resumeStartAtCommand === "false", "failure report should resume at the failed command");
+assert(report.resumeStartAfterCommand === report.commands[0].command, "failure report should also expose START_AFTER for the last success");
 assert(!report.commands.some((command) => command.command.includes("after-failure")), "commands after failure should not be recorded");
 for (const command of report.commands) {
   assert(command.phase === "sequential", "failure commands should be sequential");

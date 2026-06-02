@@ -1,0 +1,855 @@
+module AgentBackend
+
+record AgentBackendSpec = {
+  agentBin : Str,
+  model : Str,
+  reasoning : Str,
+  sandbox : Str,
+  workspaceRoot : Str,
+  template : [Str]
+}
+
+record AgentBackendSummary = {
+  kind : Str,
+  agentBin : Str,
+  model : Str,
+  reasoning : Str,
+  sandbox : Str,
+  workspaceRoot : Str,
+  templateArgCount : Int,
+  promptTransport : Str,
+  hasRoleInput : Bool,
+  hasPromptPathInput : Bool,
+  hasInlinePromptInput : Bool,
+  hasReportOutput : Bool,
+  hasSchemaInput : Bool,
+  hasWorkspaceInput : Bool,
+  hasModelInput : Bool,
+  hasReasoningInput : Bool,
+  valid : Bool,
+  validationMessage : Str,
+  warnings : [Str]
+}
+
+record AgentBackendPolicy = {
+  allowCodexFallback : Bool,
+  requirePromptPath : Bool,
+  requireSchemaInput : Bool,
+  requireWorkspaceInput : Bool,
+  requireModelInput : Bool,
+  requireReasoningInput : Bool
+}
+
+record AgentBackendPolicySummary = {
+  policyName : Str,
+  backendKind : Str,
+  promptTransport : Str,
+  valid : Bool,
+  validationMessage : Str,
+  validationMessages : [Str],
+  allowCodexFallback : Bool,
+  requirePromptPath : Bool,
+  requireSchemaInput : Bool,
+  requireWorkspaceInput : Bool,
+  requireModelInput : Bool,
+  requireReasoningInput : Bool,
+  blockingGaps : [Str],
+  requiredClosure : [Str],
+  missingPlaceholders : [Str],
+  recommendedTemplate : [Str]
+}
+
+record AgentBackendCapabilityProfile = {
+  profileName : Str,
+  supportsPlannerRole : Bool,
+  supportsBuilderRole : Bool,
+  supportsVerifierRole : Bool,
+  supportsWorkspaceEdits : Bool,
+  supportsChildTaskPlanning : Bool,
+  supportsStructuredReports : Bool,
+  requiresExternalModel : Bool
+}
+
+record AgentBackendCapabilitySummary = {
+  profileName : Str,
+  backendKind : Str,
+  promptTransport : Str,
+  standaloneReady : Bool,
+  roleCoverage : [Str],
+  supportsPlannerRole : Bool,
+  supportsBuilderRole : Bool,
+  supportsVerifierRole : Bool,
+  supportsWorkspaceEdits : Bool,
+  supportsChildTaskPlanning : Bool,
+  supportsStructuredReports : Bool,
+  requiresExternalModel : Bool,
+  validationMessages : [Str],
+  blockingGaps : [Str],
+  requiredClosure : [Str]
+}
+
+record AgentCommandRequest = {
+  role : Str,
+  schemaPath : Str,
+  reportPath : Str,
+  promptPath : Str,
+  prompt : Str
+}
+
+agentBackendEmptyCommand : [Str]
+agentBackendEmptyCommand = []
+
+agentBackendStandaloneRequiredPlaceholders : [Str]
+agentBackendStandaloneRequiredPlaceholders = [
+  "{agent_bin}",
+  "{role}",
+  "{schema_path}",
+  "{report_path}",
+  "{prompt_path}",
+  "{workspace_root}"
+]
+
+agentBackendStandaloneRecommendedTemplate : [Str]
+agentBackendStandaloneRecommendedTemplate = [
+  "{agent_bin}",
+  "--role",
+  "{role}",
+  "--schema",
+  "{schema_path}",
+  "--report",
+  "{report_path}",
+  "--prompt-path",
+  "{prompt_path}",
+  "--workspace",
+  "{workspace_root}",
+  "--model",
+  "{model}",
+  "--reasoning",
+  "{reasoning}",
+  "--sandbox",
+  "{sandbox}"
+]
+
+agentBackendClaspRunTemplate : Str -> [Str]
+agentBackendClaspRunTemplate programPath = [
+  "{agent_bin}",
+  "run",
+  programPath,
+  "--",
+  "--role",
+  "{role}",
+  "--schema",
+  "{schema_path}",
+  "--report",
+  "{report_path}",
+  "--prompt-path",
+  "{prompt_path}",
+  "--workspace",
+  "{workspace_root}",
+  "--model",
+  "{model}",
+  "--reasoning",
+  "{reasoning}",
+  "--sandbox",
+  "{sandbox}"
+]
+
+agentBackendLocalAgentTemplate : [Str]
+agentBackendLocalAgentTemplate =
+  agentBackendClaspRunTemplate "examples/swarm-native/LocalAgent.clasp"
+
+agentBackendLocalPlannerTemplate : [Str]
+agentBackendLocalPlannerTemplate =
+  agentBackendClaspRunTemplate "examples/swarm-native/LocalPlanner.clasp"
+
+agentBackendSpec : Str -> Str -> Str -> Str -> Str -> [Str] -> AgentBackendSpec
+agentBackendSpec agentBin model reasoning sandbox workspaceRoot template =
+  AgentBackendSpec {
+    agentBin = agentBin,
+    model = model,
+    reasoning = reasoning,
+    sandbox = sandbox,
+    workspaceRoot = workspaceRoot,
+    template = template
+  }
+
+agentBackendLocalAgentSpec : Str -> Str -> Str -> Str -> Str -> AgentBackendSpec
+agentBackendLocalAgentSpec agentBin model reasoning sandbox workspaceRoot =
+  agentBackendSpec agentBin model reasoning sandbox workspaceRoot agentBackendLocalAgentTemplate
+
+agentBackendLocalPlannerSpec : Str -> Str -> Str -> Str -> Str -> AgentBackendSpec
+agentBackendLocalPlannerSpec agentBin model reasoning sandbox workspaceRoot =
+  agentBackendSpec agentBin model reasoning sandbox workspaceRoot agentBackendLocalPlannerTemplate
+
+agentCommandRequest : Str -> Str -> Str -> Str -> Str -> AgentCommandRequest
+agentCommandRequest role schemaPath reportPath promptPath prompt =
+  AgentCommandRequest {
+    role = role,
+    schemaPath = schemaPath,
+    reportPath = reportPath,
+    promptPath = promptPath,
+    prompt = prompt
+  }
+
+agentBackendReasoningConfig : AgentBackendSpec -> Str
+agentBackendReasoningConfig backend =
+  textConcat ["model_reasoning_effort=\"", backend.reasoning, "\""]
+
+agentBackendPolicy : Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> AgentBackendPolicy
+agentBackendPolicy allowCodexFallback requirePromptPath requireSchemaInput requireWorkspaceInput requireModelInput requireReasoningInput =
+  AgentBackendPolicy {
+    allowCodexFallback = allowCodexFallback,
+    requirePromptPath = requirePromptPath,
+    requireSchemaInput = requireSchemaInput,
+    requireWorkspaceInput = requireWorkspaceInput,
+    requireModelInput = requireModelInput,
+    requireReasoningInput = requireReasoningInput
+  }
+
+agentBackendDefaultPolicy : AgentBackendPolicy
+agentBackendDefaultPolicy =
+  agentBackendPolicy true false false false false false
+
+agentBackendStandalonePolicy : AgentBackendPolicy
+agentBackendStandalonePolicy =
+  agentBackendPolicy false true true true false false
+
+agentBackendCapabilityProfile : Str -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> AgentBackendCapabilityProfile
+agentBackendCapabilityProfile profileName supportsPlannerRole supportsBuilderRole supportsVerifierRole supportsWorkspaceEdits supportsChildTaskPlanning supportsStructuredReports requiresExternalModel =
+  AgentBackendCapabilityProfile {
+    profileName = profileName,
+    supportsPlannerRole = supportsPlannerRole,
+    supportsBuilderRole = supportsBuilderRole,
+    supportsVerifierRole = supportsVerifierRole,
+    supportsWorkspaceEdits = supportsWorkspaceEdits,
+    supportsChildTaskPlanning = supportsChildTaskPlanning,
+    supportsStructuredReports = supportsStructuredReports,
+    requiresExternalModel = requiresExternalModel
+  }
+
+agentBackendLocalClaspCapabilityProfile : AgentBackendCapabilityProfile
+agentBackendLocalClaspCapabilityProfile =
+  agentBackendCapabilityProfile "local-clasp" true true true true true true false
+
+agentBackendCodexCapabilityProfile : AgentBackendCapabilityProfile
+agentBackendCodexCapabilityProfile =
+  agentBackendCapabilityProfile "codex" true true true true true true true
+
+agentBackendBuilderVerifierCapabilityProfile : AgentBackendCapabilityProfile
+agentBackendBuilderVerifierCapabilityProfile =
+  agentBackendCapabilityProfile "builder-verifier" false true true true false true false
+
+agentBackendUnknownCapabilityProfile : Str -> AgentBackendCapabilityProfile
+agentBackendUnknownCapabilityProfile profileName =
+  agentBackendCapabilityProfile profileName false false false false false false false
+
+agentBackendInferredCapabilityProfile : AgentBackendSpec -> AgentBackendCapabilityProfile
+agentBackendInferredCapabilityProfile backend =
+  if agentBackendUsesCodexFallback backend then
+    agentBackendCodexCapabilityProfile
+  else
+    agentBackendLocalClaspCapabilityProfile
+
+agentBackendCapabilityProfileNamedOrDefault : Str -> AgentBackendCapabilityProfile -> AgentBackendCapabilityProfile
+agentBackendCapabilityProfileNamedOrDefault profileName fallback =
+  if profileName == "" then
+    fallback
+  else if profileName == "local-clasp" then
+    agentBackendLocalClaspCapabilityProfile
+  else if profileName == "standalone" then
+    agentBackendLocalClaspCapabilityProfile
+  else if profileName == "codex" then
+    agentBackendCodexCapabilityProfile
+  else if profileName == "builder-verifier" then
+    agentBackendBuilderVerifierCapabilityProfile
+  else
+    agentBackendUnknownCapabilityProfile profileName
+
+agentBackendCapabilityProfileForBackend : Str -> AgentBackendSpec -> AgentBackendCapabilityProfile
+agentBackendCapabilityProfileForBackend profileName backend =
+  agentBackendCapabilityProfileNamedOrDefault profileName (agentBackendInferredCapabilityProfile backend)
+
+agentBackendTemplateReplace : Str -> Str -> Str -> Str
+agentBackendTemplateReplace value needle replacement =
+  textJoin replacement (textSplit value needle)
+
+agentBackendTextIncludes : Str -> Str -> Bool
+agentBackendTextIncludes value needle =
+  length (textSplit value needle) > 1
+
+agentBackendTemplateContains : [Str] -> Str -> Bool
+agentBackendTemplateContains template needle = {
+  let mut found = false;
+  for arg in template {
+    if found then
+      found
+    else {
+      found = agentBackendTextIncludes arg needle;
+      found
+    }
+  };
+  found
+}
+
+agentBackendKind : AgentBackendSpec -> Str
+agentBackendKind backend =
+  if length backend.template > 0 then
+    "template"
+  else
+    "codex"
+
+agentBackendUsesCodexFallback : AgentBackendSpec -> Bool
+agentBackendUsesCodexFallback backend =
+  agentBackendKind backend == "codex"
+
+agentBackendTemplateHasPromptPathInput : AgentBackendSpec -> Bool
+agentBackendTemplateHasPromptPathInput backend =
+  if length backend.template == 0 then
+    true
+  else
+    agentBackendTemplateContains backend.template "{prompt_path}"
+
+agentBackendTemplateHasInlinePromptInput : AgentBackendSpec -> Bool
+agentBackendTemplateHasInlinePromptInput backend =
+  if length backend.template == 0 then
+    true
+  else
+    agentBackendTemplateContains backend.template "{prompt}"
+
+agentBackendTemplateHasRoleInput : AgentBackendSpec -> Bool
+agentBackendTemplateHasRoleInput backend =
+  if length backend.template == 0 then
+    true
+  else
+    agentBackendTemplateContains backend.template "{role}"
+
+agentBackendTemplateHasReportOutput : AgentBackendSpec -> Bool
+agentBackendTemplateHasReportOutput backend =
+  if length backend.template == 0 then
+    true
+  else
+    agentBackendTemplateContains backend.template "{report_path}"
+
+agentBackendTemplateHasSchemaInput : AgentBackendSpec -> Bool
+agentBackendTemplateHasSchemaInput backend =
+  if length backend.template == 0 then
+    true
+  else
+    agentBackendTemplateContains backend.template "{schema_path}"
+
+agentBackendTemplateHasWorkspaceInput : AgentBackendSpec -> Bool
+agentBackendTemplateHasWorkspaceInput backend =
+  if length backend.template == 0 then
+    true
+  else
+    agentBackendTemplateContains backend.template "{workspace_root}"
+
+agentBackendTemplateHasModelInput : AgentBackendSpec -> Bool
+agentBackendTemplateHasModelInput backend =
+  if length backend.template == 0 then
+    true
+  else
+    agentBackendTemplateContains backend.template "{model}"
+
+agentBackendTemplateHasReasoningInput : AgentBackendSpec -> Bool
+agentBackendTemplateHasReasoningInput backend =
+  if length backend.template == 0 then
+    true
+  else
+    agentBackendTemplateContains backend.template "{reasoning}"
+
+agentBackendPromptTransport : AgentBackendSpec -> Str
+agentBackendPromptTransport backend =
+  if length backend.template == 0 then
+    "argument"
+  else {
+    let hasPromptPath = agentBackendTemplateHasPromptPathInput backend in
+    let hasInlinePrompt = agentBackendTemplateHasInlinePromptInput backend in
+    if hasPromptPath then
+      if hasInlinePrompt then
+        "prompt-path+inline"
+      else
+        "prompt-path"
+    else if hasInlinePrompt then
+      "inline-prompt"
+    else
+      "missing"
+  }
+
+agentBackendValidationMessage : AgentBackendSpec -> Str
+agentBackendValidationMessage backend =
+  if length backend.template == 0 then
+    ""
+  else if agentBackendTemplateHasRoleInput backend == false then
+    "agent-backend-template-missing-role"
+  else if agentBackendPromptTransport backend == "missing" then
+    "agent-backend-template-missing-prompt-input"
+  else if agentBackendTemplateHasReportOutput backend == false then
+    "agent-backend-template-missing-report-output"
+  else
+    ""
+
+agentBackendValidationMessages : AgentBackendSpec -> [Str]
+agentBackendValidationMessages backend =
+  if length backend.template == 0 then
+    []
+  else {
+    let roleMessages =
+      if agentBackendTemplateHasRoleInput backend then
+        []
+      else
+        ["agent-backend-template-missing-role"] in
+    let promptMessages =
+      if agentBackendPromptTransport backend == "missing" then
+        append roleMessages ["agent-backend-template-missing-prompt-input"]
+      else
+        roleMessages in
+    if agentBackendTemplateHasReportOutput backend then
+      promptMessages
+    else
+      append promptMessages ["agent-backend-template-missing-report-output"]
+  }
+
+agentBackendWarningMessages : AgentBackendSpec -> [Str]
+agentBackendWarningMessages backend =
+  if length backend.template == 0 then
+    []
+  else {
+    let schemaWarnings =
+      if agentBackendTemplateHasSchemaInput backend then
+        []
+      else
+        ["agent-backend-template-missing-schema-path"] in
+    let workspaceWarnings =
+      if agentBackendTemplateHasWorkspaceInput backend then
+        schemaWarnings
+      else
+        append schemaWarnings ["agent-backend-template-missing-workspace-root"] in
+    let modelWarnings =
+      if agentBackendTemplateHasModelInput backend then
+        workspaceWarnings
+      else
+        append workspaceWarnings ["agent-backend-template-missing-model"] in
+    if agentBackendTemplateHasReasoningInput backend then
+      modelWarnings
+    else
+      append modelWarnings ["agent-backend-template-missing-reasoning"]
+  }
+
+agentBackendValid : AgentBackendSpec -> Bool
+agentBackendValid backend =
+  agentBackendValidationMessage backend == ""
+
+agentBackendPolicyValidationMessage : AgentBackendPolicy -> AgentBackendSpec -> Str
+agentBackendPolicyValidationMessage policy backend = {
+  let baseMessage = agentBackendValidationMessage backend in
+  if baseMessage != "" then
+    baseMessage
+  else if policy.allowCodexFallback == false && agentBackendUsesCodexFallback backend then
+    "agent-backend-policy-disallows-codex-fallback"
+  else if policy.requirePromptPath && agentBackendTemplateHasPromptPathInput backend == false then
+    "agent-backend-policy-requires-prompt-path"
+  else if policy.requireSchemaInput && agentBackendTemplateHasSchemaInput backend == false then
+    "agent-backend-policy-requires-schema-path"
+  else if policy.requireWorkspaceInput && agentBackendTemplateHasWorkspaceInput backend == false then
+    "agent-backend-policy-requires-workspace-root"
+  else if policy.requireModelInput && agentBackendTemplateHasModelInput backend == false then
+    "agent-backend-policy-requires-model"
+  else if policy.requireReasoningInput && agentBackendTemplateHasReasoningInput backend == false then
+    "agent-backend-policy-requires-reasoning"
+  else
+    ""
+}
+
+agentBackendFirstTextOrEmpty : [Str] -> Str
+agentBackendFirstTextOrEmpty values = {
+  let mut first = "";
+  let mut found = false;
+  for value in values {
+    if found then
+      found
+    else {
+      first = value;
+      found = true;
+      found
+    }
+  };
+  first
+}
+
+agentBackendPolicyValidationMessages : AgentBackendPolicy -> AgentBackendSpec -> [Str]
+agentBackendPolicyValidationMessages policy backend = {
+  let baseMessages = agentBackendValidationMessages backend in
+  let fallbackMessages =
+    if policy.allowCodexFallback == false && agentBackendUsesCodexFallback backend then
+      append baseMessages ["agent-backend-policy-disallows-codex-fallback"]
+    else
+      baseMessages in
+  let promptMessages =
+    if policy.requirePromptPath && agentBackendTemplateHasPromptPathInput backend == false then
+      append fallbackMessages ["agent-backend-policy-requires-prompt-path"]
+    else
+      fallbackMessages in
+  let schemaMessages =
+    if policy.requireSchemaInput && agentBackendTemplateHasSchemaInput backend == false then
+      append promptMessages ["agent-backend-policy-requires-schema-path"]
+    else
+      promptMessages in
+  let workspaceMessages =
+    if policy.requireWorkspaceInput && agentBackendTemplateHasWorkspaceInput backend == false then
+      append schemaMessages ["agent-backend-policy-requires-workspace-root"]
+    else
+      schemaMessages in
+  let modelMessages =
+    if policy.requireModelInput && agentBackendTemplateHasModelInput backend == false then
+      append workspaceMessages ["agent-backend-policy-requires-model"]
+    else
+      workspaceMessages in
+  if policy.requireReasoningInput && agentBackendTemplateHasReasoningInput backend == false then
+    append modelMessages ["agent-backend-policy-requires-reasoning"]
+  else
+    modelMessages
+}
+
+agentBackendPolicyValid : AgentBackendPolicy -> AgentBackendSpec -> Bool
+agentBackendPolicyValid policy backend =
+  agentBackendPolicyValidationMessage policy backend == ""
+
+agentBackendPolicyMissingPlaceholders : AgentBackendPolicy -> AgentBackendSpec -> [Str]
+agentBackendPolicyMissingPlaceholders policy backend =
+  if length backend.template == 0 && policy.allowCodexFallback == false then
+    agentBackendStandaloneRequiredPlaceholders
+  else {
+    let roleMissing =
+      if agentBackendTemplateHasRoleInput backend then
+        []
+      else
+        ["{role}"] in
+    let reportMissing =
+      if agentBackendTemplateHasReportOutput backend then
+        roleMissing
+      else
+        append roleMissing ["{report_path}"] in
+    let promptMissing =
+      if policy.requirePromptPath then
+        if agentBackendTemplateHasPromptPathInput backend then
+          reportMissing
+        else
+          append reportMissing ["{prompt_path}"]
+      else if agentBackendPromptTransport backend == "missing" then
+        append reportMissing ["{prompt_path}"]
+      else
+        reportMissing in
+    let schemaMissing =
+      if policy.requireSchemaInput then
+        if agentBackendTemplateHasSchemaInput backend then
+          promptMissing
+        else
+          append promptMissing ["{schema_path}"]
+      else
+        promptMissing in
+    let workspaceMissing =
+      if policy.requireWorkspaceInput then
+        if agentBackendTemplateHasWorkspaceInput backend then
+          schemaMissing
+        else
+          append schemaMissing ["{workspace_root}"]
+      else
+        schemaMissing in
+    let modelMissing =
+      if policy.requireModelInput then
+        if agentBackendTemplateHasModelInput backend then
+          workspaceMissing
+        else
+          append workspaceMissing ["{model}"]
+      else
+        workspaceMissing in
+    if policy.requireReasoningInput then
+      if agentBackendTemplateHasReasoningInput backend then
+        modelMissing
+      else
+        append modelMissing ["{reasoning}"]
+    else
+      modelMissing
+  }
+
+agentBackendPolicyRecommendedTemplate : AgentBackendPolicy -> [Str]
+agentBackendPolicyRecommendedTemplate policy =
+  agentBackendStandaloneRecommendedTemplate
+
+agentBackendPolicyBlockingGapsForMessage : Str -> [Str]
+agentBackendPolicyBlockingGapsForMessage message =
+  if message == "" then
+    []
+  else if message == "agent-backend-template-missing-role" then
+    ["backend template does not pass the agent role through {role}"]
+  else if message == "agent-backend-template-missing-prompt-input" then
+    ["backend template does not pass the prompt through {prompt_path} or {prompt}"]
+  else if message == "agent-backend-template-missing-report-output" then
+    ["backend template does not pass the structured report path through {report_path}"]
+  else if message == "agent-backend-policy-disallows-codex-fallback" then
+    ["backend policy requires a configured non-Codex command template"]
+  else if message == "agent-backend-policy-requires-prompt-path" then
+    ["backend policy requires durable prompt-path transport through {prompt_path}"]
+  else if message == "agent-backend-policy-requires-schema-path" then
+    ["backend policy requires schema transport through {schema_path}"]
+  else if message == "agent-backend-policy-requires-workspace-root" then
+    ["backend policy requires workspace transport through {workspace_root}"]
+  else if message == "agent-backend-policy-requires-model" then
+    ["backend policy requires model transport through {model}"]
+  else if message == "agent-backend-policy-requires-reasoning" then
+    ["backend policy requires reasoning transport through {reasoning}"]
+  else if message == "agent-backend-capability-missing-planner-role" then
+    ["backend capability profile cannot serve planner tasks"]
+  else if message == "agent-backend-capability-missing-builder-role" then
+    ["backend capability profile cannot serve builder tasks"]
+  else if message == "agent-backend-capability-missing-verifier-role" then
+    ["backend capability profile cannot serve verifier tasks"]
+  else if message == "agent-backend-capability-missing-workspace-edits" then
+    ["backend capability profile cannot edit task workspaces"]
+  else if message == "agent-backend-capability-missing-child-task-planning" then
+    ["backend capability profile cannot plan child tasks"]
+  else if message == "agent-backend-capability-missing-structured-reports" then
+    ["backend capability profile cannot produce schema-checked structured reports"]
+  else
+    [textConcat ["backend policy failed with unknown validation message: ", message]]
+
+agentBackendPolicyRequiredClosureForMessage : Str -> [Str]
+agentBackendPolicyRequiredClosureForMessage message =
+  if message == "" then
+    []
+  else if message == "agent-backend-template-missing-role" then
+    ["Add {role} to the backend command template arguments."]
+  else if message == "agent-backend-template-missing-prompt-input" then
+    ["Add {prompt_path} for durable prompt transport or {prompt} for inline prompt transport."]
+  else if message == "agent-backend-template-missing-report-output" then
+    ["Add {report_path} so the backend can write the required structured report."]
+  else if message == "agent-backend-policy-disallows-codex-fallback" then
+    [
+      "Set CLASP_LOOP_AGENT_COMMAND_JSON or CLASP_MANAGER_PLANNER_AGENT_COMMAND_JSON to a non-Codex backend template.",
+      "Use agentBackendStandaloneRecommendedTemplate as the minimum command shape for standalone agents."
+    ]
+  else if message == "agent-backend-policy-requires-prompt-path" then
+    ["Add {prompt_path} to the backend command template."]
+  else if message == "agent-backend-policy-requires-schema-path" then
+    ["Add {schema_path} to the backend command template."]
+  else if message == "agent-backend-policy-requires-workspace-root" then
+    ["Add {workspace_root} to the backend command template."]
+  else if message == "agent-backend-policy-requires-model" then
+    ["Add {model} to the backend command template or relax the active backend policy."]
+  else if message == "agent-backend-policy-requires-reasoning" then
+    ["Add {reasoning} to the backend command template or relax the active backend policy."]
+  else if message == "agent-backend-capability-missing-planner-role" then
+    ["Configure a backend profile that can route planner prompts and emit planner reports."]
+  else if message == "agent-backend-capability-missing-builder-role" then
+    ["Configure a backend profile that can execute builder prompts."]
+  else if message == "agent-backend-capability-missing-verifier-role" then
+    ["Configure a backend profile that can execute verifier prompts."]
+  else if message == "agent-backend-capability-missing-workspace-edits" then
+    ["Use a backend that can write inside the assigned workspace under policy."]
+  else if message == "agent-backend-capability-missing-child-task-planning" then
+    ["Use a planner-capable backend or delegate child task planning to a capable planner profile."]
+  else if message == "agent-backend-capability-missing-structured-reports" then
+    ["Use a backend that writes the requested JSON report to {report_path} after schema validation."]
+  else
+    ["Inspect the active AgentBackendPolicy and backend template placeholders."]
+
+agentBackendPolicyBlockingGapsForMessages : [Str] -> [Str]
+agentBackendPolicyBlockingGapsForMessages messages = {
+  let mut gaps = agentBackendEmptyCommand;
+  for message in messages {
+    gaps = append gaps (agentBackendPolicyBlockingGapsForMessage message);
+    gaps
+  };
+  gaps
+}
+
+agentBackendPolicyRequiredClosureForMessages : [Str] -> [Str]
+agentBackendPolicyRequiredClosureForMessages messages = {
+  let mut closure = agentBackendEmptyCommand;
+  for message in messages {
+    closure = append closure (agentBackendPolicyRequiredClosureForMessage message);
+    closure
+  };
+  closure
+}
+
+agentBackendPolicySummary : Str -> AgentBackendPolicy -> AgentBackendSpec -> AgentBackendPolicySummary
+agentBackendPolicySummary policyName policy backend = {
+  let validationMessages = agentBackendPolicyValidationMessages policy backend in
+  let validationMessage = agentBackendFirstTextOrEmpty validationMessages in
+  AgentBackendPolicySummary {
+    policyName = policyName,
+    backendKind = agentBackendKind backend,
+    promptTransport = agentBackendPromptTransport backend,
+    valid = length validationMessages == 0,
+    validationMessage = validationMessage,
+    validationMessages = validationMessages,
+    allowCodexFallback = policy.allowCodexFallback,
+    requirePromptPath = policy.requirePromptPath,
+    requireSchemaInput = policy.requireSchemaInput,
+    requireWorkspaceInput = policy.requireWorkspaceInput,
+    requireModelInput = policy.requireModelInput,
+    requireReasoningInput = policy.requireReasoningInput,
+    blockingGaps = agentBackendPolicyBlockingGapsForMessages validationMessages,
+    requiredClosure = agentBackendPolicyRequiredClosureForMessages validationMessages,
+    missingPlaceholders = agentBackendPolicyMissingPlaceholders policy backend,
+    recommendedTemplate = agentBackendPolicyRecommendedTemplate policy
+  }
+}
+
+agentBackendStandaloneValidationMessage : AgentBackendSpec -> Str
+agentBackendStandaloneValidationMessage backend =
+  agentBackendPolicyValidationMessage agentBackendStandalonePolicy backend
+
+agentBackendStandaloneCapable : AgentBackendSpec -> Bool
+agentBackendStandaloneCapable backend =
+  agentBackendStandaloneValidationMessage backend == ""
+
+agentBackendStandalonePolicySummary : AgentBackendSpec -> AgentBackendPolicySummary
+agentBackendStandalonePolicySummary backend =
+  agentBackendPolicySummary "standalone" agentBackendStandalonePolicy backend
+
+agentBackendCapabilityRoleCoverage : AgentBackendCapabilityProfile -> [Str]
+agentBackendCapabilityRoleCoverage profile = {
+  let plannerRoles =
+    if profile.supportsPlannerRole then ["planner"] else [] in
+  let builderRoles =
+    if profile.supportsBuilderRole then append plannerRoles ["builder"] else plannerRoles in
+  if profile.supportsVerifierRole then append builderRoles ["verifier"] else builderRoles
+}
+
+agentBackendStandaloneCapabilityValidationMessages : AgentBackendCapabilityProfile -> AgentBackendSpec -> [Str]
+agentBackendStandaloneCapabilityValidationMessages profile backend = {
+  let policyMessages = agentBackendPolicyValidationMessages agentBackendStandalonePolicy backend in
+  let plannerMessages =
+    if profile.supportsPlannerRole then
+      policyMessages
+    else
+      append policyMessages ["agent-backend-capability-missing-planner-role"] in
+  let builderMessages =
+    if profile.supportsBuilderRole then
+      plannerMessages
+    else
+      append plannerMessages ["agent-backend-capability-missing-builder-role"] in
+  let verifierMessages =
+    if profile.supportsVerifierRole then
+      builderMessages
+    else
+      append builderMessages ["agent-backend-capability-missing-verifier-role"] in
+  let workspaceMessages =
+    if profile.supportsWorkspaceEdits then
+      verifierMessages
+    else
+      append verifierMessages ["agent-backend-capability-missing-workspace-edits"] in
+  let childPlanningMessages =
+    if profile.supportsChildTaskPlanning then
+      workspaceMessages
+    else
+      append workspaceMessages ["agent-backend-capability-missing-child-task-planning"] in
+  if profile.supportsStructuredReports then
+    childPlanningMessages
+  else
+    append childPlanningMessages ["agent-backend-capability-missing-structured-reports"]
+}
+
+agentBackendStandaloneCapabilitySummary : AgentBackendCapabilityProfile -> AgentBackendSpec -> AgentBackendCapabilitySummary
+agentBackendStandaloneCapabilitySummary profile backend = {
+  let validationMessages = agentBackendStandaloneCapabilityValidationMessages profile backend in
+  AgentBackendCapabilitySummary {
+    profileName = profile.profileName,
+    backendKind = agentBackendKind backend,
+    promptTransport = agentBackendPromptTransport backend,
+    standaloneReady = length validationMessages == 0,
+    roleCoverage = agentBackendCapabilityRoleCoverage profile,
+    supportsPlannerRole = profile.supportsPlannerRole,
+    supportsBuilderRole = profile.supportsBuilderRole,
+    supportsVerifierRole = profile.supportsVerifierRole,
+    supportsWorkspaceEdits = profile.supportsWorkspaceEdits,
+    supportsChildTaskPlanning = profile.supportsChildTaskPlanning,
+    supportsStructuredReports = profile.supportsStructuredReports,
+    requiresExternalModel = profile.requiresExternalModel,
+    validationMessages = validationMessages,
+    blockingGaps = agentBackendPolicyBlockingGapsForMessages validationMessages,
+    requiredClosure = agentBackendPolicyRequiredClosureForMessages validationMessages
+  }
+}
+
+agentBackendSummary : AgentBackendSpec -> AgentBackendSummary
+agentBackendSummary backend = {
+  let validationMessage = agentBackendValidationMessage backend in
+  AgentBackendSummary {
+    kind = agentBackendKind backend,
+    agentBin = backend.agentBin,
+    model = backend.model,
+    reasoning = backend.reasoning,
+    sandbox = backend.sandbox,
+    workspaceRoot = backend.workspaceRoot,
+    templateArgCount = length backend.template,
+    promptTransport = agentBackendPromptTransport backend,
+    hasRoleInput = agentBackendTemplateHasRoleInput backend,
+    hasPromptPathInput = agentBackendTemplateHasPromptPathInput backend,
+    hasInlinePromptInput = agentBackendTemplateHasInlinePromptInput backend,
+    hasReportOutput = agentBackendTemplateHasReportOutput backend,
+    hasSchemaInput = agentBackendTemplateHasSchemaInput backend,
+    hasWorkspaceInput = agentBackendTemplateHasWorkspaceInput backend,
+    hasModelInput = agentBackendTemplateHasModelInput backend,
+    hasReasoningInput = agentBackendTemplateHasReasoningInput backend,
+    valid = validationMessage == "",
+    validationMessage = validationMessage,
+    warnings = agentBackendWarningMessages backend
+  }
+}
+
+agentBackendRenderArg : AgentBackendSpec -> AgentCommandRequest -> Str -> Str
+agentBackendRenderArg backend request value = {
+  let rendered0 = agentBackendTemplateReplace value "{role}" request.role in
+  let rendered1 = agentBackendTemplateReplace rendered0 "{schema_path}" request.schemaPath in
+  let rendered2 = agentBackendTemplateReplace rendered1 "{report_path}" request.reportPath in
+  let rendered3 = agentBackendTemplateReplace rendered2 "{prompt_path}" request.promptPath in
+  let rendered4 = agentBackendTemplateReplace rendered3 "{prompt}" request.prompt in
+  let rendered5 = agentBackendTemplateReplace rendered4 "{workspace_root}" backend.workspaceRoot in
+  let rendered6 = agentBackendTemplateReplace rendered5 "{agent_bin}" backend.agentBin in
+  let rendered7 = agentBackendTemplateReplace rendered6 "{model}" backend.model in
+  let rendered8 = agentBackendTemplateReplace rendered7 "{reasoning}" backend.reasoning in
+  agentBackendTemplateReplace rendered8 "{sandbox}" backend.sandbox
+}
+
+agentBackendRenderTemplate : AgentBackendSpec -> AgentCommandRequest -> [Str]
+agentBackendRenderTemplate backend request = {
+  let mut rendered = agentBackendEmptyCommand;
+  for arg in backend.template {
+    rendered = append rendered [agentBackendRenderArg backend request arg];
+    rendered
+  };
+  rendered
+}
+
+agentBackendCodexCommand : AgentBackendSpec -> AgentCommandRequest -> [Str]
+agentBackendCodexCommand backend request = [
+  backend.agentBin,
+  "exec",
+  "--json",
+  "--cd",
+  backend.workspaceRoot,
+  "-m",
+  backend.model,
+  "-c",
+  agentBackendReasoningConfig backend,
+  "--skip-git-repo-check",
+  "--sandbox",
+  backend.sandbox,
+  "--ephemeral",
+  "--output-schema",
+  request.schemaPath,
+  "-o",
+  request.reportPath,
+  request.prompt
+]
+
+agentBackendCommand : AgentBackendSpec -> AgentCommandRequest -> [Str]
+agentBackendCommand backend request =
+  if length backend.template > 0 then
+    agentBackendRenderTemplate backend request
+  else
+    agentBackendCodexCommand backend request

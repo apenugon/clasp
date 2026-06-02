@@ -1,0 +1,339 @@
+module ResourceRecoveryPolicy
+
+record ResourceRecoveryDecision = {
+  taskId : Str,
+  kind : Str,
+  guidance : Str,
+  resourcePolicy : Bool,
+  pressureKind : Str,
+  controlPlaneKind : Str,
+  retryReview : Bool,
+  memoryAdmission : Bool,
+  message : Str
+}
+
+resourceRecoveryTextIncludes : Str -> Str -> Bool
+resourceRecoveryTextIncludes value needle = length (textSplit value needle) > 1
+
+resourceRecoveryMessageHasAction : Str -> Str -> Bool
+resourceRecoveryMessageHasAction message action =
+  if resourceRecoveryTextIncludes message (textConcat ["\"type\":\"", action, "\""]) then
+    true
+  else if resourceRecoveryTextIncludes message (textConcat ["\"type\": \"", action, "\""]) then
+    true
+  else if resourceRecoveryTextIncludes message (textConcat ["recommendedAction=", action]) then
+    true
+  else if resourceRecoveryTextIncludes message (textConcat ["action=", action]) then
+    true
+  else
+    resourceRecoveryTextIncludes message action
+
+resourceRecoveryMessageIsDiskPressure : Str -> Bool
+resourceRecoveryMessageIsDiskPressure message =
+  if resourceRecoveryMessageHasAction message "recover-disk" then
+    true
+  else if resourceRecoveryTextIncludes message "disk " then
+    true
+  else if resourceRecoveryTextIncludes message "disk:" then
+    true
+  else if resourceRecoveryTextIncludes message "disk-exceeded" then
+    true
+  else if resourceRecoveryTextIncludes message "disk headroom" then
+    true
+  else
+    false
+
+resourceRecoveryMessageIsMemoryPressure : Str -> Bool
+resourceRecoveryMessageIsMemoryPressure message =
+  if resourceRecoveryMessageHasAction message "reduce-memory-pressure" then
+    true
+  else if resourceRecoveryMessageIsOomKill message then
+    true
+  else if resourceRecoveryTextIncludes message "memory-admission: status=blocked" then
+    true
+  else if resourceRecoveryTextIncludes message "memory-concurrency-admission: status=reduced" then
+    true
+  else if resourceRecoveryTextIncludes message "memory-concurrency-admission: status=blocked" then
+    true
+  else if resourceRecoveryTextIncludes message "reason=host-memory-reserve" then
+    true
+  else if resourceRecoveryTextIncludes message "reason=projected-child-memory-reserve" then
+    true
+  else if resourceRecoveryTextIncludes message "reason=external-agent-memory-reserve" then
+    true
+  else if resourceRecoveryTextIncludes message "reason=configured-concurrency-exceeds-memory-capacity" then
+    true
+  else if resourceRecoveryTextIncludes message "reason=no-child-memory-capacity" then
+    true
+  else if resourceRecoveryTextIncludes message "action=wait-for-memory-or-stop-only-managed-jobs-by-metadata" then
+    true
+  else if resourceRecoveryTextIncludes message "action=lower-concurrency-or-child-memory-budget" then
+    true
+  else if resourceRecoveryTextIncludes message "action=lower-concurrency-to-admitted-child-capacity" then
+    true
+  else if resourceRecoveryTextIncludes message "action=wait-for-memory-or-lower-concurrency-before-launch" then
+    true
+  else if resourceRecoveryTextIncludes message "action=wait-for-external-agent-pressure-or-lower-concurrency" then
+    true
+  else if resourceRecoveryTextIncludes message "memory " then
+    true
+  else if resourceRecoveryTextIncludes message "memory:" then
+    true
+  else if resourceRecoveryTextIncludes message "memory-exceeded" then
+    true
+  else if resourceRecoveryTextIncludes message "externalAgent" then
+    true
+  else if resourceRecoveryTextIncludes message "unmanagedRssMb" then
+    true
+  else
+    false
+
+resourceRecoveryMessageIsOomKill : Str -> Bool
+resourceRecoveryMessageIsOomKill message =
+  if resourceRecoveryTextIncludes message "oom-kill" then
+    true
+  else if resourceRecoveryTextIncludes message "OOM" then
+    true
+  else if resourceRecoveryTextIncludes message "out of memory" then
+    true
+  else if resourceRecoveryTextIncludes message "Out of memory" then
+    true
+  else if resourceRecoveryTextIncludes message "Killed" then
+    true
+  else if resourceRecoveryTextIncludes message "SIGKILL" then
+    true
+  else if resourceRecoveryTextIncludes message "signal 9" then
+    true
+  else if resourceRecoveryTextIncludes message "exit 137" then
+    true
+  else if resourceRecoveryTextIncludes message "exit-status=137" then
+    true
+  else
+    resourceRecoveryTextIncludes message "status=137"
+
+resourceRecoveryMessageHasMemoryAdmission : Str -> Bool
+resourceRecoveryMessageHasMemoryAdmission message =
+  if resourceRecoveryTextIncludes message "memory-admission:" then
+    true
+  else if resourceRecoveryTextIncludes message "memory-concurrency-admission:" then
+    true
+  else if resourceRecoveryTextIncludes message "reason=host-memory-reserve" then
+    true
+  else if resourceRecoveryTextIncludes message "reason=projected-child-memory-reserve" then
+    true
+  else if resourceRecoveryTextIncludes message "reason=external-agent-memory-reserve" then
+    true
+  else if resourceRecoveryTextIncludes message "action=wait-for-memory-or-stop-only-managed-jobs-by-metadata" then
+    true
+  else if resourceRecoveryTextIncludes message "action=lower-concurrency-or-child-memory-budget" then
+    true
+  else if resourceRecoveryTextIncludes message "action=lower-concurrency-to-admitted-child-capacity" then
+    true
+  else if resourceRecoveryTextIncludes message "action=wait-for-external-agent-pressure-or-lower-concurrency" then
+    true
+  else
+    false
+
+resourceRecoveryMessageIsAutonomousLaunchGateBlocker : Str -> Bool
+resourceRecoveryMessageIsAutonomousLaunchGateBlocker message =
+  if resourceRecoveryTextIncludes message "autonomous-launch-gate-blocker" then
+    true
+  else if resourceRecoveryTextIncludes message "manager-replan-blocker=autonomous-launch-gate" then
+    true
+  else if resourceRecoveryTextIncludes message "task launch blocked by autonomous launch gate" then
+    true
+  else if resourceRecoveryTextIncludes message "autonomous launch gate blocked child launch" then
+    true
+  else if resourceRecoveryTextIncludes message "capability-gap=autonomous_launch_gate:" then
+    true
+  else
+    resourceRecoveryTextIncludes message "autonomous-launch-gate-mode:blocked-"
+
+resourceRecoveryMessageIsAdmissionLockFailure : Str -> Bool
+resourceRecoveryMessageIsAdmissionLockFailure message =
+  if resourceRecoveryMessageHasAction message "repair-admission-lock" then
+    true
+  else if resourceRecoveryTextIncludes message "admission-lock-unavailable" then
+    true
+  else if resourceRecoveryTextIncludes message "admission-lock-open-failed" then
+    true
+  else
+    false
+
+resourceRecoveryMessageIsMemoryEnforcerFailure : Str -> Bool
+resourceRecoveryMessageIsMemoryEnforcerFailure message =
+  if resourceRecoveryMessageHasAction message "repair-memory-enforcer" then
+    true
+  else if resourceRecoveryTextIncludes message "memory-enforcer-unavailable" then
+    true
+  else if resourceRecoveryTextIncludes message "systemd-scope-required-unavailable" then
+    true
+  else
+    false
+
+resourceRecoveryMessageUsesResourcePolicy : Str -> Bool
+resourceRecoveryMessageUsesResourcePolicy message =
+  if resourceRecoveryMessageIsAdmissionLockFailure message then
+    true
+  else if resourceRecoveryMessageIsMemoryEnforcerFailure message then
+    true
+  else if resourceRecoveryMessageIsMemoryPressure message then
+    true
+  else if resourceRecoveryMessageIsDiskPressure message then
+    true
+  else
+    false
+
+resourceRecoveryEvidenceUsesResourcePolicy : Str -> Str -> Str -> Bool
+resourceRecoveryEvidenceUsesResourcePolicy phase retryableStatus evidence =
+  if retryableStatus == "external-resource-blocker" then
+    true
+  else if phase == "resource-guard" then
+    true
+  else if resourceRecoveryTextIncludes evidence "recommendedAction" then
+    true
+  else if resourceRecoveryTextIncludes evidence "memory-admission: status=blocked" then
+    true
+  else if resourceRecoveryTextIncludes evidence "memory-concurrency-admission:" then
+    true
+  else if resourceRecoveryMessageIsOomKill evidence then
+    true
+  else if resourceRecoveryTextIncludes evidence "memory-exceeded" then
+    true
+  else if resourceRecoveryTextIncludes evidence "disk-exceeded" then
+    true
+  else if resourceRecoveryTextIncludes evidence "admission-lock-unavailable" then
+    true
+  else if resourceRecoveryTextIncludes evidence "memory-enforcer-unavailable" then
+    true
+  else
+    false
+
+resourceRecoveryTaskIdForMessage : Str -> Str
+resourceRecoveryTaskIdForMessage message =
+  if resourceRecoveryMessageIsAutonomousLaunchGateBlocker message then
+    "standalone-swarm-autonomous-launch-gate-repair"
+  else if resourceRecoveryMessageIsAdmissionLockFailure message then
+    "resource-admission-lock-recovery"
+  else if resourceRecoveryMessageIsMemoryEnforcerFailure message then
+    "resource-memory-enforcer-recovery"
+  else if resourceRecoveryMessageIsMemoryPressure message then
+    "resource-memory-pressure-recovery"
+  else if resourceRecoveryMessageIsDiskPressure message then
+    "resource-disk-headroom-recovery"
+  else
+    "resource-pressure-recovery"
+
+resourceRecoveryActionTaskIdForEvidence : Str -> Str -> Str -> Str
+resourceRecoveryActionTaskIdForEvidence phase retryableStatus evidence =
+  if resourceRecoveryMessageIsAutonomousLaunchGateBlocker evidence then
+    resourceRecoveryTaskIdForMessage evidence
+  else if resourceRecoveryEvidenceUsesResourcePolicy phase retryableStatus evidence then
+    resourceRecoveryTaskIdForMessage evidence
+  else
+    "retry-recovery-review"
+
+resourceRecoveryKindForMessage : Str -> Str
+resourceRecoveryKindForMessage message =
+  if resourceRecoveryMessageIsAutonomousLaunchGateBlocker message then
+    "autonomous-launch-gate"
+  else if resourceRecoveryMessageIsAdmissionLockFailure message then
+    "resource-control-plane-kind=admission-lock"
+  else if resourceRecoveryMessageIsMemoryEnforcerFailure message then
+    "resource-control-plane-kind=memory-enforcer"
+  else if resourceRecoveryMessageIsMemoryPressure message then
+    "resource-pressure-kind=memory"
+  else if resourceRecoveryMessageIsDiskPressure message then
+    "resource-pressure-kind=disk"
+  else
+    "resource-pressure-kind=disk"
+
+resourceRecoveryActionKindForEvidence : Str -> Str -> Str -> Str
+resourceRecoveryActionKindForEvidence phase retryableStatus evidence =
+  if resourceRecoveryMessageIsAutonomousLaunchGateBlocker evidence then
+    resourceRecoveryKindForMessage evidence
+  else if resourceRecoveryEvidenceUsesResourcePolicy phase retryableStatus evidence then
+    resourceRecoveryKindForMessage evidence
+  else
+    "retry-recovery-kind=child-loop"
+
+resourceRecoveryGuidanceForMessage : Str -> Str
+resourceRecoveryGuidanceForMessage message =
+  if resourceRecoveryMessageIsAutonomousLaunchGateBlocker message then
+    "standalone-swarm-autonomous-launch-gate-repair=Repair checkpoint, resource-admission, managed-supervisor, bounded-task, or focused-verification launch blockers before spawning agents; do not start unmanaged child loops as a workaround."
+  else if resourceRecoveryMessageIsAdmissionLockFailure message then
+    "resource-admission-lock-recovery=Repair managed-job admission locking before launching more child loops; do not start unmanaged agents as a workaround."
+  else if resourceRecoveryMessageIsMemoryEnforcerFailure message then
+    "resource-memory-enforcer-recovery=Repair or enable the configured managed-job memory enforcer before launching more child loops; do not bypass memory enforcement."
+  else if resourceRecoveryMessageIsMemoryPressure message then
+    "resource-memory-pressure-recovery=Replan before launching more child loops; lower concurrency or memory budgets, wait for exact external-agent pressure, or stop only manager-owned managed jobs by metadata; do not use generated-state cleanup as primary fix."
+  else if resourceRecoveryMessageIsDiskPressure message then
+    "resource-disk-headroom-recovery=Inspect generated-state cleanup health first through GeneratedStateCleanupPlan and generated-state-cleanup-*; run cleanup apply only when safeToClean=true and cleanupCanSatisfyReserve or cleanupCanSatisfyGuard is true; otherwise report the exact external disk shortfall; do not kill unrelated processes."
+  else
+    "resource-pressure-recovery=Replan before launching more child loops; prefer generated-state cleanup only for disk headroom recovery."
+
+resourceRecoveryActionGuidanceForEvidence : Str -> Str -> Str -> Str
+resourceRecoveryActionGuidanceForEvidence phase retryableStatus evidence =
+  if resourceRecoveryMessageIsAutonomousLaunchGateBlocker evidence then
+    resourceRecoveryGuidanceForMessage evidence
+  else if resourceRecoveryEvidenceUsesResourcePolicy phase retryableStatus evidence then
+    resourceRecoveryGuidanceForMessage evidence
+  else
+    "retry-recovery-review=Inspect retry record paths, child-loop output, and heartbeat state before retrying."
+
+resourceRecoveryPressureKindForMessage : Str -> Str
+resourceRecoveryPressureKindForMessage message =
+  if resourceRecoveryMessageIsAutonomousLaunchGateBlocker message then
+    "autonomous-launch-gate"
+  else if resourceRecoveryMessageIsMemoryPressure message then
+    "memory"
+  else if resourceRecoveryMessageIsDiskPressure message then
+    "disk"
+  else if resourceRecoveryMessageIsAdmissionLockFailure message then
+    "control-plane"
+  else if resourceRecoveryMessageIsMemoryEnforcerFailure message then
+    "control-plane"
+  else
+    "generic"
+
+resourceRecoveryControlPlaneKindForMessage : Str -> Str
+resourceRecoveryControlPlaneKindForMessage message =
+  if resourceRecoveryMessageIsAdmissionLockFailure message then
+    "admission-lock"
+  else if resourceRecoveryMessageIsMemoryEnforcerFailure message then
+    "memory-enforcer"
+  else
+    ""
+
+resourceRecoveryDecisionForMessage : Str -> ResourceRecoveryDecision
+resourceRecoveryDecisionForMessage message =
+  ResourceRecoveryDecision {
+    taskId = resourceRecoveryTaskIdForMessage message,
+    kind = resourceRecoveryKindForMessage message,
+    guidance = resourceRecoveryGuidanceForMessage message,
+    resourcePolicy = resourceRecoveryMessageUsesResourcePolicy message,
+    pressureKind = resourceRecoveryPressureKindForMessage message,
+    controlPlaneKind = resourceRecoveryControlPlaneKindForMessage message,
+    retryReview = false,
+    memoryAdmission = resourceRecoveryMessageHasMemoryAdmission message,
+    message = message
+  }
+
+resourceRecoveryDecisionForEvidence : Str -> Str -> Str -> ResourceRecoveryDecision
+resourceRecoveryDecisionForEvidence phase retryableStatus evidence =
+  if resourceRecoveryMessageIsAutonomousLaunchGateBlocker evidence then
+    resourceRecoveryDecisionForMessage evidence
+  else if resourceRecoveryEvidenceUsesResourcePolicy phase retryableStatus evidence then
+    resourceRecoveryDecisionForMessage evidence
+  else
+    ResourceRecoveryDecision {
+      taskId = "retry-recovery-review",
+      kind = "retry-recovery-kind=child-loop",
+      guidance = "retry-recovery-review=Inspect retry record paths, child-loop output, and heartbeat state before retrying.",
+      resourcePolicy = false,
+      pressureKind = "retry",
+      controlPlaneKind = "",
+      retryReview = true,
+      memoryAdmission = false,
+      message = evidence
+    }

@@ -13,6 +13,10 @@ project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export CLASP_VERIFY_IN_PROGRESS=1
 export CLASP_VERIFY_ACTIVE_ROOT="$project_root"
 export CLASP_ALLOW_UNMANAGED_AGENT_RUNTIME=1
+export CLASP_TEST_CODEX_MODE=builder
+export CLASP_SWARM_CHILD_MIN_AVAILABLE_MEMORY_MB="${CLASP_SWARM_CHILD_MIN_AVAILABLE_MEMORY_MB:-1}"
+export CLASP_SWARM_CHILD_MIN_AVAILABLE_DISK_MB="${CLASP_SWARM_CHILD_MIN_AVAILABLE_DISK_MB:-0}"
+export CLASP_SWARM_CHILD_MIN_DISK_HEADROOM_MB="${CLASP_SWARM_CHILD_MIN_DISK_HEADROOM_MB:-0}"
 runs_root=""
 markers_root=""
 repo_root=""
@@ -31,6 +35,8 @@ lane_merge_gate_snapshot_test_root=""
 lane_cleanup_test_root=""
 lane_worktree_retry_test_root=""
 batch_start_test_root=""
+swarm_managed_admission_test_root=""
+swarm_child_admission_test_root=""
 prompt_test_root=""
 prompt_test_root_2=""
 task_file_drain_test_root=""
@@ -38,12 +44,21 @@ status_wave_name=""
 status_lane_root_1=""
 status_lane_root_2=""
 status_lane_root_3=""
+status_lane_root_4=""
+status_lane_root_5=""
+status_lane_root_6=""
 status_runtime_root_1=""
 status_runtime_root_2=""
 status_runtime_root_3=""
+status_runtime_root_4=""
+status_runtime_root_5=""
+status_runtime_root_6=""
 status_text_output=""
 status_json_output=""
 status_live_pid=""
+stop_child_wave_name=""
+stop_child_lane_root=""
+stop_child_runtime_root=""
 summary_wave_name=""
 summary_lane_root_1=""
 summary_lane_root_2=""
@@ -57,7 +72,15 @@ cleanup() {
   if [[ -n "${status_live_pid:-}" ]]; then
     kill "${status_live_pid}" >/dev/null 2>&1 || true
   fi
-  rm -rf "${runs_root:-}" "${markers_root:-}" "${repo_root:-}" "${lane_root:-}" "${completed_root:-}" "${blocked_root:-}" "${global_completed_root:-}" "${spawn_root:-}" "${spawn_path_root:-}" "${invalid_lane_root:-}" "${autopilot_test_root:-}" "${autopilot_test_root_2:-}" "${autopilot_test_root_3:-}" "${lane_merge_test_root:-}" "${lane_merge_gate_snapshot_test_root:-}" "${lane_cleanup_test_root:-}" "${lane_worktree_retry_test_root:-}" "${batch_start_test_root:-}" "${prompt_test_root:-}" "${prompt_test_root_2:-}" "${task_file_drain_test_root:-}" "${status_lane_root_1:-}" "${status_lane_root_2:-}" "${status_lane_root_3:-}" "${status_runtime_root_1:-}" "${status_runtime_root_2:-}" "${status_runtime_root_3:-}" "${summary_lane_root_1:-}" "${summary_lane_root_2:-}" "${summary_runtime_root_1:-}" "${summary_runtime_root_2:-}"
+  if [[ -n "${stop_child_runtime_root:-}" && -d "$stop_child_runtime_root/child-jobs" ]]; then
+    while IFS= read -r child_job_dir; do
+      [[ -n "$child_job_dir" ]] || continue
+      "$project_root/scripts/stop-managed-job.sh" \
+        --jobs-root "$stop_child_runtime_root/child-jobs" \
+        "$child_job_dir" >/dev/null 2>&1 || true
+    done < <(find "$stop_child_runtime_root/child-jobs" -mindepth 1 -maxdepth 1 -type d 2>/dev/null || true)
+  fi
+  rm -rf "${runs_root:-}" "${markers_root:-}" "${repo_root:-}" "${lane_root:-}" "${completed_root:-}" "${blocked_root:-}" "${global_completed_root:-}" "${spawn_root:-}" "${spawn_path_root:-}" "${invalid_lane_root:-}" "${autopilot_test_root:-}" "${autopilot_test_root_2:-}" "${autopilot_test_root_3:-}" "${lane_merge_test_root:-}" "${lane_merge_gate_snapshot_test_root:-}" "${lane_cleanup_test_root:-}" "${lane_worktree_retry_test_root:-}" "${batch_start_test_root:-}" "${swarm_managed_admission_test_root:-}" "${swarm_child_admission_test_root:-}" "${prompt_test_root:-}" "${prompt_test_root_2:-}" "${task_file_drain_test_root:-}" "${status_lane_root_1:-}" "${status_lane_root_2:-}" "${status_lane_root_3:-}" "${status_lane_root_4:-}" "${status_lane_root_5:-}" "${status_lane_root_6:-}" "${status_runtime_root_1:-}" "${status_runtime_root_2:-}" "${status_runtime_root_3:-}" "${status_runtime_root_4:-}" "${status_runtime_root_5:-}" "${status_runtime_root_6:-}" "${stop_child_lane_root:-}" "${stop_child_runtime_root:-}" "${summary_lane_root_1:-}" "${summary_lane_root_2:-}" "${summary_runtime_root_1:-}" "${summary_runtime_root_2:-}"
   rm -f "${status_text_output:-}" "${status_json_output:-}" "${summary_text_output:-}" "${summary_json_output:-}" "${summary_markdown_output:-}"
 }
 
@@ -315,6 +338,8 @@ make_lane_merge_test_project() {
     "$project_root/scripts/clasp-swarm-common.sh" \
     "$project_root/scripts/clasp-swarm-lane.sh" \
     "$project_root/scripts/clasp-swarm-validate-task.mjs" \
+    "$project_root/scripts/run-managed-job.sh" \
+    "$project_root/scripts/stop-managed-job.sh" \
     "$project_dir/scripts/"
   cp "$project_root/agents/swarm/task.schema.json" "$project_dir/agents/swarm/task.schema.json"
 
@@ -394,6 +419,8 @@ EOF
     "$project_dir/scripts/clasp-swarm-common.sh" \
     "$project_dir/scripts/clasp-swarm-lane.sh" \
     "$project_dir/scripts/clasp-swarm-validate-task.mjs" \
+    "$project_dir/scripts/run-managed-job.sh" \
+    "$project_dir/scripts/stop-managed-job.sh" \
     "$project_dir/scripts/clasp-verifier.sh" \
     "$project_dir/scripts/verify-all.sh"
 
@@ -459,6 +486,8 @@ make_lane_merge_snapshot_gate_test_project() {
     "$project_root/scripts/clasp-swarm-common.sh" \
     "$project_root/scripts/clasp-swarm-lane.sh" \
     "$project_root/scripts/clasp-swarm-validate-task.mjs" \
+    "$project_root/scripts/run-managed-job.sh" \
+    "$project_root/scripts/stop-managed-job.sh" \
     "$project_dir/scripts/"
   cp "$project_root/agents/swarm/task.schema.json" "$project_dir/agents/swarm/task.schema.json"
 
@@ -536,6 +565,8 @@ EOF
     "$project_dir/scripts/clasp-swarm-common.sh" \
     "$project_dir/scripts/clasp-swarm-lane.sh" \
     "$project_dir/scripts/clasp-swarm-validate-task.mjs" \
+    "$project_dir/scripts/run-managed-job.sh" \
+    "$project_dir/scripts/stop-managed-job.sh" \
     "$project_dir/scripts/clasp-verifier.sh" \
     "$project_dir/scripts/verify-all.sh"
 
@@ -599,6 +630,8 @@ make_lane_cleanup_test_project() {
     "$project_root/scripts/clasp-swarm-common.sh" \
     "$project_root/scripts/clasp-swarm-lane.sh" \
     "$project_root/scripts/clasp-swarm-validate-task.mjs" \
+    "$project_root/scripts/run-managed-job.sh" \
+    "$project_root/scripts/stop-managed-job.sh" \
     "$project_dir/scripts/"
   cp "$project_root/agents/swarm/task.schema.json" "$project_dir/agents/swarm/task.schema.json"
 
@@ -668,6 +701,8 @@ EOF
     "$project_dir/scripts/clasp-swarm-common.sh" \
     "$project_dir/scripts/clasp-swarm-lane.sh" \
     "$project_dir/scripts/clasp-swarm-validate-task.mjs" \
+    "$project_dir/scripts/run-managed-job.sh" \
+    "$project_dir/scripts/stop-managed-job.sh" \
     "$project_dir/scripts/clasp-verifier.sh" \
     "$project_dir/scripts/verify-all.sh"
 
@@ -730,6 +765,8 @@ make_lane_worktree_retry_test_project() {
     "$project_root/scripts/clasp-swarm-common.sh" \
     "$project_root/scripts/clasp-swarm-lane.sh" \
     "$project_root/scripts/clasp-swarm-validate-task.mjs" \
+    "$project_root/scripts/run-managed-job.sh" \
+    "$project_root/scripts/stop-managed-job.sh" \
     "$project_dir/scripts/"
   cp "$project_root/agents/swarm/task.schema.json" "$project_dir/agents/swarm/task.schema.json"
 
@@ -823,6 +860,8 @@ EOF
     "$project_dir/scripts/clasp-swarm-common.sh" \
     "$project_dir/scripts/clasp-swarm-lane.sh" \
     "$project_dir/scripts/clasp-swarm-validate-task.mjs" \
+    "$project_dir/scripts/run-managed-job.sh" \
+    "$project_dir/scripts/stop-managed-job.sh" \
     "$project_dir/scripts/clasp-verifier.sh" \
     "$project_dir/scripts/verify-all.sh"
 
@@ -1116,21 +1155,35 @@ grep -F --quiet 'sandbox_mode="${CLASP_SWARM_CODEX_SANDBOX:-danger-full-access}"
 grep -F --quiet -- '--sandbox "$sandbox_mode"' "$project_root/scripts/clasp-verifier.sh"
 grep -F --quiet 'builder_timeout_seconds="${CLASP_SWARM_BUILDER_TIMEOUT_SECONDS:-0}"' "$project_root/scripts/clasp-swarm-lane.sh"
 grep -F --quiet 'if [[ -z "$timeout_seconds" || "$timeout_seconds" == "0" ]]; then' "$project_root/scripts/clasp-swarm-lane.sh"
+grep -F --quiet 'manage_child_subprocesses="${CLASP_SWARM_MANAGE_CHILD_SUBPROCESSES:-1}"' "$project_root/scripts/clasp-swarm-lane.sh"
+grep -F --quiet 'child_memory_mb="${CLASP_SWARM_CHILD_MEMORY_MB:-${CLASP_SWARM_LANE_MEMORY_MB:-8192}}"' "$project_root/scripts/clasp-swarm-lane.sh"
+grep -F --quiet 'run_lane_managed_subprocess "$timeout_seconds" "$@"' "$project_root/scripts/clasp-swarm-lane.sh"
+grep -F --quiet -- '--jobs-root "$child_jobs_root"' "$project_root/scripts/clasp-swarm-lane.sh"
+grep -F --quiet 'active_child_job_dir="$job_dir"' "$project_root/scripts/clasp-swarm-lane.sh"
+grep -F --quiet 'preflight-complete' "$project_root/scripts/clasp-swarm-common.sh"
 grep -F --quiet 'max_running_lanes="${CLASP_SWARM_MAX_RUNNING_LANES:-1}"' "$project_root/scripts/clasp-swarm-start.sh"
 grep -F --quiet 'lane_memory_mb="${CLASP_SWARM_LANE_MEMORY_MB:-8192}"' "$project_root/scripts/clasp-swarm-start.sh"
-grep -F --quiet 'min_available_memory_mb="${CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB:-40960}"' "$project_root/scripts/clasp-swarm-start.sh"
+grep -F --quiet 'min_available_memory_mb="${CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB:-45056}"' "$project_root/scripts/clasp-swarm-start.sh"
+grep -F --quiet 'min_available_disk_mb="${CLASP_SWARM_MIN_AVAILABLE_DISK_MB:-16384}"' "$project_root/scripts/clasp-swarm-start.sh"
+grep -F --quiet 'min_disk_headroom_mb="${CLASP_SWARM_MIN_DISK_HEADROOM_MB:-${CLASP_GENERATED_STATE_MIN_HEADROOM_MB:-1024}}"' "$project_root/scripts/clasp-swarm-start.sh"
 grep -F --quiet 'native_jobs_max="${CLASP_SWARM_NATIVE_JOBS_MAX:-1}"' "$project_root/scripts/clasp-swarm-start.sh"
 grep -F --quiet 'native_bundle_jobs="${CLASP_SWARM_NATIVE_BUNDLE_JOBS:-1}"' "$project_root/scripts/clasp-swarm-start.sh"
 grep -F --quiet 'native_image_section_jobs="${CLASP_SWARM_NATIVE_IMAGE_SECTION_JOBS:-1}"' "$project_root/scripts/clasp-swarm-start.sh"
 grep -F --quiet 'native_image_section_jobs_max="${CLASP_SWARM_NATIVE_IMAGE_SECTION_JOBS_MAX:-1}"' "$project_root/scripts/clasp-swarm-start.sh"
 grep -F --quiet 'required_available_memory_mb=$((required_available_memory_mb + (lane_memory_mb * (running_lanes + 1))))' "$project_root/scripts/clasp-swarm-start.sh"
 grep -F --quiet 'managed_job_args+=(--min-available-memory-mb "$min_available_memory_mb")' "$project_root/scripts/clasp-swarm-start.sh"
+grep -F --quiet 'managed_job_args+=(--min-available-disk-mb "$min_available_disk_mb" --disk-reserve-path "$project_root")' "$project_root/scripts/clasp-swarm-start.sh"
+grep -F --quiet 'managed_job_args+=(--min-disk-headroom-mb "$min_disk_headroom_mb" --disk-reserve-path "$project_root")' "$project_root/scripts/clasp-swarm-start.sh"
+grep -F --quiet 'CLASP_SWARM_CHILD_MEMORY_MB="${CLASP_SWARM_CHILD_MEMORY_MB:-$lane_memory_mb}"' "$project_root/scripts/clasp-swarm-start.sh"
+grep -F --quiet 'CLASP_SWARM_CHILD_MIN_AVAILABLE_MEMORY_MB="${CLASP_SWARM_CHILD_MIN_AVAILABLE_MEMORY_MB:-$min_available_memory_mb}"' "$project_root/scripts/clasp-swarm-start.sh"
 grep -F --quiet 'CLASP_NATIVE_JOBS_MAX="$native_jobs_max"' "$project_root/scripts/clasp-swarm-start.sh"
 grep -F --quiet 'CLASP_NATIVE_BUNDLE_JOBS="$native_bundle_jobs"' "$project_root/scripts/clasp-swarm-start.sh"
 grep -F --quiet 'CLASP_NATIVE_IMAGE_SECTION_JOBS_MAX="$native_image_section_jobs_max"' "$project_root/scripts/clasp-swarm-start.sh"
 grep -F --quiet 'resource guard: not starting lane=$lane_name' "$project_root/scripts/clasp-swarm-start.sh"
 grep -F --quiet 'force_signal_args=(--force-signal)' "$project_root/scripts/clasp-swarm-stop.sh"
 grep -F --quiet '"${force_signal_args[@]}" --jobs-root' "$project_root/scripts/clasp-swarm-stop.sh"
+grep -F --quiet 'stop_child_managed_jobs "$lane_name" "$runtime_root"' "$project_root/scripts/clasp-swarm-stop.sh"
+grep -F --quiet -- '--jobs-root "$child_jobs_root"' "$project_root/scripts/clasp-swarm-stop.sh"
 ! grep -F --quiet -- '--dangerously-bypass-approvals-and-sandbox' "$project_root/scripts/clasp-verifier.sh"
 
 bash -lc "
@@ -1145,6 +1198,12 @@ bash -lc "
   [[ \$(node '$project_root/scripts/clasp-swarm-validate-task.mjs' --print-field batchLabel '$project_root/agents/swarm/full/01-swarm-infra/SW-002-add-tests-for-autopilot-queue-behavior-especially-blocked-task-handling-workaround-generation-and-restart-behavior.md') == '' ]]
   [[ \$(node '$project_root/scripts/clasp-swarm-validate-task.mjs' --print-field dependencies '$project_root/agents/swarm/full/01-swarm-infra/SW-003-add-prompt-building-tests-so-builder-verifier-scripts-cannot-regress-into-shell-interpolation-or-oversized-prompt-failures.md') == 'SW-002' ]]
   [[ \$(node '$project_root/scripts/clasp-swarm-validate-task.mjs' --print-field dependencyLabels '$project_root/agents/swarm/full/01-swarm-infra/SW-005-add-a-merge-gate-that-copies-only-verified-workspace-changes-into-the-accepted-snapshot.md') == '' ]]
+  summary_row=\$(clasp_swarm_task_manifest_rows '$project_root/agents/swarm/full/01-swarm-infra/SW-003-add-prompt-building-tests-so-builder-verifier-scripts-cannot-regress-into-shell-interpolation-or-oversized-prompt-failures.md')
+  IFS=\$'\037' read -r summary_path summary_key summary_batch summary_dependencies summary_dependency_labels <<< \"\${summary_row//\$'\t'/\$'\037'}\"
+  [[ \"\$summary_key\" == 'SW-003' ]]
+  [[ \"\$summary_batch\" == '' ]]
+  [[ \"\$summary_dependencies\" == 'SW-002' ]]
+  [[ \"\$summary_dependency_labels\" == '' ]]
   [[ -z \$(bash '$project_root/scripts/clasp-swarm-start.sh' --list-batches full) ]]
   clasp_swarm_retry_limit_is_bounded '2'
   ! clasp_swarm_retry_limit_is_bounded '0'
@@ -1218,7 +1277,16 @@ bash -lc "
   printf 'base\n' > \"\$repo_root/file.txt\"
   git -C \"\$repo_root\" add file.txt
   git -C \"\$repo_root\" commit -m 'base' >/dev/null
+  git -C \"\$repo_root\" commit --allow-empty -m 'GF-001 completed through git fallback' >/dev/null
   git -C \"\$repo_root\" branch agents/swarm-trunk
+
+  mkdir -p \"\$repo_root/.clasp-swarm/completed\" \"\$repo_root/not-global-completed\"
+  clasp_swarm_task_is_completed \"\$repo_root/.clasp-swarm/completed\" GF-001 \"\$repo_root\" main agents/swarm-trunk
+  ! clasp_swarm_task_is_completed \"\$repo_root/not-global-completed\" GF-001 \"\$repo_root\" main agents/swarm-trunk
+  CLASP_SWARM_GIT_COMPLETION_FALLBACK=always \
+    clasp_swarm_task_is_completed \"\$repo_root/not-global-completed\" GF-001 \"\$repo_root\" main agents/swarm-trunk
+  ! env CLASP_SWARM_GIT_COMPLETION_FALLBACK=never bash -lc \"source '$project_root/scripts/clasp-swarm-common.sh'; clasp_swarm_task_is_completed '\$repo_root/.clasp-swarm/completed' GF-001 '\$repo_root' main agents/swarm-trunk\"
+  unset CLASP_SWARM_GIT_COMPLETION_FALLBACK
 
   printf 'main-only\n' >> \"\$repo_root/file.txt\"
   git -C \"\$repo_root\" commit -am 'main update' >/dev/null
@@ -1293,9 +1361,15 @@ status_wave_name="status-test-$$"
 status_lane_root_1="$project_root/agents/swarm/$status_wave_name/01-active"
 status_lane_root_2="$project_root/agents/swarm/$status_wave_name/02-idle"
 status_lane_root_3="$project_root/agents/swarm/$status_wave_name/03-interrupted"
+status_lane_root_4="$project_root/agents/swarm/$status_wave_name/04-admission"
+status_lane_root_5="$project_root/agents/swarm/$status_wave_name/05-enforcer"
+status_lane_root_6="$project_root/agents/swarm/$status_wave_name/06-disk"
 status_runtime_root_1="$project_root/.clasp-swarm/$status_wave_name/01-active"
 status_runtime_root_2="$project_root/.clasp-swarm/$status_wave_name/02-idle"
 status_runtime_root_3="$project_root/.clasp-swarm/$status_wave_name/03-interrupted"
+status_runtime_root_4="$project_root/.clasp-swarm/$status_wave_name/04-admission"
+status_runtime_root_5="$project_root/.clasp-swarm/$status_wave_name/05-enforcer"
+status_runtime_root_6="$project_root/.clasp-swarm/$status_wave_name/06-disk"
 status_text_output="$(mktemp)"
 status_json_output="$(mktemp)"
 
@@ -1305,6 +1379,9 @@ mkdir -p \
   "$status_lane_root_1" \
   "$status_lane_root_2" \
   "$status_lane_root_3" \
+  "$status_lane_root_4" \
+  "$status_lane_root_5" \
+  "$status_lane_root_6" \
   "$status_runtime_root_1/completed" \
   "$status_runtime_root_1/blocked" \
   "$status_runtime_root_1/runs/20260314T120000Z-AA-100-sample-attempt1" \
@@ -1315,7 +1392,20 @@ mkdir -p \
   "$status_runtime_root_3/completed" \
   "$status_runtime_root_3/blocked" \
   "$status_runtime_root_3/jobs/stopped-job" \
-  "$status_runtime_root_3/runs/20260314T123000Z-CC-300-interrupted-attempt1"
+  "$status_runtime_root_3/child-jobs/clasp-builder-20260314T123001Z" \
+  "$status_runtime_root_3/runs/20260314T123000Z-CC-300-interrupted-attempt1" \
+  "$status_runtime_root_4/completed" \
+  "$status_runtime_root_4/blocked" \
+  "$status_runtime_root_4/jobs/admission-job" \
+  "$status_runtime_root_4/runs/20260314T124000Z-DD-400-admission-attempt1" \
+  "$status_runtime_root_5/completed" \
+  "$status_runtime_root_5/blocked" \
+  "$status_runtime_root_5/jobs/enforcer-job" \
+  "$status_runtime_root_5/runs/20260314T125000Z-EE-500-enforcer-attempt1" \
+  "$status_runtime_root_6/completed" \
+  "$status_runtime_root_6/blocked" \
+  "$status_runtime_root_6/jobs/disk-job" \
+  "$status_runtime_root_6/runs/20260314T130000Z-FF-600-disk-attempt1"
 
 cat > "$status_lane_root_3/CC-300-interrupted.md" <<'EOF'
 # CC-300 Interrupted
@@ -1324,9 +1414,33 @@ cat > "$status_lane_root_3/CC-300-interrupted.md" <<'EOF'
 
 Exercise reportless stopped-run status classification.
 EOF
+cat > "$status_lane_root_4/DD-400-admission.md" <<'EOF'
+# DD-400 Admission
+
+## Goal
+
+Exercise reportless admission-lock failure classification.
+EOF
+cat > "$status_lane_root_5/EE-500-enforcer.md" <<'EOF'
+# EE-500 Enforcer
+
+## Goal
+
+Exercise reportless memory-enforcer failure classification.
+EOF
+cat > "$status_lane_root_6/FF-600-disk.md" <<'EOF'
+# FF-600 Disk
+
+## Goal
+
+Exercise reportless disk-guard failure classification and recovery hints.
+EOF
 
 printf '%s\n' "AA-100-sample" > "$status_runtime_root_1/current-task.txt"
 printf '%s\n' "CC-300-interrupted" > "$status_runtime_root_3/current-task.txt"
+printf '%s\n' "DD-400-admission" > "$status_runtime_root_4/current-task.txt"
+printf '%s\n' "EE-500-enforcer" > "$status_runtime_root_5/current-task.txt"
+printf '%s\n' "FF-600-disk" > "$status_runtime_root_6/current-task.txt"
 printf '%s\n' "done" > "$status_runtime_root_1/completed/AA-001"
 printf '%s\n' "done" > "$status_runtime_root_1/completed/AA-002"
 printf '%s\n' '{}' > "$status_runtime_root_1/blocked/AA-003.json"
@@ -1372,13 +1486,57 @@ idle line 2
 EOF
 
 printf '%s\n' "$status_runtime_root_3/jobs/stopped-job" > "$status_runtime_root_3/job"
-printf '%s\n' "stopped" > "$status_runtime_root_3/jobs/stopped-job/status"
-printf '%s\n' "143" > "$status_runtime_root_3/jobs/stopped-job/exit-status"
+printf '%s\n' "memory-exceeded" > "$status_runtime_root_3/jobs/stopped-job/status"
+printf '%s\n' "137" > "$status_runtime_root_3/jobs/stopped-job/exit-status"
 printf '%s\n' "512" > "$status_runtime_root_3/jobs/stopped-job/memory-mb"
 printf '%s\n' "2048" > "$status_runtime_root_3/jobs/stopped-job/min-available-memory-mb"
 printf '%s\n' "systemd-scope" > "$status_runtime_root_3/jobs/stopped-job/memory-enforcer"
+cat > "$status_runtime_root_3/jobs/stopped-job/memory-exceeded" <<'EOF'
+reason=host-available-memory-reserve
+phase=watch
+EOF
+printf '%s\n' "memory-exceeded" > "$status_runtime_root_3/child-jobs/clasp-builder-20260314T123001Z/status"
+printf '%s\n' "137" > "$status_runtime_root_3/child-jobs/clasp-builder-20260314T123001Z/exit-status"
+printf '%s\n' "256" > "$status_runtime_root_3/child-jobs/clasp-builder-20260314T123001Z/memory-mb"
+printf '%s\n' "1024" > "$status_runtime_root_3/child-jobs/clasp-builder-20260314T123001Z/min-available-memory-mb"
+printf '%s\n' "systemd-scope" > "$status_runtime_root_3/child-jobs/clasp-builder-20260314T123001Z/memory-enforcer"
+cat > "$status_runtime_root_3/child-jobs/clasp-builder-20260314T123001Z/memory-exceeded" <<'EOF'
+reason=host-available-memory-reserve
+phase=preflight
+EOF
 cat > "$status_runtime_root_3/lane.log" <<'EOF'
 interrupted line 1
+EOF
+printf '%s\n' "$status_runtime_root_4/jobs/admission-job" > "$status_runtime_root_4/job"
+printf '%s\n' "admission-lock-unavailable" > "$status_runtime_root_4/jobs/admission-job/status"
+printf '%s\n' "125" > "$status_runtime_root_4/jobs/admission-job/exit-status"
+cat > "$status_runtime_root_4/jobs/admission-job/admission-error" <<'EOF'
+reason=admission-lock-open-failed
+EOF
+cat > "$status_runtime_root_4/lane.log" <<'EOF'
+admission line 1
+EOF
+printf '%s\n' "$status_runtime_root_5/jobs/enforcer-job" > "$status_runtime_root_5/job"
+printf '%s\n' "memory-enforcer-unavailable" > "$status_runtime_root_5/jobs/enforcer-job/status"
+printf '%s\n' "125" > "$status_runtime_root_5/jobs/enforcer-job/exit-status"
+cat > "$status_runtime_root_5/jobs/enforcer-job/memory-enforcer-error" <<'EOF'
+reason=systemd-scope-required-unavailable
+EOF
+cat > "$status_runtime_root_5/lane.log" <<'EOF'
+enforcer line 1
+EOF
+printf '%s\n' "$status_runtime_root_6/jobs/disk-job" > "$status_runtime_root_6/job"
+printf '%s\n' "disk-exceeded" > "$status_runtime_root_6/jobs/disk-job/status"
+printf '%s\n' "123" > "$status_runtime_root_6/jobs/disk-job/exit-status"
+cat > "$status_runtime_root_6/jobs/disk-job/disk-exceeded" <<'EOF'
+reason=host-available-disk-headroom
+phase=watch
+recovery_command=bash scripts/clasp-clean-generated-state.sh --health --json --include-run-binary-cache --include-temp-caches --include-build-caches --include-codex-logs
+recovery_apply_command=bash scripts/clasp-clean-generated-state.sh --apply --include-run-binary-cache --include-temp-caches --include-build-caches --include-codex-logs
+recovery_note=inspect the health report and run apply only when safeToClean is true
+EOF
+cat > "$status_runtime_root_6/lane.log" <<'EOF'
+disk line 1
 EOF
 
 sleep 30 >/dev/null 2>&1 &
@@ -1400,8 +1558,8 @@ bash -lc "
   set -euo pipefail
   text=\$(cat '$status_text_output')
   [[ \"\$text\" == *'wave: $status_wave_name'* ]]
-  [[ \"\$text\" == *'summary: lanes=3 running=1 stopped=2 completed=3 blocked=1'* ]]
-  [[ \"\$text\" == *'run-states: builder-complete=1 pass=1 stopped-before-report=1'* ]]
+  [[ \"\$text\" == *'summary: lanes=6 running=1 stopped=5 completed=3 blocked=1'* ]]
+  [[ \"\$text\" == *'run-states: admission-lock-unavailable=1 builder-complete=1 disk-exceeded=1 memory-enforcer-unavailable=1 memory-exceeded=1 pass=1'* ]]
   [[ \"\$text\" == *'lane: 01-active'* ]]
   [[ \"\$text\" == *'stale pid: '* ]]
   [[ \"\$text\" == *'current task: AA-100-sample'* ]]
@@ -1413,14 +1571,51 @@ bash -lc "
   [[ \"\$text\" == *'run status: builder-complete'* ]]
   [[ \"\$text\" == *'run summary: builder summary only'* ]]
   [[ \"\$text\" == *'lane: 03-interrupted'* ]]
-  [[ \"\$text\" == *'managed job status: stopped'* ]]
-  [[ \"\$text\" == *'managed job exit: 143'* ]]
+  [[ \"\$text\" == *'managed job status: memory-exceeded'* ]]
+  [[ \"\$text\" == *'managed job exit: 137'* ]]
   [[ \"\$text\" == *'managed job memory mb: 512'* ]]
   [[ \"\$text\" == *'managed job min available memory mb: 2048'* ]]
   [[ \"\$text\" == *'managed job memory enforcer: systemd-scope'* ]]
+  [[ \"\$text\" == *'managed job memory exceeded: true'* ]]
+  [[ \"\$text\" == *'managed job failure reason: host-available-memory-reserve'* ]]
+  [[ \"\$text\" == *'managed job failure phase: watch'* ]]
+  [[ \"\$text\" == *'latest child job: clasp-builder-20260314T123001Z'* ]]
+  [[ \"\$text\" == *'child job status: memory-exceeded'* ]]
+  [[ \"\$text\" == *'child job exit: 137'* ]]
+  [[ \"\$text\" == *'child job memory mb: 256'* ]]
+  [[ \"\$text\" == *'child job min available memory mb: 1024'* ]]
+  [[ \"\$text\" == *'child job memory enforcer: systemd-scope'* ]]
+  [[ \"\$text\" == *'child job memory exceeded: true'* ]]
+  [[ \"\$text\" == *'child job failure reason: host-available-memory-reserve'* ]]
+  [[ \"\$text\" == *'child job failure phase: preflight'* ]]
   [[ \"\$text\" == *'current task: CC-300-interrupted'* ]]
-  [[ \"\$text\" == *'run status: stopped-before-report'* ]]
-  [[ \"\$text\" == *'run summary: Lane 03-interrupted was stopped before writing a structured report.'* ]]
+  [[ \"\$text\" == *'run status: memory-exceeded'* ]]
+  [[ \"\$text\" == *'run summary: Lane 03-interrupted stopped before writing a structured report because the managed job exceeded its memory guard.'* ]]
+  [[ \"\$text\" == *'lane: 04-admission'* ]]
+  [[ \"\$text\" == *'managed job status: admission-lock-unavailable'* ]]
+  [[ \"\$text\" == *'managed job admission error: true'* ]]
+  [[ \"\$text\" == *'managed job failure reason: admission-lock-open-failed'* ]]
+  [[ \"\$text\" == *'current task: DD-400-admission'* ]]
+  [[ \"\$text\" == *'run status: admission-lock-unavailable'* ]]
+  [[ \"\$text\" == *'run summary: Lane 04-admission stopped before writing a structured report because the managed-job admission lock was unavailable.'* ]]
+  [[ \"\$text\" == *'lane: 05-enforcer'* ]]
+  [[ \"\$text\" == *'managed job status: memory-enforcer-unavailable'* ]]
+  [[ \"\$text\" == *'managed job memory enforcer error: true'* ]]
+  [[ \"\$text\" == *'managed job failure reason: systemd-scope-required-unavailable'* ]]
+  [[ \"\$text\" == *'current task: EE-500-enforcer'* ]]
+  [[ \"\$text\" == *'run status: memory-enforcer-unavailable'* ]]
+  [[ \"\$text\" == *'run summary: Lane 05-enforcer stopped before writing a structured report because the managed-job memory enforcer was unavailable.'* ]]
+  [[ \"\$text\" == *'lane: 06-disk'* ]]
+  [[ \"\$text\" == *'managed job status: disk-exceeded'* ]]
+  [[ \"\$text\" == *'managed job disk exceeded: true'* ]]
+  [[ \"\$text\" == *'managed job failure reason: host-available-disk-headroom'* ]]
+  [[ \"\$text\" == *'managed job failure phase: watch'* ]]
+  [[ \"\$text\" == *'managed job recovery command: bash scripts/clasp-clean-generated-state.sh --health --json --include-run-binary-cache --include-temp-caches --include-build-caches --include-codex-logs'* ]]
+  [[ \"\$text\" == *'managed job recovery apply command: bash scripts/clasp-clean-generated-state.sh --apply --include-run-binary-cache --include-temp-caches --include-build-caches --include-codex-logs'* ]]
+  [[ \"\$text\" == *'managed job recovery note: inspect the health report and run apply only when safeToClean is true'* ]]
+  [[ \"\$text\" == *'current task: FF-600-disk'* ]]
+  [[ \"\$text\" == *'run status: disk-exceeded'* ]]
+  [[ \"\$text\" == *'run summary: Lane 06-disk stopped before writing a structured report because the managed job exceeded its disk guard.'* ]]
   [[ \"\$text\" == *'line 6'* ]]
   [[ \"\$text\" == *'idle line 2'* ]]
   node - <<'EOF' '$status_json_output' '$status_wave_name' '$status_live_pid'
@@ -1430,22 +1625,32 @@ const payload = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
 if (payload.wave !== expectedWave) {
   throw new Error(\`unexpected wave: \${payload.wave}\`);
 }
-if (payload.summary.laneCount !== 3 || payload.summary.runningCount !== 1 || payload.summary.stoppedCount !== 2) {
+if (payload.summary.laneCount !== 6 || payload.summary.runningCount !== 1 || payload.summary.stoppedCount !== 5) {
   throw new Error('unexpected lane summary counts');
 }
 if (payload.summary.completedCount !== 3 || payload.summary.blockedCount !== 1) {
   throw new Error('unexpected completion summary counts');
 }
-if (payload.summary.runStateCounts?.pass !== 1 || payload.summary.runStateCounts?.['builder-complete'] !== 1 || payload.summary.runStateCounts?.['stopped-before-report'] !== 1) {
+if (
+  payload.summary.runStateCounts?.pass !== 1 ||
+  payload.summary.runStateCounts?.['builder-complete'] !== 1 ||
+  payload.summary.runStateCounts?.['memory-exceeded'] !== 1 ||
+  payload.summary.runStateCounts?.['disk-exceeded'] !== 1 ||
+  payload.summary.runStateCounts?.['admission-lock-unavailable'] !== 1 ||
+  payload.summary.runStateCounts?.['memory-enforcer-unavailable'] !== 1
+) {
   throw new Error('unexpected run-state summary counts');
 }
-if (Object.keys(payload.summary.runStateCounts || {}).length !== 3) {
+if (Object.keys(payload.summary.runStateCounts || {}).length !== 6) {
   throw new Error('unexpected run-state summary keys');
 }
 const active = payload.lanes.find((lane) => lane.lane === '01-active');
 const idle = payload.lanes.find((lane) => lane.lane === '02-idle');
 const interrupted = payload.lanes.find((lane) => lane.lane === '03-interrupted');
-if (!active || !idle || !interrupted) {
+const admission = payload.lanes.find((lane) => lane.lane === '04-admission');
+const enforcer = payload.lanes.find((lane) => lane.lane === '05-enforcer');
+const disk = payload.lanes.find((lane) => lane.lane === '06-disk');
+if (!active || !idle || !interrupted || !admission || !enforcer || !disk) {
   throw new Error('expected all lanes in JSON output');
 }
 if (active.status !== 'stopped' || active.stalePid === null || active.currentTask !== 'AA-100-sample') {
@@ -1460,14 +1665,113 @@ if (idle.status !== 'running' || String(idle.pid) !== livePid) {
 if (idle.latestRun?.status !== 'builder-complete' || idle.latestRun?.summary !== 'builder summary only') {
   throw new Error('unexpected idle-lane run summary');
 }
-if (interrupted.status !== 'stopped' || interrupted.managedJobStatus !== 'stopped' || interrupted.managedJobExitStatus !== '143') {
+if (interrupted.status !== 'stopped' || interrupted.managedJobStatus !== 'memory-exceeded' || interrupted.managedJobExitStatus !== '137') {
   throw new Error('unexpected interrupted-lane job state');
 }
 if (interrupted.managedJobMemoryMb !== 512 || interrupted.managedJobMinAvailableMemoryMb !== 2048 || interrupted.managedJobMemoryEnforcer !== 'systemd-scope') {
   throw new Error('unexpected interrupted-lane memory guard state');
 }
-if (interrupted.latestRun?.status !== 'stopped-before-report' || interrupted.latestRun?.summary !== 'Lane 03-interrupted was stopped before writing a structured report.') {
+if (interrupted.managedJobMemoryExceeded !== true || interrupted.managedJobDiskExceeded !== false) {
+  throw new Error('unexpected interrupted-lane managed guard markers');
+}
+if (interrupted.managedJobFailureReason !== 'host-available-memory-reserve' || interrupted.managedJobFailurePhase !== 'watch') {
+  throw new Error('unexpected interrupted-lane managed failure detail');
+}
+if (!interrupted.latestChildJob || interrupted.latestChildJob.name !== 'clasp-builder-20260314T123001Z') {
+  throw new Error('missing interrupted-lane child job state');
+}
+if (interrupted.latestChildJob.status !== 'memory-exceeded' || interrupted.latestChildJob.exitStatus !== '137') {
+  throw new Error('unexpected interrupted-lane child job status');
+}
+if (interrupted.latestChildJob.memoryMb !== 256 || interrupted.latestChildJob.minAvailableMemoryMb !== 1024 || interrupted.latestChildJob.memoryEnforcer !== 'systemd-scope') {
+  throw new Error('unexpected interrupted-lane child guard state');
+}
+if (interrupted.latestChildJob.memoryExceeded !== true || interrupted.latestChildJob.diskExceeded !== false) {
+  throw new Error('unexpected interrupted-lane child guard markers');
+}
+if (interrupted.latestChildJob.failureReason !== 'host-available-memory-reserve' || interrupted.latestChildJob.failurePhase !== 'preflight') {
+  throw new Error('unexpected interrupted-lane child failure detail');
+}
+if (interrupted.latestRun?.status !== 'memory-exceeded' || interrupted.latestRun?.summary !== 'Lane 03-interrupted stopped before writing a structured report because the managed job exceeded its memory guard.') {
   throw new Error('unexpected interrupted-lane run summary');
+}
+if (
+  interrupted.recommendedAction?.type !== 'reduce-memory-pressure' ||
+  interrupted.recommendedAction?.reason !== 'host-available-memory-reserve' ||
+  interrupted.recommendedAction?.phase !== 'watch' ||
+  interrupted.recommendedAction?.command !== null ||
+  !interrupted.recommendedAction?.note?.includes('lower swarm concurrency')
+) {
+  throw new Error('unexpected interrupted-lane recommended action');
+}
+if (admission.status !== 'stopped' || admission.managedJobStatus !== 'admission-lock-unavailable' || admission.managedJobExitStatus !== '125') {
+  throw new Error('unexpected admission-lane job state');
+}
+if (admission.managedJobAdmissionError !== true || admission.managedJobMemoryEnforcerError !== false) {
+  throw new Error('unexpected admission-lane managed error markers');
+}
+if (admission.managedJobFailureReason !== 'admission-lock-open-failed') {
+  throw new Error('unexpected admission-lane failure reason');
+}
+if (admission.latestRun?.status !== 'admission-lock-unavailable' || admission.latestRun?.summary !== 'Lane 04-admission stopped before writing a structured report because the managed-job admission lock was unavailable.') {
+  throw new Error('unexpected admission-lane run summary');
+}
+if (
+  admission.recommendedAction?.type !== 'repair-admission-lock' ||
+  admission.recommendedAction?.reason !== 'admission-lock-open-failed' ||
+  !admission.recommendedAction?.note?.includes('admission lock')
+) {
+  throw new Error('unexpected admission-lane recommended action');
+}
+if (enforcer.status !== 'stopped' || enforcer.managedJobStatus !== 'memory-enforcer-unavailable' || enforcer.managedJobExitStatus !== '125') {
+  throw new Error('unexpected enforcer-lane job state');
+}
+if (enforcer.managedJobAdmissionError !== false || enforcer.managedJobMemoryEnforcerError !== true) {
+  throw new Error('unexpected enforcer-lane managed error markers');
+}
+if (enforcer.managedJobFailureReason !== 'systemd-scope-required-unavailable') {
+  throw new Error('unexpected enforcer-lane failure reason');
+}
+if (enforcer.latestRun?.status !== 'memory-enforcer-unavailable' || enforcer.latestRun?.summary !== 'Lane 05-enforcer stopped before writing a structured report because the managed-job memory enforcer was unavailable.') {
+  throw new Error('unexpected enforcer-lane run summary');
+}
+if (
+  enforcer.recommendedAction?.type !== 'repair-memory-enforcer' ||
+  enforcer.recommendedAction?.reason !== 'systemd-scope-required-unavailable' ||
+  !enforcer.recommendedAction?.note?.includes('memory enforcer')
+) {
+  throw new Error('unexpected enforcer-lane recommended action');
+}
+if (disk.status !== 'stopped' || disk.managedJobStatus !== 'disk-exceeded' || disk.managedJobExitStatus !== '123') {
+  throw new Error('unexpected disk-lane job state');
+}
+if (disk.managedJobDiskExceeded !== true || disk.managedJobMemoryExceeded !== false) {
+  throw new Error('unexpected disk-lane managed guard markers');
+}
+if (disk.managedJobFailureReason !== 'host-available-disk-headroom' || disk.managedJobFailurePhase !== 'watch') {
+  throw new Error('unexpected disk-lane failure detail');
+}
+if (disk.managedJobRecoveryCommand !== 'bash scripts/clasp-clean-generated-state.sh --health --json --include-run-binary-cache --include-temp-caches --include-build-caches --include-codex-logs') {
+  throw new Error('unexpected disk-lane recovery command');
+}
+if (disk.managedJobRecoveryApplyCommand !== 'bash scripts/clasp-clean-generated-state.sh --apply --include-run-binary-cache --include-temp-caches --include-build-caches --include-codex-logs') {
+  throw new Error('unexpected disk-lane recovery apply command');
+}
+if (disk.managedJobRecoveryNote !== 'inspect the health report and run apply only when safeToClean is true') {
+  throw new Error('unexpected disk-lane recovery note');
+}
+if (disk.latestRun?.status !== 'disk-exceeded' || disk.latestRun?.summary !== 'Lane 06-disk stopped before writing a structured report because the managed job exceeded its disk guard.') {
+  throw new Error('unexpected disk-lane run summary');
+}
+if (
+  disk.recommendedAction?.type !== 'recover-disk' ||
+  disk.recommendedAction?.reason !== 'host-available-disk-headroom' ||
+  disk.recommendedAction?.phase !== 'watch' ||
+  disk.recommendedAction?.command !== 'bash scripts/clasp-clean-generated-state.sh --health --json --include-run-binary-cache --include-temp-caches --include-build-caches --include-codex-logs' ||
+  disk.recommendedAction?.applyCommand !== 'bash scripts/clasp-clean-generated-state.sh --apply --include-run-binary-cache --include-temp-caches --include-build-caches --include-codex-logs' ||
+  disk.recommendedAction?.note !== 'inspect the health report and run apply only when safeToClean is true'
+) {
+  throw new Error('unexpected disk-lane recommended action');
 }
 if (!Array.isArray(active.recentLogLines) || active.recentLogLines.at(-1) !== 'line 6') {
   throw new Error('unexpected active-lane log tail');
@@ -1481,6 +1785,60 @@ EOF
 kill "$status_live_pid" >/dev/null 2>&1 || true
 wait "$status_live_pid" 2>/dev/null || true
 status_live_pid=""
+
+stop_child_wave_name="stop-child-test-$$"
+stop_child_lane_root="$project_root/agents/swarm/$stop_child_wave_name/01-child"
+stop_child_runtime_root="$project_root/.clasp-swarm/$stop_child_wave_name/01-child"
+mkdir -p "$stop_child_lane_root" "$stop_child_runtime_root/child-jobs"
+
+cat > "$stop_child_lane_root/SC-001-child-stop.md" <<'EOF'
+# SC-001 Child Stop
+
+## Goal
+
+Exercise exact managed-child stop behavior for orphaned child jobs.
+EOF
+
+stop_child_job="$(
+  CLASP_MANAGED_JOB_USE_SYSTEMD_SCOPE=never \
+  CLASP_MANAGED_JOB_DEFAULT_MIN_AVAILABLE_MEMORY_MB=0 \
+    "$project_root/scripts/run-managed-job.sh" \
+      --jobs-root "$stop_child_runtime_root/child-jobs" \
+      --job-id orphan-child \
+      --memory-mb 64 \
+      --min-available-memory-mb 1 \
+      -- bash -c 'while true; do sleep 1; done'
+)"
+
+bash -lc "
+  set -euo pipefail
+  deadline=\$((SECONDS + 5))
+  while [[ ! -f '$stop_child_job/pid' ]]; do
+    if (( SECONDS >= deadline )); then
+      echo 'timed out waiting for orphan child managed job' >&2
+      exit 1
+    fi
+    sleep 0.05
+  done
+  child_pid=\$(tr -d '[:space:]' < '$stop_child_job/pid')
+  [[ \$(sed -n '1p' '$stop_child_job/status') == 'started' ]]
+  kill -0 \"\$child_pid\" >/dev/null 2>&1
+
+  output=\$(CLASP_MANAGED_JOB_STOP_TIMEOUT_SECS=10 CLASP_MANAGED_JOB_KILL_AFTER_SECS=1 bash '$project_root/scripts/clasp-swarm-stop.sh' '$stop_child_wave_name')
+  [[ \"\$output\" == *'stopped lane=01-child child=orphan-child pid='* ]]
+  [[ \"\$output\" == *'lane 01-child is not running'* ]]
+  [[ \$(sed -n '1p' '$stop_child_job/status') == 'stopped' ]]
+  [[ -f '$stop_child_job/exit-status' ]]
+
+  deadline=\$((SECONDS + 5))
+  while kill -0 \"\$child_pid\" >/dev/null 2>&1; do
+    if (( SECONDS >= deadline )); then
+      echo \"orphan child managed job survived stop: \$child_pid\" >&2
+      exit 1
+    fi
+    sleep 0.05
+  done
+" >/dev/null
 
 summary_wave_name="summary-test-$$"
 summary_lane_root_1="$project_root/agents/swarm/$summary_wave_name/01-core"
@@ -1996,7 +2354,7 @@ bash -lc "
   batches=\$(bash scripts/clasp-swarm-start.sh --list-batches test-wave)
   [[ \"\$batches\" == *'foundation'* ]]
 
-  output=\$(CLASP_SWARM_ALLOW_DIRTY=1 CLASP_SWARM_MAX_RUNNING_LANES=2 CLASP_SWARM_LANE_MEMORY_MB=1024 CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB=1 bash scripts/clasp-swarm-start.sh --batch foundation test-wave)
+  output=\$(CLASP_SWARM_ALLOW_DIRTY=1 CLASP_SWARM_MAX_RUNNING_LANES=2 CLASP_SWARM_LANE_MEMORY_MB=1024 CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB=1 CLASP_SWARM_MIN_AVAILABLE_DISK_MB=0 CLASP_SWARM_MIN_DISK_HEADROOM_MB=0 bash scripts/clasp-swarm-start.sh --batch foundation test-wave)
   [[ \"\$output\" == *'batch=foundation'* ]]
   [[ \"\$output\" == *'lane=01-foundation-a'* ]]
   [[ \"\$output\" == *'lane=02-foundation-b'* ]]
@@ -2016,7 +2374,7 @@ bash -lc "
   [[ ! -f BA-003-follow-up.txt ]]
   [[ \$(sort builder-events.log | tr '\n' ' ') == 'BA-001-foundation-a BA-002-foundation-b ' ]]
 
-  CLASP_SWARM_ALLOW_DIRTY=1 CLASP_SWARM_LANE_MEMORY_MB=1024 CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB=1 bash scripts/clasp-swarm-start.sh test-wave >/dev/null
+  CLASP_SWARM_ALLOW_DIRTY=1 CLASP_SWARM_LANE_MEMORY_MB=1024 CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB=1 CLASP_SWARM_MIN_AVAILABLE_DISK_MB=0 CLASP_SWARM_MIN_DISK_HEADROOM_MB=0 bash scripts/clasp-swarm-start.sh test-wave >/dev/null
   deadline=\$((SECONDS + 20))
   while [[ -f .clasp-swarm/test-wave/03-follow-up/pid ]]; do
     if (( SECONDS >= deadline )); then
@@ -2036,7 +2394,7 @@ bash -lc "
   set -euo pipefail
   cd '$swarm_resource_cap_project_root'
 
-  output=\$(CLASP_SWARM_ALLOW_DIRTY=1 CLASP_SWARM_MAX_RUNNING_LANES=1 CLASP_SWARM_LANE_MEMORY_MB=1024 CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB=1 CLASP_SWARM_TEST_BUILDER_SLEEP_SECS=2 bash scripts/clasp-swarm-start.sh --batch foundation test-wave)
+  output=\$(CLASP_SWARM_ALLOW_DIRTY=1 CLASP_SWARM_MAX_RUNNING_LANES=1 CLASP_SWARM_LANE_MEMORY_MB=1024 CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB=1 CLASP_SWARM_MIN_AVAILABLE_DISK_MB=0 CLASP_SWARM_MIN_DISK_HEADROOM_MB=0 CLASP_SWARM_TEST_BUILDER_SLEEP_SECS=2 bash scripts/clasp-swarm-start.sh --batch foundation test-wave)
   [[ \"\$output\" == *'started lane=01-foundation-a'* ]]
   [[ \"\$output\" == *'resource guard: not starting lane=02-foundation-b; running_lanes=1 max_running_lanes=1'* ]]
   [[ ! -f .clasp-swarm/test-wave/02-foundation-b/job ]]
@@ -2053,7 +2411,7 @@ bash -lc "
     sleep 0.2
   done
 
-  output=\$(CLASP_SWARM_ALLOW_DIRTY=1 CLASP_SWARM_MAX_RUNNING_LANES=1 CLASP_SWARM_LANE_MEMORY_MB=1024 CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB=1 bash scripts/clasp-swarm-start.sh --batch foundation test-wave)
+  output=\$(CLASP_SWARM_ALLOW_DIRTY=1 CLASP_SWARM_MAX_RUNNING_LANES=1 CLASP_SWARM_LANE_MEMORY_MB=1024 CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB=1 CLASP_SWARM_MIN_AVAILABLE_DISK_MB=0 CLASP_SWARM_MIN_DISK_HEADROOM_MB=0 bash scripts/clasp-swarm-start.sh --batch foundation test-wave)
   [[ \"\$output\" == *'started lane=02-foundation-b'* ]]
 
   deadline=\$((SECONDS + 20))
@@ -2079,27 +2437,110 @@ bash -lc "
   cd '$swarm_memory_guard_project_root'
 
   set +e
-  invalid_output=\$(CLASP_SWARM_ALLOW_DIRTY=1 CLASP_SWARM_MAX_RUNNING_LANES=not-a-number bash scripts/clasp-swarm-start.sh --batch foundation test-wave 2>&1)
+  invalid_output=\$(CLASP_SWARM_ALLOW_DIRTY=1 CLASP_SWARM_MIN_AVAILABLE_DISK_MB=0 CLASP_SWARM_MIN_DISK_HEADROOM_MB=0 CLASP_SWARM_MAX_RUNNING_LANES=not-a-number bash scripts/clasp-swarm-start.sh --batch foundation test-wave 2>&1)
   invalid_status=\$?
   set -e
   [[ \"\$invalid_status\" -ne 0 ]]
   [[ \"\$invalid_output\" == *'CLASP_SWARM_MAX_RUNNING_LANES must be a non-negative integer'* ]]
 
-  output=\$(CLASP_SWARM_ALLOW_DIRTY=1 CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB=999999999 bash scripts/clasp-swarm-start.sh --batch foundation test-wave)
+  output=\$(CLASP_SWARM_ALLOW_DIRTY=1 CLASP_SWARM_MIN_AVAILABLE_DISK_MB=0 CLASP_SWARM_MIN_DISK_HEADROOM_MB=0 CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB=999999999 bash scripts/clasp-swarm-start.sh --batch foundation test-wave)
   [[ \"\$output\" == *'resource guard: not starting lane=01-foundation-a; available_memory_mb='* ]]
   [[ \"\$output\" == *'min_available_memory_mb=999999999'* ]]
   [[ ! -f .clasp-swarm/test-wave/01-foundation-a/job ]]
   [[ ! -f .clasp-swarm/test-wave/02-foundation-b/job ]]
   [[ ! -f builder-events.log ]]
 
-  output=\$(CLASP_SWARM_ALLOW_DIRTY=1 CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB=0 CLASP_SWARM_LANE_MEMORY_MB=999999999 bash scripts/clasp-swarm-start.sh --batch foundation test-wave)
+  output=\$(CLASP_SWARM_ALLOW_DIRTY=1 CLASP_SWARM_MIN_AVAILABLE_DISK_MB=0 CLASP_SWARM_MIN_DISK_HEADROOM_MB=0 CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB=0 CLASP_SWARM_LANE_MEMORY_MB=999999999 bash scripts/clasp-swarm-start.sh --batch foundation test-wave)
   [[ \"\$output\" == *'resource guard: not starting lane=01-foundation-a; available_memory_mb='* ]]
   [[ \"\$output\" == *'required_available_memory_mb=999999999'* ]]
   [[ \"\$output\" == *'lane_memory_mb=999999999'* ]]
   [[ ! -f .clasp-swarm/test-wave/01-foundation-a/job ]]
   [[ ! -f .clasp-swarm/test-wave/02-foundation-b/job ]]
   [[ ! -f builder-events.log ]]
-" >/dev/null
+
+	  output=\$(CLASP_SWARM_ALLOW_DIRTY=1 CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB=0 CLASP_SWARM_LANE_MEMORY_MB=0 CLASP_SWARM_MIN_AVAILABLE_DISK_MB=999999999 bash scripts/clasp-swarm-start.sh --batch foundation test-wave)
+	  [[ \"\$output\" == *'resource guard: not starting lane=01-foundation-a; available_disk_mb='* ]]
+	  [[ \"\$output\" == *'min_available_disk_mb=999999999'* ]]
+	  [[ ! -f .clasp-swarm/test-wave/01-foundation-a/job ]]
+	  [[ ! -f .clasp-swarm/test-wave/02-foundation-b/job ]]
+	  [[ ! -f builder-events.log ]]
+
+	  output=\$(CLASP_SWARM_ALLOW_DIRTY=1 CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB=0 CLASP_SWARM_LANE_MEMORY_MB=0 CLASP_SWARM_MIN_AVAILABLE_DISK_MB=1 CLASP_SWARM_MIN_DISK_HEADROOM_MB=999999999 bash scripts/clasp-swarm-start.sh --batch foundation test-wave)
+	  [[ \"\$output\" == *'resource guard: not starting lane=01-foundation-a; available_disk_mb='* ]]
+	  [[ \"\$output\" == *'disk_headroom_mb='* ]]
+	  [[ \"\$output\" == *'min_disk_headroom_mb=999999999'* ]]
+	  [[ ! -f .clasp-swarm/test-wave/01-foundation-a/job ]]
+	  [[ ! -f .clasp-swarm/test-wave/02-foundation-b/job ]]
+	  [[ ! -f builder-events.log ]]
+	" >/dev/null
+
+swarm_managed_admission_test_root="$(mktemp -d)"
+swarm_managed_admission_project_root="$(make_batch_start_test_project "$swarm_managed_admission_test_root")"
+
+bash -lc "
+  set -euo pipefail
+  cd '$swarm_managed_admission_project_root'
+
+  holder_job=\$(CLASP_MANAGED_JOB_MAX_MEMORY_MB=0 CLASP_MANAGED_JOB_DEFAULT_MIN_AVAILABLE_MEMORY_MB=0 CLASP_MANAGED_JOB_USE_SYSTEMD_SCOPE=never scripts/run-managed-job.sh --jobs-root \"\$PWD/holder-jobs\" --job-id budget-holder --memory-mb 999999999 -- bash -c 'while true; do sleep 1; done')
+  trap 'scripts/stop-managed-job.sh --jobs-root \"\$PWD/holder-jobs\" budget-holder >/dev/null 2>&1 || true' EXIT
+  deadline=\$((SECONDS + 5))
+  while [[ ! -f \"\$holder_job/pid\" ]]; do
+    if (( SECONDS >= deadline )); then
+      echo 'timed out waiting for budget holder to start' >&2
+      exit 1
+    fi
+    sleep 0.05
+  done
+  holder_status=\$(sed -n '1p' \"\$holder_job/status\")
+  [[ \"\$holder_status\" == 'started' ]]
+
+  output=\$(CLASP_MANAGED_JOB_MAX_MEMORY_MB=0 CLASP_SWARM_ALLOW_DIRTY=1 CLASP_SWARM_MAX_RUNNING_LANES=2 CLASP_SWARM_LANE_MEMORY_MB=1 CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB=1 CLASP_SWARM_MIN_AVAILABLE_DISK_MB=0 CLASP_SWARM_MIN_DISK_HEADROOM_MB=0 bash scripts/clasp-swarm-start.sh --batch foundation test-wave 2>&1)
+  [[ \"\$output\" == *'resource guard: not starting lane=01-foundation-a; managed_job_status=memory-exceeded'* ]]
+  [[ \"\$output\" == *'lane=01-foundation-a memory-exceeded:'* ]]
+  [[ \"\$output\" == *'running_managed_memory_budget_mb=999999999'* ]]
+  [[ ! -f .clasp-swarm/test-wave/01-foundation-a/job ]]
+  [[ ! -f .clasp-swarm/test-wave/01-foundation-a/pid ]]
+  [[ ! -f .clasp-swarm/test-wave/02-foundation-b/job ]]
+  [[ ! -f .clasp-swarm/test-wave/02-foundation-b/pid ]]
+  [[ ! -f builder-events.log ]]
+	" >/dev/null
+
+swarm_child_admission_test_root="$(mktemp -d)"
+swarm_child_admission_project_root="$(make_batch_start_test_project "$swarm_child_admission_test_root")"
+
+bash -lc "
+  set -euo pipefail
+  cd '$swarm_child_admission_project_root'
+
+  holder_job=\$(CLASP_MANAGED_JOB_MAX_MEMORY_MB=0 CLASP_MANAGED_JOB_DEFAULT_MIN_AVAILABLE_MEMORY_MB=0 CLASP_MANAGED_JOB_USE_SYSTEMD_SCOPE=never scripts/run-managed-job.sh --jobs-root \"\$PWD/holder-jobs\" --job-id child-budget-holder --memory-mb 999999999 -- bash -c 'while true; do sleep 1; done')
+  trap 'scripts/stop-managed-job.sh --jobs-root \"\$PWD/holder-jobs\" child-budget-holder >/dev/null 2>&1 || true' EXIT
+  deadline=\$((SECONDS + 5))
+  while [[ ! -f \"\$holder_job/pid\" ]]; do
+    if (( SECONDS >= deadline )); then
+      echo 'timed out waiting for child budget holder to start' >&2
+      exit 1
+    fi
+    sleep 0.05
+  done
+  [[ \$(sed -n '1p' \"\$holder_job/status\") == 'started' ]]
+
+  set +e
+  output=\$(CLASP_MANAGED_JOB_MAX_MEMORY_MB=0 CLASP_SWARM_RETRY_LIMIT=1 CLASP_SWARM_CHILD_MEMORY_MB=1 CLASP_SWARM_CHILD_MIN_AVAILABLE_MEMORY_MB=1 CLASP_SWARM_CHILD_MIN_AVAILABLE_DISK_MB=0 CLASP_SWARM_CHILD_MIN_DISK_HEADROOM_MB=0 bash scripts/clasp-swarm-lane.sh agents/swarm/test-wave/01-foundation-a 2>&1)
+  lane_status=\$?
+  set -e
+  [[ \"\$lane_status\" -eq 0 ]]
+  [[ \"\$output\" == *'lane subprocess clasp-builder managed job failed: status=memory-exceeded'* ]]
+  [[ \"\$output\" == *'subprocess=clasp-builder memory-exceeded:'* ]]
+  [[ \"\$output\" == *'running_managed_memory_budget_mb=999999999'* ]]
+  [[ ! -f builder-events.log ]]
+  verifier_report=\$(find .clasp-swarm/test-wave/01-foundation-a/runs -name verifier-report.json -print | sort | tail -1)
+  [[ -n \"\$verifier_report\" ]]
+  grep -F 'Builder subagent infrastructure failed before verification could run.' \"\$verifier_report\" >/dev/null
+  child_job=\$(find .clasp-swarm/test-wave/01-foundation-a/child-jobs -mindepth 1 -maxdepth 1 -type d -print | sort | tail -1)
+  [[ -n \"\$child_job\" ]]
+  [[ \$(sed -n '1p' \"\$child_job/status\") == 'memory-exceeded' ]]
+  [[ -f \"\$child_job/memory-exceeded\" ]]
+	" >/dev/null
 
 prompt_test_root="$(mktemp -d)"
 prompt_project_root="$(make_prompt_test_project "$prompt_test_root")"

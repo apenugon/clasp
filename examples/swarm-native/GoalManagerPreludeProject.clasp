@@ -1,5 +1,6 @@
 module GoalManagerPreludeProject
 
+import AgentBackend
 import GoalManagerPrelude
 import GoalManagerConfig
 import GoalManagerTypes
@@ -153,6 +154,29 @@ taskWorkspaceCacheRoot = pathJoin [resolvedWorkspaceRoot, ".clasp-task-workspace
 
 taskWorkspaceBaselineCacheRoot : Str
 taskWorkspaceBaselineCacheRoot = pathJoin [resolvedWorkspaceRoot, ".clasp-task-baselines"]
+
+managerPlannerBackend : AgentBackendSpec
+managerPlannerBackend =
+  goalManagerAgentBackend plannerAgentCommandTemplate resolvedWorkspaceRoot
+
+managerPlannerBackendSummary : AgentBackendSummary
+managerPlannerBackendSummary =
+  agentBackendSummary managerPlannerBackend
+
+managerPlannerBackendPolicySummary : AgentBackendPolicySummary
+managerPlannerBackendPolicySummary =
+  if plannerRequireStandaloneAgentBackend then
+    agentBackendStandalonePolicySummary managerPlannerBackend
+  else
+    agentBackendPolicySummary "default" agentBackendDefaultPolicy managerPlannerBackend
+
+managerPlannerBackendCapabilityProfile : AgentBackendCapabilityProfile
+managerPlannerBackendCapabilityProfile =
+  agentBackendCapabilityProfileForBackend plannerAgentCapabilityProfileName managerPlannerBackend
+
+managerPlannerBackendCapabilitySummary : AgentBackendCapabilitySummary
+managerPlannerBackendCapabilitySummary =
+  agentBackendStandaloneCapabilitySummary managerPlannerBackendCapabilityProfile managerPlannerBackend
 
 resolvedTaskWorkspaceActualRoot : Str -> Str
 resolvedTaskWorkspaceActualRoot taskId =

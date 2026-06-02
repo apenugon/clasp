@@ -25,6 +25,12 @@ writeWatchedHeartbeat path running completed exitCode updatedAtMs =
         running = running,
         completed = completed,
         exitCode = exitCode,
+        status = "",
+        timedOut = false,
+        error = "",
+        outputLimitBytes = 0,
+        stdoutTruncated = false,
+        stderrTruncated = false,
         stdoutPath = textConcat [path, ".stdout"],
         stderrPath = textConcat [path, ".stderr"],
         heartbeatPath = path,
@@ -101,6 +107,21 @@ waitingReasonsIncludeKind reasons kind = {
   found
 }
 
+waitingReasonsIncludeDetail : [StatusWaitingReason] -> Str -> Bool
+waitingReasonsIncludeDetail reasons needle = {
+  let mut found = false;
+  for reason in reasons {
+    if found then
+      found
+    else if textListIncludes reason.details needle then {
+      found = true;
+      found
+    } else
+      found
+  };
+  found
+}
+
 firstError : [Str] -> Str
 firstError errors =
   textJoin "" errors
@@ -134,6 +155,7 @@ spawnLeaseChild taskId =
       childLoopAwaitTimeoutMs
       0
       2
+      64
       ["bash", "-c", "sleep 0.25"])
 
 taskHeartbeatSeen : Str -> Bool
@@ -179,6 +201,27 @@ writeHarnessPlannerRecord =
       ""
       ["wave=1"])
 
+writeHarnessResourceActionRecord : Str -> Str
+writeHarnessResourceActionRecord taskId =
+  appendRetryRecoveryRecord
+    (retryRecoveryRecord
+      1
+      taskId
+      "resource-guard"
+      "external-resource-blocker"
+      "managed child loop resource action"
+      [taskFeedbackPath taskId]
+      ["claspc", "run", "examples/swarm-native/GoalManagerServiceMain.clasp"]
+      "blocked"
+      0
+      (taskProcessStdoutPath taskId)
+      (taskProcessStderrPath taskId)
+      (taskProcessHeartbeatPath taskId)
+      [
+        "{\"recommendedAction\":{\"type\":\"repair-memory-enforcer\",\"reason\":\"systemd-scope-required-unavailable\"}}",
+        "managedJobStatus=memory-enforcer-unavailable"
+      ])
+
 runHarness : Str
 runHarness = {
   let missingTask = "missing-launch" in
@@ -188,6 +231,7 @@ runHarness = {
   let completedTask = "stale-completed-launch" in
   let leaseTask = "lease-fresh" in
   let retryTask = "retry-record-task" in
+  let resourceActionTask = "resource-action-record" in
   let setupError =
     firstError [
       prepareTaskRoot missingTask,
@@ -197,6 +241,7 @@ runHarness = {
       prepareTaskRoot completedTask,
       prepareTaskRoot leaseTask,
       prepareTaskRoot retryTask,
+      prepareTaskRoot resourceActionTask,
       ensureLeaseTask leaseTask,
       writeTextFile (taskProcessHeartbeatPath malformedTask) "{",
       writeTextFile (taskProcessHeartbeatPath unresolvedTask) "{}",
@@ -207,6 +252,7 @@ runHarness = {
       writeChildState completedTask "builder-running" false false,
       writeWatchedHeartbeat (taskBuilderHeartbeatPath completedTask 1) false true 0 124,
       writeHarnessRetryRecord retryTask,
+      writeHarnessResourceActionRecord resourceActionTask,
       writeHarnessPlannerRecord
     ] in
   if setupError != "" then
@@ -218,6 +264,9 @@ runHarness = {
     let plannerRetryRecord = latestRetryRecoveryRecord (plannerTaskIdForWave 1) in
     let retryMailboxDetails = retryRecoveryMailboxDetails retryTask in
     let retryWaitingReasons = retryRecoveryWaitingReasonForTask retryTask in
+    let resourceActionRecord = latestRetryRecoveryRecord resourceActionTask in
+    let resourceActionMailboxDetails = retryRecoveryMailboxDetails resourceActionTask in
+    let resourceActionWaitingReasons = retryRecoveryWaitingReasonForTask resourceActionTask in
     textJoin
       "\n"
       [
@@ -234,7 +283,13 @@ runHarness = {
         intLine "retry-record-count" (length (readRetryRecoveryRecords retryTask)),
         textConcat ["retry-record-latest=", retryRecoverySummaryText latestRetryRecord],
         boolLine "retry-record-mailbox-has-path" (textListIncludes retryMailboxDetails "retryRecordPath="),
+        boolLine "retry-record-mailbox-has-review" (textListIncludes retryMailboxDetails "retryRecordRecoveryTask=retry-recovery-review"),
         boolLine "retry-record-status-has-kind" (waitingReasonsIncludeKind retryWaitingReasons "retry-recovery-records"),
+        boolLine "retry-record-status-has-review" (waitingReasonsIncludeDetail retryWaitingReasons "retry-recovery-review"),
+        textConcat ["resource-action-summary=", retryRecoveryActionSummaryText resourceActionRecord],
+        boolLine "resource-action-mailbox-has-task" (textListIncludes resourceActionMailboxDetails "retryRecordRecoveryTask=resource-memory-enforcer-recovery"),
+        boolLine "resource-action-mailbox-has-guidance" (textListIncludes resourceActionMailboxDetails "do not bypass memory enforcement"),
+        boolLine "resource-action-status-has-task" (waitingReasonsIncludeDetail resourceActionWaitingReasons "resource-memory-enforcer-recovery"),
         textConcat ["planner-record-latest=", retryRecoverySummaryText plannerRetryRecord]
       ]
 }

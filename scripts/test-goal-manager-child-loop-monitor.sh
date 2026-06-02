@@ -29,9 +29,19 @@ XDG_CACHE_HOME="$test_xdg_cache_home" \
   "$claspc_bin" run "$project_root/examples/swarm-native/GoalManagerChildLoopControlHarness.clasp" -- "$test_root/state" \
   >"$output"
 
-grep -F 'lease-spawn=running' "$output" >/dev/null
-grep -F 'lease-await=timeout' "$output" >/dev/null
-grep -F 'lease-heartbeat-seen=true' "$output" >/dev/null
-grep -F 'watch-pass=completed-pass' "$output" >/dev/null
+require_output() {
+  local expected="$1"
+  if ! grep -F "$expected" "$output" >/dev/null; then
+    printf 'missing expected child-loop monitor output: %s\n' "$expected" >&2
+    cat "$output" >&2
+    exit 1
+  fi
+}
+
+require_output 'lease-spawn=running'
+require_output 'lease-await=timeout'
+require_output 'lease-complete=completed-pass'
+require_output 'lease-heartbeat-seen=true'
+require_output 'watch-pass=completed-pass'
 
 printf 'goal-manager-child-loop-monitor-ok\n'

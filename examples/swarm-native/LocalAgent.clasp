@@ -1,5 +1,9 @@
 module Main
 
+import AgentErgonomics
+import LocalRouting
+import LocalSourceEdit
+
 record BuilderFeedback = {
   summary : Str,
   ergonomics : [Str],
@@ -9,6 +13,8 @@ record BuilderFeedback = {
 
 record BuilderReport = {
   summary : Str,
+  workspace_fingerprint_manifest : Str,
+  workspace_fingerprint_manifest_fingerprint64_hex : Str,
   files_touched : [Str],
   tests_run : [Str],
   residual_risks : [Str],
@@ -26,6 +32,8 @@ record CapabilityStatus = {
 record VerifierReport = {
   verdict : Str,
   summary : Str,
+  workspace_fingerprint_manifest : Str,
+  workspace_fingerprint_manifest_fingerprint64_hex : Str,
   findings : [Str],
   tests_run : [Str],
   follow_up : [Str],
@@ -93,78 +101,845 @@ ensureDirOrMessage path =
     Err message -> textConcat ["mkdir-error:", path, ":", message]
   }
 
-writeBuilderReport : Str -> Str -> Str
-writeBuilderReport reportPath content =
-  writeTextOrMessage
-    reportPath
-    (encode
-      (BuilderReport {
-        summary = textConcat ["local Clasp builder wrote ", content],
-        files_touched = ["workspace.txt", "notes/child-artifact.txt"],
-        tests_run = ["clasp-local-agent", "clasp-local-agent-context-pack", "clasp-local-agent-task-file-prompt"],
-        residual_risks = emptyTexts,
-        feedback =
-          BuilderFeedback {
-            summary = "local Clasp builder backend completed",
-            ergonomics = [
-              "ordinary Clasp program can act as a swarm agent backend",
-              "local builder consumed the native swarm context pack",
-              "local builder received the task file content in its prompt"
-            ],
-            follow_ups = emptyTexts,
-            warnings = emptyTexts
-          }
-      }))
+standaloneSwarmWorkspaceFingerprintManifestForPrompt : Str -> Str -> Str
+standaloneSwarmWorkspaceFingerprintManifestForPrompt route prompt =
+  if route == "standalone-swarm" && promptHasSourceEditPlan prompt then
+    standaloneSwarmDirectSourceEditManifestPath
+  else
+    ""
 
-passingCapability : Str -> CapabilityStatus
-passingCapability unused =
+standaloneSwarmWorkspaceFingerprintManifestFingerprint64Hex : Str -> Str -> Str -> Str
+standaloneSwarmWorkspaceFingerprintManifestFingerprint64Hex workspaceRoot route prompt = {
+  let manifestPath = standaloneSwarmWorkspaceFingerprintManifestForPrompt route prompt in
+  if manifestPath == "" then
+    ""
+  else
+    textFingerprint64Hex (readTextOr (pathJoin [workspaceRoot, manifestPath]) "")
+}
+
+writeBuilderReportForRoute : Str -> Str -> Str -> Str -> Bool -> Bool -> Str -> Str
+writeBuilderReportForRoute reportPath workspaceRoot content route hasDependencyEvidence hasBackendPolicyRepair prompt =
+  {
+    let hasSourceEditPlan = promptHasSourceEditPlan prompt in
+    let hasRepoScaleSourceEditPlan = promptHasRepoScaleSourceEditPlan prompt in
+    writeTextOrMessage
+      reportPath
+      (encode
+        (BuilderReport {
+          summary =
+            if route == "generic" then
+              textConcat ["local Clasp builder wrote ", content]
+            else
+              textConcat ["local Clasp builder wrote ", content, " for ", route],
+          workspace_fingerprint_manifest = standaloneSwarmWorkspaceFingerprintManifestForPrompt route prompt,
+          workspace_fingerprint_manifest_fingerprint64_hex =
+            standaloneSwarmWorkspaceFingerprintManifestFingerprint64Hex workspaceRoot route prompt,
+          files_touched = routeFilesTouchedForPrompt route prompt,
+          tests_run = routeTestsRunWithEvidence route hasDependencyEvidence hasBackendPolicyRepair hasSourceEditPlan hasRepoScaleSourceEditPlan,
+          residual_risks = emptyTexts,
+          feedback =
+            BuilderFeedback {
+              summary = "local Clasp builder backend completed",
+              ergonomics =
+                append
+                  (routeBuilderErgonomicsWithEvidence route hasDependencyEvidence hasBackendPolicyRepair hasSourceEditPlan hasRepoScaleSourceEditPlan)
+                  (capabilityAuditClosureDecisionBuilderErgonomics route prompt),
+              follow_ups = emptyTexts,
+              warnings = emptyTexts
+            }
+        }))
+  }
+
+passingCapability : Str -> Bool -> Bool -> Bool -> Bool -> CapabilityStatus
+passingCapability route hasDependencyEvidence hasBackendPolicyRepair hasSourceEditPlan hasRepoScaleSourceEditPlan =
   CapabilityStatus {
     name = "clasp_native_agent_backend",
     status = "pass",
-    evidence = [
-      "builder and verifier reports were produced by examples/swarm-native/LocalAgent.clasp",
-      "local Clasp agent consumed native builder and verifier context packs",
-      "local Clasp agent received task file content without reading a separate task file"
-    ],
+    evidence =
+      capabilityEvidenceForRoute route hasDependencyEvidence hasBackendPolicyRepair hasSourceEditPlan hasRepoScaleSourceEditPlan,
     blocking_gaps = emptyTexts,
     required_closure = emptyTexts
   }
 
-failingCapability : Str -> CapabilityStatus
-failingCapability unused =
+failingCapability : Str -> Bool -> Bool -> CapabilityStatus
+failingCapability route hasDependencyEvidence hasBackendPolicyRepair =
   CapabilityStatus {
     name = "clasp_native_agent_backend",
     status = "fail",
-    evidence = ["local verifier observed first-attempt workspace state"],
+    evidence =
+      failingCapabilityEvidenceForRoute route hasDependencyEvidence hasBackendPolicyRepair,
     blocking_gaps = ["builder has not consumed verifier feedback yet"],
     required_closure = ["Use the persisted verifier feedback to update workspace.txt on the next attempt."]
   }
+
+localVerifierGateStep : Str -> Bool -> [Str] -> AgentCommandStepResult
+localVerifierGateStep route ok issues =
+  AgentCommandStepResult {
+    label = "clasp-local-agent-verifier-gate",
+    ok = ok,
+    status = if ok then "ok" else "verifier-findings",
+    processSummary =
+      textConcat [
+        if ok then "pass" else "fail",
+        ":0:finished:",
+        if ok then "no-error" else "verifier-findings"
+      ],
+    stdout = route,
+    stderr = textJoin "\n" issues,
+    issueTexts = issues,
+    evidence =
+      [
+        "local verifier emitted typed gate evidence",
+        textConcat ["local-verifier-gate-route:", route],
+        textConcat ["local-verifier-gate-status:", if ok then "pass" else "fail"]
+      ]
+  }
+
+localVerifierGatePlan : Str -> Bool -> [Str] -> AgentCommandPlanResult
+localVerifierGatePlan route ok issues =
+  agentCommandPlanResultFromResults
+    1
+    [localVerifierGateStep route ok issues]
+
+localVerifierGateFor : Str -> Bool -> [Str] -> AgentVerifierGate
+localVerifierGateFor route ok issues =
+  agentVerifierGate
+    (agentVerifierMemoryPolicySummary agentVerifierMemoryPolicyDefault)
+    (localVerifierGatePlan route ok issues)
+
+localVerifierGateCapability : AgentVerifierGate -> CapabilityStatus
+localVerifierGateCapability gate =
+  CapabilityStatus {
+    name = "local_verifier_gate",
+    status = if gate.ok then "pass" else "fail",
+    evidence =
+      append
+        gate.evidence
+        [
+          textConcat ["local-verifier-gate-status:", gate.status],
+          textConcat ["local-verifier-gate-recommendation:", gate.recommendation]
+        ],
+    blocking_gaps = if gate.ok then emptyTexts else gate.issueTexts,
+    required_closure = if gate.ok then emptyTexts else [gate.recommendation]
+  }
+
+promptAffectedVerificationPlanInlineJson : Str -> Str
+promptAffectedVerificationPlanInlineJson prompt =
+  agentAffectedVerificationPlanInlineJsonFromPrompt prompt
+
+promptAffectedVerificationPlanPath : Str -> Str
+promptAffectedVerificationPlanPath prompt =
+  agentAffectedVerificationPlanPathFromPrompt prompt
+
+promptHasAffectedVerificationPlanPath : Str -> Bool
+promptHasAffectedVerificationPlanPath prompt =
+  agentHasAffectedVerificationPlanPath prompt
+
+promptAffectedVerificationPlanJson : Str -> Str
+promptAffectedVerificationPlanJson prompt =
+  agentAffectedVerificationPlanJsonFromPrompt prompt
+
+promptHasAffectedVerificationPlanJson : Str -> Bool
+promptHasAffectedVerificationPlanJson prompt =
+  agentHasAffectedVerificationPlanJson prompt
+
+promptAffectedVerificationLaunchPolicyInlineJson : Str -> Str
+promptAffectedVerificationLaunchPolicyInlineJson prompt =
+  agentAffectedVerificationLaunchPolicyInlineJsonFromPrompt prompt
+
+promptAffectedVerificationLaunchPolicyPath : Str -> Str
+promptAffectedVerificationLaunchPolicyPath prompt =
+  agentAffectedVerificationLaunchPolicyPathFromPrompt prompt
+
+promptHasAffectedVerificationLaunchPolicyPath : Str -> Bool
+promptHasAffectedVerificationLaunchPolicyPath prompt =
+  agentHasAffectedVerificationLaunchPolicyPath prompt
+
+promptAffectedVerificationLaunchPolicyJson : Str -> Str
+promptAffectedVerificationLaunchPolicyJson prompt =
+  agentAffectedVerificationLaunchPolicyJsonFromPrompt prompt
+
+promptHasAffectedVerificationLaunchPolicyJson : Str -> Bool
+promptHasAffectedVerificationLaunchPolicyJson prompt =
+  agentHasAffectedVerificationLaunchPolicyJson prompt
+
+promptFocusedVerificationLaunchPolicyInlineJson : Str -> Str
+promptFocusedVerificationLaunchPolicyInlineJson prompt =
+  agentFocusedVerificationLaunchPolicyInlineJsonFromPrompt prompt
+
+promptFocusedVerificationLaunchPolicyJson : Str -> Str
+promptFocusedVerificationLaunchPolicyJson prompt =
+  agentFocusedVerificationLaunchPolicyJsonFromPrompt prompt
+
+promptHasFocusedVerificationLaunchPolicyJson : Str -> Bool
+promptHasFocusedVerificationLaunchPolicyJson prompt =
+  agentHasFocusedVerificationLaunchPolicyJson prompt
+
+promptAutonomousLaunchGateJson : Str -> Str
+promptAutonomousLaunchGateJson prompt =
+  agentAutonomousLaunchGateJsonFromPrompt prompt
+
+promptHasAutonomousLaunchGateJson : Str -> Bool
+promptHasAutonomousLaunchGateJson prompt =
+  agentHasAutonomousLaunchGateJson prompt
+
+affectedVerificationPlanCapabilityStatus : AgentAffectedVerificationPlanDecision -> CapabilityStatus
+affectedVerificationPlanCapabilityStatus decision = {
+  let launchPolicy = agentAffectedVerificationLaunchPolicy decision;
+  CapabilityStatus {
+    name = "affected_verification_plan",
+    status =
+      if launchPolicy.ready then
+        "pass"
+      else if launchPolicy.valid then
+        "partial"
+      else
+        "fail",
+    evidence =
+      append
+        (append
+          decision.evidence
+          [
+            textConcat ["affected-verification-plan-status:", decision.status],
+            textConcat ["affected-verification-plan-recommendation:", decision.recommendation],
+            textConcat ["affected-verification-plan-command-count:", encode decision.commandCount],
+            textConcat ["affected-verification-plan-static-command-count:", encode decision.staticCommandCount],
+            textConcat ["affected-verification-plan-focused-command-count:", encode decision.focusedCommandCount],
+            textConcat ["affected-verification-plan-heavy-command-count:", encode decision.heavyCommandCount],
+            textConcat ["affected-verification-plan-safe-direct-command-count:", encode decision.safeDirectCommandCount],
+            textConcat ["affected-verification-plan-managed-guard-command-count:", encode decision.managedGuardCommandCount],
+            textConcat ["affected-verification-plan-compiler-state-free-command-count:", encode decision.compilerStateFreeCommandCount],
+            textConcat ["affected-verification-plan-compiler-state-touching-command-count:", encode decision.compilerStateTouchingCommandCount],
+            textConcat ["affected-verification-plan-can-run-without-compiler-state:", if decision.canRunWithoutCompilerState then "true" else "false"],
+            textConcat ["affected-verification-plan-requires-managed:", if decision.requiresManagedGuard then "true" else "false"]
+          ])
+        launchPolicy.evidence,
+    blocking_gaps = launchPolicy.blockingGaps,
+    required_closure = launchPolicy.requiredClosure
+  }
+}
+
+affectedVerificationLaunchPolicyCapabilityStatus : AgentAffectedVerificationLaunchPolicy -> CapabilityStatus
+affectedVerificationLaunchPolicyCapabilityStatus launchPolicy =
+  CapabilityStatus {
+    name = "affected_verification_launch_policy",
+    status =
+      if launchPolicy.ready then
+        "pass"
+      else if launchPolicy.valid then
+        "partial"
+      else
+        "fail",
+    evidence =
+      append
+        launchPolicy.evidence
+        [
+          textConcat ["affected-verification-launch-policy-mode:", launchPolicy.mode],
+          textConcat ["affected-verification-launch-policy-recommendation:", launchPolicy.recommendation],
+          textConcat ["affected-verification-launch-policy-plan-recommendation:", launchPolicy.verificationPlanRecommendation],
+          textConcat ["affected-verification-launch-policy-can-run-direct:", if launchPolicy.canRunDirect then "true" else "false"],
+          textConcat ["affected-verification-launch-policy-can-run-without-compiler-state:", if launchPolicy.canRunWithoutCompilerState then "true" else "false"],
+          textConcat ["affected-verification-launch-policy-requires-managed:", if launchPolicy.requiresManagedGuard then "true" else "false"]
+        ],
+    blocking_gaps = launchPolicy.blockingGaps,
+    required_closure = launchPolicy.requiredClosure
+  }
+
+affectedVerificationPlanCapabilityStatuses : Str -> [CapabilityStatus]
+affectedVerificationPlanCapabilityStatuses prompt =
+  append
+    (if promptHasAffectedVerificationPlanJson prompt then
+      [affectedVerificationPlanCapabilityStatus (agentAffectedVerificationPlanDecisionFromJson (promptAffectedVerificationPlanJson prompt))]
+    else
+      emptyCapabilityStatuses)
+    (if promptHasAffectedVerificationLaunchPolicyJson prompt then
+      [affectedVerificationLaunchPolicyCapabilityStatus (agentAffectedVerificationLaunchPolicyFromJson (promptAffectedVerificationLaunchPolicyJson prompt))]
+    else
+      emptyCapabilityStatuses)
+
+affectedVerificationPlanTestsRun : Str -> [Str]
+affectedVerificationPlanTestsRun prompt =
+  append
+    (if promptHasAffectedVerificationPlanJson prompt then
+      ["clasp-local-agent-affected-verification-plan"]
+    else
+      emptyTexts)
+    (if promptHasAffectedVerificationLaunchPolicyJson prompt then
+      ["clasp-local-agent-affected-verification-launch-policy"]
+    else
+      emptyTexts)
+
+promptHasFocusedVerificationPlanSection : Str -> Bool
+promptHasFocusedVerificationPlanSection prompt =
+  agentCapabilityAuditClosureVerificationPromptSection prompt != ""
+
+focusedVerificationPlanCapabilityStatus : Str -> CapabilityStatus
+focusedVerificationPlanCapabilityStatus prompt = {
+  let launchPolicy = agentFocusedVerificationLaunchPolicyFromPrompt prompt;
+  CapabilityStatus {
+    name = "focused_verification_plan",
+    status =
+      if launchPolicy.valid then
+        if launchPolicy.ready then
+          "pass"
+        else
+          "partial"
+      else
+        "fail",
+    evidence =
+      append
+        launchPolicy.evidence
+        [
+          textConcat ["focused-verification-plan-command:", launchPolicy.command],
+          textConcat ["focused-verification-plan-resource-class:", launchPolicy.resourceClass],
+          textConcat ["focused-verification-plan-oom-risk:", launchPolicy.oomRisk],
+          textConcat ["focused-verification-plan-managed-required:", if launchPolicy.managedRequired then "true" else "false"],
+          textConcat ["focused-verification-plan-safe-direct:", if launchPolicy.safeDirect then "true" else "false"],
+          textConcat ["focused-verification-plan-recommendation:", launchPolicy.verificationPlanRecommendation],
+          textConcat ["focused-verification-launch-policy-mode:", launchPolicy.mode],
+          textConcat ["focused-verification-launch-policy-recommendation:", launchPolicy.recommendation]
+        ],
+    blocking_gaps = launchPolicy.blockingGaps,
+    required_closure = launchPolicy.requiredClosure
+  }
+}
+
+focusedVerificationLaunchPolicyCapabilityStatus : AgentFocusedVerificationLaunchPolicy -> CapabilityStatus
+focusedVerificationLaunchPolicyCapabilityStatus launchPolicy =
+  CapabilityStatus {
+    name = "focused_verification_launch_policy",
+    status =
+      if launchPolicy.valid then
+        if launchPolicy.ready then
+          "pass"
+        else
+          "partial"
+      else
+        "fail",
+    evidence =
+      append
+        launchPolicy.evidence
+        [
+          textConcat ["focused-verification-launch-policy-command:", launchPolicy.command],
+          textConcat ["focused-verification-launch-policy-resource-class:", launchPolicy.resourceClass],
+          textConcat ["focused-verification-launch-policy-oom-risk:", launchPolicy.oomRisk],
+          textConcat ["focused-verification-launch-policy-managed-required:", if launchPolicy.managedRequired then "true" else "false"],
+          textConcat ["focused-verification-launch-policy-safe-direct:", if launchPolicy.safeDirect then "true" else "false"],
+          textConcat ["focused-verification-launch-policy-mode:", launchPolicy.mode],
+          textConcat ["focused-verification-launch-policy-recommendation:", launchPolicy.recommendation],
+          textConcat ["focused-verification-launch-policy-plan-recommendation:", launchPolicy.verificationPlanRecommendation]
+        ],
+    blocking_gaps = launchPolicy.blockingGaps,
+    required_closure = launchPolicy.requiredClosure
+  }
+
+focusedVerificationPlanCapabilityStatuses : Str -> [CapabilityStatus]
+focusedVerificationPlanCapabilityStatuses prompt =
+  append
+    (if promptHasFocusedVerificationPlanSection prompt then
+      [focusedVerificationPlanCapabilityStatus prompt]
+    else
+      emptyCapabilityStatuses)
+    (if promptHasFocusedVerificationLaunchPolicyJson prompt then
+      [focusedVerificationLaunchPolicyCapabilityStatus (agentFocusedVerificationLaunchPolicyFromJson (promptFocusedVerificationLaunchPolicyJson prompt))]
+    else
+      emptyCapabilityStatuses)
+
+focusedVerificationPlanTestsRun : Str -> [Str]
+focusedVerificationPlanTestsRun prompt =
+  append
+    (if promptHasFocusedVerificationPlanSection prompt then
+      ["clasp-local-agent-focused-verification-plan"]
+    else
+      emptyTexts)
+    (if promptHasFocusedVerificationLaunchPolicyJson prompt then
+      ["clasp-local-agent-focused-verification-launch-policy"]
+    else
+      emptyTexts)
+
+autonomousLaunchGateCapabilityStatus : AgentAutonomousLaunchGate -> CapabilityStatus
+autonomousLaunchGateCapabilityStatus gate =
+  CapabilityStatus {
+    name = "autonomous_launch_gate",
+    status =
+      if gate.valid then
+        if gate.ready then
+          "pass"
+        else
+          "partial"
+      else
+        "fail",
+    evidence =
+      append
+        gate.evidence
+        [
+          textConcat ["autonomous-launch-gate-mode:", gate.mode],
+          textConcat ["autonomous-launch-gate-recommendation:", gate.recommendation],
+          textConcat ["autonomous-launch-gate-may-spawn:", if gate.maySpawn then "true" else "false"],
+          textConcat ["autonomous-launch-gate-may-mutate-compiler:", if gate.mayMutateCompiler then "true" else "false"],
+          textConcat ["autonomous-launch-gate-requested-child-agents:", encode gate.requestedChildAgents],
+          textConcat ["autonomous-launch-gate-admitted-child-capacity:", encode gate.admittedChildCapacity]
+        ],
+    blocking_gaps = gate.blockingGaps,
+    required_closure = gate.requiredClosure
+  }
+
+autonomousLaunchGateCapabilityStatuses : Str -> [CapabilityStatus]
+autonomousLaunchGateCapabilityStatuses prompt =
+  if promptHasAutonomousLaunchGateJson prompt then
+    [autonomousLaunchGateCapabilityStatus (agentAutonomousLaunchGateFromJson (promptAutonomousLaunchGateJson prompt))]
+  else
+    emptyCapabilityStatuses
+
+autonomousLaunchGateTestsRun : Str -> [Str]
+autonomousLaunchGateTestsRun prompt =
+  if promptHasAutonomousLaunchGateJson prompt then
+    ["clasp-local-agent-autonomous-launch-gate"]
+  else
+    emptyTexts
+
+capabilityAuditClosureDecisionForPrompt : Str -> AgentCapabilityAuditClosureDecision
+capabilityAuditClosureDecisionForPrompt prompt =
+  agentCapabilityAuditClosureDecisionFromPromptOrJson prompt
+
+capabilityAuditClosureDecisionEvidence : AgentCapabilityAuditClosureDecision -> [Str]
+capabilityAuditClosureDecisionEvidence decision =
+  [
+    textConcat ["capability-audit-decision-kind:", decision.kind],
+    textConcat ["capability-audit-decision-detail:", decision.detail],
+    textConcat ["capability-audit-decision-focus:", textJoin "," decision.coordinationFocus]
+  ]
+
+capabilityAuditClosureDecisionBuilderErgonomics : Str -> Str -> [Str]
+capabilityAuditClosureDecisionBuilderErgonomics route prompt =
+  if route == "capability-audit" then
+    capabilityAuditClosureDecisionEvidence (capabilityAuditClosureDecisionForPrompt prompt)
+  else
+    emptyTexts
+
+capabilityAuditClosureDecisionCapabilityStatus : Str -> CapabilityStatus
+capabilityAuditClosureDecisionCapabilityStatus prompt = {
+  let decision = capabilityAuditClosureDecisionForPrompt prompt;
+  CapabilityStatus {
+    name = "capability_audit_closure_decision",
+    status = "partial",
+    evidence = capabilityAuditClosureDecisionEvidence decision,
+    blocking_gaps = [decision.detail],
+    required_closure = [decision.taskPrompt]
+  }
+}
+
+capabilityAuditClosureDecisionCapabilityStatuses : Str -> Str -> [CapabilityStatus]
+capabilityAuditClosureDecisionCapabilityStatuses route prompt =
+  if route == "capability-audit" then
+    [capabilityAuditClosureDecisionCapabilityStatus prompt]
+  else
+    emptyCapabilityStatuses
 
 writeVerifierReport : Str -> VerifierReport -> Str
 writeVerifierReport reportPath report = writeTextOrMessage reportPath (encode report)
 
 promptHasBuilderContextPack : Str -> Bool
 promptHasBuilderContextPack prompt =
-  if textIncludes prompt "Swarm context pack:" then
-    textIncludes prompt "task: builder-"
-  else
-    false
+  agentPromptHasBuilderContextPack prompt
 
 promptHasVerifierContextPack : Str -> Bool
 promptHasVerifierContextPack prompt =
-  if textIncludes prompt "Swarm context pack:" then
-    textIncludes prompt "task: verifier-"
-  else
-    false
+  agentPromptHasVerifierContextPack prompt
 
 promptHasTaskFileContent : Str -> Bool
 promptHasTaskFileContent prompt =
-  textIncludes prompt "Task file content:"
+  agentPromptHasTaskFileContent prompt
+
+promptHasDependencyCompletionEvidence : Str -> Bool
+promptHasDependencyCompletionEvidence prompt =
+  agentPromptHasDependencyCompletionEvidence prompt
+
+promptHasAgentBackendPolicyRepair : Str -> Bool
+promptHasAgentBackendPolicyRepair prompt =
+  agentPromptHasAgentBackendPolicyRepair prompt
+
+taskRouteForPrompt : Str -> Str
+taskRouteForPrompt prompt = localRouteTaskKindForPrompt prompt
+
+routeFirstAttemptContent : Str -> Str
+routeFirstAttemptContent route =
+  if route == "generic" then
+    "first-attempt"
+  else
+    textConcat [route, "-first-attempt"]
+
+routeFixedContent : Str -> Str
+routeFixedContent route =
+  if route == "generic" then
+    "fixed-after-feedback"
+  else
+    textConcat [route, "-fixed-after-feedback"]
+
+routeTestsRun : Str -> [Str]
+routeTestsRun route =
+  if route == "generic" then
+    ["clasp-local-agent", "clasp-local-agent-context-pack", "clasp-local-agent-task-file-prompt"]
+  else if route == "capability-audit" then
+    [
+      "clasp-local-agent",
+      "clasp-local-agent-context-pack",
+      "clasp-local-agent-task-file-prompt",
+      "clasp-local-agent-task-routing",
+      "clasp-local-agent-capability-audit-decision",
+      "clasp-local-agent-capability-audit-closure"
+    ]
+  else if route == "standalone-swarm" then
+    [
+      "clasp-local-agent",
+      "clasp-local-agent-context-pack",
+      "clasp-local-agent-task-file-prompt",
+      "clasp-local-agent-task-routing"
+    ]
+  else
+    ["clasp-local-agent", "clasp-local-agent-context-pack", "clasp-local-agent-task-file-prompt", "clasp-local-agent-task-routing"]
+
+sourceEditTestsRun : [Str]
+sourceEditTestsRun =
+  [
+    "clasp-local-agent-source-edit-plan",
+    "clasp-local-agent-direct-source-edit",
+    "clasp-local-agent-multi-file-source-edit",
+    "clasp-local-agent-source-patch-plan",
+    "clasp-local-agent-targeted-source-patch",
+    "clasp-local-agent-repo-surface-source-patch",
+    "clasp-local-agent-multi-surface-source-patch",
+    "clasp-local-agent-atomic-source-patch-preflight",
+    "clasp-local-agent-source-patch-postcheck"
+  ]
+
+repoScaleSourceEditTestsRun : [Str]
+repoScaleSourceEditTestsRun =
+  ["clasp-local-agent-repo-scale-source-patch"]
+
+routeTestsRunWithEvidence : Str -> Bool -> Bool -> Bool -> Bool -> [Str]
+routeTestsRunWithEvidence route hasDependencyEvidence hasBackendPolicyRepair hasSourceEditPlan hasRepoScaleSourceEditPlan = {
+  let sourceTests =
+    if hasSourceEditPlan then
+      append (routeTestsRun route) sourceEditTestsRun
+    else
+      routeTestsRun route in
+  let repoScaleTests =
+    if hasRepoScaleSourceEditPlan then
+      append sourceTests repoScaleSourceEditTestsRun
+    else
+      sourceTests in
+  let dependencyTests =
+    if hasDependencyEvidence then
+      append repoScaleTests ["clasp-local-agent-dependency-evidence"]
+    else
+      repoScaleTests in
+  if hasBackendPolicyRepair then
+    append dependencyTests ["clasp-local-agent-backend-policy-repair"]
+  else
+    dependencyTests
+}
+
+routeBuilderErgonomics : Str -> [Str]
+routeBuilderErgonomics route =
+  if route == "generic" then
+    [
+      "ordinary Clasp program can act as a swarm agent backend",
+      "local builder consumed the native swarm context pack",
+      "local builder received the task file content in its prompt"
+    ]
+  else if route == "capability-audit" then
+    [
+      "ordinary Clasp program can act as a swarm agent backend",
+      "local builder consumed the native swarm context pack",
+      "local builder received the task file content in its prompt",
+      "local builder routed task kind: capability-audit",
+      "local builder produced a concrete capability-audit closure source artifact"
+    ]
+  else if route == "standalone-swarm" then
+    [
+      "ordinary Clasp program can act as a swarm agent backend",
+      "local builder consumed the native swarm context pack",
+      "local builder received the task file content in its prompt",
+      "local builder routed task kind: standalone-swarm"
+    ]
+  else
+    [
+      "ordinary Clasp program can act as a swarm agent backend",
+      "local builder consumed the native swarm context pack",
+      "local builder received the task file content in its prompt",
+      textConcat ["local builder routed task kind: ", route]
+    ]
+
+sourceEditBuilderErgonomics : [Str]
+sourceEditBuilderErgonomics =
+  [
+    "local builder consumed a prompt source-edit plan",
+    "local builder consumed a prompt source-patch plan",
+    "local builder edited an existing ordinary-Clasp source file",
+    "local builder edited multiple existing ordinary-Clasp source files",
+    "local builder applied targeted replacements inside existing source files",
+    "local builder applied targeted replacements across safe repo source surfaces",
+    "local builder preflighted all planned source patches before writing files",
+    "local builder postchecked patched source fingerprints before reporting success"
+  ]
+
+repoScaleSourceEditBuilderErgonomics : [Str]
+repoScaleSourceEditBuilderErgonomics =
+  ["local builder demonstrated repo-scale source patching across src, examples, scripts, docs, and runtime"]
+
+routeBuilderErgonomicsWithEvidence : Str -> Bool -> Bool -> Bool -> Bool -> [Str]
+routeBuilderErgonomicsWithEvidence route hasDependencyEvidence hasBackendPolicyRepair hasSourceEditPlan hasRepoScaleSourceEditPlan = {
+  let sourceErgonomics =
+    if hasSourceEditPlan then
+      append (routeBuilderErgonomics route) sourceEditBuilderErgonomics
+    else
+      routeBuilderErgonomics route in
+  let repoScaleErgonomics =
+    if hasRepoScaleSourceEditPlan then
+      append sourceErgonomics repoScaleSourceEditBuilderErgonomics
+    else
+      sourceErgonomics in
+  let dependencyErgonomics =
+    if hasDependencyEvidence then
+      append repoScaleErgonomics ["local builder consumed dependency completion evidence"]
+    else
+      repoScaleErgonomics in
+  if hasBackendPolicyRepair then
+    append dependencyErgonomics ["local builder consumed backend policy repair context"]
+  else
+    dependencyErgonomics
+}
+
+repoScaleSourceEditCapabilityEvidence : [Str]
+repoScaleSourceEditCapabilityEvidence =
+  ["local Clasp agent demonstrated repo-scale source patching across src, examples, scripts, docs, and runtime"]
+
+capabilityEvidenceForRoute : Str -> Bool -> Bool -> Bool -> Bool -> [Str]
+capabilityEvidenceForRoute route hasDependencyEvidence hasBackendPolicyRepair hasSourceEditPlan hasRepoScaleSourceEditPlan = {
+  let routedEvidence =
+    if route == "generic" then
+      [
+        "builder and verifier reports were produced by examples/swarm-native/LocalAgent.clasp",
+        "local Clasp agent consumed native builder and verifier context packs",
+        "local Clasp agent received task file content without reading a separate task file"
+      ]
+    else
+      [
+        "builder and verifier reports were produced by examples/swarm-native/LocalAgent.clasp",
+        "local Clasp agent consumed native builder and verifier context packs",
+        "local Clasp agent received task file content without reading a separate task file",
+        textConcat ["local Clasp agent completed routed task kind: ", route]
+      ] in
+  let closureEvidence =
+    if route == "capability-audit" then
+      append routedEvidence [
+        "local Clasp agent produced capability-audit closure source artifact",
+        "local Clasp agent produced capability-audit closure proof"
+      ]
+    else if route == "standalone-swarm" && hasSourceEditPlan then
+      append routedEvidence [
+        "local Clasp agent consumed a prompt source-edit plan",
+        "local Clasp agent consumed a prompt source-patch plan",
+        "local Clasp agent edited an existing ordinary-Clasp source file",
+        "local Clasp agent edited multiple existing ordinary-Clasp source files",
+        "local Clasp agent applied targeted replacements inside existing source files",
+        "local Clasp agent applied targeted replacements across safe repo source surfaces",
+        "local Clasp agent preflighted all planned source patches before writing files",
+        "local Clasp agent postchecked patched source fingerprints before reporting success",
+        "local Clasp verifier required direct source edit proof before passing"
+      ]
+    else
+      routedEvidence in
+  let repoScaleEvidence =
+    if hasRepoScaleSourceEditPlan then
+      append closureEvidence repoScaleSourceEditCapabilityEvidence
+    else
+      closureEvidence in
+  let dependencyEvidence =
+    if hasDependencyEvidence then
+      append repoScaleEvidence ["local Clasp agent consumed dependency completion evidence"]
+    else
+      repoScaleEvidence in
+  if hasBackendPolicyRepair then
+    append dependencyEvidence ["local Clasp agent consumed backend policy repair context"]
+  else
+    dependencyEvidence
+}
+
+failingCapabilityEvidenceForRoute : Str -> Bool -> Bool -> [Str]
+failingCapabilityEvidenceForRoute route hasDependencyEvidence hasBackendPolicyRepair = {
+  let routedEvidence =
+    if route == "generic" then
+      ["local verifier observed first-attempt workspace state"]
+    else
+      [
+        "local verifier observed first-attempt workspace state",
+        textConcat ["local verifier classified routed task kind: ", route]
+      ] in
+  let dependencyEvidence =
+    if hasDependencyEvidence then
+      append routedEvidence ["local verifier observed dependency completion evidence"]
+    else
+      routedEvidence in
+  if hasBackendPolicyRepair then
+    append dependencyEvidence ["local verifier observed backend policy repair context"]
+  else
+    dependencyEvidence
+}
+
+routeFilesTouched : Str -> [Str]
+routeFilesTouched route =
+  if route == "generic" then
+    ["workspace.txt", "notes/child-artifact.txt"]
+  else if route == "capability-audit" then
+    [
+      "workspace.txt",
+      "notes/child-artifact.txt",
+      "notes/local-agent-route.txt",
+      "notes/capability-audit-closure.txt",
+      "notes/capability-audit-decision.json",
+      "src/CapabilityAuditClosure.clasp"
+    ]
+  else if route == "standalone-swarm" then
+    [
+      "workspace.txt",
+      "notes/child-artifact.txt",
+      "notes/local-agent-route.txt"
+    ]
+  else
+    ["workspace.txt", "notes/child-artifact.txt", "notes/local-agent-route.txt"]
+
+routeFilesTouchedForPrompt : Str -> Str -> [Str]
+routeFilesTouchedForPrompt route prompt =
+  if route == "standalone-swarm" && promptHasSourceEditPlan prompt then
+    append ["workspace.txt", "notes/child-artifact.txt", "notes/local-agent-route.txt", "notes/direct-source-edit.txt", standaloneSwarmDirectSourceEditManifestPath] (sourceEditPlanTargetsFromPrompt prompt)
+  else
+    routeFilesTouched route
+
+capabilityAuditClosureSource : Str -> AgentCapabilityAuditClosureDecision -> Str
+capabilityAuditClosureSource content decision =
+  textJoin "\n" [
+    "module CapabilityAuditClosure",
+    "",
+    "record ClosureSignal = { route : Str, status : Str, decisionKind : Str, evidence : Str }",
+    "",
+    "closureSignal : ClosureSignal",
+    textConcat ["closureSignal = ClosureSignal { route = \"capability-audit\", status = \"closed\", decisionKind = \"", decision.kind, "\", evidence = \"local-agent-non-codex-source-artifact\" }"],
+    "",
+    "main : Str",
+    textConcat ["main = \"", content, "\""],
+    ""
+  ]
+
+capabilityAuditClosureProofText : Str -> AgentCapabilityAuditClosureDecision -> Str
+capabilityAuditClosureProofText content decision =
+  textJoin "\n" [
+    "kind=clasp-local-agent-capability-audit-closure",
+    "route=capability-audit",
+    textConcat ["decisionKind=", decision.kind],
+    textConcat ["decisionDetail=", decision.detail],
+    textConcat ["status=", content],
+    "sourceFile=src/CapabilityAuditClosure.clasp",
+    "decisionFile=notes/capability-audit-decision.json",
+    "verification=bash scripts/test-local-agent-capability-closure.sh",
+    ""
+  ]
+
+writeCapabilityAuditClosureArtifacts : Str -> Str -> Str -> Str -> Str
+writeCapabilityAuditClosureArtifacts workspaceRoot route content prompt =
+  if route != "capability-audit" then
+    ""
+  else {
+    let decision = capabilityAuditClosureDecisionForPrompt prompt;
+    let srcRoot = pathJoin [workspaceRoot, "src"] in
+    let srcError = ensureDirOrMessage srcRoot in
+    if srcError != "" then
+      srcError
+    else {
+      let sourcePath = pathJoin [srcRoot, "CapabilityAuditClosure.clasp"] in
+      let sourceError = writeTextOrMessage sourcePath (capabilityAuditClosureSource content decision) in
+      if sourceError != "" then
+        sourceError
+      else {
+        let proofError = writeTextOrMessage (pathJoin [workspaceRoot, "notes", "capability-audit-closure.txt"]) (capabilityAuditClosureProofText content decision) in
+        if proofError != "" then
+          proofError
+        else
+          writeTextOrMessage (pathJoin [workspaceRoot, "notes", "capability-audit-decision.json"]) (encode decision)
+      }
+    }
+  }
+
+capabilityAuditDecisionJsonValid : Str -> Bool
+capabilityAuditDecisionJsonValid raw =
+  match tryDecode AgentCapabilityAuditClosureDecision raw {
+    Ok decision ->
+      if decision.kind == "" then
+        false
+      else if decision.taskPrompt == "" then
+        false
+      else
+        length decision.coordinationFocus > 0,
+    Err message -> false
+  }
+
+capabilityAuditClosureArtifactsPresent : Str -> Str -> Bool
+capabilityAuditClosureArtifactsPresent workspaceRoot route =
+  if route != "capability-audit" then
+    true
+  else {
+    let source = readTextOr (pathJoin [workspaceRoot, "src", "CapabilityAuditClosure.clasp"]) "" in
+    let proof = readTextOr (pathJoin [workspaceRoot, "notes", "capability-audit-closure.txt"]) "" in
+    let decisionJson = readTextOr (pathJoin [workspaceRoot, "notes", "capability-audit-decision.json"]) "" in
+    if textIncludes source "local-agent-non-codex-source-artifact" then
+      if textIncludes source "decisionKind" then
+        if textIncludes proof "decisionKind=" then
+          if textIncludes proof "decisionFile=notes/capability-audit-decision.json" then
+            capabilityAuditDecisionJsonValid decisionJson
+          else
+            false
+        else
+          false
+      else
+        false
+    else
+      false
+  }
+
+localVerifierWorkspaceFindingsForRoute : Str -> [Str]
+localVerifierWorkspaceFindingsForRoute route =
+  if route == "generic" then
+    ["workspace.txt still has first-attempt content"]
+  else
+    [textConcat ["workspace.txt still has first-attempt content for ", route]]
+
+localVerifierFindingsFor : Str -> Str -> Str -> Str -> [Str]
+localVerifierFindingsFor workspaceRoot route prompt content =
+  if content != textConcat [routeFixedContent route, "\n"] then
+    localVerifierWorkspaceFindingsForRoute route
+  else if capabilityAuditClosureArtifactsPresent workspaceRoot route == false then
+    [textConcat ["capability-audit closure artifacts missing or invalid for ", route]]
+  else if standaloneSwarmDirectSourceEditPresent workspaceRoot route prompt == false then
+    append
+      (append
+        [
+          "standalone-swarm direct source edit proof missing or invalid",
+          "Check notes/direct-source-edit.txt and notes/direct-source-edit-manifest.json"
+        ]
+        (standaloneSwarmDirectSourceEditIssueTexts workspaceRoot route prompt))
+      (standaloneSwarmDirectSourceEditRepairHints workspaceRoot route prompt)
+  else
+    [textConcat ["local verifier failed unknown condition for ", route]]
 
 runBuilder : Str -> Str -> Str -> Str -> Str
 runBuilder reportPath workspaceRoot reportRoot prompt = {
   let workspaceTextPath = pathJoin [workspaceRoot, "workspace.txt"] in
   let workspaceArtifactPath = pathJoin [workspaceRoot, "notes", "child-artifact.txt"] in
+  let routeArtifactPath = pathJoin [workspaceRoot, "notes", "local-agent-route.txt"] in
+  let route = taskRouteForPrompt prompt in
+  let hasDependencyEvidence = promptHasDependencyCompletionEvidence prompt in
+  let hasBackendPolicyRepair = promptHasAgentBackendPolicyRepair prompt in
   if promptHasBuilderContextPack prompt == false then
     "local-agent-error:missing builder context pack"
   else if promptHasTaskFileContent prompt == false then
@@ -185,17 +960,39 @@ runBuilder reportPath workspaceRoot reportRoot prompt = {
           let content =
             if textIncludes prompt "Verifier feedback from the previous attempt:" then
               if textIncludes prompt "force-close-category" then
-                "fixed-after-feedback"
+                routeFixedContent route
               else
-                "first-attempt"
+                routeFirstAttemptContent route
             else
-              "first-attempt" in
+              routeFirstAttemptContent route in
           let workspaceError = writeTextOrMessage workspaceTextPath (textConcat [content, "\n"]) in
           if workspaceError != "" then
             workspaceError
           else {
             let artifactError = writeTextOrMessage workspaceArtifactPath (textConcat [content, "\n"]) in
-            if artifactError != "" then artifactError else writeBuilderReport reportPath content
+            if artifactError != "" then
+              artifactError
+            else {
+              let routeError =
+                if route == "generic" then
+                  ""
+                else
+                  writeTextOrMessage routeArtifactPath (textConcat [route, "\n"]) in
+              if routeError != "" then
+                routeError
+              else {
+                let closureError = writeCapabilityAuditClosureArtifacts workspaceRoot route content prompt in
+                if closureError != "" then
+                  closureError
+                else {
+                  let sourceEditError = writeStandaloneSwarmDirectSourceEdit workspaceRoot route content prompt in
+                  if sourceEditError != "" then
+                    sourceEditError
+                  else
+                    writeBuilderReportForRoute reportPath workspaceRoot content route hasDependencyEvidence hasBackendPolicyRepair prompt
+                }
+              }
+            }
           }
         }
       }
@@ -207,6 +1004,14 @@ runVerifier : Str -> Str -> Str -> Str -> Str
 runVerifier reportPath workspaceRoot reportRoot prompt = {
   let workspaceTextPath = pathJoin [workspaceRoot, "workspace.txt"] in
   let builderPolicyPath = pathJoin [reportRoot, "builder-policy.md"] in
+  let route = taskRouteForPrompt prompt in
+  let hasDependencyEvidence = promptHasDependencyCompletionEvidence prompt in
+  let hasBackendPolicyRepair = promptHasAgentBackendPolicyRepair prompt in
+  let hasSourceEditPlan = promptHasSourceEditPlan prompt in
+  let hasRepoScaleSourceEditPlan = promptHasRepoScaleSourceEditPlan prompt in
+  let affectedPlanStatuses = affectedVerificationPlanCapabilityStatuses prompt in
+  let focusedPlanStatuses = focusedVerificationPlanCapabilityStatuses prompt in
+  let autonomousGateStatuses = autonomousLaunchGateCapabilityStatuses prompt in
   if promptHasVerifierContextPack prompt == false then
     "local-agent-error:missing verifier context pack"
   else if promptHasTaskFileContent prompt == false then
@@ -217,32 +1022,94 @@ runVerifier reportPath workspaceRoot reportRoot prompt = {
       reportError
     else {
       let content = readTextOr workspaceTextPath "" in
-      if content == "fixed-after-feedback\n" then
-        writeVerifierReport
-          reportPath
-          (VerifierReport {
-            verdict = "pass",
-            summary = "local Clasp verifier passed",
-            findings = emptyTexts,
-            tests_run = ["clasp-local-agent", "clasp-local-agent-context-pack", "clasp-local-agent-task-file-prompt"],
-            follow_up = emptyTexts,
-            capability_statuses = [passingCapability ""]
-          })
+      if content == textConcat [routeFixedContent route, "\n"] && capabilityAuditClosureArtifactsPresent workspaceRoot route && standaloneSwarmDirectSourceEditPresent workspaceRoot route prompt then
+        {
+          let gate = localVerifierGateFor route true emptyTexts in
+          writeVerifierReport
+            reportPath
+            (VerifierReport {
+              verdict = "pass",
+              summary =
+                if route == "generic" then
+                  "local Clasp verifier passed"
+                else
+                  textConcat ["local Clasp verifier passed ", route],
+              workspace_fingerprint_manifest = standaloneSwarmWorkspaceFingerprintManifestForPrompt route prompt,
+              workspace_fingerprint_manifest_fingerprint64_hex =
+                standaloneSwarmWorkspaceFingerprintManifestFingerprint64Hex workspaceRoot route prompt,
+              findings = emptyTexts,
+              tests_run =
+                append
+                  (append
+                    (append
+                      (append
+                        (routeTestsRunWithEvidence route hasDependencyEvidence hasBackendPolicyRepair hasSourceEditPlan hasRepoScaleSourceEditPlan)
+                        ["clasp-local-agent-verifier-gate"])
+                      (affectedVerificationPlanTestsRun prompt))
+                    (focusedVerificationPlanTestsRun prompt))
+                  (autonomousLaunchGateTestsRun prompt),
+              follow_up = emptyTexts,
+              capability_statuses =
+                append
+                  (append
+                    (append
+                      (append
+                        [
+                          passingCapability route hasDependencyEvidence hasBackendPolicyRepair hasSourceEditPlan hasRepoScaleSourceEditPlan,
+                          localVerifierGateCapability gate
+                        ]
+                        (capabilityAuditClosureDecisionCapabilityStatuses route prompt))
+                      affectedPlanStatuses)
+                    focusedPlanStatuses)
+                  autonomousGateStatuses
+            })
+        }
       else {
         let policyError = writeTextOrMessage builderPolicyPath "force-close-category\n" in
         if policyError != "" then
           policyError
-        else
+        else {
+          let findings = localVerifierFindingsFor workspaceRoot route prompt content in
+          let gate = localVerifierGateFor route false findings in
           writeVerifierReport
             reportPath
             (VerifierReport {
               verdict = "fail",
-              summary = "local Clasp verifier requested feedback retry",
-              findings = ["workspace.txt still has first-attempt content"],
-              tests_run = ["clasp-local-agent", "clasp-local-agent-context-pack", "clasp-local-agent-task-file-prompt"],
+              summary =
+                if route == "generic" then
+                  "local Clasp verifier requested feedback retry"
+                else
+                  textConcat ["local Clasp verifier requested feedback retry for ", route],
+              workspace_fingerprint_manifest = standaloneSwarmWorkspaceFingerprintManifestForPrompt route prompt,
+              workspace_fingerprint_manifest_fingerprint64_hex =
+                standaloneSwarmWorkspaceFingerprintManifestFingerprint64Hex workspaceRoot route prompt,
+              findings = findings,
+              tests_run =
+                append
+                  (append
+                    (append
+                      (append
+                        (routeTestsRunWithEvidence route hasDependencyEvidence hasBackendPolicyRepair hasSourceEditPlan hasRepoScaleSourceEditPlan)
+                        ["clasp-local-agent-verifier-gate"])
+                      (affectedVerificationPlanTestsRun prompt))
+                    (focusedVerificationPlanTestsRun prompt))
+                  (autonomousLaunchGateTestsRun prompt),
               follow_up = ["Close the clasp_native_agent_backend category by consuming verifier feedback."],
-              capability_statuses = [failingCapability ""]
+              capability_statuses =
+                append
+                  (append
+                    (append
+                      (append
+                        [
+                          failingCapability route hasDependencyEvidence hasBackendPolicyRepair,
+                          localVerifierGateCapability gate
+                        ]
+                        (capabilityAuditClosureDecisionCapabilityStatuses route prompt))
+                      affectedPlanStatuses)
+                    focusedPlanStatuses)
+                  autonomousGateStatuses
             })
+        }
       }
     }
   }

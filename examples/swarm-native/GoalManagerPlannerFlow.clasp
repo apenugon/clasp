@@ -8,6 +8,8 @@ import GoalManagerFinalize
 import GoalManagerBenchmarkFlow
 import GoalManagerPlannerReuse
 import GoalManagerPlannerMemory
+import GoalManagerPlannerInputState
+import GoalManagerResourceHealth
 import GoalManagerChildLoopMonitor
 import GoalManagerTaskExecutionRuntime
 import GoalManagerTaskSet
@@ -212,6 +214,51 @@ writePlannerRunEvidence wave stdoutText stderrText =
       }
   }
 
+plannerRunArtifactText : Str -> Str
+plannerRunArtifactText path =
+  match readFile path {
+    Ok raw -> raw,
+    Err message -> textConcat ["failed to read planner run artifact ", path, ": ", message]
+  }
+
+writePlannerSwarmRunEvidence : Int -> SwarmRun -> Str
+writePlannerSwarmRunEvidence wave run =
+  writePlannerRunEvidence
+    wave
+    (plannerRunArtifactText run.stdoutArtifactPath)
+    (plannerRunArtifactText run.stderrArtifactPath)
+
+plannerRunFailureDetail : SwarmRun -> Str
+plannerRunFailureDetail run =
+  textJoin "\n" [
+    textConcat ["exitCode=", encode run.exitCode],
+    textConcat ["status=", run.status],
+    textConcat ["timedOut=", encode run.timedOut],
+    textConcat ["memoryLimitMb=", encode run.memoryLimitMb],
+    textConcat ["stdoutArtifactPath=", run.stdoutArtifactPath],
+    textConcat ["stderrArtifactPath=", run.stderrArtifactPath],
+    textConcat ["stdoutTail=", readProcessOutputTailText run.stdoutArtifactPath],
+    textConcat ["stderrTail=", readProcessOutputTailText run.stderrArtifactPath],
+    if run.timedOut then textConcat ["planner command timed out after ", encode plannerTimeoutMs, "ms"] else ""
+  ]
+
+plannerRecoverableTransportDetail : Str -> Bool
+plannerRecoverableTransportDetail detail =
+  if textIncludes detail "We're currently experiencing high demand" then
+    true
+  else if textIncludes detail "stream disconnected before completion" then
+    true
+  else if textIncludes detail "websocket closed by server before response.completed" then
+    true
+  else if textIncludes detail "websocket closed by server" then
+    true
+  else if textIncludes detail "turn.failed" then
+    true
+  else if textIncludes detail "timedOut=true" then
+    true
+  else
+    textIncludes detail "exitCode=124"
+
 recordPlannerRecovery : ManagerState -> Str -> [Str] -> Str
 recordPlannerRecovery state cause command =
   appendRetryRecoveryRecord
@@ -304,18 +351,26 @@ runPlanner = {
         else {
           let plannerPromptPath = plannerPromptPathForWave wave in
           let plannerPrompt = plannerPromptFor wave benchmarkSummary in
-          match writeFile plannerPromptPath plannerPrompt {
-            Err message ->
-              plannerFailure "planner prompt write failed" message,
-            Ok promptWriteValue -> {
-              let plannerCommand =
-                commandSpec
-                  managerProjectRoot
-                  (plannerAgentCommandArgs resolvedPlannerSchemaPath (plannerReportPathFor wave) plannerPromptPath plannerPrompt) in
-              let commandTrace = appendManagerTrace (textConcat ["planner-wave-", encode wave, ":command-ready"]) in
-              if commandTrace != "" then
-                plannerFailure "manager trace write failed" commandTrace
-              else
+          let plannerResourceError = managerPlannerLaunchResourceError in
+          if plannerResourceError != "" then
+            plannerFailure "planner launch blocked by resource guard" plannerResourceError
+          else {
+            let plannerBackendError = plannerAgentBackendValidationMessage in
+            if plannerBackendError != "" then
+              plannerFailure "planner backend config invalid" (plannerAgentBackendConfigRepairText plannerBackendError)
+            else
+            match writeFile plannerPromptPath plannerPrompt {
+              Err message ->
+                plannerFailure "planner prompt write failed" message,
+              Ok promptWriteValue -> {
+                let plannerCommand =
+                  commandSpec
+                    managerProjectRoot
+                    (plannerAgentCommandArgs resolvedPlannerSchemaPath (plannerReportPathFor wave) plannerPromptPath plannerPrompt) in
+                let commandTrace = appendManagerTrace (textConcat ["planner-wave-", encode wave, ":command-ready"]) in
+                if commandTrace != "" then
+                  plannerFailure "manager trace write failed" commandTrace
+                else
           match lease (plannerHandleForWave wave) {
             Err message ->
               if length (textSplit message "task run budget exhausted") > 1 then {
@@ -367,25 +422,13 @@ runPlanner = {
                 if runTrace != "" then
                   plannerFailure "manager trace write failed" runTrace
                 else
-                match runCommand plannerCommand.cwd plannerCommand.command {
+                match toolRunWithOptionalLimits (plannerHandleForWave wave) plannerCommand plannerTimeoutMs plannerMemoryLimitMb {
                   Err message -> {
                     let evidenceError = writePlannerRunEvidence wave "" message in
                     if evidenceError != "" then
                       plannerFailure "planner run evidence write failed" evidenceError
                     else
-                    let recoverableTransport =
-                      if textIncludes message "We're currently experiencing high demand" then
-                        true
-                      else if textIncludes message "stream disconnected before completion" then
-                        true
-                      else if textIncludes message "websocket closed by server before response.completed" then
-                        true
-                      else if textIncludes message "websocket closed by server" then
-                        true
-                      else if textIncludes message "turn.failed" then
-                        true
-                      else
-                        textIncludes message "exitCode=124" in
+                    let recoverableTransport = plannerRecoverableTransportDetail message in
                     if recoverableTransport then {
                       let recordError = recordPlannerRecovery state (textConcat ["planner run failed: ", message]) plannerCommand.command in
                       if recordError != "" then
@@ -418,26 +461,14 @@ runPlanner = {
                     } else
                       plannerFailure "planner run failed" message
                   },
-                  Ok process ->
-                    let evidenceError = writePlannerRunEvidence wave process.stdout process.stderr in
+                  Ok run ->
+                    let evidenceError = writePlannerSwarmRunEvidence wave run in
                     if evidenceError != "" then
                       plannerFailure "planner run evidence write failed" evidenceError
                     else
-                    if process.exitCode != 0 then {
-                      let detail = textConcat [process.stderr, process.stdout] in
-                      let recoverableTransport =
-                        if textIncludes detail "We're currently experiencing high demand" then
-                          true
-                        else if textIncludes detail "stream disconnected before completion" then
-                          true
-                        else if textIncludes detail "websocket closed by server before response.completed" then
-                          true
-                        else if textIncludes detail "websocket closed by server" then
-                          true
-                        else if textIncludes detail "turn.failed" then
-                          true
-                        else
-                          textIncludes detail "exitCode=124" in
+                    if run.exitCode != 0 then {
+                      let detail = plannerRunFailureDetail run in
+                      let recoverableTransport = plannerRecoverableTransportDetail detail in
                       if recoverableTransport then {
                         let recordError = recordPlannerRecovery state (textConcat ["planner run failed: ", detail]) plannerCommand.command in
                         if recordError != "" then
@@ -481,14 +512,15 @@ runPlanner = {
                         }
                       else {
                         let failed = fail (plannerHandleForWave wave) in
-                        plannerFailure "planner step failed before producing a durable report" (textConcat [process.stderr, process.stdout])
-                      }
-                }
+                        plannerFailure "planner step failed before producing a durable report" (plannerRunFailureDetail run)
+                  }
               }
             }
           }
-            }
-          }
+        }
+        }
+      }
+      }
         }
       }
     }
@@ -602,7 +634,7 @@ continueWithPlanResolved wave benchmarkRuns benchmarkSummary reportResult =
               if trace5 != "" then
                 plannerFailure "manager trace write failed" trace5
               else {
-              let ensureTasksError = ensurePlannedTasks report in
+              let ensureTasksError = ensurePlannedTasks wave report in
               if ensureTasksError != "" then
                 finalizeWithReport failureState (syntheticFailureReport "planned task setup failed" ensureTasksError)
               else
@@ -705,7 +737,7 @@ executeReadyTasks report wave benchmarkRuns = {
                         else if length finalStatus.readyPlannedIds > 0 then
                           executeReadyTasks report wave benchmarkRuns
                         else if length finalStatus.failedIds > 0 then
-                          if wave < maxWaves then {
+                          if wave < maxWaves || resourceRecoveryReplanAvailable wave finalStatus.failedIds then {
                             let nextWave = incrementManagerCounter wave in
                             let nextState =
                               managerStateFor "needs-planner" "pending" false "" emptyTexts nextWave benchmarkRuns false in

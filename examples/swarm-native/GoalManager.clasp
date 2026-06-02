@@ -8,11 +8,61 @@ record WatchedProcess = {
   running : Bool,
   completed : Bool,
   exitCode : Int,
+  status : Str,
+  timedOut : Bool,
+  error : Str,
+  outputLimitBytes : Int,
+  stdoutTruncated : Bool,
+  stderrTruncated : Bool,
   stdoutPath : Str,
   stderrPath : Str,
   heartbeatPath : Str,
   updatedAtMs : Int
 }
+
+record LegacyWatchedProcess = {
+  pid : Int,
+  running : Bool,
+  completed : Bool,
+  exitCode : Int,
+  stdoutPath : Str,
+  stderrPath : Str,
+  heartbeatPath : Str,
+  updatedAtMs : Int
+}
+
+legacyWatchedProcessStatus : LegacyWatchedProcess -> Str
+legacyWatchedProcessStatus process =
+  if process.running then
+    "running"
+  else if process.completed then
+    if process.exitCode == 0 then
+      "completed-pass"
+    else if process.exitCode == 124 then
+      "timeout"
+    else
+      "completed-fail"
+  else
+    ""
+
+watchedProcessFromLegacy : LegacyWatchedProcess -> WatchedProcess
+watchedProcessFromLegacy process =
+  WatchedProcess {
+    pid = process.pid,
+    running = process.running,
+    completed = process.completed,
+    exitCode = process.exitCode,
+    status = legacyWatchedProcessStatus process,
+    timedOut = process.exitCode == 124,
+    error = if process.exitCode == 124 then "timeout" else "",
+    outputLimitBytes = 0,
+    stdoutTruncated = false,
+    stderrTruncated = false,
+    stdoutPath = process.stdoutPath,
+    stderrPath = process.stderrPath,
+    heartbeatPath = process.heartbeatPath,
+    updatedAtMs = process.updatedAtMs
+  }
 
 record MonitoredLoopSpec = {
   cwd : Str,
@@ -23,6 +73,7 @@ record MonitoredLoopSpec = {
   awaitTimeoutMs : Int,
   retryCount : Int,
   maxRetries : Int,
+  memoryLimitMb : Int,
   command : [Str]
 }
 
@@ -221,7 +272,8 @@ record TaskStatusLookup = {
 }
 
 record EnsurePlanState = {
-  error : Str
+  error : Str,
+  parentTaskId : Str
 }
 
 record PlanValidationIssue = {
@@ -342,7 +394,9 @@ emptyRetryRecoveryRecords = []
 
 foreign runCommandRaw : Str -> [Str] -> Result Str = "runCommandJson"
 foreign spawnCommandRaw : Str -> Str -> Str -> Str -> Int -> [Str] -> Result Str = "spawnCommandJson"
+foreign spawnCommandWithLimitsRaw : Str -> Str -> Str -> Str -> Int -> Int -> [Str] -> Result Str = "spawnCommandWithLimitsJson"
 foreign watchCommandRaw : Str -> Str -> Str -> Str -> Int -> [Str] -> Result Str = "watchCommandJson"
+foreign watchCommandWithLimitsRaw : Str -> Str -> Str -> Str -> Int -> Int -> [Str] -> Result Str = "watchCommandWithLimitsJson"
 foreign reconcileWatchedProcessRaw : Str -> Result Str = "reconcileWatchedProcessJson"
 foreign awaitWatchedProcessRaw : Str -> Int -> Result Str = "awaitWatchedProcessJson"
 foreign awaitWatchedProcessTimeoutRaw : Str -> Int -> Int -> Result Str = "awaitWatchedProcessTimeoutJson"
@@ -394,6 +448,42 @@ readEnvInt name fallback = match envVar name {
   Ok raw -> if raw == "" then fallback else decode Int raw,
   Err message -> fallback
 }
+
+configEnvPresent : Str -> Bool
+configEnvPresent name = match envVar name {
+  Ok raw -> raw != "",
+  Err message -> false
+}
+
+configTruthyText : Str -> Bool
+configTruthyText value =
+  if value == "1" then
+    true
+  else if value == "true" then
+    true
+  else if value == "yes" then
+    true
+  else
+    value == "on"
+
+allowUnmanagedAgentRuntime : Bool
+allowUnmanagedAgentRuntime = match envVar "CLASP_ALLOW_UNMANAGED_AGENT_RUNTIME" {
+  Ok raw ->
+    if raw == "dangerous" then
+      configTruthyText (readEnvText "CLASP_UNMANAGED_AGENT_RUNTIME_DANGER_ACCEPTED" "false")
+    else if configTruthyText raw then
+      configEnvPresent "CLASP_TEST_CODEX_MODE"
+    else
+      false,
+  Err message -> false
+}
+
+managedAgentRuntimeReady : Bool
+managedAgentRuntimeReady =
+  if configEnvPresent "CLASP_MANAGED_JOB_ID" then
+    true
+  else
+    allowUnmanagedAgentRuntime
 
 goalText : Str
 goalText =
@@ -499,6 +589,26 @@ agentCommandTemplate = readEnvTextList "CLASP_LOOP_AGENT_COMMAND_JSON" emptyText
 plannerAgentCommandTemplate : [Str]
 plannerAgentCommandTemplate = readEnvTextList "CLASP_MANAGER_PLANNER_AGENT_COMMAND_JSON" agentCommandTemplate
 
+agentMemoryLimitMb : Int
+agentMemoryLimitMb = readEnvInt "CLASP_LOOP_AGENT_MEMORY_MB_JSON" 8192
+
+plannerMemoryLimitMb : Int
+plannerMemoryLimitMb = readEnvInt "CLASP_MANAGER_PLANNER_MEMORY_MB_JSON" agentMemoryLimitMb
+
+managerChildMemoryReserveMb : Int
+managerChildMemoryReserveMb =
+  readEnvInt "CLASP_MANAGER_CHILD_MEMORY_RESERVE_MB_JSON" agentMemoryLimitMb
+
+managerExternalAgentReserveMb : Int
+managerExternalAgentReserveMb =
+  readEnvInt
+    "CLASP_MANAGER_EXTERNAL_AGENT_RESERVE_MB_JSON"
+    (readEnvInt "CLASP_MANAGED_JOB_EXTERNAL_AGENT_RESERVE_MB" 1024)
+
+managerExternalAgentProcessNames : [Str]
+managerExternalAgentProcessNames =
+  readEnvTextList "CLASP_MANAGER_EXTERNAL_AGENT_PROCESS_NAMES_JSON" ["codex"]
+
 childLoopWatchPollMs : Int
 childLoopWatchPollMs = match envVar "CLASP_LOOP_WATCH_POLL_MS_JSON" {
   Ok raw -> decode Int raw,
@@ -544,6 +654,9 @@ benchmarkTimeoutMs = match envVar "CLASP_MANAGER_BENCHMARK_TIMEOUT_MS_JSON" {
   Err message -> 3600000
 }
 
+benchmarkMemoryLimitMb : Int
+benchmarkMemoryLimitMb = readEnvInt "CLASP_MANAGER_BENCHMARK_MEMORY_MB_JSON" agentMemoryLimitMb
+
 maxWaves : Int
 maxWaves = match envVar "CLASP_MANAGER_MAX_WAVES_JSON" {
   Ok raw -> decode Int raw,
@@ -583,6 +696,50 @@ childMaxAttempts = match envVar "CLASP_MANAGER_CHILD_MAX_ATTEMPTS_JSON" {
   Ok raw -> decode Int raw,
   Err message -> 3
 }
+
+plannedTaskApprovalName : Str
+plannedTaskApprovalName =
+  readEnvText "CLASP_MANAGER_TASK_APPROVAL_JSON" "merge-ready"
+
+plannedTaskMergegateName : Str
+plannedTaskMergegateName =
+  readEnvText "CLASP_MANAGER_TASK_MERGEGATE_JSON" "trunk"
+
+plannedTaskRequiredApprovals : [Str]
+plannedTaskRequiredApprovals =
+  readEnvTextList "CLASP_MANAGER_TASK_REQUIRED_APPROVALS_JSON" [plannedTaskApprovalName]
+
+plannedTaskRequiredVerifiers : [Str]
+plannedTaskRequiredVerifiers =
+  readEnvTextList "CLASP_MANAGER_TASK_REQUIRED_VERIFIERS_JSON" emptyTexts
+
+plannedTaskAllowedProcesses : [Str]
+plannedTaskAllowedProcesses =
+  readEnvTextList "CLASP_MANAGER_TASK_ALLOWED_PROCESSES_JSON" emptyTexts
+
+plannedTaskAllowedWorkspaceRoots : [Str]
+plannedTaskAllowedWorkspaceRoots =
+  readEnvTextList "CLASP_MANAGER_TASK_ALLOWED_WORKSPACE_ROOTS_JSON" emptyTexts
+
+plannedTaskAllowedReadonlyRoots : [Str]
+plannedTaskAllowedReadonlyRoots =
+  readEnvTextList "CLASP_MANAGER_TASK_ALLOWED_READONLY_ROOTS_JSON" emptyTexts
+
+plannedTaskAllowedNetworkDestinations : [Str]
+plannedTaskAllowedNetworkDestinations =
+  readEnvTextList "CLASP_MANAGER_TASK_ALLOWED_NETWORK_DESTINATIONS_JSON" emptyTexts
+
+plannedTaskNetworkAccess : Str
+plannedTaskNetworkAccess =
+  readEnvText "CLASP_MANAGER_TASK_NETWORK_ACCESS_JSON" (if length plannedTaskAllowedNetworkDestinations > 0 then swarmNetworkAllowlisted else swarmNetworkAmbient)
+
+plannedTaskAccessPolicy : SwarmAccessPolicy
+plannedTaskAccessPolicy =
+  swarmAccessPolicyWithReadonlyRoots plannedTaskAllowedProcesses plannedTaskAllowedWorkspaceRoots plannedTaskAllowedReadonlyRoots plannedTaskNetworkAccess plannedTaskAllowedNetworkDestinations
+
+plannedTaskVerificationPolicy : SwarmVerificationPolicy
+plannedTaskVerificationPolicy =
+  swarmVerificationPolicy plannedTaskMergegateName plannedTaskRequiredApprovals plannedTaskRequiredVerifiers plannedTaskAccessPolicy
 
 childReportSettlePolls : Int
 childReportSettlePolls = readEnvInt "CLASP_MANAGER_CHILD_REPORT_SETTLE_POLLS_JSON" 3
@@ -1285,6 +1442,44 @@ initializeWorkspaceGitRepo root =
 plannerReportError : Str -> Result PlannerReport
 plannerReportError message = Err message
 
+record PlannerReportBoundarySummary = {
+  schemaName : Str,
+  schemaVersion : Str,
+  trustPolicy : Str,
+  trust : Str,
+  accepted : Bool,
+  reason : Str,
+  format : Str
+}
+
+record TrustedPlannerReport = {
+  summary : PlannerReportBoundarySummary,
+  report : PlannerReport
+}
+
+plannerReportBoundarySummary : Str -> Bool -> Str -> PlannerReportBoundarySummary
+plannerReportBoundarySummary format accepted reason =
+  PlannerReportBoundarySummary {
+    schemaName = "PlannerReport",
+    schemaVersion = "v1",
+    trustPolicy = "untrusted-until-planner-report-decode",
+    trust = if accepted then "validated" else "untrusted",
+    accepted = accepted,
+    reason = reason,
+    format = format
+  }
+
+trustedPlannerReportOk : Str -> PlannerReport -> Result TrustedPlannerReport
+trustedPlannerReportOk format report =
+  Ok
+    (TrustedPlannerReport {
+      summary = plannerReportBoundarySummary format true "",
+      report = report
+    })
+
+trustedPlannerReportError : Str -> Result TrustedPlannerReport
+trustedPlannerReportError message = Err message
+
 defaultPlannerTaskRole : Str -> Str -> Str
 defaultPlannerTaskRole taskId detail =
   if length (textSplit taskId "benchmark") > 1 then
@@ -1367,14 +1562,34 @@ plannerReportRawLooksLegacy raw =
   else
     false
 
+trustedPlannerReportFromRaw : Str -> Result TrustedPlannerReport
+trustedPlannerReportFromRaw raw =
+  if plannerReportRawLooksCurrent raw then
+    match tryDecode PlannerReport raw {
+      Ok report -> trustedPlannerReportOk "current" report,
+      Err message -> trustedPlannerReportError (textConcat ["planner report decode failed: ", message])
+    }
+  else if plannerReportRawLooksLegacy raw then
+    match tryDecode LegacyPlannerReport raw {
+      Ok report -> trustedPlannerReportOk "legacy" (legacyPlannerReportToCurrent report),
+      Err message -> trustedPlannerReportError (textConcat ["legacy planner report decode failed: ", message])
+    }
+  else
+    trustedPlannerReportError "planner report missing required fields"
+
+plannerReportBoundarySummaryFromRaw : Str -> PlannerReportBoundarySummary
+plannerReportBoundarySummaryFromRaw raw =
+  match trustedPlannerReportFromRaw raw {
+    Ok trusted -> trusted.summary,
+    Err message -> plannerReportBoundarySummary "unknown" false message
+  }
+
 plannerReportFromRaw : Str -> Result PlannerReport
 plannerReportFromRaw raw =
-  if plannerReportRawLooksCurrent raw then
-    Ok (decode PlannerReport raw)
-  else if plannerReportRawLooksLegacy raw then
-    Ok (legacyPlannerReportToCurrent (decode LegacyPlannerReport raw))
-  else
-    plannerReportError "planner report missing required fields"
+  match trustedPlannerReportFromRaw raw {
+    Ok trusted -> Ok trusted.report,
+    Err message -> plannerReportError message
+  }
 
 readPlannerReportPath : Str -> Result PlannerReport
 readPlannerReportPath path = match readFile path {
@@ -1396,25 +1611,49 @@ legacyPlannerInputStateToCurrent state =
     mailboxSummary = ""
   }
 
-plannerInputStateFromRaw : Str -> PlannerInputState
+plannerInputStateFromRaw : Str -> Result PlannerInputState
 plannerInputStateFromRaw raw =
   if length (textSplit raw "\"mailboxSummary\":") > 1 then
-    decode PlannerInputState raw
+    match tryDecode PlannerInputState raw {
+      Ok state -> Ok state,
+      Err message -> plannerInputStateError (textConcat ["planner input state decode failed: ", message])
+    }
   else
-    legacyPlannerInputStateToCurrent (decode LegacyPlannerInputState raw)
+    match tryDecode LegacyPlannerInputState raw {
+      Ok state -> Ok (legacyPlannerInputStateToCurrent state),
+      Err message -> plannerInputStateError (textConcat ["legacy planner input state decode failed: ", message])
+    }
 
 readPlannerInputStatePath : Str -> Result PlannerInputState
 readPlannerInputStatePath path = match readFile path {
-  Ok raw -> Ok (plannerInputStateFromRaw raw),
+  Ok raw -> plannerInputStateFromRaw raw,
   Err message -> plannerInputStateError message
 }
 
 watchedProcessError : Str -> Result WatchedProcess
 watchedProcessError message = Err message
 
+watchedProcessFromRaw : Str -> Result WatchedProcess
+watchedProcessFromRaw raw =
+  match tryDecode WatchedProcess raw {
+    Ok process -> Ok process,
+    Err message ->
+      match tryDecode LegacyWatchedProcess raw {
+        Ok legacyProcess -> Ok (watchedProcessFromLegacy legacyProcess),
+        Err legacyMessage ->
+          watchedProcessError
+            (textConcat [
+              "watched process decode failed: ",
+              message,
+              "; legacy watched process decode failed: ",
+              legacyMessage
+            ])
+      }
+  }
+
 watchedProcessResult : Result Str -> Result WatchedProcess
 watchedProcessResult value = match value {
-  Ok raw -> Ok (decode WatchedProcess raw),
+  Ok raw -> watchedProcessFromRaw raw,
   Err message -> watchedProcessError message
 }
 
@@ -1433,15 +1672,23 @@ spawnWatchedProcess : Str -> Str -> Str -> Str -> Int -> [Str] -> Result Watched
 spawnWatchedProcess cwd stdoutPath stderrPath heartbeatPath pollMs command =
   watchedProcessResult (spawnCommandRaw cwd stdoutPath stderrPath heartbeatPath pollMs command)
 
+spawnWatchedProcessWithLimits : Str -> Str -> Str -> Str -> Int -> Int -> [Str] -> Result WatchedProcess
+spawnWatchedProcessWithLimits cwd stdoutPath stderrPath heartbeatPath pollMs memoryLimitMb command =
+  watchedProcessResult (spawnCommandWithLimitsRaw cwd stdoutPath stderrPath heartbeatPath pollMs memoryLimitMb command)
+
 watchWatchedProcess : Str -> Str -> Str -> Str -> Int -> [Str] -> Result WatchedProcess
 watchWatchedProcess cwd stdoutPath stderrPath heartbeatPath pollMs command =
   watchedProcessResult (watchCommandRaw cwd stdoutPath stderrPath heartbeatPath pollMs command)
 
+watchWatchedProcessWithLimits : Str -> Str -> Str -> Str -> Int -> Int -> [Str] -> Result WatchedProcess
+watchWatchedProcessWithLimits cwd stdoutPath stderrPath heartbeatPath pollMs memoryLimitMb command =
+  watchedProcessResult (watchCommandWithLimitsRaw cwd stdoutPath stderrPath heartbeatPath pollMs memoryLimitMb command)
+
 sleepMsValue : Int -> Result Str
 sleepMsValue delayMs = sleepMsRaw delayMs
 
-monitoredLoopSpec : Str -> Str -> Str -> Str -> Int -> Int -> Int -> Int -> [Str] -> MonitoredLoopSpec
-monitoredLoopSpec cwd stdoutPath stderrPath heartbeatPath watchPollMs awaitTimeoutMs retryCount maxRetries command =
+monitoredLoopSpec : Str -> Str -> Str -> Str -> Int -> Int -> Int -> Int -> Int -> [Str] -> MonitoredLoopSpec
+monitoredLoopSpec cwd stdoutPath stderrPath heartbeatPath watchPollMs awaitTimeoutMs retryCount maxRetries memoryLimitMb command =
   MonitoredLoopSpec {
     cwd = cwd,
     stdoutPath = stdoutPath,
@@ -1451,6 +1698,7 @@ monitoredLoopSpec cwd stdoutPath stderrPath heartbeatPath watchPollMs awaitTimeo
     awaitTimeoutMs = awaitTimeoutMs,
     retryCount = retryCount,
     maxRetries = maxRetries,
+    memoryLimitMb = memoryLimitMb,
     command = command
   }
 
@@ -1464,6 +1712,12 @@ monitoredLoopPlaceholderProcess spec =
     running = false,
     completed = false,
     exitCode = 1,
+    status = "",
+    timedOut = false,
+    error = "",
+    outputLimitBytes = 0,
+    stdoutTruncated = false,
+    stderrTruncated = false,
     stdoutPath = spec.stdoutPath,
     stderrPath = spec.stderrPath,
     heartbeatPath = spec.heartbeatPath,
@@ -1482,6 +1736,20 @@ monitoredLoopRetryableStatus status =
     true
   else
     status == "malformed-unresolved-heartbeat"
+
+monitoredLoopProcessOutputLimited : WatchedProcess -> Bool
+monitoredLoopProcessOutputLimited process =
+  if process.status == "output-limit" then
+    true
+  else if process.error == "output-limit" then
+    true
+  else if process.exitCode == 125 then
+    if process.stdoutTruncated then
+      true
+    else
+      process.stderrTruncated
+  else
+    false
 
 monitoredLoopOutcomeFor : MonitoredLoopSpec -> Str -> Str -> WatchedProcess -> MonitoredLoopOutcome
 monitoredLoopOutcomeFor spec status message process = {
@@ -1513,7 +1781,11 @@ monitoredLoopMalformedHeartbeat spec message =
 
 monitoredLoopClassifyProcess : MonitoredLoopSpec -> WatchedProcess -> MonitoredLoopOutcome
 monitoredLoopClassifyProcess spec process =
-  if process.running then
+  if monitoredLoopProcessOutputLimited process then
+    monitoredLoopOutcomeFor spec "output-limit" "output limit exceeded" process
+  else if process.timedOut then
+    monitoredLoopOutcomeFor spec "timeout" "timeout" process
+  else if process.running then
     if process.completed then
       if process.exitCode == 0 then
         monitoredLoopOutcomeFor spec "completed-pass" "" process
@@ -1622,27 +1894,51 @@ monitoredLoopAwait spec =
 
 monitoredLoopSpawn : MonitoredLoopSpec -> MonitoredLoopOutcome
 monitoredLoopSpawn spec =
-  monitoredLoopClassifyResult
-    spec
-    (spawnWatchedProcess
-      spec.cwd
-      spec.stdoutPath
-      spec.stderrPath
-      spec.heartbeatPath
-      spec.watchPollMs
-      spec.command)
+  if spec.memoryLimitMb > 0 then
+    monitoredLoopClassifyResult
+      spec
+      (spawnWatchedProcessWithLimits
+        spec.cwd
+        spec.stdoutPath
+        spec.stderrPath
+        spec.heartbeatPath
+        spec.watchPollMs
+        spec.memoryLimitMb
+        spec.command)
+  else
+    monitoredLoopClassifyResult
+      spec
+      (spawnWatchedProcess
+        spec.cwd
+        spec.stdoutPath
+        spec.stderrPath
+        spec.heartbeatPath
+        spec.watchPollMs
+        spec.command)
 
 monitoredLoopWatch : MonitoredLoopSpec -> MonitoredLoopOutcome
 monitoredLoopWatch spec =
-  monitoredLoopClassifyResult
-    spec
-    (watchWatchedProcess
-      spec.cwd
-      spec.stdoutPath
-      spec.stderrPath
-      spec.heartbeatPath
-      spec.watchPollMs
-      spec.command)
+  if spec.memoryLimitMb > 0 then
+    monitoredLoopClassifyResult
+      spec
+      (watchWatchedProcessWithLimits
+        spec.cwd
+        spec.stdoutPath
+        spec.stderrPath
+        spec.heartbeatPath
+        spec.watchPollMs
+        spec.memoryLimitMb
+        spec.command)
+  else
+    monitoredLoopClassifyResult
+      spec
+      (watchWatchedProcess
+        spec.cwd
+        spec.stdoutPath
+        spec.stderrPath
+        spec.heartbeatPath
+        spec.watchPollMs
+        spec.command)
 
 monitoredLoopLaunchOrResume : MonitoredLoopSpec -> MonitoredLoopOutcome
 monitoredLoopLaunchOrResume spec =
@@ -1654,9 +1950,16 @@ monitoredLoopLaunchOrResume spec =
 childLoopStateError : Str -> Result ChildLoopState
 childLoopStateError message = Err message
 
+childLoopStateFromRaw : Str -> Result ChildLoopState
+childLoopStateFromRaw raw =
+  match tryDecode ChildLoopState raw {
+    Ok state -> Ok state,
+    Err message -> childLoopStateError (textConcat ["child loop state decode failed: ", message])
+  }
+
 readChildLoopStatePath : Str -> Result ChildLoopState
 readChildLoopStatePath path = match readFile path {
-  Ok raw -> Ok (decode ChildLoopState raw),
+  Ok raw -> childLoopStateFromRaw raw,
   Err message -> childLoopStateError message
 }
 
@@ -1673,7 +1976,14 @@ syntheticFailureReport summary detail =
 
 readVerifierReportPath : Str -> VerifierReport
 readVerifierReportPath path = match readFile path {
-  Ok raw -> decode VerifierReport raw,
+  Ok raw ->
+    match tryDecode VerifierReport raw {
+      Ok report -> report,
+      Err message ->
+        syntheticFailureReport
+          (textConcat ["invalid verifier report: ", message])
+          message
+    },
   Err message ->
     syntheticFailureReport
       (textConcat ["missing verifier report: ", message])
@@ -1685,15 +1995,22 @@ builderFeedbackError message = Err message
 
 readBuilderReportPath : Str -> Result BuilderReport
 readBuilderReportPath path = match readFile path {
-  Ok raw -> Ok (decode BuilderReport raw),
+  Ok raw -> tryDecode BuilderReport raw,
   Err message -> builderFeedbackError message
 }
 
 readMailboxMessagesPath : Str -> [SwarmMailboxMessage]
 readMailboxMessagesPath path = match readFile path {
-  Ok raw -> decode [SwarmMailboxMessage] raw,
+  Ok raw -> mailboxMessagesFromRaw raw,
   Err message -> emptySwarmMailboxMessages
 }
+
+mailboxMessagesFromRaw : Str -> [SwarmMailboxMessage]
+mailboxMessagesFromRaw raw =
+  match tryDecode [SwarmMailboxMessage] raw {
+    Ok messages -> messages,
+    Err message -> emptySwarmMailboxMessages
+  }
 
 writeMailboxMessages : [SwarmMailboxMessage] -> Str
 writeMailboxMessages messages = match writeFile mailboxPath (encode messages) {
@@ -2062,6 +2379,9 @@ appendCapabilityMailboxDetails details statuses = {
   let mut rendered = details;
   for status in statuses {
     rendered = append rendered [textConcat ["capability=", status.name, ":", status.status]];
+    rendered = appendPrefixedMailboxDetails rendered (textConcat ["capability-evidence=", status.name, ":"]) status.evidence;
+    rendered = appendPrefixedMailboxDetails rendered (textConcat ["capability-gap=", status.name, ":"]) status.blocking_gaps;
+    rendered = appendPrefixedMailboxDetails rendered (textConcat ["capability-closure=", status.name, ":"]) status.required_closure;
     rendered
   };
   rendered
@@ -2275,6 +2595,7 @@ childLoopMonitorSpecForTaskId taskId =
     childLoopAwaitTimeoutMs
     (readChildLoopManagerRetries taskId)
     childLoopMaxManagerRetries
+    0
     emptyTexts
 
 childLoopMonitorSpec : PlannerTaskSpec -> MonitoredLoopSpec
@@ -2288,6 +2609,7 @@ childLoopMonitorSpec spec =
     childLoopAwaitTimeoutMs
     (readChildLoopManagerRetries spec.taskId)
     childLoopMaxManagerRetries
+    managerChildMemoryReserveMb
     (childLoopCommandArgs spec)
 
 nonZeroAttemptOr : Int -> Int -> Int
@@ -2381,6 +2703,7 @@ childLoopLaunchMonitorSpec taskId =
     childLoopAwaitTimeoutMs
     0
     999999
+    0
     emptyTexts
 
 childLoopLaunchOutcome : Str -> MonitoredLoopOutcome
@@ -2396,6 +2719,8 @@ childLoopLaunchState taskId = {
     watchedProcessError outcome.message
   else if outcome.status == "retry-exhausted" then
     watchedProcessError outcome.message
+  else if outcome.status == "output-limit" then
+    watchedProcessError "output-limit"
   else
     Ok outcome.process
 }
@@ -2452,6 +2777,8 @@ childLoopLaunchCompleted taskId = {
   if outcome.status == "completed-pass" then
     true
   else if outcome.status == "completed-fail" then
+    true
+  else if outcome.status == "output-limit" then
     true
   else if outcome.status == "running" then
     if childLoopLaunchHeartbeatStale outcome.process then
@@ -3485,9 +3812,16 @@ readPlannerInputState = readPlannerInputStatePath plannerInputPath
 benchmarkCheckpointError : Str -> Result BenchmarkCheckpoint
 benchmarkCheckpointError message = Err message
 
+benchmarkCheckpointFromRaw : Str -> Result BenchmarkCheckpoint
+benchmarkCheckpointFromRaw raw =
+  match tryDecode BenchmarkCheckpoint raw {
+    Ok checkpoint -> Ok checkpoint,
+    Err message -> benchmarkCheckpointError (textConcat ["benchmark checkpoint decode failed: ", message])
+  }
+
 readBenchmarkCheckpointPath : Str -> Result BenchmarkCheckpoint
 readBenchmarkCheckpointPath path = match readFile path {
-  Ok raw -> Ok (decode BenchmarkCheckpoint raw),
+  Ok raw -> benchmarkCheckpointFromRaw raw,
   Err message -> benchmarkCheckpointError message
 }
 
@@ -3514,6 +3848,53 @@ managerHealthSummaryText wave =
     "hostProbe=disabled-in-native-fast-path"
   ]
 
+rawEnvTextOrEmpty : Str -> Str
+rawEnvTextOrEmpty name =
+  match envVar name {
+    Ok raw -> raw,
+    Err message -> ""
+  }
+
+plannerTaskCatalogFileFingerprint : Str -> Str
+plannerTaskCatalogFileFingerprint path =
+  if path == "" then
+    "missing"
+  else if fileExists path then
+    textConcat [path, ":", textFingerprint64Hex (readTextOrEmpty path)]
+  else
+    textConcat [path, ":missing"]
+
+plannerTaskCatalogRawFingerprint : Str -> Str
+plannerTaskCatalogRawFingerprint raw =
+  if raw == "" then
+    "missing"
+  else
+    textFingerprint64Hex raw
+
+plannerTaskCatalogEnvPath : Str
+plannerTaskCatalogEnvPath = rawEnvTextOrEmpty "CLASP_LOCAL_PLANNER_TASK_CATALOG_PATH"
+
+plannerWorkspaceTaskCatalogPath : Str
+plannerWorkspaceTaskCatalogPath =
+  pathJoin [resolvedWorkspaceRoot, ".clasp-local-planner", "task-catalog.json"]
+
+plannerTaskCatalogFingerprintSource : Str
+plannerTaskCatalogFingerprintSource =
+  textJoin "\n" [
+    textConcat [
+      "env-json:",
+      plannerTaskCatalogRawFingerprint (rawEnvTextOrEmpty "CLASP_LOCAL_PLANNER_TASK_CATALOG_JSON")
+    ],
+    textConcat [
+      "env-path:",
+      plannerTaskCatalogFileFingerprint plannerTaskCatalogEnvPath
+    ],
+    textConcat [
+      "workspace-path:",
+      plannerTaskCatalogFileFingerprint plannerWorkspaceTaskCatalogPath
+    ]
+  ]
+
 plannerInputFingerprintSourceFor : Int -> Str -> Str
 plannerInputFingerprintSourceFor wave benchmarkSummary =
   let mailboxSummary = mailboxSummaryText wave in
@@ -3527,6 +3908,7 @@ plannerInputFingerprintSourceFor wave benchmarkSummary =
     textConcat ["wave:", encode wave],
     textConcat ["benchmark-enabled:", encode benchmarkEnabled],
     textConcat ["benchmark-summary:", benchmarkSummary],
+    textConcat ["planner-task-catalog:", plannerTaskCatalogFingerprintSource],
     textConcat ["mailbox-summary:", mailboxSummary],
     textConcat ["health-summary:", healthSummary]
   ]
@@ -3592,10 +3974,24 @@ plannerRunFailureDetail : SwarmRun -> Str
 plannerRunFailureDetail run =
   textJoin "\n" [
     textConcat ["exitCode=", encode run.exitCode],
+    textConcat ["status=", run.status],
+    textConcat ["timedOut=", encode run.timedOut],
+    textConcat ["memoryLimitMb=", encode run.memoryLimitMb],
     textConcat ["stdoutArtifactPath=", run.stdoutArtifactPath],
     textConcat ["stderrArtifactPath=", run.stderrArtifactPath],
     textConcat ["stdoutTail=", readProcessOutputTailText run.stdoutArtifactPath],
-    textConcat ["stderrTail=", readProcessOutputTailText run.stderrArtifactPath]
+    textConcat ["stderrTail=", readProcessOutputTailText run.stderrArtifactPath],
+    if run.timedOut then textConcat ["planner command timed out after ", encode plannerTimeoutMs, "ms"] else ""
+  ]
+
+plannerRunFailureDetailFor : Int -> SwarmRun -> Str
+plannerRunFailureDetailFor wave run =
+  textJoin "\n" [
+    plannerRunFailureDetail run,
+    textConcat ["plannerStdoutPath=", plannerStdoutPathFor wave],
+    textConcat ["plannerStderrPath=", plannerStderrPathFor wave],
+    textConcat ["plannerStdoutTail=", readProcessOutputTailText (plannerStdoutPathFor wave)],
+    textConcat ["plannerStderrTail=", readProcessOutputTailText (plannerStderrPathFor wave)]
   ]
 
 plannerProcessFailureDetail : Int -> ProcessResult -> Str
@@ -3651,6 +4047,13 @@ childLoopStateSummary taskId =
 benchmarkSignalError : Str -> Result BenchmarkSignal
 benchmarkSignalError message = Err message
 
+benchmarkSignalFromRaw : Str -> Result BenchmarkSignal
+benchmarkSignalFromRaw raw =
+  match tryDecode BenchmarkSignal raw {
+    Ok signal -> Ok signal,
+    Err message -> benchmarkSignalError (textConcat ["benchmark signal decode failed: ", message])
+  }
+
 readBenchmarkSignalStdout : Int -> Result BenchmarkSignal
 readBenchmarkSignalStdout wave =
   let stdoutPath = benchmarkStdoutPathFor wave in
@@ -3669,7 +4072,7 @@ readBenchmarkSignalStdout wave =
         if raw == "" then
           benchmarkSignalError (textConcat ["missing benchmark signal in ", stdoutPath])
         else
-          Ok (decode BenchmarkSignal raw)
+          benchmarkSignalFromRaw raw
     }
   else
     benchmarkSignalError (textConcat ["missing benchmark stdout: ", stdoutPath])
@@ -3769,12 +4172,13 @@ pollWatchedProcess heartbeatPath pollMs remainingMs =
 
 runBenchmarkCommand : Int -> Int -> Result ProcessResult
 runBenchmarkCommand wave benchmarkRuns =
-  match spawnWatchedProcess
+  match spawnWatchedProcessWithLimits
     benchmarkCwd
     (benchmarkStdoutPathFor wave)
     (benchmarkStderrPathFor wave)
     (benchmarkHeartbeatPathFor wave)
     benchmarkWatchPollMs
+    benchmarkMemoryLimitMb
     (benchmarkCommandArgs wave benchmarkRuns) {
     Err message ->
       processResultError message,
@@ -5113,6 +5517,8 @@ ensureManagerReady : Str
 ensureManagerReady =
   if workspaceRoot == "" then
     "config-error:missing-workspace-root"
+  else if managedAgentRuntimeReady == false then
+    "config-error:managed-job-required"
   else if maxTaskLoops < 0 then
     "config-error:max-tasks-must-be-nonnegative"
   else if plannerTaskMaxRuns < 1 then
@@ -5351,22 +5757,37 @@ ensureObjective = match objectiveCreate swarmStateRoot effectiveObjectiveId goal
   Err message -> message
 }
 
-ensureTask : Str -> Str -> [Str] -> Str
-ensureTask taskId detail dependencies = match tasks swarmStateRoot {
+ensureTaskWithSpawnPolicy : SwarmSpawnPolicy -> Str -> Str -> [Str] -> Str
+ensureTaskWithSpawnPolicy spawnPolicy taskId detail dependencies = match tasks swarmStateRoot {
   Ok taskValues ->
     if taskListHasId taskId taskValues then
       ""
     else
-      match taskCreate objectiveRef taskId detail dependencies 1 taskLeaseTimeoutMs {
+      match taskCreateWithSpawnPolicy objectiveRef spawnPolicy taskId detail dependencies childMaxAttempts noDeadlineAtMs 0 taskLeaseTimeoutMs {
         Ok created -> "",
         Err message -> if textIncludes message "already exists" then "" else message
       },
   Err message ->
-    match taskCreate objectiveRef taskId detail dependencies 1 taskLeaseTimeoutMs {
+    match taskCreateWithSpawnPolicy objectiveRef spawnPolicy taskId detail dependencies childMaxAttempts noDeadlineAtMs 0 taskLeaseTimeoutMs {
       Ok created -> "",
       Err createMessage -> if textIncludes createMessage "already exists" then "" else createMessage
     }
 }
+
+ensureTask : Str -> Str -> [Str] -> Str
+ensureTask taskId detail dependencies =
+  ensureTaskWithSpawnPolicy (swarmSpawnPolicy "" 0) taskId detail dependencies
+
+ensurePlannedTask : Str -> Str -> Str -> [Str] -> Str
+ensurePlannedTask parentTaskId taskId detail dependencies =
+  ensureTaskWithSpawnPolicy (swarmSpawnPolicyWithChildBudget parentTaskId 0 0) taskId detail dependencies
+
+ensurePlannedTaskPolicy : Str -> Str
+ensurePlannedTaskPolicy taskId =
+  match policySetVerificationPolicy (taskHandleFor taskId) plannedTaskVerificationPolicy {
+    Ok policyValue -> "",
+    Err message -> message
+  }
 
 ensurePlannerTaskFor : Int -> Str
 ensurePlannerTaskFor wave = match tasks swarmStateRoot {
@@ -5374,23 +5795,29 @@ ensurePlannerTaskFor wave = match tasks swarmStateRoot {
     if taskListHasId (plannerTaskIdForWave wave) taskValues then
       ""
     else
-      match taskCreate
+      match taskCreateWithSpawnPolicy
         objectiveRef
+        (swarmSpawnPolicyWithChildBudget "" 1 maxTaskLoops)
         (plannerTaskIdForWave wave)
         (textConcat ["Plan bounded task DAG wave ", encode wave, " for the high-level objective."])
         emptyTexts
         plannerTaskMaxRuns
+        noDeadlineAtMs
+        0
         taskLeaseTimeoutMs {
         Ok created -> "",
         Err message -> if textIncludes message "already exists" then "" else message
       },
   Err message ->
-    match taskCreate
+    match taskCreateWithSpawnPolicy
       objectiveRef
+      (swarmSpawnPolicyWithChildBudget "" 1 maxTaskLoops)
       (plannerTaskIdForWave wave)
       (textConcat ["Plan bounded task DAG wave ", encode wave, " for the high-level objective."])
       emptyTexts
       plannerTaskMaxRuns
+      noDeadlineAtMs
+      0
       taskLeaseTimeoutMs {
       Ok created -> "",
       Err createMessage -> if textIncludes createMessage "already exists" then "" else createMessage
@@ -5402,21 +5829,18 @@ ensurePlannedTaskStep state spec =
   if state.error != "" then
     state
   else {
-    let taskError = ensureTask spec.taskId (annotatedPlannerTaskDetail spec) spec.dependencies in
+    let taskError = ensurePlannedTask state.parentTaskId spec.taskId (annotatedPlannerTaskDetail spec) spec.dependencies in
     if taskError != "" then
-      EnsurePlanState { error = taskError }
+      EnsurePlanState { error = taskError, parentTaskId = state.parentTaskId }
     else {
-      let policyError = match policySet (taskHandleFor spec.taskId) "trunk" ["merge-ready"] emptyTexts {
-        Ok policyValue -> "",
-        Err message -> message
-      } in
-      EnsurePlanState { error = policyError }
+      let policyError = ensurePlannedTaskPolicy spec.taskId in
+      EnsurePlanState { error = policyError, parentTaskId = state.parentTaskId }
     }
   }
 
-ensurePlannedTasks : PlannerReport -> Str
-ensurePlannedTasks report =
-  (fold ensurePlannedTaskStep (EnsurePlanState { error = "" }) report.tasks).error
+ensurePlannedTasks : Int -> PlannerReport -> Str
+ensurePlannedTasks wave report =
+  (fold ensurePlannedTaskStep (EnsurePlanState { error = "", parentTaskId = plannerTaskIdForWave wave }) report.tasks).error
 
 plannerTaskCountError : PlannerReport -> Str
 plannerTaskCountError report =
@@ -5430,6 +5854,58 @@ plannerTaskCountError report =
     ]
   else
     ""
+
+plannerTaskDependencyVerifierEvidenceLine : Str -> Str
+plannerTaskDependencyVerifierEvidenceLine taskId =
+  if fileExists (taskFeedbackPath taskId) then
+    let report = readVerifierReportPath (taskFeedbackPath taskId) in
+    textConcat [
+      "- ",
+      taskId,
+      " verifier=",
+      report.verdict,
+      " summary=",
+      report.summary
+    ]
+  else
+    textConcat ["- ", taskId, " verifier=missing"]
+
+plannerTaskDependencyBuilderEvidenceLine : Str -> Str
+plannerTaskDependencyBuilderEvidenceLine taskId =
+  if fileExists (taskLatestBuilderReportPath taskId) then
+    match taskLatestBuilderReport taskId {
+      Ok report ->
+        textConcat [
+          "  builder=",
+          report.summary,
+          " feedback=",
+          report.feedback.summary
+        ],
+      Err message ->
+        textConcat ["  builder=read-error:", message]
+    }
+  else
+    "  builder=missing"
+
+plannerTaskDependencyEvidenceLines : [Str] -> [Str]
+plannerTaskDependencyEvidenceLines dependencies = {
+  let mut lines = emptyTexts;
+  for taskId in dependencies {
+    lines = append lines [
+      plannerTaskDependencyVerifierEvidenceLine taskId,
+      plannerTaskDependencyBuilderEvidenceLine taskId
+    ];
+    lines
+  };
+  lines
+}
+
+plannerTaskDependencyEvidenceText : PlannerTaskSpec -> Str
+plannerTaskDependencyEvidenceText spec =
+  if length spec.dependencies == 0 then
+    "No declared task dependencies."
+  else
+    textJoin "\n" (plannerTaskDependencyEvidenceLines spec.dependencies)
 
 taskPromptText : Int -> PlannerReport -> PlannerTaskSpec -> Str
 taskPromptText wave report spec = textJoin "\n" [
@@ -5448,6 +5924,9 @@ taskPromptText wave report spec = textJoin "\n" [
   "",
   "Sibling branches in this wave:",
   plannerTaskSiblingSummaryText report spec.taskId,
+  "",
+  "Dependency completion evidence:",
+  plannerTaskDependencyEvidenceText spec,
   "",
   "Shared swarm mailbox context:",
   mailboxSummaryTextForReport wave report,
@@ -5502,7 +5981,20 @@ childLoopCommandArgs spec =
     "CLASP_MANAGER_BENCHMARK_POLL_MS_JSON",
     "-u",
     "CLASP_MANAGER_BENCHMARK_TIMEOUT_MS_JSON",
+    "-u",
+    "CLASP_MANAGER_BENCHMARK_MEMORY_MB_JSON",
     textConcat ["CLASP_LOOP_CODEX_BIN_JSON=", encode codexBin],
+    textConcat ["CLASP_LOOP_CODEX_MODEL_JSON=", encode codexModel],
+    textConcat ["CLASP_LOOP_CODEX_REASONING_JSON=", encode codexReasoning],
+    textConcat ["CLASP_LOOP_CODEX_SANDBOX_JSON=", encode codexSandbox],
+    textConcat ["CLASP_LOOP_AGENT_BIN_JSON=", encode agentBin],
+    textConcat ["CLASP_LOOP_AGENT_MODEL_JSON=", encode agentModel],
+    textConcat ["CLASP_LOOP_AGENT_REASONING_JSON=", encode agentReasoning],
+    textConcat ["CLASP_LOOP_AGENT_SANDBOX_JSON=", encode agentSandbox],
+    textConcat ["CLASP_LOOP_AGENT_COMMAND_JSON=", encode agentCommandTemplate],
+    textConcat ["CLASP_LOOP_AGENT_MEMORY_MB_JSON=", encode agentMemoryLimitMb],
+    textConcat ["CLASP_LOOP_BUILDER_MEMORY_MB_JSON=", encode builderMemoryLimitMb],
+    textConcat ["CLASP_LOOP_VERIFIER_MEMORY_MB_JSON=", encode verifierMemoryLimitMb],
     textConcat ["CLASP_LOOP_TASK_FILE_JSON=", encode (taskPromptPath spec.taskId)],
     textConcat ["CLASP_LOOP_WORKSPACE_JSON=", encode (taskWorkspaceActualRoot spec.taskId)],
     textConcat ["CLASP_MANAGER_TASK_ROLE_JSON=", encode (plannerTaskRoleLabel spec)],
@@ -5747,6 +6239,8 @@ recoverablePlannerTransportFailure detail =
   else if textIncludes detail "websocket closed by server" then
     true
   else if textIncludes detail "turn.failed" then
+    true
+  else if textIncludes detail "timedOut=true" then
     true
   else
     textIncludes detail "exitCode=124"
@@ -6114,8 +6608,13 @@ runBenchmarkCheckpoint report wave benchmarkRuns = {
               (syntheticFailureReport "benchmark trace write failed" trace1)
           else if process.exitCode != 0 then
             benchmarkCommandFailure report wave benchmarkRuns process.stderr
-          else {
-            let signal = decode BenchmarkSignal process.stdout in
+          else
+            match benchmarkSignalFromRaw process.stdout {
+            Err message ->
+              finalizeWithReport
+                (managerFailureState (plannerTaskIds report) wave benchmarkRuns)
+                (syntheticFailureReport "benchmark signal decode failed" message),
+            Ok signal -> {
             let trace2 = appendManagerTrace (textConcat ["benchmark-wave-", encode wave, ":decoded-signal"]) in
             if trace2 != "" then
               finalizeWithReport
@@ -6131,6 +6630,7 @@ runBenchmarkCheckpoint report wave benchmarkRuns = {
               else
                 finalizeBenchmarkCheckpoint report wave benchmarkRuns checkpoint
             }
+          }
           }
         }
       }
@@ -6180,11 +6680,18 @@ resumeBenchmarkCheckpoint wave benchmarkRuns =
                 if result.exitCode != 0 then
                   benchmarkCommandFailure report wave benchmarkRuns result.stderr
                 else
-                  finalizeBenchmarkCheckpoint
-                    report
-                    wave
-                    benchmarkRuns
-                    (checkpointFromSignal wave (decode BenchmarkSignal result.stdout))
+                  match benchmarkSignalFromRaw result.stdout {
+                    Err signalMessage ->
+                      finalizeWithReport
+                        (managerFailureState (plannerTaskIds report) wave benchmarkRuns)
+                        (syntheticFailureReport "benchmark signal decode failed" signalMessage),
+                    Ok signal ->
+                      finalizeBenchmarkCheckpoint
+                        report
+                        wave
+                        benchmarkRuns
+                        (checkpointFromSignal wave signal)
+                  }
             }
         }
       else
@@ -6361,7 +6868,7 @@ runPlanner = {
                   if runTrace != "" then
                     plannerFailure "manager trace write failed" runTrace
                   else
-                  match runCommand plannerCommand.cwd plannerCommand.command {
+                  match toolRunWithOptionalLimits (plannerHandleForWave wave) plannerCommand plannerTimeoutMs plannerMemoryLimitMb {
                     Err message ->
                       if textIncludes message "We're currently experiencing high demand" then
                         continueAfterPlannerTransportBlocker "planner run failed" message plannerCommand.command
@@ -6378,9 +6885,9 @@ runPlanner = {
                         continueAfterPlannerTransportBlocker "planner run failed" message plannerCommand.command
                       else
                         plannerFailure "planner run failed" message,
-                    Ok process ->
-                      if process.exitCode != 0 then {
-                        let detail = plannerProcessFailureDetail wave process in
+                    Ok run ->
+                      if run.exitCode != 0 then {
+                        let detail = plannerRunFailureDetailFor wave run in
                         if textIncludes detail "We're currently experiencing high demand" then
                           continueAfterPlannerTransportBlocker "planner run failed" detail plannerCommand.command
                         else if textIncludes detail "usage limit" then {
@@ -6405,7 +6912,7 @@ runPlanner = {
                             continueWithPlan
                         }
                       else {
-                        let detail = textConcat [process.stderr, process.stdout] in
+                        let detail = plannerRunFailureDetailFor wave run in
                         if textIncludes detail "We're currently experiencing high demand" then
                           continueAfterPlannerTransportBlocker "planner step failed before producing a durable report" detail plannerCommand.command
                         else if textIncludes detail "usage limit" then {
@@ -6758,7 +7265,12 @@ recoverExpiredTaskFailureRecording spec message =
 
 approveCompletedPlannedTask : PlannerTaskSpec -> Str
 approveCompletedPlannedTask spec =
-  match approveAndMerge (taskHandleFor spec.taskId) "merge-ready" "trunk" emptyTexts mailboxLimit {
+  match approveAndMerge
+    (taskHandleFor spec.taskId)
+    plannedTaskApprovalName
+    plannedTaskMergegateName
+    plannedTaskRequiredVerifiers
+    mailboxLimit {
     Err message ->
       textConcat ["task review failed: ", spec.taskId, ": ", message],
     Ok reviewValue ->
@@ -6933,6 +7445,8 @@ launchChildLoop spec = {
       watchedProcessError outcome.message
     else
       Ok outcome.process
+  else if outcome.status == "output-limit" then
+    watchedProcessError "output-limit"
   else
     watchedProcessError outcome.message
 }
@@ -7130,7 +7644,7 @@ continueWithPlanResolved wave benchmarkRuns benchmarkSummary reportResult =
               if trace5 != "" then
                 plannerFailure "manager trace write failed" trace5
               else {
-              let ensureTasksError = ensurePlannedTasks report in
+              let ensureTasksError = ensurePlannedTasks wave report in
               if ensureTasksError != "" then
                 finalizeWithReport failureState (syntheticFailureReport "planned task setup failed" ensureTasksError)
               else
@@ -7364,13 +7878,18 @@ executeReadyTasks report wave benchmarkRuns = {
                     {
                       let waitOutcome = awaitChildLoopOutcome activeTaskIds in
                       let traceTimeout =
-                        if waitOutcome.status == "timeout" then
+                        if waitOutcome.status == "output-limit" then
+                          appendManagerTrace
+                            (textConcat ["task-wait-output-limit:", firstTextOrEmpty activeTaskIds])
+                        else if waitOutcome.status == "timeout" then
                           appendManagerTrace
                             (textConcat ["task-wait-timeout:", firstTextOrEmpty activeTaskIds])
                         else
                           "" in
                       if traceTimeout != "" then
                         finalizeWithReport failureState (syntheticFailureReport "manager trace write failed" traceTimeout)
+                      else if waitOutcome.status == "output-limit" then
+                        finalizeWithReport failureState (syntheticFailureReport "child loop output limit exceeded" (firstTextOrEmpty activeTaskIds))
                       else
                         executeReadyTasks report wave benchmarkRuns
                     }
@@ -7437,13 +7956,18 @@ executeReadyTasks report wave benchmarkRuns = {
                               {
                                 let waitOutcome = awaitChildLoopOutcome pendingLaunchIds in
                                 let traceTimeout =
-                                  if waitOutcome.status == "timeout" then
+                                  if waitOutcome.status == "output-limit" then
+                                    appendManagerTrace
+                                      (textConcat ["task-launch-wait-output-limit:", firstTextOrEmpty pendingLaunchIds])
+                                  else if waitOutcome.status == "timeout" then
                                     appendManagerTrace
                                       (textConcat ["task-launch-wait-timeout:", firstTextOrEmpty pendingLaunchIds])
                                   else
                                     "" in
                                 if traceTimeout != "" then
                                   finalizeWithReport failureState (syntheticFailureReport "manager trace write failed" traceTimeout)
+                                else if waitOutcome.status == "output-limit" then
+                                  finalizeWithReport failureState (syntheticFailureReport "child loop launch output limit exceeded" (firstTextOrEmpty pendingLaunchIds))
                                 else
                                   executeReadyTasks report wave benchmarkRuns
                               }
@@ -7521,6 +8045,9 @@ managerServiceConfigArgs =
     textConcat ["CLASP_LOOP_AGENT_REASONING_JSON=", encode agentReasoning],
     textConcat ["CLASP_LOOP_AGENT_SANDBOX_JSON=", encode agentSandbox],
     textConcat ["CLASP_LOOP_AGENT_COMMAND_JSON=", encode agentCommandTemplate],
+    textConcat ["CLASP_LOOP_AGENT_MEMORY_MB_JSON=", encode agentMemoryLimitMb],
+    textConcat ["CLASP_LOOP_BUILDER_MEMORY_MB_JSON=", encode builderMemoryLimitMb],
+    textConcat ["CLASP_LOOP_VERIFIER_MEMORY_MB_JSON=", encode verifierMemoryLimitMb],
     textConcat ["CLASP_MANAGER_PLANNER_AGENT_COMMAND_JSON=", encode plannerAgentCommandTemplate],
     textConcat ["CLASP_LOOP_WATCH_POLL_MS_JSON=", encode childLoopWatchPollMs],
     textConcat ["CLASP_MANAGER_CHILD_AWAIT_TIMEOUT_MS_JSON=", encode childLoopAwaitTimeoutMs],
@@ -7533,6 +8060,15 @@ managerServiceConfigArgs =
     textConcat ["CLASP_MANAGER_TASK_LEASE_TIMEOUT_JSON=", encode taskLeaseTimeoutMs],
     textConcat ["CLASP_MANAGER_CHILD_MAX_ATTEMPTS_JSON=", encode childMaxAttempts],
     textConcat ["CLASP_MANAGER_MAX_CONCURRENT_CHILDREN_JSON=", encode maxConcurrentChildren],
+    textConcat ["CLASP_MANAGER_TASK_APPROVAL_JSON=", encode plannedTaskApprovalName],
+    textConcat ["CLASP_MANAGER_TASK_MERGEGATE_JSON=", encode plannedTaskMergegateName],
+    textConcat ["CLASP_MANAGER_TASK_REQUIRED_APPROVALS_JSON=", encode plannedTaskRequiredApprovals],
+    textConcat ["CLASP_MANAGER_TASK_REQUIRED_VERIFIERS_JSON=", encode plannedTaskRequiredVerifiers],
+    textConcat ["CLASP_MANAGER_TASK_ALLOWED_PROCESSES_JSON=", encode plannedTaskAllowedProcesses],
+    textConcat ["CLASP_MANAGER_TASK_ALLOWED_WORKSPACE_ROOTS_JSON=", encode plannedTaskAllowedWorkspaceRoots],
+    textConcat ["CLASP_MANAGER_TASK_ALLOWED_READONLY_ROOTS_JSON=", encode plannedTaskAllowedReadonlyRoots],
+    textConcat ["CLASP_MANAGER_TASK_NETWORK_ACCESS_JSON=", encode plannedTaskNetworkAccess],
+    textConcat ["CLASP_MANAGER_TASK_ALLOWED_NETWORK_DESTINATIONS_JSON=", encode plannedTaskAllowedNetworkDestinations],
     textConcat ["CLASP_MANAGER_TASK_WORKSPACE_CACHE_MAX_MB_JSON=", encode taskWorkspaceCacheMaxMb],
     textConcat ["CLASP_MANAGER_TASK_BASELINE_CACHE_MAX_MB_JSON=", encode taskBaselineCacheMaxMb],
     textConcat ["CLASP_MANAGER_FEEDBACK_LOOP_BASELINE_CACHE_MAX_MB_JSON=", encode feedbackLoopBaselineCacheMaxMb],
@@ -7549,6 +8085,7 @@ managerServiceConfigArgs =
     textConcat ["CLASP_MANAGER_BENCHMARK_CWD_JSON=", encode benchmarkCwd],
     textConcat ["CLASP_MANAGER_BENCHMARK_POLL_MS_JSON=", encode benchmarkWatchPollMs],
     textConcat ["CLASP_MANAGER_BENCHMARK_TIMEOUT_MS_JSON=", encode benchmarkTimeoutMs],
+    textConcat ["CLASP_MANAGER_BENCHMARK_MEMORY_MB_JSON=", encode benchmarkMemoryLimitMb],
     textConcat ["CLASP_MANAGER_SERVICE_ROOT_JSON=", encode serviceRoot],
     textConcat ["CLASP_MANAGER_SERVICE_ID_JSON=", encode serviceId],
     textConcat ["CLASP_MANAGER_SERVICE_RESTART_DELAY_MS_JSON=", encode serviceRestartDelayMs]

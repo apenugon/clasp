@@ -2,6 +2,8 @@ module Compiler.Emit.NativeSurface
 
 import Compiler.Ast
 import Compiler.Checker
+import Compiler.Checker.Builtins
+import Compiler.Checker.Types
 import Compiler.Emit.NativeJson
 import Compiler.Json
 import Compiler.Lower

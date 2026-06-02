@@ -1,8 +1,26 @@
 module GoalManagerTypes
 
+import AgentBackend
 import Swarm
 
 record WatchedProcess = {
+  pid : Int,
+  running : Bool,
+  completed : Bool,
+  exitCode : Int,
+  status : Str,
+  timedOut : Bool,
+  error : Str,
+  outputLimitBytes : Int,
+  stdoutTruncated : Bool,
+  stderrTruncated : Bool,
+  stdoutPath : Str,
+  stderrPath : Str,
+  heartbeatPath : Str,
+  updatedAtMs : Int
+}
+
+record LegacyWatchedProcess = {
   pid : Int,
   running : Bool,
   completed : Bool,
@@ -12,6 +30,39 @@ record WatchedProcess = {
   heartbeatPath : Str,
   updatedAtMs : Int
 }
+
+legacyWatchedProcessStatus : LegacyWatchedProcess -> Str
+legacyWatchedProcessStatus process =
+  if process.running then
+    "running"
+  else if process.completed then
+    if process.exitCode == 0 then
+      "completed-pass"
+    else if process.exitCode == 124 then
+      "timeout"
+    else
+      "completed-fail"
+  else
+    ""
+
+watchedProcessFromLegacy : LegacyWatchedProcess -> WatchedProcess
+watchedProcessFromLegacy process =
+  WatchedProcess {
+    pid = process.pid,
+    running = process.running,
+    completed = process.completed,
+    exitCode = process.exitCode,
+    status = legacyWatchedProcessStatus process,
+    timedOut = process.exitCode == 124,
+    error = if process.exitCode == 124 then "timeout" else "",
+    outputLimitBytes = 0,
+    stdoutTruncated = false,
+    stderrTruncated = false,
+    stdoutPath = process.stdoutPath,
+    stderrPath = process.stderrPath,
+    heartbeatPath = process.heartbeatPath,
+    updatedAtMs = process.updatedAtMs
+  }
 
 record PlannerTaskSpec = {
   taskId : Str,
@@ -167,6 +218,9 @@ record StatusWaitingReason = {
 
 record StatusView = {
   state : ManagerState,
+  plannerBackend : AgentBackendSummary,
+  plannerBackendPolicy : AgentBackendPolicySummary,
+  plannerBackendCapability : AgentBackendCapabilitySummary,
   plannerSummary : Str,
   objectiveProjectedStatus : Str,
   plannedTaskIds : [Str],
@@ -201,7 +255,8 @@ record TaskStatusLookup = {
 }
 
 record EnsurePlanState = {
-  error : Str
+  error : Str,
+  parentTaskId : Str
 }
 
 record PlanValidationIssue = {
@@ -243,15 +298,6 @@ record CyclePartitionState = {
   progressed : Bool
 }
 
-record PlannerInputState = {
-  fingerprint : Str,
-  goalText : Str,
-  plannerPolicy : Str,
-  schemaPath : Str,
-  workspaceRoot : Str,
-  mailboxSummary : Str
-}
-
 record PlannedTaskReconcileResult = {
   error : Str,
   runningTaskIds : [Str]
@@ -267,14 +313,6 @@ record PlannedTaskFinalStatus = {
   failedIds : [Str],
   readyPlannedIds : [Str],
   pendingLaunchIds : [Str]
-}
-
-record LegacyPlannerInputState = {
-  fingerprint : Str,
-  goalText : Str,
-  plannerPolicy : Str,
-  schemaPath : Str,
-  workspaceRoot : Str
 }
 
 record ChildLoopState = {

@@ -4,6 +4,7 @@ import GoalManagerBootstrapSetup
 import GoalManagerBootstrapPlanner
 import GoalManagerBootstrapTasks
 import GoalManagerPlannerReuse
+import GoalManagerPlannerInputState
 import GoalManagerStateView
 import GoalManagerFinalize
 import GoalManagerTaskExecutionHelpers
@@ -79,8 +80,13 @@ finalizeBenchmarkProcessResult : PlannerReport -> Int -> Int -> ProcessResult ->
 finalizeBenchmarkProcessResult report wave benchmarkRuns process =
   if process.exitCode != 0 then
     benchmarkCommandFailure report wave benchmarkRuns process.stderr
-  else {
-    let signal = decode BenchmarkSignal process.stdout in
+  else
+    match benchmarkSignalFromRaw process.stdout {
+    Err message ->
+      finalizeWithReport
+        (managerFailureState (plannerTaskIds report) wave benchmarkRuns)
+        (syntheticFailureReport "benchmark signal decode failed" message),
+    Ok signal -> {
     let trace2 = appendManagerTrace (textConcat ["benchmark-wave-", encode wave, ":decoded-signal"]) in
     if trace2 != "" then
       finalizeWithReport
@@ -96,6 +102,7 @@ finalizeBenchmarkProcessResult report wave benchmarkRuns process =
       else
         finalizeBenchmarkCheckpoint report wave benchmarkRuns checkpoint
     }
+  }
   }
 
 runBenchmarkCheckpoint : PlannerReport -> Int -> Int -> Str
@@ -380,7 +387,7 @@ continueWithPlanResolved wave benchmarkRuns benchmarkSummary reportResult =
           if trace4 != "" then
             plannerFailure "manager trace write failed" trace4
           else {
-          let ensureTasksError = ensurePlannedTasks report in
+          let ensureTasksError = ensurePlannedTasks wave report in
           if ensureTasksError != "" then
             finalizeWithReport failureState (syntheticFailureReport "planned task setup failed" ensureTasksError)
           else
@@ -455,13 +462,18 @@ executeReadyTasks report wave benchmarkRuns = {
                   else if length launched.activeTaskIds > 0 then {
                     let waitOutcome = awaitChildLoopOutcome launched.activeTaskIds in
                     let traceTimeout =
-                      if waitOutcome.status == "timeout" then
+                      if waitOutcome.status == "output-limit" then
+                        appendManagerTrace
+                          (textConcat ["task-wait-output-limit:", firstTextOrEmpty launched.activeTaskIds])
+                      else if waitOutcome.status == "timeout" then
                         appendManagerTrace
                           (textConcat ["task-wait-timeout:", firstTextOrEmpty launched.activeTaskIds])
                       else
                         "" in
                     if traceTimeout != "" then
                       finalizeWithReport failureState (syntheticFailureReport "manager trace write failed" traceTimeout)
+                    else if waitOutcome.status == "output-limit" then
+                      finalizeWithReport failureState (syntheticFailureReport "child loop output limit exceeded" (firstTextOrEmpty launched.activeTaskIds))
                     else
                       executeReadyTasks report wave benchmarkRuns
                   }
@@ -476,13 +488,18 @@ executeReadyTasks report wave benchmarkRuns = {
                           {
                             let waitOutcome = awaitChildLoopOutcome finalStatus.pendingLaunchIds in
                             let traceTimeout =
-                              if waitOutcome.status == "timeout" then
+                              if waitOutcome.status == "output-limit" then
+                                appendManagerTrace
+                                  (textConcat ["task-launch-wait-output-limit:", firstTextOrEmpty finalStatus.pendingLaunchIds])
+                              else if waitOutcome.status == "timeout" then
                                 appendManagerTrace
                                   (textConcat ["task-launch-wait-timeout:", firstTextOrEmpty finalStatus.pendingLaunchIds])
                               else
                                 "" in
                             if traceTimeout != "" then
                               finalizeWithReport failureState (syntheticFailureReport "manager trace write failed" traceTimeout)
+                            else if waitOutcome.status == "output-limit" then
+                              finalizeWithReport failureState (syntheticFailureReport "child loop launch output limit exceeded" (firstTextOrEmpty finalStatus.pendingLaunchIds))
                             else
                               executeReadyTasks report wave benchmarkRuns
                           }

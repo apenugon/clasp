@@ -1,0 +1,237 @@
+module SafeWorkspaceHarness
+
+foreign workspacePathRaw : Str -> Str -> Result Str = "workspacePath"
+foreign workspaceReadFileRaw : Str -> Str -> Result Str = "workspaceReadFile"
+foreign workspaceWriteFileRaw : Str -> Str -> Str -> Result Str = "workspaceWriteFile"
+foreign workspaceAppendFileRaw : Str -> Str -> Str -> Result Str = "workspaceAppendFile"
+foreign workspaceMkdirAllRaw : Str -> Str -> Result Str = "workspaceMkdirAll"
+foreign workspaceListDirRaw : Str -> Str -> Result [Str] = "workspaceListDir"
+foreign workspaceListTreeRaw : Str -> Str -> Int -> Int -> Result [Str] = "workspaceListTree"
+foreign workspaceSearchTextRaw : Str -> Str -> Str -> Int -> Int -> Int -> Int -> Result [Str] = "workspaceSearchText"
+foreign workspaceReplaceTextRaw : Str -> Str -> Str -> Str -> Int -> Int -> Result Int = "workspaceReplaceText"
+foreign workspacePathSizeMbRaw : Str -> Str -> Result Int = "workspacePathSizeMb"
+foreign workspaceRemovePathRaw : Str -> Str -> Result Str = "workspaceRemovePath"
+
+record SafeWorkspaceReport = {
+  normalizedPath : Str,
+  mkdirResult : Str,
+  writeResult : Str,
+  appendResult : Str,
+  readText : Str,
+  appendedText : Str,
+  nestedListing : Str,
+  rootListing : Str,
+  treeListing : Str,
+  limitedTreeListing : Str,
+  escapedTreeListing : Str,
+  searchListing : Str,
+  defaultSearchListing : Str,
+  limitedSearchListing : Str,
+  escapedSearchListing : Str,
+  emptySearchListing : Str,
+  replaceCount : Int,
+  replacedText : Str,
+  missingReplaceResult : Str,
+  emptyReplaceResult : Str,
+  limitedReplaceResult : Str,
+  nestedSizeMb : Int,
+  rootSizeMb : Int,
+  removeFileResult : Str,
+  removedRead : Str,
+  removeDirResult : Str,
+  removedDirListing : Str,
+  parentEscape : Str,
+  absoluteEscape : Str,
+  chainedEscape : Str,
+  missingRead : Str
+}
+
+workspacePath : Str -> Str -> Result Str
+workspacePath root relative = workspacePathRaw root relative
+
+workspaceReadText : Str -> Str -> Result Str
+workspaceReadText root relative = workspaceReadFileRaw root relative
+
+workspaceWriteText : Str -> Str -> Str -> Result Str
+workspaceWriteText root relative contents = workspaceWriteFileRaw root relative contents
+
+workspaceAppendText : Str -> Str -> Str -> Result Str
+workspaceAppendText root relative contents = workspaceAppendFileRaw root relative contents
+
+workspaceMkdirAll : Str -> Str -> Result Str
+workspaceMkdirAll root relative = workspaceMkdirAllRaw root relative
+
+workspaceListDir : Str -> Str -> Result [Str]
+workspaceListDir root relative = workspaceListDirRaw root relative
+
+workspaceListTree : Str -> Str -> Int -> Int -> Result [Str]
+workspaceListTree root relative maxEntries maxDepth = workspaceListTreeRaw root relative maxEntries maxDepth
+
+workspaceSearchTextBounded : Str -> Str -> Str -> Int -> Int -> Int -> Int -> Result [Str]
+workspaceSearchTextBounded root relative needle maxMatches maxFiles maxFileBytes maxDepth =
+  workspaceSearchTextRaw root relative needle maxMatches maxFiles maxFileBytes maxDepth
+
+workspaceSearchText : Str -> Str -> Str -> Result [Str]
+workspaceSearchText root relative needle =
+  workspaceSearchTextBounded root relative needle 64 2000 262144 16
+
+workspaceReplaceTextBounded : Str -> Str -> Str -> Str -> Int -> Int -> Result Int
+workspaceReplaceTextBounded root relative findText replaceText maxReplacements maxFileBytes =
+  workspaceReplaceTextRaw root relative findText replaceText maxReplacements maxFileBytes
+
+workspaceReplaceText : Str -> Str -> Str -> Str -> Result Int
+workspaceReplaceText root relative findText replaceText =
+  workspaceReplaceTextBounded root relative findText replaceText 64 262144
+
+workspacePathSizeMb : Str -> Str -> Result Int
+workspacePathSizeMb root relative = workspacePathSizeMbRaw root relative
+
+workspaceRemovePath : Str -> Str -> Result Str
+workspaceRemovePath root relative = workspaceRemovePathRaw root relative
+
+firstTextOrEmpty : [Str] -> Str
+firstTextOrEmpty values = {
+  let mut first = "";
+  let mut found = false;
+  for value in values {
+    if found then
+      found
+    else {
+      first = value;
+      found = true;
+      found
+    }
+  };
+  first
+}
+
+secondTextOrEmpty : [Str] -> Str
+secondTextOrEmpty values = {
+  let mut second = "";
+  let mut index = 0;
+  for value in values {
+    if index == 0 then {
+      index = 1;
+      index
+    } else if index == 1 then {
+      second = value;
+      index = 2;
+      index
+    } else
+      index
+  };
+  second
+}
+
+workspaceRoot : Str
+workspaceRoot = {
+  let configured = firstTextOrEmpty argv;
+  if configured == "" then "safe-workspace-state" else configured
+}
+
+outsidePath : Str
+outsidePath = secondTextOrEmpty argv
+
+resultText : Result Str -> Str
+resultText result = match result {
+  Ok value -> value,
+  Err message -> textConcat ["ERR:", message]
+}
+
+resultListText : Result [Str] -> Str
+resultListText result = match result {
+  Ok values -> textJoin "," values,
+  Err message -> textConcat ["ERR:", message]
+}
+
+resultIntOrNegativeOne : Result Int -> Int
+resultIntOrNegativeOne result = match result {
+  Ok value -> value,
+  Err message -> -1
+}
+
+resultIntText : Result Int -> Str
+resultIntText result = match result {
+  Ok value -> encode value,
+  Err message -> textConcat ["ERR:", message]
+}
+
+absoluteEscapeResult : Str
+absoluteEscapeResult =
+  if outsidePath == "" then
+    "skipped"
+  else
+    resultText (workspaceWriteText workspaceRoot outsidePath "leaked")
+
+scenarioReport : SafeWorkspaceReport
+scenarioReport = {
+  let normalized = resultText (workspacePath workspaceRoot "nested/result.txt");
+  let madeLogs = resultText (workspaceMkdirAll workspaceRoot "logs");
+  let written = resultText (workspaceWriteText workspaceRoot "nested/result.txt" "workspace-text");
+  let firstAppend = resultText (workspaceAppendText workspaceRoot "logs/events.jsonl" "event-one\n");
+  let secondAppend = resultText (workspaceAppendText workspaceRoot "logs/events.jsonl" "event-two\n");
+  let readBack = resultText (workspaceReadText workspaceRoot "nested/result.txt");
+  let appendedBack = resultText (workspaceReadText workspaceRoot "logs/events.jsonl");
+  let nestedNames = resultListText (workspaceListDir workspaceRoot "nested");
+  let rootNames = resultListText (workspaceListDir workspaceRoot ".");
+  let treeNames = resultListText (workspaceListTree workspaceRoot "." 64 4);
+  let limitedTreeNames = resultListText (workspaceListTree workspaceRoot "." 1 4);
+  let escapedTreeNames = resultListText (workspaceListTree workspaceRoot "../outside" 64 4);
+  let searchNames = resultListText (workspaceSearchTextBounded workspaceRoot "." "workspace-text" 8 64 1024 4);
+  let defaultSearchNames = resultListText (workspaceSearchText workspaceRoot "." "event-two");
+  let limitedSearchNames = resultListText (workspaceSearchTextBounded workspaceRoot "." "workspace-text" 0 64 1024 4);
+  let escapedSearchNames = resultListText (workspaceSearchTextBounded workspaceRoot "../outside" "workspace-text" 8 64 1024 4);
+  let emptySearchNames = resultListText (workspaceSearchTextBounded workspaceRoot "." "" 8 64 1024 4);
+  let replacedCount = resultIntOrNegativeOne (workspaceReplaceText workspaceRoot "nested/result.txt" "workspace-text" "workspace-updated");
+  let replacedBack = resultText (workspaceReadText workspaceRoot "nested/result.txt");
+  let missingReplace = resultIntText (workspaceReplaceText workspaceRoot "nested/result.txt" "workspace-text" "workspace-unexpected");
+  let emptyReplace = resultIntText (workspaceReplaceTextBounded workspaceRoot "nested/result.txt" "" "workspace-unexpected" 64 262144);
+  let repeatWrite = resultText (workspaceWriteText workspaceRoot "nested/repeat.txt" "repeat repeat");
+  let limitedReplace = resultIntText (workspaceReplaceTextBounded workspaceRoot "nested/repeat.txt" "repeat" "done" 1 262144);
+  let nestedSize = resultIntOrNegativeOne (workspacePathSizeMb workspaceRoot "nested");
+  let rootSize = resultIntOrNegativeOne (workspacePathSizeMb workspaceRoot ".");
+  let removableWrite = resultText (workspaceWriteText workspaceRoot "removable/file.txt" "remove-me");
+  let removedFile = resultText (workspaceRemovePath workspaceRoot "removable/file.txt");
+  let removedRead = resultText (workspaceReadText workspaceRoot "removable/file.txt");
+  let removedDir = resultText (workspaceRemovePath workspaceRoot "removable");
+  let removedDirListing = resultListText (workspaceListDir workspaceRoot "removable");
+  let parentEscape = resultText (workspaceWriteText workspaceRoot "../outside.txt" "leaked");
+  let chainedEscape = resultText (workspaceReadText workspaceRoot "nested/../../outside.txt");
+  let missingRead = resultText (workspaceReadText workspaceRoot "missing.txt");
+  SafeWorkspaceReport {
+    normalizedPath = normalized,
+    mkdirResult = madeLogs,
+    writeResult = written,
+    appendResult = secondAppend,
+    readText = readBack,
+    appendedText = appendedBack,
+    nestedListing = nestedNames,
+    rootListing = rootNames,
+    treeListing = treeNames,
+    limitedTreeListing = limitedTreeNames,
+    escapedTreeListing = escapedTreeNames,
+    searchListing = searchNames,
+    defaultSearchListing = defaultSearchNames,
+    limitedSearchListing = limitedSearchNames,
+    escapedSearchListing = escapedSearchNames,
+    emptySearchListing = emptySearchNames,
+    replaceCount = replacedCount,
+    replacedText = replacedBack,
+    missingReplaceResult = missingReplace,
+    emptyReplaceResult = emptyReplace,
+    limitedReplaceResult = limitedReplace,
+    nestedSizeMb = nestedSize,
+    rootSizeMb = rootSize,
+    removeFileResult = removedFile,
+    removedRead = removedRead,
+    removeDirResult = removedDir,
+    removedDirListing = removedDirListing,
+    parentEscape = parentEscape,
+    absoluteEscape = absoluteEscapeResult,
+    chainedEscape = chainedEscape,
+    missingRead = missingRead
+  }
+}
+
+main : Str
+main = encode scenarioReport

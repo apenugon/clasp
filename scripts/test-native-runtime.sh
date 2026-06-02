@@ -52,6 +52,10 @@ maybe_enter_nix_shell() {
     return 0
   fi
 
+  if [[ -n "${IN_NIX_SHELL:-}" || "${CLASP_VERIFY_IN_NIX_DEVELOP:-0}" == "1" ]]; then
+    return 0
+  fi
+
   if [[ "$nix_reentry" == "1" ]]; then
     return 0
   fi
@@ -75,6 +79,11 @@ maybe_enter_nix_shell
 
 if [[ ! -f "$rust_runtime_lib" && -f "$fallback_rust_runtime_lib" ]]; then
   rust_runtime_lib="$fallback_rust_runtime_lib"
+fi
+
+if ! command -v "$cargo_bin" >/dev/null 2>&1 && ! runtime_lib_is_current "$rust_runtime_lib"; then
+  printf 'native runtime library is missing or stale and cargo is unavailable; refusing nested nix re-entry inside current verification shell\n' >&2
+  exit 1
 fi
 
 claspc_bin="$(env -u CLASP_CLASPC -u CLASPC_BIN CLASP_PROJECT_ROOT="$project_root" "$project_root/scripts/resolve-claspc.sh")"

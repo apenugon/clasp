@@ -1,0 +1,192 @@
+module Compiler.SemanticArtifacts.ImpactIndex
+
+import Compiler.Ast
+import Compiler.Checker
+import Compiler.Checker.Types
+import Compiler.Json
+import Compiler.Project
+import Compiler.SemanticArtifacts.Base
+import Compiler.SemanticArtifacts.Names
+import Compiler.SemanticArtifacts.Uses
+import Compiler.SemanticArtifacts.Impact
+
+semanticImpactEntry : Str -> Str -> Str -> [Str] -> [Str] -> [Str] -> Str
+semanticImpactEntry sourceId sourceKind sourceName affectedSurfaces relevantVerifiers relevantMergeGates =
+  jsonObject
+    [ jsonFieldText "sourceId" sourceId
+    , jsonFieldText "sourceKind" sourceKind
+    , jsonFieldText "name" sourceName
+    , jsonFieldRaw "affectedSurfaces" (semanticJsonTextArray affectedSurfaces)
+    , jsonFieldRaw "relevantVerifiers" (semanticJsonTextArray relevantVerifiers)
+    , jsonFieldRaw "relevantMergeGates" (semanticJsonTextArray relevantMergeGates)
+    ]
+
+semanticContextImpactIndexSchemas : HostedModuleAst -> [Str]
+semanticContextImpactIndexSchemas modl = {
+  let mut entries = emptyRenderedTexts;
+  for recordDecl in moduleRecordDeclarations modl {
+    let toolNames = semanticToolNamesForSchemaName modl (recordDeclName recordDecl);
+    let verifierNames = semanticVerifierNamesForToolNames modl toolNames;
+    entries =
+      appendRenderedText
+        entries
+        (semanticImpactEntry
+          (semanticSchemaNodeId recordDecl)
+          "schema"
+          (recordDeclName recordDecl)
+          (semanticSchemaAffectedSurfaces modl recordDecl)
+          (semanticVerifierIdsForNames modl verifierNames)
+          (semanticMergeGateIdsForVerifierNames modl verifierNames));
+    entries
+  };
+  entries
+}
+
+semanticContextImpactIndexDecls : HostedModuleAst -> [Str]
+semanticContextImpactIndexDecls modl = {
+  let mut entries = emptyRenderedTexts;
+  for decl in moduleDeclarations modl {
+    entries =
+      appendRenderedText
+        entries
+        (semanticImpactEntry
+          (semanticDeclNodeId decl)
+          "declaration"
+          (declName decl)
+          (semanticDeclAffectedSurfaces modl decl)
+          emptyRenderedTexts
+          emptyRenderedTexts);
+    entries
+  };
+  entries
+}
+
+semanticContextImpactIndexRoutes : HostedModuleAst -> [Str]
+semanticContextImpactIndexRoutes modl = {
+  let mut entries = emptyRenderedTexts;
+  for routeDecl in moduleRouteDeclarations modl {
+    entries =
+      appendRenderedText
+        entries
+        (semanticImpactEntry
+          (semanticRouteNodeId routeDecl)
+          "route"
+          (routeDeclName routeDecl)
+          (semanticRouteAffectedSurfaces modl routeDecl)
+          emptyRenderedTexts
+          emptyRenderedTexts);
+    entries
+  };
+  entries
+}
+
+semanticContextImpactIndexTools : HostedModuleAst -> [Str]
+semanticContextImpactIndexTools modl = {
+  let mut entries = emptyRenderedTexts;
+  for toolDecl in moduleToolDeclarations modl {
+    let verifierNames = semanticVerifierNamesForToolName modl (toolDeclName toolDecl);
+    entries =
+      appendRenderedText
+        entries
+        (semanticImpactEntry
+          (semanticToolNodeId toolDecl)
+          "tool"
+          (toolDeclName toolDecl)
+          (semanticToolAffectedSurfaces modl toolDecl)
+          (semanticVerifierIdsForNames modl verifierNames)
+          (semanticMergeGateIdsForVerifierNames modl verifierNames));
+    entries
+  };
+  entries
+}
+
+semanticContextImpactIndexWorkflows : HostedModuleAst -> [Str]
+semanticContextImpactIndexWorkflows modl = {
+  let mut entries = emptyRenderedTexts;
+  for workflowDecl in moduleWorkflowDeclarations modl {
+    entries =
+      appendRenderedText
+        entries
+        (semanticImpactEntry
+          (semanticWorkflowNodeId workflowDecl)
+          "workflow"
+          (workflowDeclName workflowDecl)
+          (semanticWorkflowAffectedSurfaces modl workflowDecl)
+          emptyRenderedTexts
+          emptyRenderedTexts);
+    entries
+  };
+  entries
+}
+
+semanticContextImpactIndexPolicies : HostedModuleAst -> [Str]
+semanticContextImpactIndexPolicies modl = {
+  let mut entries = emptyRenderedTexts;
+  for policyDecl in modulePolicyDeclarations modl {
+    let verifierNames = semanticVerifierNamesForToolNames modl (semanticToolNamesForPolicyName modl (policyDeclName policyDecl));
+    entries =
+      appendRenderedText
+        entries
+        (semanticImpactEntry
+          (semanticPolicyNodeId policyDecl)
+          "policy"
+          (policyDeclName policyDecl)
+          (semanticPolicyAffectedSurfaces modl policyDecl)
+          (semanticVerifierIdsForNames modl verifierNames)
+          (semanticMergeGateIdsForVerifierNames modl verifierNames));
+    entries
+  };
+  entries
+}
+
+semanticContextImpactIndexVerifiers : HostedModuleAst -> [Str]
+semanticContextImpactIndexVerifiers modl = {
+  let mut entries = emptyRenderedTexts;
+  for verifierDecl in moduleVerifierDeclarations modl {
+    let verifierNames = [verifierDeclName verifierDecl];
+    entries =
+      appendRenderedText
+        entries
+        (semanticImpactEntry
+          (semanticVerifierNodeId verifierDecl)
+          "verifier"
+          (verifierDeclName verifierDecl)
+          (semanticVerifierAffectedSurfaces modl verifierDecl)
+          (semanticVerifierIdsForNames modl verifierNames)
+          (semanticMergeGateIdsForVerifierNames modl verifierNames));
+    entries
+  };
+  entries
+}
+
+semanticContextImpactIndexMergeGates : HostedModuleAst -> [Str]
+semanticContextImpactIndexMergeGates modl = {
+  let mut entries = emptyRenderedTexts;
+  for mergeGateDecl in moduleMergeGateDeclarations modl {
+    entries =
+      appendRenderedText
+        entries
+        (semanticImpactEntry
+          (semanticMergeGateNodeId mergeGateDecl)
+          "mergeGate"
+          (mergeGateDeclName mergeGateDecl)
+          (semanticMergeGateAffectedSurfaces modl mergeGateDecl)
+          (semanticVerifierIdsForNames modl (mergeGateDeclVerifierNames mergeGateDecl))
+          [semanticMergeGateNodeId mergeGateDecl]);
+    entries
+  };
+  entries
+}
+
+semanticContextImpactIndex : HostedModuleAst -> Str
+semanticContextImpactIndex modl =
+  jsonObject
+    [ jsonFieldRaw "schemas" (jsonArray (semanticContextImpactIndexSchemas modl))
+    , jsonFieldRaw "declarations" (jsonArray (semanticContextImpactIndexDecls modl))
+    , jsonFieldRaw "routes" (jsonArray (semanticContextImpactIndexRoutes modl))
+    , jsonFieldRaw "tools" (jsonArray (semanticContextImpactIndexTools modl))
+    , jsonFieldRaw "workflows" (jsonArray (semanticContextImpactIndexWorkflows modl))
+    , jsonFieldRaw "policies" (jsonArray (semanticContextImpactIndexPolicies modl))
+    , jsonFieldRaw "verifiers" (jsonArray (semanticContextImpactIndexVerifiers modl))
+    , jsonFieldRaw "mergeGates" (jsonArray (semanticContextImpactIndexMergeGates modl))
+    ]

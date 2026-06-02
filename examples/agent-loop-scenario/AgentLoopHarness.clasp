@@ -1,0 +1,757 @@
+module AgentLoopHarness
+
+foreign workspaceReadFileRaw : Str -> Str -> Result Str = "workspaceReadFile"
+foreign workspaceWriteFileRaw : Str -> Str -> Str -> Result Str = "workspaceWriteFile"
+foreign workspaceAppendFileRaw : Str -> Str -> Str -> Result Str = "workspaceAppendFile"
+foreign workspaceMkdirAllRaw : Str -> Str -> Result Str = "workspaceMkdirAll"
+foreign runWorkspaceCommandTimeoutRaw : Str -> Str -> Int -> [Str] -> Result Str = "runWorkspaceCommandTimeoutJson"
+
+record AgentEvent = {
+  kind : Str,
+  role : Str,
+  status : Str,
+  detail : Str
+}
+
+record ProcessResult = {
+  exitCode : Int,
+  stdout : Str,
+  stderr : Str,
+  timedOut : Bool,
+  error : Str
+}
+
+record CommandSpec = {
+  root : Str,
+  cwd : Str,
+  timeoutMs : Int,
+  command : [Str]
+}
+
+record MonitoredCommandSpec = {
+  runId : Str,
+  role : Str,
+  statusPath : Str,
+  eventLogPath : Str,
+  commandSpec : CommandSpec
+}
+
+record MonitoredProcessEvent = {
+  kind : Str,
+  runId : Str,
+  role : Str,
+  status : Str,
+  detail : Str
+}
+
+record MonitoredProcessRecord = {
+  runId : Str,
+  role : Str,
+  status : Str,
+  exitCode : Int,
+  stdout : Str,
+  stderr : Str,
+  timedOut : Bool,
+  error : Str,
+  command : [Str],
+  root : Str,
+  cwd : Str,
+  timeoutMs : Int,
+  statusPath : Str,
+  eventLogPath : Str
+}
+
+record AgentLoopStep = {
+  role : Str,
+  status : Str,
+  exitCode : Int,
+  stdout : Str,
+  stderr : Str,
+  finalText : Str,
+  timedOut : Bool,
+  ok : Bool,
+  runRecord : MonitoredProcessRecord
+}
+
+record AgentLoopTask = {
+  taskId : Str,
+  role : Str,
+  artifactPath : Str
+}
+
+record AgentLoopOutcome = {
+  taskId : Str,
+  role : Str,
+  status : Str,
+  ok : Bool,
+  detail : Str
+}
+
+record AgentLoopState = {
+  inputText : Str,
+  builder : AgentLoopStep,
+  verifier : AgentLoopStep,
+  events : [AgentEvent],
+  outcomes : [AgentLoopOutcome],
+  processedTaskIds : [Str],
+  remainingTaskIds : [Str]
+}
+
+record AgentLoopReport = {
+  loopId : Str,
+  finalStatus : Str,
+  completed : Bool,
+  workspaceRoot : Str,
+  inputPath : Str,
+  outputPath : Str,
+  statusPath : Str,
+  eventLogPath : Str,
+  runEventLogPath : Str,
+  builderPromptPath : Str,
+  builderFinalPath : Str,
+  builderRunStatusPath : Str,
+  verifierRunStatusPath : Str,
+  taskQueue : [AgentLoopTask],
+  workLimit : Int,
+  processedCount : Int,
+  processedTaskIds : [Str],
+  remainingTaskIds : [Str],
+  outcomes : [AgentLoopOutcome],
+  inputText : Str,
+  outputText : Str,
+  builder : AgentLoopStep,
+  verifier : AgentLoopStep,
+  events : [AgentEvent],
+  summary : Str
+}
+
+loopId : Str
+loopId = "ordinary-clasp-safe-agent-loop"
+
+inputPath : Str
+inputPath = "src/input.txt"
+
+outputPath : Str
+outputPath = "src/output.txt"
+
+statusPath : Str
+statusPath = "agent-loop-status.json"
+
+eventLogPath : Str
+eventLogPath = "agent-loop-events.jsonl"
+
+runEventLogPath : Str
+runEventLogPath = "agent-loop-runs.jsonl"
+
+builderPromptPath : Str
+builderPromptPath = "artifacts/builder.prompt.md"
+
+builderFinalPath : Str
+builderFinalPath = "artifacts/builder.final.txt"
+
+builderRunStatusPath : Str
+builderRunStatusPath = "artifacts/builder.run.json"
+
+verifierRunStatusPath : Str
+verifierRunStatusPath = "artifacts/verifier.run.json"
+
+workLimit : Int
+workLimit = 2
+
+agentTaskQueue : [AgentLoopTask]
+agentTaskQueue = [
+  AgentLoopTask {
+    taskId = "task-builder",
+    role = "builder",
+    artifactPath = builderFinalPath
+  },
+  AgentLoopTask {
+    taskId = "task-verifier",
+    role = "verifier",
+    artifactPath = outputPath
+  }
+]
+
+emptyTexts : [Str]
+emptyTexts = []
+
+emptyAgentOutcomes : [AgentLoopOutcome]
+emptyAgentOutcomes = []
+
+processResultError : Str -> Result ProcessResult
+processResultError message = Err message
+
+monitoredProcessRecordError : Str -> Result MonitoredProcessRecord
+monitoredProcessRecordError message = Err message
+
+workspaceReadText : Str -> Str -> Result Str
+workspaceReadText root relative = workspaceReadFileRaw root relative
+
+workspaceWriteText : Str -> Str -> Str -> Result Str
+workspaceWriteText root relative contents = workspaceWriteFileRaw root relative contents
+
+workspaceAppendText : Str -> Str -> Str -> Result Str
+workspaceAppendText root relative contents = workspaceAppendFileRaw root relative contents
+
+workspaceMkdirAll : Str -> Str -> Result Str
+workspaceMkdirAll root relative = workspaceMkdirAllRaw root relative
+
+agentEvent : Str -> Str -> Str -> Str -> AgentEvent
+agentEvent kind role status detail =
+  AgentEvent {
+    kind = kind,
+    role = role,
+    status = status,
+    detail = detail
+  }
+
+agentEventLine : AgentEvent -> Str
+agentEventLine value = textConcat [encode value, "\n"]
+
+agentReadTextOrEmpty : Str -> Str -> Str
+agentReadTextOrEmpty root relative =
+  match workspaceReadText root relative {
+    Ok value -> value,
+    Err message -> ""
+  }
+
+agentWriteTextStatus : Str -> Str -> Str -> Str
+agentWriteTextStatus root relative value =
+  match workspaceWriteText root relative value {
+    Ok path -> "",
+    Err message -> textConcat ["workspace-write-error:", message]
+  }
+
+agentAppendTextStatus : Str -> Str -> Str -> Str
+agentAppendTextStatus root relative value =
+  match workspaceAppendText root relative value {
+    Ok path -> "",
+    Err message -> textConcat ["workspace-append-error:", message]
+  }
+
+agentAppendEvent : Str -> Str -> AgentEvent -> Str
+agentAppendEvent root relative value =
+  agentAppendTextStatus root relative (agentEventLine value)
+
+agentEnsureDirStatus : Str -> Str -> Str
+agentEnsureDirStatus root relative =
+  match workspaceMkdirAll root relative {
+    Ok path -> "",
+    Err message -> textConcat ["workspace-mkdir-error:", message]
+  }
+
+firstTextOrEmpty : [Str] -> Str
+firstTextOrEmpty values = {
+  let mut first = "";
+  let mut found = false;
+  for value in values {
+    if found then
+      found
+    else {
+      first = value;
+      found = true;
+      found
+    }
+  };
+  first
+}
+
+secondTextOrEmpty : [Str] -> Str
+secondTextOrEmpty values = {
+  let mut second = "";
+  let mut index = 0;
+  for value in values {
+    if index == 0 then {
+      index = 1;
+      index
+    } else if index == 1 then {
+      second = value;
+      index = 2;
+      index
+    } else
+      index
+  };
+  second
+}
+
+workspaceRoot : Str
+workspaceRoot = {
+  let configured = firstTextOrEmpty argv;
+  if configured == "" then "agent-loop-scenario-state" else configured
+}
+
+codexBinary : Str
+codexBinary = {
+  let configured = secondTextOrEmpty argv;
+  if configured == "" then "codex" else configured
+}
+
+commandSpec : Str -> Str -> Int -> [Str] -> CommandSpec
+commandSpec root cwd timeoutMs command =
+  CommandSpec {
+    root = root,
+    cwd = cwd,
+    timeoutMs = timeoutMs,
+    command = command
+  }
+
+monitoredCommandSpec : Str -> Str -> Str -> Str -> CommandSpec -> MonitoredCommandSpec
+monitoredCommandSpec runId role statusPathValue eventLogPathValue commandSpecValue =
+  MonitoredCommandSpec {
+    runId = runId,
+    role = role,
+    statusPath = statusPathValue,
+    eventLogPath = eventLogPathValue,
+    commandSpec = commandSpecValue
+  }
+
+processResult : Result Str -> Result ProcessResult
+processResult value = match value {
+  Ok raw -> Ok (decode ProcessResult raw),
+  Err message -> processResultError message
+}
+
+run : CommandSpec -> Result ProcessResult
+run spec =
+  processResult (
+    runWorkspaceCommandTimeoutRaw
+      spec.root
+      spec.cwd
+      spec.timeoutMs
+      spec.command
+  )
+
+monitoredProcessStatus : ProcessResult -> Str
+monitoredProcessStatus result =
+  if result.timedOut then
+    "timeout"
+  else if result.exitCode == 0 then
+    "completed-pass"
+  else
+    "completed-fail"
+
+monitoredProcessEvent : MonitoredCommandSpec -> Str -> Str -> Str -> MonitoredProcessEvent
+monitoredProcessEvent spec kind status detail =
+  MonitoredProcessEvent {
+    kind = kind,
+    runId = spec.runId,
+    role = spec.role,
+    status = status,
+    detail = detail
+  }
+
+appendMonitoredProcessEvent : MonitoredCommandSpec -> Str -> Str -> Str -> Str
+appendMonitoredProcessEvent spec kind status detail = {
+  let commandSpecValue = spec.commandSpec;
+  match workspaceAppendText commandSpecValue.root spec.eventLogPath (textConcat [encode (monitoredProcessEvent spec kind status detail), "\n"]) {
+    Ok path -> "",
+    Err message -> message
+  }
+}
+
+monitoredProcessRecordFromResult : MonitoredCommandSpec -> ProcessResult -> MonitoredProcessRecord
+monitoredProcessRecordFromResult spec result = {
+  let commandSpecValue = spec.commandSpec;
+  MonitoredProcessRecord {
+    runId = spec.runId,
+    role = spec.role,
+    status = monitoredProcessStatus result,
+    exitCode = result.exitCode,
+    stdout = result.stdout,
+    stderr = result.stderr,
+    timedOut = result.timedOut,
+    error = result.error,
+    command = commandSpecValue.command,
+    root = commandSpecValue.root,
+    cwd = commandSpecValue.cwd,
+    timeoutMs = commandSpecValue.timeoutMs,
+    statusPath = spec.statusPath,
+    eventLogPath = spec.eventLogPath
+  }
+}
+
+monitoredProcessRecordFromError : MonitoredCommandSpec -> Str -> MonitoredProcessRecord
+monitoredProcessRecordFromError spec message = {
+  let commandSpecValue = spec.commandSpec;
+  MonitoredProcessRecord {
+    runId = spec.runId,
+    role = spec.role,
+    status = "runtime-error",
+    exitCode = 127,
+    stdout = "",
+    stderr = message,
+    timedOut = false,
+    error = message,
+    command = commandSpecValue.command,
+    root = commandSpecValue.root,
+    cwd = commandSpecValue.cwd,
+    timeoutMs = commandSpecValue.timeoutMs,
+    statusPath = spec.statusPath,
+    eventLogPath = spec.eventLogPath
+  }
+}
+
+persistMonitoredProcessRecord : MonitoredProcessRecord -> Result MonitoredProcessRecord
+persistMonitoredProcessRecord record =
+  match workspaceWriteText record.root record.statusPath (encode record) {
+    Ok path -> Ok record,
+    Err message -> monitoredProcessRecordError message
+  }
+
+finishMonitoredProcessRun : MonitoredCommandSpec -> Result ProcessResult -> Result MonitoredProcessRecord
+finishMonitoredProcessRun spec processResultValue = {
+  let record = match processResultValue {
+    Ok result -> monitoredProcessRecordFromResult spec result,
+    Err message -> monitoredProcessRecordFromError spec message
+  };
+  match persistMonitoredProcessRecord record {
+    Err message -> monitoredProcessRecordError message,
+    Ok persisted -> {
+      let kind = if persisted.status == "runtime-error" then "run-error" else "run-completed";
+      let detail = textConcat ["exit=", encode persisted.exitCode];
+      let closed = appendMonitoredProcessEvent spec kind persisted.status detail;
+      Ok persisted
+    }
+  }
+}
+
+runMonitoredLogged : MonitoredCommandSpec -> Result MonitoredProcessRecord
+runMonitoredLogged spec = {
+  let opened = appendMonitoredProcessEvent spec "run-started" "running" "command started";
+  finishMonitoredProcessRun spec (run spec.commandSpec)
+}
+
+builderPrompt : Str -> Str
+builderPrompt inputText =
+  textJoin "\n" [
+    "You are the builder subagent for a deterministic Clasp ordinary-program loop.",
+    "Inspect the workspace file content below and return one concise implementation note.",
+    "The Clasp program will perform the bounded workspace write and verifier step itself.",
+    textConcat ["INPUT:", inputText]
+  ]
+
+codexExecCommand : Str -> [Str]
+codexExecCommand prompt = [
+  codexBinary,
+  "exec",
+  "--skip-git-repo-check",
+  "--output-last-message",
+  builderFinalPath,
+  prompt
+]
+
+verifierCommand : [Str]
+verifierCommand = [
+  "node",
+  "-e",
+  "const fs=require('fs'); const input=fs.readFileSync('src/input.txt','utf8'); const output=fs.readFileSync('src/output.txt','utf8'); const final=fs.readFileSync('artifacts/builder.final.txt','utf8'); if (!output.includes(input.trim())) { process.stderr.write('input text missing'); process.exit(11); } if (!output.includes(final.trim())) { process.stderr.write('builder final missing'); process.exit(12); } process.stdout.write(JSON.stringify({ok:true,inputBytes:input.length,outputBytes:output.length,finalBytes:final.length}));"
+]
+
+pendingRunRecord : Str -> Str -> Str -> MonitoredProcessRecord
+pendingRunRecord role runId statusPathValue =
+  MonitoredProcessRecord {
+    runId = runId,
+    role = role,
+    status = "pending",
+    exitCode = 0,
+    stdout = "",
+    stderr = "",
+    timedOut = false,
+    error = "",
+    command = emptyTexts,
+    root = workspaceRoot,
+    cwd = ".",
+    timeoutMs = 0,
+    statusPath = statusPathValue,
+    eventLogPath = runEventLogPath
+  }
+
+builderRunSpec : [Str] -> MonitoredCommandSpec
+builderRunSpec command =
+  monitoredCommandSpec
+    "builder-codex"
+    "builder"
+    builderRunStatusPath
+    runEventLogPath
+    (commandSpec workspaceRoot "." 5000 command)
+
+verifierRunSpec : MonitoredCommandSpec
+verifierRunSpec =
+  monitoredCommandSpec
+    "verifier-check"
+    "verifier"
+    verifierRunStatusPath
+    runEventLogPath
+    (commandSpec workspaceRoot "." 5000 verifierCommand)
+
+processStepFromRecord : Str -> MonitoredProcessRecord -> Str -> Bool -> AgentLoopStep
+processStepFromRecord role record finalText ok =
+  AgentLoopStep {
+    role = role,
+    status =
+      if record.status == "runtime-error" then
+        "runtime-error"
+      else if record.timedOut then
+        "timeout"
+      else if ok then
+        "completed-pass"
+      else
+        "completed-fail",
+    exitCode = record.exitCode,
+    stdout = record.stdout,
+    stderr = record.stderr,
+    finalText = finalText,
+    timedOut = record.timedOut,
+    ok = ok,
+    runRecord = record
+  }
+
+processStepFromError : Str -> MonitoredCommandSpec -> Str -> AgentLoopStep
+processStepFromError role spec message =
+  processStepFromRecord role (monitoredProcessRecordFromError spec message) "" false
+
+builderProcessOk : MonitoredProcessRecord -> Str -> Bool
+builderProcessOk record finalText =
+  if record.exitCode == 0 then
+    if record.timedOut then
+      false
+    else
+      finalText != ""
+  else
+    false
+
+verifierProcessOk : MonitoredProcessRecord -> Bool
+verifierProcessOk record =
+  if record.exitCode == 0 then
+    record.timedOut == false
+  else
+    false
+
+runBuilder : Str -> AgentLoopStep
+runBuilder inputText = {
+  let prompt = builderPrompt inputText;
+  let spec = builderRunSpec (codexExecCommand prompt);
+  let wrotePrompt = agentWriteTextStatus workspaceRoot builderPromptPath prompt;
+  if wrotePrompt == "" then
+    match runMonitoredLogged spec {
+      Ok record -> {
+        let finalText = agentReadTextOrEmpty workspaceRoot builderFinalPath;
+        processStepFromRecord "builder" record finalText (builderProcessOk record finalText)
+      },
+      Err message -> processStepFromError "builder" spec message
+    }
+  else
+    processStepFromError "builder" spec wrotePrompt
+}
+
+writeOutputText : Str -> Str -> Str
+writeOutputText inputText builderFinal =
+  textConcat [
+    "input:",
+    inputText,
+    "\nagent-note:",
+    builderFinal,
+    "bounded-edit: wrote src/output.txt from ordinary Clasp code\n"
+  ]
+
+runVerifier : Str -> Str -> AgentLoopStep
+runVerifier inputText builderFinal = {
+  let outputText = writeOutputText inputText builderFinal;
+  let wroteOutput = agentWriteTextStatus workspaceRoot outputPath outputText;
+  if wroteOutput == "" then
+    match runMonitoredLogged verifierRunSpec {
+      Ok result ->
+        processStepFromRecord "verifier" result result.stdout (verifierProcessOk result),
+      Err message -> processStepFromError "verifier" verifierRunSpec message
+    }
+  else
+    processStepFromError "verifier" verifierRunSpec wroteOutput
+}
+
+pendingStep : Str -> Str -> Str -> AgentLoopStep
+pendingStep role runId statusPathValue =
+  AgentLoopStep {
+    role = role,
+    status = "pending",
+    exitCode = 0,
+    stdout = "",
+    stderr = "",
+    finalText = "",
+    timedOut = false,
+    ok = false,
+    runRecord = pendingRunRecord role runId statusPathValue
+  }
+
+initialAgentLoopState : Str -> AgentEvent -> AgentLoopState
+initialAgentLoopState inputText loopStarted =
+  AgentLoopState {
+    inputText = inputText,
+    builder = pendingStep "builder" "builder-codex" builderRunStatusPath,
+    verifier = pendingStep "verifier" "verifier-check" verifierRunStatusPath,
+    events = [loopStarted],
+    outcomes = emptyAgentOutcomes,
+    processedTaskIds = emptyTexts,
+    remainingTaskIds = emptyTexts
+  }
+
+outcomeDetail : AgentLoopStep -> Str
+outcomeDetail step =
+  if step.ok then
+    step.finalText
+  else if step.stderr == "" then
+    step.stdout
+  else
+    step.stderr
+
+agentTaskOutcome : AgentLoopTask -> AgentLoopStep -> AgentLoopOutcome
+agentTaskOutcome task step =
+  AgentLoopOutcome {
+    taskId = task.taskId,
+    role = task.role,
+    status = step.status,
+    ok = step.ok,
+    detail = outcomeDetail step
+  }
+
+agentTaskEvent : AgentLoopTask -> AgentLoopStep -> AgentEvent
+agentTaskEvent task step =
+  agentEvent "step-completed" task.role step.status task.artifactPath
+
+recordTaskOutcome : AgentLoopState -> AgentLoopTask -> AgentLoopStep -> AgentLoopState
+recordTaskOutcome state task step = {
+  let event = agentTaskEvent task step;
+  let wroteEvent = agentAppendEvent workspaceRoot eventLogPath event;
+  AgentLoopState {
+    inputText = state.inputText,
+    builder =
+      if task.role == "builder" then
+        step
+      else
+        state.builder,
+    verifier =
+      if task.role == "verifier" then
+        step
+      else
+        state.verifier,
+    events = append state.events [event],
+    outcomes = append state.outcomes [agentTaskOutcome task step],
+    processedTaskIds = append state.processedTaskIds [task.taskId],
+    remainingTaskIds = state.remainingTaskIds
+  }
+}
+
+deferTask : AgentLoopState -> AgentLoopTask -> AgentLoopState
+deferTask state task =
+  AgentLoopState {
+    inputText = state.inputText,
+    builder = state.builder,
+    verifier = state.verifier,
+    events = state.events,
+    outcomes = state.outcomes,
+    processedTaskIds = state.processedTaskIds,
+    remainingTaskIds = append state.remainingTaskIds [task.taskId]
+  }
+
+processQueuedTask : AgentLoopState -> AgentLoopTask -> AgentLoopState
+processQueuedTask state task =
+  if task.role == "builder" then
+    recordTaskOutcome state task (runBuilder state.inputText)
+  else if task.role == "verifier" then
+    if state.builder.ok then
+      recordTaskOutcome state task (runVerifier state.inputText state.builder.finalText)
+    else
+      recordTaskOutcome state task (processStepFromError "verifier" verifierRunSpec "builder did not complete")
+  else
+    deferTask state task
+
+processAgentTaskQueue : [AgentLoopTask] -> Int -> Str -> AgentEvent -> AgentLoopState
+processAgentTaskQueue tasks limit inputText loopStarted = {
+  let mut state = initialAgentLoopState inputText loopStarted;
+  for task in tasks {
+    let nextState =
+      if length state.processedTaskIds < limit then
+        processQueuedTask state task
+      else
+        deferTask state task;
+    state = nextState;
+    state
+  };
+  state
+}
+
+loopFinalStatus : AgentLoopStep -> AgentLoopStep -> Str
+loopFinalStatus builder verifier =
+  if builder.ok then
+    if verifier.ok then
+      "completed-pass"
+    else
+      "verifier-failed"
+  else
+    "builder-failed"
+
+loopSummary : AgentLoopStep -> AgentLoopStep -> Str
+loopSummary builder verifier =
+  textConcat [
+    "loop=",
+    loopId,
+    " builder=",
+    builder.status,
+    " verifier=",
+    verifier.status,
+    " final=",
+    loopFinalStatus builder verifier
+  ]
+
+agentLoopReport : AgentLoopState -> [AgentEvent] -> AgentLoopReport
+agentLoopReport state events = {
+  let outputText = agentReadTextOrEmpty workspaceRoot outputPath;
+  AgentLoopReport {
+    loopId = loopId,
+    finalStatus = loopFinalStatus state.builder state.verifier,
+    completed = true,
+    workspaceRoot = workspaceRoot,
+    inputPath = inputPath,
+    outputPath = outputPath,
+    statusPath = statusPath,
+    eventLogPath = eventLogPath,
+    runEventLogPath = runEventLogPath,
+    builderPromptPath = builderPromptPath,
+    builderFinalPath = builderFinalPath,
+    builderRunStatusPath = builderRunStatusPath,
+    verifierRunStatusPath = verifierRunStatusPath,
+    taskQueue = agentTaskQueue,
+    workLimit = workLimit,
+    processedCount = length state.processedTaskIds,
+    processedTaskIds = state.processedTaskIds,
+    remainingTaskIds = state.remainingTaskIds,
+    outcomes = state.outcomes,
+    inputText = state.inputText,
+    outputText = outputText,
+    builder = state.builder,
+    verifier = state.verifier,
+    events = events,
+    summary = loopSummary state.builder state.verifier
+  }
+}
+
+persistAgentLoopReport : AgentLoopReport -> Str
+persistAgentLoopReport report = {
+  let wroteStatus = agentWriteTextStatus workspaceRoot statusPath (encode report);
+  encode report
+}
+
+runLoop : Str
+runLoop = {
+  let madeArtifacts = agentEnsureDirStatus workspaceRoot "artifacts";
+  let madeSource = agentEnsureDirStatus workspaceRoot "src";
+  let inputText = agentReadTextOrEmpty workspaceRoot inputPath;
+  let loopStarted = agentEvent "loop-started" loopId "running" inputPath;
+  let wroteLoopStarted = agentAppendEvent workspaceRoot eventLogPath loopStarted;
+  let state = processAgentTaskQueue agentTaskQueue workLimit inputText loopStarted;
+  let loopCompleted = agentEvent "loop-completed" loopId (loopFinalStatus state.builder state.verifier) statusPath;
+  let wroteLoopCompleted = agentAppendEvent workspaceRoot eventLogPath loopCompleted;
+  persistAgentLoopReport (agentLoopReport state (append state.events [loopCompleted]))
+}
+
+main : Str
+main = runLoop

@@ -1,0 +1,24 @@
+module Compiler.Checker.RecordValidation
+
+import Compiler.Ast
+import Compiler.Checker.TypeOps
+
+findRecordLiteralFieldValidationFailure : HostedRecordDeclAst -> [HostedRecordFieldExprAst] -> Str
+findRecordLiteralFieldValidationFailure recordDecl fields = {
+  let mut seenFields = emptyRenderedTexts;
+  for exprField in fields {
+    let fieldName = recordExprFieldName exprField;
+    if containsText seenFields fieldName then {
+      return textConcat ["Record literal for `", recordDeclName recordDecl, "` repeats field `", fieldName, "`."]
+    } else {
+      seenFields = appendCheckerRenderedText seenFields fieldName;
+      match lookupRecordField (recordDeclFields recordDecl) fieldName {
+        FoundRecordField fieldDecl ->
+          "",
+        MissingRecordField missingField ->
+          return textConcat ["Record literal for `", recordDeclName recordDecl, "` includes unknown field `", missingField, "`."]
+      }
+    }
+  };
+  ""
+}

@@ -12,6 +12,7 @@ record MonitoredLoopSpec = {
   awaitTimeoutMs : Int,
   retryCount : Int,
   maxRetries : Int,
+  memoryLimitMb : Int,
   command : [Str]
 }
 
@@ -22,8 +23,8 @@ record MonitoredLoopOutcome = {
   process : WatchedProcess
 }
 
-monitoredLoopSpec : Str -> Str -> Str -> Str -> Int -> Int -> Int -> Int -> [Str] -> MonitoredLoopSpec
-monitoredLoopSpec cwd stdoutPath stderrPath heartbeatPath watchPollMs awaitTimeoutMs retryCount maxRetries command =
+monitoredLoopSpec : Str -> Str -> Str -> Str -> Int -> Int -> Int -> Int -> Int -> [Str] -> MonitoredLoopSpec
+monitoredLoopSpec cwd stdoutPath stderrPath heartbeatPath watchPollMs awaitTimeoutMs retryCount maxRetries memoryLimitMb command =
   MonitoredLoopSpec {
     cwd = cwd,
     stdoutPath = stdoutPath,
@@ -33,6 +34,7 @@ monitoredLoopSpec cwd stdoutPath stderrPath heartbeatPath watchPollMs awaitTimeo
     awaitTimeoutMs = awaitTimeoutMs,
     retryCount = retryCount,
     maxRetries = maxRetries,
+    memoryLimitMb = memoryLimitMb,
     command = command
   }
 
@@ -46,6 +48,12 @@ monitoredLoopPlaceholderProcess spec =
     running = false,
     completed = false,
     exitCode = 1,
+    status = "",
+    timedOut = false,
+    error = "",
+    outputLimitBytes = 0,
+    stdoutTruncated = false,
+    stderrTruncated = false,
     stdoutPath = spec.stdoutPath,
     stderrPath = spec.stderrPath,
     heartbeatPath = spec.heartbeatPath,
@@ -64,6 +72,20 @@ monitoredLoopRetryableStatus status =
     true
   else
     status == "malformed-unresolved-heartbeat"
+
+monitoredLoopProcessOutputLimited : WatchedProcess -> Bool
+monitoredLoopProcessOutputLimited process =
+  if process.status == "output-limit" then
+    true
+  else if process.error == "output-limit" then
+    true
+  else if process.exitCode == 125 then
+    if process.stdoutTruncated then
+      true
+    else
+      process.stderrTruncated
+  else
+    false
 
 monitoredLoopOutcomeFor : MonitoredLoopSpec -> Str -> Str -> WatchedProcess -> MonitoredLoopOutcome
 monitoredLoopOutcomeFor spec status message process = {
@@ -95,7 +117,11 @@ monitoredLoopMalformedHeartbeat spec message =
 
 monitoredLoopClassifyProcess : MonitoredLoopSpec -> WatchedProcess -> MonitoredLoopOutcome
 monitoredLoopClassifyProcess spec process =
-  if process.running then
+  if monitoredLoopProcessOutputLimited process then
+    monitoredLoopOutcomeFor spec "output-limit" "output limit exceeded" process
+  else if process.timedOut then
+    monitoredLoopOutcomeFor spec "timeout" "timeout" process
+  else if process.running then
     if process.completed then
       if process.exitCode == 0 then
         monitoredLoopOutcomeFor spec "completed-pass" "" process
@@ -203,27 +229,51 @@ monitoredLoopAwait spec =
 
 monitoredLoopSpawn : MonitoredLoopSpec -> MonitoredLoopOutcome
 monitoredLoopSpawn spec =
-  monitoredLoopClassifyResult
-    spec
-    (spawnWatchedProcess
-      spec.cwd
-      spec.stdoutPath
-      spec.stderrPath
-      spec.heartbeatPath
-      spec.watchPollMs
-      spec.command)
+  if spec.memoryLimitMb > 0 then
+    monitoredLoopClassifyResult
+      spec
+      (spawnWatchedProcessWithLimits
+        spec.cwd
+        spec.stdoutPath
+        spec.stderrPath
+        spec.heartbeatPath
+        spec.watchPollMs
+        spec.memoryLimitMb
+        spec.command)
+  else
+    monitoredLoopClassifyResult
+      spec
+      (spawnWatchedProcess
+        spec.cwd
+        spec.stdoutPath
+        spec.stderrPath
+        spec.heartbeatPath
+        spec.watchPollMs
+        spec.command)
 
 monitoredLoopWatch : MonitoredLoopSpec -> MonitoredLoopOutcome
 monitoredLoopWatch spec =
-  monitoredLoopClassifyResult
-    spec
-    (watchWatchedProcess
-      spec.cwd
-      spec.stdoutPath
-      spec.stderrPath
-      spec.heartbeatPath
-      spec.watchPollMs
-      spec.command)
+  if spec.memoryLimitMb > 0 then
+    monitoredLoopClassifyResult
+      spec
+      (watchWatchedProcessWithLimits
+        spec.cwd
+        spec.stdoutPath
+        spec.stderrPath
+        spec.heartbeatPath
+        spec.watchPollMs
+        spec.memoryLimitMb
+        spec.command)
+  else
+    monitoredLoopClassifyResult
+      spec
+      (watchWatchedProcess
+        spec.cwd
+        spec.stdoutPath
+        spec.stderrPath
+        spec.heartbeatPath
+        spec.watchPollMs
+        spec.command)
 
 monitoredLoopLaunchOrResume : MonitoredLoopSpec -> MonitoredLoopOutcome
 monitoredLoopLaunchOrResume spec =

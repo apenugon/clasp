@@ -1,0 +1,70 @@
+module Compiler.Checker.Types
+
+import Compiler.Ast
+
+type TypeText = TInt | TStr | TBool | TList TypeText | TFunction TypeText TypeText | TNamed Str | TApply Str [TypeText] | TVar Str | TUnknown Str
+type LookupResult = FoundType TypeText | MissingType Str
+type TypeDeclLookupResult = FoundTypeDecl HostedTypeDeclAst | MissingTypeDecl Str
+type RecordLookupResult = FoundRecord HostedRecordDeclAst | MissingRecord Str
+type RecordFieldLookupResult = FoundRecordField HostedRecordFieldDeclAst | MissingRecordField Str
+type RecordExprFieldLookupResult = FoundRecordExprField HostedRecordFieldExprAst | MissingRecordExprField Str
+type ConstructorLookupResult = FoundConstructor Str HostedConstructorDeclAst | MissingConstructor Str
+type TypeConstructorLookupResult = FoundTypeConstructor HostedConstructorDeclAst | MissingTypeConstructor Str
+type PatternBindResult = BoundPattern [TypeBinding] | PatternBindError Str
+type InferMatchBranchResult = InferredMatchBranch Str TypeText | InferMatchBranchError Str
+type InferExprResult = InferredExpr TypeText | InferExprError Str
+type InferDeclResult = InferredDecl TypeBinding | InferDeclError Str
+type InferModuleResult = InferredModule [TypeBinding] | InferModuleError Str
+type InferModulePassResult = InferModulePassResult [TypeBinding] Bool
+type ApplyCallResult = ApplyCallOk TypeText [TypeSubstitution] | ApplyCallError Str
+type TypeSubstitution = TypeSubstitution Str TypeText
+type TypeUnifyResult = UnifiedTypes [TypeSubstitution] | TypeUnifyError
+type RecordSubstitutionResult = RecordSubstitutionOk [TypeSubstitution] | RecordSubstitutionError Str
+type RecordSubstitutionFoldState = WaitingRecordSubstitutions [TypeSubstitution] | SeenRecordSubstitutionError Str
+type BuiltinCallInferResult = BuiltinCallInferred TypeText | BuiltinCallNotHandled | BuiltinCallError Str
+type DecodeTargetTypeResult = DecodeTargetType TypeText | DecodeTargetTypeError Str
+type ListInferState = WaitingForItem | SeenItemType TypeText | SeenListError Str
+type BindParamsState = BindingParams [TypeBinding] TypeText | BindingParamError Str
+type MatchBranchState = WaitingForBranch [Str] | SeenBranchType [Str] TypeText | SeenMatchError Str
+type TypeBinding = TypeBinding Str TypeText
+type ReturnContext = OutsideFunction | InsideFunction TypeText
+
+keepNoTypeBinding : TypeBinding -> Bool
+keepNoTypeBinding value = false
+
+emptyTypeBindings : [TypeBinding]
+emptyTypeBindings = filter keepNoTypeBinding [TypeBinding "" (TUnknown "")]
+
+keepNoTypeText : TypeText -> Bool
+keepNoTypeText value = false
+
+emptyTypeTexts : [TypeText]
+emptyTypeTexts = filter keepNoTypeText [TUnknown ""]
+
+keepNoTypeSubstitution : TypeSubstitution -> Bool
+keepNoTypeSubstitution value = false
+
+emptyTypeSubstitutions : [TypeSubstitution]
+emptyTypeSubstitutions = filter keepNoTypeSubstitution [TypeSubstitution "" (TUnknown "")]
+
+appendTypeBinding : [TypeBinding] -> TypeBinding -> [TypeBinding]
+appendTypeBinding bindings binding = append bindings [binding]
+
+lookupTypeBinding : [TypeBinding] -> Str -> LookupResult
+lookupTypeBinding env targetName = {
+  for binding in env {
+    match binding {
+      TypeBinding bindingName bindingType ->
+        if bindingName == targetName then return FoundType bindingType else MissingType targetName
+    }
+  };
+  MissingType targetName
+}
+
+lookupTypeBindingLayers : [TypeBinding] -> [TypeBinding] -> Str -> LookupResult
+lookupTypeBindingLayers localEnv env targetName = match lookupTypeBinding localEnv targetName {
+  FoundType bindingType ->
+    FoundType bindingType,
+  MissingType missing ->
+    lookupTypeBinding env targetName
+}

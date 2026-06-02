@@ -231,6 +231,8 @@ ensureManagerReady : Str
 ensureManagerReady =
   if workspaceRoot == "" then
     "config-error:missing-workspace-root"
+  else if managedAgentRuntimeReady == false then
+    "config-error:managed-job-required"
   else if maxTaskLoops < 0 then
     "config-error:max-tasks-must-be-nonnegative"
   else if plannerTaskMaxRuns < 1 then
@@ -239,6 +241,18 @@ ensureManagerReady =
     "config-error:child-max-attempts-must-be-positive"
   else if maxConcurrentChildren < 1 then
     "config-error:max-concurrent-children-must-be-positive"
+  else if managerMinAvailableDiskMb < 0 then
+    "config-error:manager-min-available-disk-mb-must-be-nonnegative"
+  else if managerMinDiskHeadroomMb < 0 then
+    "config-error:manager-min-disk-headroom-mb-must-be-nonnegative"
+  else if managerMinAvailableMemoryMb < 0 then
+    "config-error:manager-min-available-memory-mb-must-be-nonnegative"
+  else if managerChildMemoryReserveMb < 0 then
+    "config-error:manager-child-memory-reserve-mb-must-be-nonnegative"
+  else if managerExternalAgentReserveMb < 0 then
+    "config-error:manager-external-agent-reserve-mb-must-be-nonnegative"
+  else if resourceRecoveryExtraWaves < 0 then
+    "config-error:resource-recovery-extra-waves-must-be-nonnegative"
   else if objectiveTaskBudget < configuredObjectiveBudgetFloor then
     textConcat [
       "config-error:objective-task-budget-too-small:configured=",

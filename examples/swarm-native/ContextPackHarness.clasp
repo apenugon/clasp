@@ -1,12 +1,1455 @@
 module Main
 
-import Swarm
+foreign swarmLeaseRaw : Str -> Str -> Str -> Result Str = "swarmLeaseJson"
+foreign swarmCompleteRaw : Str -> Str -> Str -> Result Str = "swarmCompleteJson"
+foreign swarmFailRaw : Str -> Str -> Str -> Result Str = "swarmFailJson"
+foreign swarmStatusRaw : Str -> Str -> Result Str = "swarmStatusJson"
+foreign swarmReadyRaw : Str -> Str -> Result Str = "swarmReadyJson"
+foreign swarmManagerNextRaw : Str -> Str -> Result Str = "swarmManagerNextJson"
+foreign swarmObjectiveCreateWithDeadlineRaw : Str -> Str -> Str -> Int -> Int -> Int -> Result Str = "swarmObjectiveCreateWithDeadlineJson"
+foreign swarmTaskCreateWithDeadlineRaw : Str -> Str -> Str -> Str -> [Str] -> Int -> Int -> Int -> Result Str = "swarmTaskCreateWithDeadlineJson"
+foreign swarmPolicySetRaw : Str -> Str -> Str -> [Str] -> [Str] -> Result Str = "swarmPolicySetJson"
+foreign swarmToolRunWithTimeoutRaw : Str -> Str -> Str -> Str -> Int -> [Str] -> Result Str = "swarmToolRunWithTimeoutJson"
+foreign swarmVerifierRunWithTimeoutRaw : Str -> Str -> Str -> Str -> Str -> Int -> [Str] -> Result Str = "swarmVerifierRunWithTimeoutJson"
+foreign swarmApproveRaw : Str -> Str -> Str -> Str -> Result Str = "swarmApproveJson"
+foreign swarmApprovalsRaw : Str -> Str -> Result Str = "swarmApprovalsJson"
+foreign swarmMergegateDecideRaw : Str -> Str -> Str -> Str -> [Str] -> Result Str = "swarmMergegateDecideJson"
+foreign swarmRunsRaw : Str -> Str -> Result Str = "swarmRunsJson"
+foreign swarmArtifactsRaw : Str -> Str -> Result Str = "swarmArtifactsJson"
+foreign swarmArtifactReadRaw : Str -> Int -> Int -> Result Str = "swarmArtifactReadJson"
+foreign swarmArtifactSearchRaw : Str -> Str -> Str -> Str -> Int -> Int -> Result Str = "swarmArtifactSearchJson"
+foreign swarmArtifactWriteRaw : Str -> Str -> Str -> Str -> Str -> Result Str = "swarmArtifactWriteJson"
+foreign swarmMemoryPutRaw : Str -> Str -> Str -> Str -> Str -> Str -> Result Str = "swarmMemoryPutJson"
+foreign swarmMemoryQueryRaw : Str -> Str -> Str -> Str -> Int -> Result Str = "swarmMemoryQueryJson"
+foreign swarmMemorySearchRaw : Str -> Str -> Str -> Str -> Int -> Result Str = "swarmMemorySearchJson"
+foreign swarmHistoryRaw : Str -> Str -> Result Str = "swarmHistoryJson"
+foreign swarmTailRaw : Str -> Str -> Int -> Result Str = "swarmTailJson"
+foreign swarmTasksRaw : Str -> Result Str = "swarmTasksJson"
+
+record BenchmarkSignal = {
+  suite : Str,
+  summary : Str,
+  passed : Bool,
+  meetsTarget : Bool,
+  scoreName : Str,
+  scoreValue : Int,
+  targetName : Str,
+  targetValue : Int
+}
+
+record SwarmRoot = { path : Str }
+record ObjectiveHandle = { root : SwarmRoot, objectiveId : Str }
+record TaskHandle = { root : SwarmRoot, taskId : Str, actor : Str }
+record SwarmCommand = { cwd : Str, command : [Str] }
+
+record SwarmObjective = {
+  createdAtMs : Int,
+  deadlineAtMs : Int,
+  objectiveId : Str,
+  detail : Str,
+  maxRuns : Int,
+  maxTasks : Int,
+  projectedStatus : Str,
+  status : Str,
+  taskCount : Int,
+  runCount : Int,
+  updatedAtMs : Int
+}
+
+record SwarmTask = {
+  attempts : Int,
+  taskId : Str,
+  status : Str,
+  objectiveId : Str,
+  detail : Str,
+  dependencies : [Str],
+  ready : Bool,
+  blockedBy : [Str],
+  createdAtMs : Int,
+  deadlineAtMs : Int,
+  heartbeatSeen : Bool,
+  lastError : Str,
+  lastHeartbeatAtMs : Int,
+  leaseActor : Str,
+  leaseExpired : Bool,
+  leaseTimeoutMs : Int,
+  maxRuns : Int,
+  priority : Int,
+  objectiveDeadlineAtMs : Int,
+  updatedAtMs : Int
+}
+
+record SwarmPolicy = {
+  createdAtMs : Int,
+  taskId : Str,
+  mergegateName : Str,
+  requiredApprovals : [Str],
+  requiredVerifiers : [Str],
+  allowedProcesses : [Str],
+  allowedWorkspaceRoots : [Str],
+  networkAccess : Str,
+  updatedAtMs : Int
+}
+
+record SwarmRun = {
+  actor : Str,
+  command : [Str],
+  cwd : Str,
+  endedAtMs : Int,
+  exitCode : Int,
+  name : Str,
+  role : Str,
+  runId : Int,
+  startedAtMs : Int,
+  status : Str,
+  stderrArtifactPath : Str,
+  stdoutArtifactPath : Str,
+  taskId : Str,
+  timedOut : Bool,
+  memoryLimitMb : Int
+}
+
+record SwarmApproval = {
+  actor : Str,
+  approvalId : Int,
+  atMs : Int,
+  detail : Str,
+  name : Str,
+  taskId : Str
+}
+
+record SwarmMergeDecision = {
+  taskId : Str,
+  mergegateName : Str,
+  verdict : Str
+}
+
+record SwarmArtifact = {
+  artifactId : Int,
+  createdAtMs : Int,
+  taskId : Str,
+  kind : Str,
+  path : Str
+}
+
+record SwarmArtifactContent = {
+  artifactId : Int,
+  createdAtMs : Int,
+  taskId : Str,
+  kind : Str,
+  path : Str,
+  maxBytes : Int,
+  bytesRead : Int,
+  totalBytes : Int,
+  truncated : Bool,
+  lossyUtf8 : Bool,
+  text : Str
+}
+
+record SwarmArtifactSearchResult = {
+  artifact : SwarmArtifact,
+  score : Int,
+  matchedText : Str,
+  excerpt : SwarmArtifactContent
+}
+
+record SwarmSemanticIndexEntry = {
+  id : Str,
+  kind : Str,
+  editFiles : [Str],
+  artifactRefs : [Str],
+  surfaceIds : [Str],
+  queryText : Str
+}
+
+record SwarmSemanticIndex = {
+  entries : [SwarmSemanticIndexEntry]
+}
+
+record SwarmSemanticIndexArtifact = {
+  semanticIndex : SwarmSemanticIndex
+}
+
+record SwarmMemory = {
+  actor : Str,
+  createdAtMs : Int,
+  memoryId : Int,
+  objectiveId : Str,
+  taskId : Str,
+  key : Str,
+  value : Str,
+  updatedAtMs : Int
+}
+
+record SwarmMemorySearchResult = {
+  memory : SwarmMemory,
+  score : Int,
+  matchedText : Str
+}
+
+record SwarmEvent = {
+  actor : Str,
+  atMs : Int,
+  detail : Str,
+  kind : Str,
+  taskId : Str,
+}
+
+record SwarmTaskUpdate = {
+  database : Str,
+  event : SwarmEvent,
+  root : Str,
+  task : SwarmTask
+}
+
+record SwarmManagerAction = {
+  objectiveId : Str,
+  status : Str,
+  action : Str,
+  suggestedCommand : [Str],
+  taskId : Str,
+  taskStatus : Str,
+  taskPriority : Int,
+  blockedBy : [Str],
+  blockerTaskIds : [Str],
+  requiredApprovals : [Str],
+  requiredVerifiers : [Str],
+  latestRunId : Int,
+  latestRunRole : Str,
+  latestRunName : Str,
+  latestRunStatus : Str,
+  latestRunExitCode : Int,
+  latestVerifier : Str,
+  latestVerifierStatus : Str,
+  latestVerifierExitCode : Int,
+  mergegateName : Str,
+  mergegateVerdict : Str,
+  mergegateDetail : Str
+}
+
+record SwarmMailbox = {
+  history : [SwarmEvent],
+  tail : [SwarmEvent],
+  approvals : [SwarmApproval],
+  runs : [SwarmRun],
+  artifacts : [SwarmArtifact],
+  memory : [SwarmMemory],
+  latestRunStatus : Str,
+  latestRunName : Str,
+  latestVerifierStatus : Str,
+  latestVerifier : Str
+}
+
+record ToolStepResult = {
+  lease : SwarmTaskUpdate,
+  run : SwarmRun,
+  status : SwarmTaskUpdate,
+  mailbox : SwarmMailbox
+}
+
+record VerifierStepResult = {
+  run : SwarmRun,
+  mailbox : SwarmMailbox
+}
+
+record VerificationCommand = {
+  verifierName : Str,
+  command : SwarmCommand
+}
+
+record VerificationPlan = {
+  name : Str,
+  commands : [VerificationCommand],
+  requiredVerifierNames : [Str]
+}
+
+record VerificationTraceEntry = {
+  verifierName : Str,
+  runId : Int,
+  status : Str,
+  exitCode : Int,
+  timedOut : Bool,
+  memoryLimitMb : Int,
+  stdoutArtifactPath : Str,
+  stderrArtifactPath : Str,
+  failedVerifierClassification : Str
+}
+
+record VerificationPlanMailboxSummary = {
+  historyCount : Int,
+  tailCount : Int,
+  approvalCount : Int,
+  runCount : Int,
+  artifactCount : Int,
+  memoryCount : Int,
+  latestRunStatus : Str,
+  latestRunName : Str,
+  latestVerifierStatus : Str,
+  latestVerifier : Str,
+  artifactKinds : [Str],
+  artifactPaths : [Str]
+}
+
+record SwarmTextSearch = {
+  wanted : Str,
+  found : Bool
+}
+
+record SwarmDependencyProjection = {
+  dependencyProjectionIds : [Str],
+  dependencyProjectionStatuses : [Str],
+  dependencyProjectionReady : [Bool]
+}
+
+record SwarmEvidencePack = {
+  task : SwarmTask,
+  query : Str,
+  dependencyTaskIds : [Str],
+  dependencyTaskStatuses : [Str],
+  dependencyTaskReady : [Bool],
+  mailboxSummary : VerificationPlanMailboxSummary,
+  taskMemoryMatches : [SwarmMemorySearchResult],
+  objectiveMemoryMatches : [SwarmMemorySearchResult],
+  benchmarkMemoryMatches : [SwarmMemorySearchResult],
+  artifactSearchMatches : [SwarmArtifactSearchResult],
+  semanticArtifactMatches : [SwarmArtifactSearchResult],
+  memoryValues : [Str],
+  memoryMatchedText : [Str],
+  memoryScores : [Int],
+  benchmarkValues : [Str],
+  benchmarkMatchedText : [Str],
+  benchmarkScores : [Int],
+  artifactSearchMatchedText : [Str],
+  artifactSearchScores : [Int],
+  semanticArtifactMatchedText : [Str],
+  semanticArtifactScores : [Int],
+  semanticIndexEntries : [SwarmSemanticIndexEntry],
+  semanticIndexEntryIds : [Str],
+  semanticIndexEditFiles : [Str],
+  semanticIndexArtifactRefs : [Str],
+  semanticIndexSurfaceIds : [Str],
+  semanticIndexQueryTexts : [Str],
+  runTrace : [VerificationTraceEntry],
+  artifactKinds : [Str],
+  artifactPaths : [Str],
+  artifactExcerpts : [SwarmArtifactContent]
+}
+
+record SwarmContextPack = {
+  task : SwarmTask,
+  readyTaskIds : [Str],
+  dependencyTaskIds : [Str],
+  dependencyTaskStatuses : [Str],
+  dependencyTaskReady : [Bool],
+  managerAction : SwarmManagerAction,
+  mailboxSummary : VerificationPlanMailboxSummary,
+  taskMemoryMatches : [SwarmMemorySearchResult],
+  objectiveMemoryMatches : [SwarmMemorySearchResult],
+  benchmarkMemoryMatches : [SwarmMemorySearchResult],
+  artifactSearchMatches : [SwarmArtifactSearchResult],
+  semanticArtifactMatches : [SwarmArtifactSearchResult],
+  memoryValues : [Str],
+  memoryMatchedText : [Str],
+  memoryScores : [Int],
+  benchmarkValues : [Str],
+  benchmarkMatchedText : [Str],
+  benchmarkScores : [Int],
+  artifactSearchMatchedText : [Str],
+  artifactSearchScores : [Int],
+  semanticArtifactMatchedText : [Str],
+  semanticArtifactScores : [Int],
+  semanticIndexEntries : [SwarmSemanticIndexEntry],
+  semanticIndexEntryIds : [Str],
+  semanticIndexEditFiles : [Str],
+  semanticIndexArtifactRefs : [Str],
+  semanticIndexSurfaceIds : [Str],
+  semanticIndexQueryTexts : [Str],
+  runTrace : [VerificationTraceEntry],
+  artifactKinds : [Str],
+  artifactPaths : [Str],
+  artifactExcerpts : [SwarmArtifactContent]
+}
+
+record VerificationPlanResult = {
+  plan : VerificationPlan,
+  steps : [VerifierStepResult],
+  passed : Bool,
+  failedVerifiers : [Str],
+  trace : [VerificationTraceEntry],
+  mailbox : SwarmMailbox,
+  mailboxSummary : VerificationPlanMailboxSummary
+}
+
+record VerificationPlanExecution = {
+  handle : TaskHandle,
+  mailboxLimit : Int,
+  timeoutMs : Int,
+  steps : [VerifierStepResult],
+  passed : Bool,
+  failedVerifiers : [Str],
+  trace : [VerificationTraceEntry],
+  error : Str
+}
+
+record ReviewStepResult = {
+  approval : SwarmApproval,
+  approvals : [SwarmApproval],
+  managerAfterApproval : SwarmManagerAction,
+  mergeDecision : SwarmMergeDecision,
+  mailbox : SwarmMailbox
+}
+
+emptyTexts : [Str]
+emptyTexts = []
+
+emptyBools : [Bool]
+emptyBools = []
+
+emptyVerifierStepResults : [VerifierStepResult]
+emptyVerifierStepResults = []
+
+emptyVerifierNames : [Str]
+emptyVerifierNames = []
+
+emptyVerificationTraceEntries : [VerificationTraceEntry]
+emptyVerificationTraceEntries = []
+
+emptyArtifactContents : [SwarmArtifactContent]
+emptyArtifactContents = []
+
+emptySwarmSemanticIndexEntries : [SwarmSemanticIndexEntry]
+emptySwarmSemanticIndexEntries = []
+
+contextPackArtifactReadBytes : Int
+contextPackArtifactReadBytes = 4096
+
+contextPackSemanticIndexReadBytes : Int
+contextPackSemanticIndexReadBytes = 65536
+
+contextPackSemanticIndexQuery : Str
+contextPackSemanticIndexQuery = "semanticIndex entries editFiles artifactRefs surfaceIds queryText route schema host-boundary action-item"
+
+contextPackBenchmarkQuery : Str
+contextPackBenchmarkQuery = "benchmark score target suite wave meetsTarget summary regression improvement"
+
+swarmRoot : Str -> SwarmRoot
+swarmRoot path = SwarmRoot { path = path }
+
+objectiveHandle : SwarmRoot -> Str -> ObjectiveHandle
+objectiveHandle root objectiveId = ObjectiveHandle { root = root, objectiveId = objectiveId }
+
+taskHandle : SwarmRoot -> Str -> Str -> TaskHandle
+taskHandle root taskId actor = TaskHandle { root = root, taskId = taskId, actor = actor }
+
+commandSpec : Str -> [Str] -> SwarmCommand
+commandSpec cwd command = SwarmCommand { cwd = cwd, command = command }
+
+verificationCommand : Str -> SwarmCommand -> VerificationCommand
+verificationCommand verifierName command =
+  VerificationCommand { verifierName = verifierName, command = command }
+
+verificationCommandName : VerificationCommand -> Str
+verificationCommandName command = command.verifierName
+
+verificationPlan : Str -> [VerificationCommand] -> VerificationPlan
+verificationPlan name commands =
+  VerificationPlan {
+    name = name,
+    commands = commands,
+    requiredVerifierNames = map verificationCommandName commands
+  }
+
+taskResultError : Str -> Result SwarmTask
+taskResultError message = Err message
+
+taskUpdateResultError : Str -> Result SwarmTaskUpdate
+taskUpdateResultError message = Err message
+
+objectiveResultError : Str -> Result SwarmObjective
+objectiveResultError message = Err message
+
+policyResultError : Str -> Result SwarmPolicy
+policyResultError message = Err message
+
+runResultError : Str -> Result SwarmRun
+runResultError message = Err message
+
+approvalResultError : Str -> Result SwarmApproval
+approvalResultError message = Err message
+
+mergeDecisionResultError : Str -> Result SwarmMergeDecision
+mergeDecisionResultError message = Err message
+
+managerActionResultError : Str -> Result SwarmManagerAction
+managerActionResultError message = Err message
+
+taskListResultError : Str -> Result [SwarmTask]
+taskListResultError message = Err message
+
+runListResultError : Str -> Result [SwarmRun]
+runListResultError message = Err message
+
+artifactListResultError : Str -> Result [SwarmArtifact]
+artifactListResultError message = Err message
+
+artifactResultError : Str -> Result SwarmArtifact
+artifactResultError message = Err message
+
+artifactContentResultError : Str -> Result SwarmArtifactContent
+artifactContentResultError message = Err message
+
+artifactContentListResultError : Str -> Result [SwarmArtifactContent]
+artifactContentListResultError message = Err message
+
+artifactSearchResultListError : Str -> Result [SwarmArtifactSearchResult]
+artifactSearchResultListError message = Err message
+
+memoryResultError : Str -> Result SwarmMemory
+memoryResultError message = Err message
+
+memoryListResultError : Str -> Result [SwarmMemory]
+memoryListResultError message = Err message
+
+memorySearchResultListError : Str -> Result [SwarmMemorySearchResult]
+memorySearchResultListError message = Err message
+
+eventListResultError : Str -> Result [SwarmEvent]
+eventListResultError message = Err message
+
+approvalListResultError : Str -> Result [SwarmApproval]
+approvalListResultError message = Err message
+
+mailboxResultError : Str -> Result SwarmMailbox
+mailboxResultError message = Err message
+
+toolStepResultError : Str -> Result ToolStepResult
+toolStepResultError message = Err message
+
+verifierStepResultError : Str -> Result VerifierStepResult
+verifierStepResultError message = Err message
+
+verificationPlanResultError : Str -> Result VerificationPlanResult
+verificationPlanResultError message = Err message
+
+reviewStepResultError : Str -> Result ReviewStepResult
+reviewStepResultError message = Err message
+
+evidencePackResultError : Str -> Result SwarmEvidencePack
+evidencePackResultError message = Err message
+
+contextPackResultError : Str -> Result SwarmContextPack
+contextPackResultError message = Err message
+
+contextStringResultError : Str -> Result Str
+contextStringResultError message = Err message
+
+taskResult : Result Str -> Result SwarmTask
+taskResult value = match value {
+  Ok raw -> Ok (decode SwarmTask raw),
+  Err message -> taskResultError message
+}
+
+taskUpdateResult : Result Str -> Result SwarmTaskUpdate
+taskUpdateResult value = match value {
+  Ok raw -> Ok (decode SwarmTaskUpdate raw),
+  Err message -> taskUpdateResultError message
+}
+
+objectiveResult : Result Str -> Result SwarmObjective
+objectiveResult value = match value {
+  Ok raw -> Ok (decode SwarmObjective raw),
+  Err message -> objectiveResultError message
+}
+
+policyResult : Result Str -> Result SwarmPolicy
+policyResult value = match value {
+  Ok raw -> Ok (decode SwarmPolicy raw),
+  Err message -> policyResultError message
+}
+
+runResult : Result Str -> Result SwarmRun
+runResult value = match value {
+  Ok raw -> Ok (decode SwarmRun raw),
+  Err message -> runResultError message
+}
+
+approvalResult : Result Str -> Result SwarmApproval
+approvalResult value = match value {
+  Ok raw -> Ok (decode SwarmApproval raw),
+  Err message -> approvalResultError message
+}
+
+mergeDecisionResult : Result Str -> Result SwarmMergeDecision
+mergeDecisionResult value = match value {
+  Ok raw -> Ok (decode SwarmMergeDecision raw),
+  Err message -> mergeDecisionResultError message
+}
+
+managerActionResult : Result Str -> Result SwarmManagerAction
+managerActionResult value = match value {
+  Ok raw -> Ok (decode SwarmManagerAction raw),
+  Err message -> managerActionResultError message
+}
+
+taskListResult : Result Str -> Result [SwarmTask]
+taskListResult value = match value {
+  Ok raw -> Ok (decode [SwarmTask] raw),
+  Err message -> taskListResultError message
+}
+
+runListResult : Result Str -> Result [SwarmRun]
+runListResult value = match value {
+  Ok raw -> Ok (decode [SwarmRun] raw),
+  Err message -> runListResultError message
+}
+
+artifactListResult : Result Str -> Result [SwarmArtifact]
+artifactListResult value = match value {
+  Ok raw -> Ok (decode [SwarmArtifact] raw),
+  Err message -> artifactListResultError message
+}
+
+artifactResult : Result Str -> Result SwarmArtifact
+artifactResult value = match value {
+  Ok raw -> Ok (decode SwarmArtifact raw),
+  Err message -> artifactResultError message
+}
+
+artifactContentResult : Result Str -> Result SwarmArtifactContent
+artifactContentResult value = match value {
+  Ok raw -> Ok (decode SwarmArtifactContent raw),
+  Err message -> artifactContentResultError message
+}
+
+artifactSearchResultListResult : Result Str -> Result [SwarmArtifactSearchResult]
+artifactSearchResultListResult value = match value {
+  Ok raw -> Ok (decode [SwarmArtifactSearchResult] raw),
+  Err message -> artifactSearchResultListError message
+}
+
+memoryResult : Result Str -> Result SwarmMemory
+memoryResult value = match value {
+  Ok raw -> Ok (decode SwarmMemory raw),
+  Err message -> memoryResultError message
+}
+
+memoryListResult : Result Str -> Result [SwarmMemory]
+memoryListResult value = match value {
+  Ok raw -> Ok (decode [SwarmMemory] raw),
+  Err message -> memoryListResultError message
+}
+
+memorySearchResultListResult : Result Str -> Result [SwarmMemorySearchResult]
+memorySearchResultListResult value = match value {
+  Ok raw -> Ok (decode [SwarmMemorySearchResult] raw),
+  Err message -> memorySearchResultListError message
+}
+
+eventListResult : Result Str -> Result [SwarmEvent]
+eventListResult value = match value {
+  Ok raw -> Ok (decode [SwarmEvent] raw),
+  Err message -> eventListResultError message
+}
+
+approvalListResult : Result Str -> Result [SwarmApproval]
+approvalListResult value = match value {
+  Ok raw -> Ok (decode [SwarmApproval] raw),
+  Err message -> approvalListResultError message
+}
+
+lease : TaskHandle -> Result SwarmTaskUpdate
+lease handle = taskUpdateResult (swarmLeaseRaw handle.root.path handle.taskId handle.actor)
+
+complete : TaskHandle -> Result SwarmTaskUpdate
+complete handle = taskUpdateResult (swarmCompleteRaw handle.root.path handle.taskId handle.actor)
+
+fail : TaskHandle -> Result SwarmTaskUpdate
+fail handle = taskUpdateResult (swarmFailRaw handle.root.path handle.taskId handle.actor)
+
+status : TaskHandle -> Result SwarmTask
+status handle = taskResult (swarmStatusRaw handle.root.path handle.taskId)
+
+ready : ObjectiveHandle -> Result [SwarmTask]
+ready handle = taskListResult (swarmReadyRaw handle.root.path handle.objectiveId)
+
+managerNext : ObjectiveHandle -> Result SwarmManagerAction
+managerNext handle = managerActionResult (swarmManagerNextRaw handle.root.path handle.objectiveId)
+
+objectiveCreateWithDeadline : SwarmRoot -> Str -> Str -> Int -> Int -> Int -> Result SwarmObjective
+objectiveCreateWithDeadline root objectiveId detail maxTasks maxRuns deadlineAtMs =
+  objectiveResult (swarmObjectiveCreateWithDeadlineRaw root.path objectiveId detail maxTasks maxRuns deadlineAtMs)
+
+taskCreateWithDeadline : ObjectiveHandle -> Str -> Str -> [Str] -> Int -> Int -> Int -> Result SwarmTask
+taskCreateWithDeadline handle taskId detail dependencies maxRuns deadlineAtMs leaseTimeoutMs =
+  taskResult (swarmTaskCreateWithDeadlineRaw handle.root.path handle.objectiveId taskId detail dependencies maxRuns deadlineAtMs leaseTimeoutMs)
+
+policySet : TaskHandle -> Str -> [Str] -> [Str] -> Result SwarmPolicy
+policySet handle mergegateName requiredApprovals requiredVerifiers =
+  policyResult (swarmPolicySetRaw handle.root.path handle.taskId mergegateName requiredApprovals requiredVerifiers)
+
+policySetForVerificationPlan : TaskHandle -> Str -> [Str] -> VerificationPlan -> Result SwarmPolicy
+policySetForVerificationPlan handle mergegateName requiredApprovals plan =
+  policySet handle mergegateName requiredApprovals plan.requiredVerifierNames
+
+toolRunWithTimeout : TaskHandle -> SwarmCommand -> Int -> Result SwarmRun
+toolRunWithTimeout handle spec timeoutMs =
+  runResult (swarmToolRunWithTimeoutRaw handle.root.path handle.taskId handle.actor spec.cwd timeoutMs spec.command)
+
+verifierRunWithTimeout : TaskHandle -> Str -> SwarmCommand -> Int -> Result SwarmRun
+verifierRunWithTimeout handle verifierName spec timeoutMs =
+  runResult (swarmVerifierRunWithTimeoutRaw handle.root.path handle.taskId handle.actor verifierName spec.cwd timeoutMs spec.command)
+
+approve : TaskHandle -> Str -> Result SwarmApproval
+approve handle approvalName =
+  approvalResult (swarmApproveRaw handle.root.path handle.taskId handle.actor approvalName)
+
+approvals : TaskHandle -> Result [SwarmApproval]
+approvals handle = approvalListResult (swarmApprovalsRaw handle.root.path handle.taskId)
+
+mergegateDecide : TaskHandle -> Str -> [Str] -> Result SwarmMergeDecision
+mergegateDecide handle mergegateName requiredVerifiers =
+  mergeDecisionResult (swarmMergegateDecideRaw handle.root.path handle.taskId handle.actor mergegateName requiredVerifiers)
+
+runs : TaskHandle -> Result [SwarmRun]
+runs handle = runListResult (swarmRunsRaw handle.root.path handle.taskId)
+
+artifacts : TaskHandle -> Result [SwarmArtifact]
+artifacts handle = artifactListResult (swarmArtifactsRaw handle.root.path handle.taskId)
+
+artifactRead : SwarmRoot -> Int -> Int -> Result SwarmArtifactContent
+artifactRead root artifactId maxBytes =
+  artifactContentResult (swarmArtifactReadRaw root.path artifactId maxBytes)
+
+artifactSearch : TaskHandle -> Str -> Str -> Int -> Int -> Result [SwarmArtifactSearchResult]
+artifactSearch handle kind query limit maxBytes =
+  artifactSearchResultListResult (swarmArtifactSearchRaw handle.root.path handle.taskId kind query limit maxBytes)
+
+artifactWrite : TaskHandle -> Str -> Str -> Result SwarmArtifact
+artifactWrite handle kind text =
+  artifactResult (swarmArtifactWriteRaw handle.root.path handle.taskId handle.actor kind text)
+
+semanticIndexArtifactKind : Str
+semanticIndexArtifactKind = "agent-pack"
+
+semanticIndexEntry : Str -> Str -> [Str] -> [Str] -> [Str] -> Str -> SwarmSemanticIndexEntry
+semanticIndexEntry id kind editFiles artifactRefs surfaceIds queryText =
+  SwarmSemanticIndexEntry {
+    id = id,
+    kind = kind,
+    editFiles = editFiles,
+    artifactRefs = artifactRefs,
+    surfaceIds = surfaceIds,
+    queryText = queryText
+  }
+
+semanticIndexArtifactText : [SwarmSemanticIndexEntry] -> Str
+semanticIndexArtifactText entries =
+  encode
+    (SwarmSemanticIndexArtifact {
+      semanticIndex = SwarmSemanticIndex {
+        entries = entries
+      }
+    })
+
+artifactWriteSemanticIndex : TaskHandle -> [SwarmSemanticIndexEntry] -> Result SwarmArtifact
+artifactWriteSemanticIndex handle entries =
+  artifactWrite handle semanticIndexArtifactKind (semanticIndexArtifactText entries)
+
+semanticArtifactSearch : TaskHandle -> Str -> Int -> Int -> Result [SwarmArtifactSearchResult]
+semanticArtifactSearch handle query limit maxBytes =
+  artifactSearch handle semanticIndexArtifactKind query limit maxBytes
+
+memoryPut : SwarmRoot -> Str -> Str -> Str -> Str -> Str -> Result SwarmMemory
+memoryPut root objectiveId taskId actor key value =
+  memoryResult (swarmMemoryPutRaw root.path objectiveId taskId actor key value)
+
+memoryQuery : SwarmRoot -> Str -> Str -> Str -> Int -> Result [SwarmMemory]
+memoryQuery root objectiveId taskId key limit =
+  memoryListResult (swarmMemoryQueryRaw root.path objectiveId taskId key limit)
+
+memorySearch : SwarmRoot -> Str -> Str -> Str -> Int -> Result [SwarmMemorySearchResult]
+memorySearch root objectiveId taskId query limit =
+  memorySearchResultListResult (swarmMemorySearchRaw root.path objectiveId taskId query limit)
+
+objectiveMemoryPut : ObjectiveHandle -> Str -> Str -> Str -> Result SwarmMemory
+objectiveMemoryPut handle actor key value =
+  memoryPut handle.root handle.objectiveId "" actor key value
+
+taskMemoryPut : TaskHandle -> Str -> Str -> Result SwarmMemory
+taskMemoryPut handle key value =
+  memoryPut handle.root "" handle.taskId handle.actor key value
+
+taskMemory : TaskHandle -> Str -> Int -> Result [SwarmMemory]
+taskMemory handle key limit =
+  memoryQuery handle.root "" handle.taskId key limit
+
+objectiveMemorySearch : ObjectiveHandle -> Str -> Int -> Result [SwarmMemorySearchResult]
+objectiveMemorySearch handle query limit =
+  memorySearch handle.root handle.objectiveId "" query limit
+
+taskMemorySearch : TaskHandle -> Str -> Int -> Result [SwarmMemorySearchResult]
+taskMemorySearch handle query limit =
+  memorySearch handle.root "" handle.taskId query limit
+
+benchmarkMemoryKey : Str
+benchmarkMemoryKey = "benchmark-result"
+
+benchmarkHistorySearch : ObjectiveHandle -> Int -> Result [SwarmMemorySearchResult]
+benchmarkHistorySearch handle limit =
+  objectiveMemorySearch handle contextPackBenchmarkQuery limit
+
+history : TaskHandle -> Result [SwarmEvent]
+history handle = eventListResult (swarmHistoryRaw handle.root.path handle.taskId)
+
+tail : TaskHandle -> Int -> Result [SwarmEvent]
+tail handle limit = eventListResult (swarmTailRaw handle.root.path handle.taskId limit)
+
+tasks : SwarmRoot -> Result [SwarmTask]
+tasks root = taskListResult (swarmTasksRaw root.path)
+
+runPassed : SwarmRun -> Bool
+runPassed run = run.status == "passed"
+
+finishToolRun : TaskHandle -> SwarmRun -> Result SwarmTaskUpdate
+finishToolRun handle run =
+  if runPassed run then
+    complete handle
+  else
+    fail handle
+
+firstRunStatus : Str -> SwarmRun -> Str
+firstRunStatus current run = if current == "" then run.status else current
+
+firstRunName : Str -> SwarmRun -> Str
+firstRunName current run = if current == "" then run.name else current
+
+firstVerifierStatus : Str -> SwarmRun -> Str
+firstVerifierStatus current run =
+  if current == "" then
+    if run.role == "verifier" then run.status else ""
+  else
+    current
+
+firstVerifierName : Str -> SwarmRun -> Str
+firstVerifierName current run =
+  if current == "" then
+    if run.role == "verifier" then run.name else ""
+  else
+    current
+
+artifactKind : SwarmArtifact -> Str
+artifactKind artifact = artifact.kind
+
+artifactPath : SwarmArtifact -> Str
+artifactPath artifact = artifact.path
+
+readyTaskId : SwarmTask -> Str
+readyTaskId task = task.taskId
+
+swarmTextSearchStep : SwarmTextSearch -> Str -> SwarmTextSearch
+swarmTextSearchStep search value =
+  if search.found then
+    search
+  else
+    SwarmTextSearch { wanted = search.wanted, found = value == search.wanted }
+
+swarmTextListHas : Str -> [Str] -> Bool
+swarmTextListHas wanted values =
+  (fold swarmTextSearchStep (SwarmTextSearch { wanted = wanted, found = false }) values).found
+
+emptyDependencyProjection : [Str] -> SwarmDependencyProjection
+emptyDependencyProjection dependencyIds =
+  SwarmDependencyProjection {
+    dependencyProjectionIds = dependencyIds,
+    dependencyProjectionStatuses = emptyTexts,
+    dependencyProjectionReady = emptyBools
+  }
+
+dependencyProjectionStep : SwarmDependencyProjection -> SwarmTask -> SwarmDependencyProjection
+dependencyProjectionStep projection task =
+  if swarmTextListHas task.taskId projection.dependencyProjectionIds then
+    SwarmDependencyProjection {
+      dependencyProjectionIds = projection.dependencyProjectionIds,
+      dependencyProjectionStatuses = append projection.dependencyProjectionStatuses [task.status],
+      dependencyProjectionReady = append projection.dependencyProjectionReady [task.ready]
+    }
+  else
+    projection
+
+dependencyProjectionFrom : [Str] -> [SwarmTask] -> SwarmDependencyProjection
+dependencyProjectionFrom dependencyIds taskValues =
+  fold dependencyProjectionStep (emptyDependencyProjection dependencyIds) taskValues
+
+memorySearchResultMemoryValue : SwarmMemorySearchResult -> Str
+memorySearchResultMemoryValue item = item.memory.value
+
+memorySearchResultMatchedText : SwarmMemorySearchResult -> Str
+memorySearchResultMatchedText item = item.matchedText
+
+memorySearchResultScore : SwarmMemorySearchResult -> Int
+memorySearchResultScore item = item.score
+
+artifactSearchResultMatchedText : SwarmArtifactSearchResult -> Str
+artifactSearchResultMatchedText item = item.matchedText
+
+artifactSearchResultScore : SwarmArtifactSearchResult -> Int
+artifactSearchResultScore item = item.score
+
+semanticIndexSearchResultEntries : SwarmArtifactSearchResult -> [SwarmSemanticIndexEntry]
+semanticIndexSearchResultEntries result =
+  (decode SwarmSemanticIndexArtifact result.excerpt.text).semanticIndex.entries
+
+semanticIndexArtifactContentEntries : SwarmArtifactContent -> [SwarmSemanticIndexEntry]
+semanticIndexArtifactContentEntries content =
+  if content.truncated then
+    emptySwarmSemanticIndexEntries
+  else
+    (decode SwarmSemanticIndexArtifact content.text).semanticIndex.entries
+
+appendSemanticIndexSearchResultEntries : [SwarmSemanticIndexEntry] -> SwarmArtifactSearchResult -> [SwarmSemanticIndexEntry]
+appendSemanticIndexSearchResultEntries entries result =
+  append entries (semanticIndexSearchResultEntries result)
+
+semanticIndexEntriesFromSearchResults : [SwarmArtifactSearchResult] -> [SwarmSemanticIndexEntry]
+semanticIndexEntriesFromSearchResults results =
+  fold appendSemanticIndexSearchResultEntries emptySwarmSemanticIndexEntries results
+
+semanticIndexEntriesFromSearchResultsRoot : SwarmRoot -> [SwarmArtifactSearchResult] -> [SwarmSemanticIndexEntry]
+semanticIndexEntriesFromSearchResultsRoot root results = {
+  let mut entries = emptySwarmSemanticIndexEntries;
+  for result in results {
+    match artifactRead root result.artifact.artifactId contextPackSemanticIndexReadBytes {
+      Ok content ->
+        if content.truncated then
+          entries
+        else {
+          entries = append entries (semanticIndexArtifactContentEntries content);
+          entries
+        },
+      Err message ->
+        entries
+    }
+  };
+  entries
+}
+
+semanticIndexEntryId : SwarmSemanticIndexEntry -> Str
+semanticIndexEntryId entry = entry.id
+
+semanticIndexEntryQueryText : SwarmSemanticIndexEntry -> Str
+semanticIndexEntryQueryText entry = entry.queryText
+
+appendSemanticIndexEntryEditFiles : [Str] -> SwarmSemanticIndexEntry -> [Str]
+appendSemanticIndexEntryEditFiles values entry =
+  append values entry.editFiles
+
+appendSemanticIndexEntryArtifactRefs : [Str] -> SwarmSemanticIndexEntry -> [Str]
+appendSemanticIndexEntryArtifactRefs values entry =
+  append values entry.artifactRefs
+
+appendSemanticIndexEntrySurfaceIds : [Str] -> SwarmSemanticIndexEntry -> [Str]
+appendSemanticIndexEntrySurfaceIds values entry =
+  append values entry.surfaceIds
+
+semanticIndexEntryEditFiles : [SwarmSemanticIndexEntry] -> [Str]
+semanticIndexEntryEditFiles entries =
+  fold appendSemanticIndexEntryEditFiles emptyTexts entries
+
+semanticIndexEntryArtifactRefs : [SwarmSemanticIndexEntry] -> [Str]
+semanticIndexEntryArtifactRefs entries =
+  fold appendSemanticIndexEntryArtifactRefs emptyTexts entries
+
+semanticIndexEntrySurfaceIds : [SwarmSemanticIndexEntry] -> [Str]
+semanticIndexEntrySurfaceIds entries =
+  fold appendSemanticIndexEntrySurfaceIds emptyTexts entries
+
+readArtifactFrom : SwarmRoot -> SwarmArtifact -> Int -> Result SwarmArtifactContent
+readArtifactFrom root artifact maxBytes =
+  artifactRead root artifact.artifactId maxBytes
+
+verificationTraceFailureClassification : SwarmRun -> Str
+verificationTraceFailureClassification run =
+  if runPassed run then
+    "none"
+  else
+    if run.timedOut then
+      "timeout"
+    else
+      "exit-code"
+
+verificationTraceEntry : Str -> SwarmRun -> VerificationTraceEntry
+verificationTraceEntry verifierName run =
+  VerificationTraceEntry {
+    verifierName = textConcat [verifierName],
+    runId = run.runId,
+    status = textConcat [run.status],
+    exitCode = run.exitCode,
+    timedOut = run.timedOut,
+    memoryLimitMb = run.memoryLimitMb,
+    stdoutArtifactPath = textConcat [run.stdoutArtifactPath],
+    stderrArtifactPath = textConcat [run.stderrArtifactPath],
+    failedVerifierClassification = textConcat [verificationTraceFailureClassification run]
+  }
+
+runTraceEntry : SwarmRun -> VerificationTraceEntry
+runTraceEntry run = verificationTraceEntry run.name run
+
+verificationPlanMailboxSummary : SwarmMailbox -> VerificationPlanMailboxSummary
+verificationPlanMailboxSummary mailbox =
+  VerificationPlanMailboxSummary {
+    historyCount = length mailbox.history,
+    tailCount = length mailbox.tail,
+    approvalCount = length mailbox.approvals,
+    runCount = length mailbox.runs,
+    artifactCount = length mailbox.artifacts,
+    memoryCount = length mailbox.memory,
+    latestRunStatus = mailbox.latestRunStatus,
+    latestRunName = mailbox.latestRunName,
+    latestVerifierStatus = mailbox.latestVerifierStatus,
+    latestVerifier = mailbox.latestVerifier,
+    artifactKinds = map artifactKind mailbox.artifacts,
+    artifactPaths = map artifactPath mailbox.artifacts
+  }
+
+taskMailbox : TaskHandle -> Int -> Result SwarmMailbox
+taskMailbox handle limit =
+  match history handle {
+    Ok historyValue ->
+      match tail handle limit {
+        Ok tailValue ->
+          match approvals handle {
+            Ok approvalsValue ->
+              match runs handle {
+                Ok runsValue ->
+                  match artifacts handle {
+                    Ok artifactsValue ->
+                      match taskMemory handle "" limit {
+                        Ok memoryValue ->
+                          Ok (SwarmMailbox {
+                            history = historyValue,
+                            tail = tailValue,
+                            approvals = approvalsValue,
+                            runs = runsValue,
+                            artifacts = artifactsValue,
+                            memory = memoryValue,
+                            latestRunStatus = fold firstRunStatus "" runsValue,
+                            latestRunName = fold firstRunName "" runsValue,
+                            latestVerifierStatus = fold firstVerifierStatus "" runsValue,
+                            latestVerifier = fold firstVerifierName "" runsValue
+                          }),
+                        Err message ->
+                          mailboxResultError message
+                      },
+                    Err message ->
+                      mailboxResultError message
+                  },
+                Err message ->
+                  mailboxResultError message
+              },
+            Err message ->
+              mailboxResultError message
+          },
+        Err message ->
+          mailboxResultError message
+      },
+    Err message ->
+      mailboxResultError message
+  }
+
+runToolStepWithTimeout : TaskHandle -> SwarmCommand -> Int -> Int -> Result ToolStepResult
+runToolStepWithTimeout handle spec timeoutMs mailboxLimit =
+  match lease handle {
+    Ok leaseValue ->
+      match toolRunWithTimeout handle spec timeoutMs {
+        Ok runValue ->
+          match finishToolRun handle runValue {
+            Ok statusValue ->
+              match taskMailbox handle mailboxLimit {
+                Ok mailboxValue ->
+                  Ok (ToolStepResult {
+                    lease = leaseValue,
+                    run = runValue,
+                    status = statusValue,
+                    mailbox = mailboxValue
+                  }),
+                Err message ->
+                  toolStepResultError message
+              },
+            Err message ->
+              toolStepResultError message
+          },
+        Err message ->
+          toolStepResultError message
+      },
+    Err message ->
+      toolStepResultError message
+  }
+
+runVerifierStepWithTimeout : TaskHandle -> Str -> SwarmCommand -> Int -> Int -> Result VerifierStepResult
+runVerifierStepWithTimeout handle verifierName spec timeoutMs mailboxLimit =
+  match verifierRunWithTimeout handle verifierName spec timeoutMs {
+    Ok runValue ->
+      match taskMailbox handle mailboxLimit {
+        Ok mailboxValue ->
+          Ok (VerifierStepResult {
+            run = runValue,
+            mailbox = mailboxValue
+          }),
+        Err message ->
+          verifierStepResultError message
+      },
+    Err message ->
+      verifierStepResultError message
+  }
+
+emptyVerificationPlanExecution : TaskHandle -> Int -> Int -> VerificationPlanExecution
+emptyVerificationPlanExecution handle mailboxLimit timeoutMs =
+  VerificationPlanExecution {
+    handle = handle,
+    mailboxLimit = mailboxLimit,
+    timeoutMs = timeoutMs,
+    steps = emptyVerifierStepResults,
+    passed = true,
+    failedVerifiers = emptyVerifierNames,
+    trace = emptyVerificationTraceEntries,
+    error = ""
+  }
+
+verificationPlanExecutionError : VerificationPlanExecution -> Str -> VerificationPlanExecution
+verificationPlanExecutionError state message =
+  VerificationPlanExecution {
+    handle = state.handle,
+    mailboxLimit = state.mailboxLimit,
+    timeoutMs = state.timeoutMs,
+    steps = state.steps,
+    passed = state.passed,
+    failedVerifiers = state.failedVerifiers,
+    trace = state.trace,
+    error = message
+  }
+
+verificationPlanExecutionAppend : VerificationPlanExecution -> Str -> VerifierStepResult -> VerificationPlanExecution
+verificationPlanExecutionAppend state verifierName step =
+  VerificationPlanExecution {
+    handle = state.handle,
+    mailboxLimit = state.mailboxLimit,
+    timeoutMs = state.timeoutMs,
+    steps = append state.steps [step],
+    passed = if runPassed step.run then state.passed else false,
+    failedVerifiers = if runPassed step.run then state.failedVerifiers else append state.failedVerifiers [verifierName],
+    trace = append state.trace [verificationTraceEntry verifierName step.run],
+    error = state.error
+  }
+
+verificationPlanExecutionStep : VerificationPlanExecution -> VerificationCommand -> VerificationPlanExecution
+verificationPlanExecutionStep state command =
+  if state.error != "" then
+    state
+  else
+    match runVerifierStepWithTimeout state.handle command.verifierName command.command state.timeoutMs state.mailboxLimit {
+      Ok stepValue ->
+        verificationPlanExecutionAppend state command.verifierName stepValue,
+      Err message ->
+        verificationPlanExecutionError state message
+    }
+
+executeVerificationPlanWithTimeout : TaskHandle -> VerificationPlan -> Int -> Int -> Result VerificationPlanResult
+executeVerificationPlanWithTimeout handle plan timeoutMs mailboxLimit =
+  let execution = fold verificationPlanExecutionStep (emptyVerificationPlanExecution handle mailboxLimit timeoutMs) plan.commands in
+  if execution.error != "" then
+    verificationPlanResultError execution.error
+  else
+    match taskMailbox handle mailboxLimit {
+      Ok mailboxValue ->
+        Ok (VerificationPlanResult {
+          plan = plan,
+          steps = execution.steps,
+          passed = execution.passed,
+          failedVerifiers = execution.failedVerifiers,
+          trace = execution.trace,
+          mailbox = mailboxValue,
+          mailboxSummary = verificationPlanMailboxSummary mailboxValue
+        }),
+      Err message ->
+        verificationPlanResultError message
+    }
+
+approveAndMergeVerificationPlan : TaskHandle -> Str -> Str -> VerificationPlan -> Int -> Result ReviewStepResult
+approveAndMergeVerificationPlan handle approvalName mergegateName plan mailboxLimit =
+  match approve handle approvalName {
+    Ok approvalValue ->
+      match approvals handle {
+        Ok approvalsValue ->
+          match status handle {
+            Ok taskStatusValue ->
+              match managerNext (objectiveHandle handle.root taskStatusValue.objectiveId) {
+                Ok managerAfterApprovalValue ->
+                  match mergegateDecide handle mergegateName plan.requiredVerifierNames {
+                    Ok mergeDecisionValue ->
+                      match taskMailbox handle mailboxLimit {
+                        Ok mailboxValue ->
+                          Ok (ReviewStepResult {
+                            approval = approvalValue,
+                            approvals = approvalsValue,
+                            managerAfterApproval = managerAfterApprovalValue,
+                            mergeDecision = mergeDecisionValue,
+                            mailbox = mailboxValue
+                          }),
+                        Err message ->
+                          reviewStepResultError message
+                      },
+                    Err message ->
+                      reviewStepResultError message
+                  },
+                Err message ->
+                  reviewStepResultError message
+              },
+            Err message ->
+              reviewStepResultError message
+          },
+        Err message ->
+          reviewStepResultError message
+      },
+    Err message ->
+      reviewStepResultError message
+  }
+
+readArtifactContents : SwarmRoot -> [SwarmArtifact] -> Int -> Int -> Result [SwarmArtifactContent]
+readArtifactContents root artifactValues maxBytes limit = {
+  let mut contents = emptyArtifactContents;
+  let mut remaining = limit;
+  let mut error = "";
+  for artifact in artifactValues {
+    if error != "" then
+      error
+    else if remaining <= 0 then
+      error
+    else {
+      match readArtifactFrom root artifact maxBytes {
+        Ok content -> {
+          contents = append contents [content];
+          remaining = intSubtract remaining 1;
+          error
+        },
+        Err message -> {
+          error = message;
+          error
+        }
+      }
+    }
+  };
+  if error == "" then
+    Ok contents
+  else
+    artifactContentListResultError error
+}
+
+taskEvidencePack : TaskHandle -> Str -> Int -> Result SwarmEvidencePack
+taskEvidencePack handle query limit =
+  match status handle {
+    Ok taskValue ->
+      let objective = objectiveHandle handle.root taskValue.objectiveId in
+      match taskMailbox handle limit {
+        Ok mailboxValue ->
+          match taskMemorySearch handle query limit {
+            Ok taskMemoryMatchesValue ->
+              match objectiveMemorySearch objective query limit {
+                Ok objectiveMemoryMatchesValue ->
+                  match benchmarkHistorySearch objective limit {
+                    Ok benchmarkMemoryMatchesValue ->
+                      match artifactSearch handle "" query limit contextPackArtifactReadBytes {
+                        Ok searchResultsValue ->
+                          match semanticArtifactSearch handle contextPackSemanticIndexQuery limit contextPackArtifactReadBytes {
+                            Ok semanticSearchResultsValue ->
+                              let semanticIndexEntriesValue = semanticIndexEntriesFromSearchResultsRoot handle.root semanticSearchResultsValue in
+                              match readArtifactContents handle.root mailboxValue.artifacts contextPackArtifactReadBytes limit {
+                                Ok artifactContentValues ->
+                                  let memoryMatches = append taskMemoryMatchesValue objectiveMemoryMatchesValue in
+                                  let mailboxSummary = verificationPlanMailboxSummary mailboxValue in
+                                  match tasks handle.root {
+                                    Ok taskValues ->
+                                      let dependencyProjection = dependencyProjectionFrom taskValue.dependencies taskValues in
+                                      Ok (SwarmEvidencePack {
+                                        task = taskValue,
+                                        query = query,
+                                        dependencyTaskIds = dependencyProjection.dependencyProjectionIds,
+                                        dependencyTaskStatuses = dependencyProjection.dependencyProjectionStatuses,
+                                        dependencyTaskReady = dependencyProjection.dependencyProjectionReady,
+                                        mailboxSummary = mailboxSummary,
+                                        taskMemoryMatches = taskMemoryMatchesValue,
+                                        objectiveMemoryMatches = objectiveMemoryMatchesValue,
+                                        benchmarkMemoryMatches = benchmarkMemoryMatchesValue,
+                                        artifactSearchMatches = searchResultsValue,
+                                        semanticArtifactMatches = semanticSearchResultsValue,
+                                        memoryValues = map memorySearchResultMemoryValue memoryMatches,
+                                        memoryMatchedText = map memorySearchResultMatchedText memoryMatches,
+                                        memoryScores = map memorySearchResultScore memoryMatches,
+                                        benchmarkValues = map memorySearchResultMemoryValue benchmarkMemoryMatchesValue,
+                                        benchmarkMatchedText = map memorySearchResultMatchedText benchmarkMemoryMatchesValue,
+                                        benchmarkScores = map memorySearchResultScore benchmarkMemoryMatchesValue,
+                                        artifactSearchMatchedText = map artifactSearchResultMatchedText searchResultsValue,
+                                        artifactSearchScores = map artifactSearchResultScore searchResultsValue,
+                                        semanticArtifactMatchedText = map artifactSearchResultMatchedText semanticSearchResultsValue,
+                                        semanticArtifactScores = map artifactSearchResultScore semanticSearchResultsValue,
+                                        semanticIndexEntries = semanticIndexEntriesValue,
+                                        semanticIndexEntryIds = map semanticIndexEntryId semanticIndexEntriesValue,
+                                        semanticIndexEditFiles = semanticIndexEntryEditFiles semanticIndexEntriesValue,
+                                        semanticIndexArtifactRefs = semanticIndexEntryArtifactRefs semanticIndexEntriesValue,
+                                        semanticIndexSurfaceIds = semanticIndexEntrySurfaceIds semanticIndexEntriesValue,
+                                        semanticIndexQueryTexts = map semanticIndexEntryQueryText semanticIndexEntriesValue,
+                                        runTrace = map runTraceEntry mailboxValue.runs,
+                                        artifactKinds = mailboxSummary.artifactKinds,
+                                        artifactPaths = mailboxSummary.artifactPaths,
+                                        artifactExcerpts = artifactContentValues
+                                      }),
+                                    Err message ->
+                                      evidencePackResultError message
+                                  },
+                                Err message ->
+                                  evidencePackResultError message
+                              },
+                            Err message ->
+                              evidencePackResultError message
+                          },
+                        Err message ->
+                          evidencePackResultError message
+                      },
+                    Err message ->
+                      evidencePackResultError message
+                  },
+                Err message ->
+                  evidencePackResultError message
+              },
+            Err message ->
+              evidencePackResultError message
+          },
+        Err message ->
+          evidencePackResultError message
+      },
+    Err message ->
+      evidencePackResultError message
+  }
+
+contextPackFromEvidence : SwarmEvidencePack -> [SwarmTask] -> SwarmManagerAction -> SwarmContextPack
+contextPackFromEvidence evidence readyTasks managerActionValue =
+  SwarmContextPack {
+    task = evidence.task,
+    readyTaskIds = map readyTaskId readyTasks,
+    dependencyTaskIds = evidence.dependencyTaskIds,
+    dependencyTaskStatuses = evidence.dependencyTaskStatuses,
+    dependencyTaskReady = evidence.dependencyTaskReady,
+    managerAction = managerActionValue,
+    mailboxSummary = evidence.mailboxSummary,
+    taskMemoryMatches = evidence.taskMemoryMatches,
+    objectiveMemoryMatches = evidence.objectiveMemoryMatches,
+    benchmarkMemoryMatches = evidence.benchmarkMemoryMatches,
+    artifactSearchMatches = evidence.artifactSearchMatches,
+    semanticArtifactMatches = evidence.semanticArtifactMatches,
+    memoryValues = evidence.memoryValues,
+    memoryMatchedText = evidence.memoryMatchedText,
+    memoryScores = evidence.memoryScores,
+    benchmarkValues = evidence.benchmarkValues,
+    benchmarkMatchedText = evidence.benchmarkMatchedText,
+    benchmarkScores = evidence.benchmarkScores,
+    artifactSearchMatchedText = evidence.artifactSearchMatchedText,
+    artifactSearchScores = evidence.artifactSearchScores,
+    semanticArtifactMatchedText = evidence.semanticArtifactMatchedText,
+    semanticArtifactScores = evidence.semanticArtifactScores,
+    semanticIndexEntries = evidence.semanticIndexEntries,
+    semanticIndexEntryIds = evidence.semanticIndexEntryIds,
+    semanticIndexEditFiles = evidence.semanticIndexEditFiles,
+    semanticIndexArtifactRefs = evidence.semanticIndexArtifactRefs,
+    semanticIndexSurfaceIds = evidence.semanticIndexSurfaceIds,
+    semanticIndexQueryTexts = evidence.semanticIndexQueryTexts,
+    runTrace = evidence.runTrace,
+    artifactKinds = evidence.artifactKinds,
+    artifactPaths = evidence.artifactPaths,
+    artifactExcerpts = evidence.artifactExcerpts
+  }
+
+taskContextPack : TaskHandle -> Str -> Int -> Result SwarmContextPack
+taskContextPack handle query limit =
+  match taskEvidencePack handle query limit {
+    Ok evidence ->
+      let objective = objectiveHandle handle.root evidence.task.objectiveId in
+      match ready objective {
+        Ok readyTasks ->
+          match managerNext objective {
+            Ok managerActionValue ->
+              Ok (contextPackFromEvidence evidence readyTasks managerActionValue),
+            Err message ->
+              contextPackResultError message
+          },
+        Err message ->
+          contextPackResultError message
+      },
+    Err message ->
+      contextPackResultError message
+  }
+
+foreign swarmObjectiveCreateRaw : Str -> Str -> Str -> Int -> Int -> Result Str = "swarmObjectiveCreateJson"
+foreign swarmTaskCreateRaw : Str -> Str -> Str -> Str -> [Str] -> Int -> Int -> Result Str = "swarmTaskCreateJson"
+foreign swarmToolRunRaw : Str -> Str -> Str -> Str -> [Str] -> Result Str = "swarmToolRunJson"
+
+noDeadlineAtMs : Int
+noDeadlineAtMs = 0
+
+objectiveCreate : SwarmRoot -> Str -> Str -> Int -> Int -> Result SwarmObjective
+objectiveCreate root objectiveId detail maxTasks maxRuns =
+  objectiveResult (swarmObjectiveCreateRaw root.path objectiveId detail maxTasks maxRuns)
+
+taskCreate : ObjectiveHandle -> Str -> Str -> [Str] -> Int -> Int -> Result SwarmTask
+taskCreate handle taskId detail dependencies maxRuns leaseTimeoutMs =
+  taskResult (swarmTaskCreateRaw handle.root.path handle.objectiveId taskId detail dependencies maxRuns leaseTimeoutMs)
+
+toolRun : TaskHandle -> SwarmCommand -> Result SwarmRun
+toolRun handle spec =
+  runResult (swarmToolRunRaw handle.root.path handle.taskId handle.actor spec.cwd spec.command)
+
+runToolStep : TaskHandle -> SwarmCommand -> Int -> Result ToolStepResult
+runToolStep handle spec mailboxLimit =
+  match lease handle {
+    Ok leaseValue ->
+      match toolRun handle spec {
+        Ok runValue ->
+          match finishToolRun handle runValue {
+            Ok statusValue ->
+              match taskMailbox handle mailboxLimit {
+                Ok mailboxValue ->
+                  Ok (ToolStepResult {
+                    lease = leaseValue,
+                    run = runValue,
+                    status = statusValue,
+                    mailbox = mailboxValue
+                  }),
+                Err message ->
+                  toolStepResultError message
+              },
+            Err message ->
+              toolStepResultError message
+          },
+        Err message ->
+          toolStepResultError message
+      },
+    Err message ->
+      toolStepResultError message
+  }
+
+benchmarkRecord : ObjectiveHandle -> Str -> Result SwarmMemory
+benchmarkRecord handle value =
+  objectiveMemoryPut handle "benchmark" benchmarkMemoryKey value
+
+verificationTraceFailedVerifierClassification : VerificationTraceEntry -> Str
+verificationTraceFailedVerifierClassification entry = entry.failedVerifierClassification
 
 record ContextPackHarnessReport = {
   taskId : Str,
   taskStatus : Str,
   managerAction : Str,
   readyTaskIds : [Str],
+  dependencyTaskIds : [Str],
+  dependencyTaskStatuses : [Str],
+  dependencyTaskReady : [Bool],
   memoryValues : [Str],
   memoryMatchedText : [Str],
   memoryScores : [Int],
@@ -52,6 +1495,9 @@ record ContextPackHarnessReport = {
   evidenceSemanticIndexEditFiles : [Str],
   evidenceTaskId : Str,
   evidenceQuery : Str,
+  evidenceDependencyTaskIds : [Str],
+  evidenceDependencyTaskStatuses : [Str],
+  evidenceDependencyTaskReady : [Bool],
   evidenceMemoryValues : [Str],
   evidenceBenchmarkValues : [Str],
   evidenceArtifactSearchCount : Int,
@@ -180,6 +1626,9 @@ reportContextPack pack evidence verificationValue artifactContent publishedArtif
     taskStatus = pack.task.status,
     managerAction = pack.managerAction.action,
     readyTaskIds = pack.readyTaskIds,
+    dependencyTaskIds = pack.dependencyTaskIds,
+    dependencyTaskStatuses = pack.dependencyTaskStatuses,
+    dependencyTaskReady = pack.dependencyTaskReady,
     memoryValues = pack.memoryValues,
     memoryMatchedText = pack.memoryMatchedText,
     memoryScores = pack.memoryScores,
@@ -225,6 +1674,9 @@ reportContextPack pack evidence verificationValue artifactContent publishedArtif
     evidenceSemanticIndexEditFiles = evidence.semanticIndexEditFiles,
     evidenceTaskId = evidence.task.taskId,
     evidenceQuery = evidence.query,
+    evidenceDependencyTaskIds = evidence.dependencyTaskIds,
+    evidenceDependencyTaskStatuses = evidence.dependencyTaskStatuses,
+    evidenceDependencyTaskReady = evidence.dependencyTaskReady,
     evidenceMemoryValues = evidence.memoryValues,
     evidenceBenchmarkValues = evidence.benchmarkValues,
     evidenceArtifactSearchCount = length evidence.artifactSearchMatches,
@@ -238,8 +1690,8 @@ reportContextPack pack evidence verificationValue artifactContent publishedArtif
     artifactReadText = artifactContent.text
   })
 
-main : Str
-main =
+initializeContextPackState : Result Str
+initializeContextPackState =
   match mkdirAll stateRootPath {
     Ok rootCreated ->
       match objectiveCreate root objective.objectiveId "Assemble agent context from durable swarm state." 2 8 {
@@ -248,85 +1700,136 @@ main =
             Ok planTaskValue ->
               match taskCreate objective repairTask.taskId "Repair using compact context evidence." [planTask.taskId] 4 60000 {
                 Ok repairTaskValue ->
-                  match objectiveMemoryPut objective "planner" "context-lesson" "objective focused compiler verifier lesson" {
-                    Ok objectiveMemoryValue ->
-                      match benchmarkRecord objective benchmarkContextText {
-                        Ok benchmarkMemoryValue ->
-                          match taskMemoryPut repairTask "context-lesson" "task focused compiler verifier should inspect local evidence" {
-                            Ok taskMemoryValue ->
-                              match runToolStep planTask builderCommand 10 {
-                                Ok planStep ->
-                                  match runToolStep repairTask builderCommand 10 {
-                                    Ok repairStep ->
-                                      match executeVerificationPlanWithTimeout repairTask contextVerificationPlan 5000 10 {
-                                        Ok verificationValue ->
-                                          match artifactWrite repairTask "note" "published context artifact from ordinary clasp" {
-                                            Ok publishedArtifact ->
-                                              match artifactWriteSemanticIndex repairTask semanticIndexEntries {
-                                                Ok semanticArtifact ->
-                                                  match readArtifactFrom root publishedArtifact 64 {
-                                                    Ok publishedArtifactContent ->
-                                                      match taskContextPack repairTask "focused compiler verifier ordinary clasp" 10 {
-                                                        Ok pack ->
-                                                          match taskEvidencePack repairTask "focused compiler verifier ordinary clasp" 10 {
-                                                            Ok evidence ->
-                                                              match artifacts repairTask {
-                                                                Ok artifactValues ->
-                                                                  let pick = stdoutArtifactPick artifactValues in
-                                                                  if pick.found then
-                                                                    match artifactRead root pick.artifactId 16 {
-                                                                      Ok artifactContent ->
-                                                                        reportContextPack pack evidence verificationValue artifactContent publishedArtifactContent,
-                                                                      Err message ->
-                                                                        errorText message
-                                                                    }
-                                                                  else
-                                                                    errorText "missing stdout artifact",
-                                                                Err message ->
-                                                                  errorText message
-                                                              },
-                                                            Err message ->
-                                                              errorText message
-                                                          },
-                                                        Err message ->
-                                                          errorText message
-                                                      },
-                                                    Err message ->
-                                                      errorText message
-                                                  },
-                                                Err message ->
-                                                  errorText message
-                                              },
-                                            Err message ->
-                                              errorText message
-                                          },
-                                        Err message ->
-                                          errorText message
-                                      },
-                                    Err message ->
-                                      errorText message
-                                  },
-                                Err message ->
-                                  errorText message
-                              },
-                            Err message ->
-                              errorText message
-                          },
-                        Err message ->
-                          errorText message
-                      },
-                    Err message ->
-                      errorText message
-                  },
+                  Ok "initialized",
                 Err message ->
-                  errorText message
+                  contextStringResultError message
               },
             Err message ->
-              errorText message
+              contextStringResultError message
           },
         Err message ->
-          errorText message
+          contextStringResultError message
       },
+    Err message ->
+      contextStringResultError message
+  }
+
+seedContextPackState : Result Str
+seedContextPackState =
+  match objectiveMemoryPut objective "planner" "context-lesson" "objective focused compiler verifier lesson" {
+    Ok objectiveMemoryValue ->
+      match benchmarkRecord objective benchmarkContextText {
+        Ok benchmarkMemoryValue ->
+          match taskMemoryPut repairTask "context-lesson" "task focused compiler verifier should inspect local evidence" {
+            Ok taskMemoryValue ->
+              Ok "seeded",
+            Err message ->
+              contextStringResultError message
+          },
+        Err message ->
+          contextStringResultError message
+      },
+    Err message ->
+      contextStringResultError message
+  }
+
+runContextPackBuilderSteps : Result Str
+runContextPackBuilderSteps =
+  match runToolStep planTask builderCommand 10 {
+    Ok planStep ->
+      match runToolStep repairTask builderCommand 10 {
+        Ok repairStep ->
+          Ok "ran",
+        Err message ->
+          contextStringResultError message
+      },
+    Err message ->
+      contextStringResultError message
+  }
+
+publishContextPackArtifacts : Result SwarmArtifactContent
+publishContextPackArtifacts =
+  match artifactWrite repairTask "note" "published context artifact from ordinary clasp" {
+    Ok publishedArtifact ->
+      match artifactWriteSemanticIndex repairTask semanticIndexEntries {
+        Ok semanticArtifact ->
+          readArtifactFrom root publishedArtifact 64,
+        Err message ->
+          artifactContentResultError message
+      },
+    Err message ->
+      artifactContentResultError message
+  }
+
+collectContextPackReport : VerificationPlanResult -> SwarmArtifactContent -> Result Str
+collectContextPackReport verificationValue publishedArtifactContent =
+  match taskEvidencePack repairTask "focused compiler verifier ordinary clasp" 10 {
+    Ok evidence ->
+      let packObjectiveHandle = objectiveHandle root evidence.task.objectiveId in
+      match ready packObjectiveHandle {
+        Ok readyTaskValues ->
+          match managerNext packObjectiveHandle {
+            Ok managerActionValue ->
+              let pack = contextPackFromEvidence evidence readyTaskValues managerActionValue in
+              match artifacts repairTask {
+                Ok artifactValues ->
+                  let pick = stdoutArtifactPick artifactValues in
+                  if pick.found then
+                    match artifactRead root pick.artifactId 16 {
+                      Ok artifactContent ->
+                        Ok (reportContextPack pack evidence verificationValue artifactContent publishedArtifactContent),
+                      Err message ->
+                        contextStringResultError message
+                    }
+                  else
+                    contextStringResultError "missing stdout artifact",
+                Err message ->
+                  contextStringResultError message
+              },
+            Err message ->
+              contextStringResultError message
+          },
+        Err message ->
+          contextStringResultError message
+      },
+    Err message ->
+      contextStringResultError message
+  }
+
+runContextPackHarness : Result Str
+runContextPackHarness =
+  match initializeContextPackState {
+    Ok initialized ->
+      match seedContextPackState {
+        Ok seeded ->
+          match runContextPackBuilderSteps {
+            Ok ran ->
+              match executeVerificationPlanWithTimeout repairTask contextVerificationPlan 5000 10 {
+                Ok verificationValue ->
+                  match publishContextPackArtifacts {
+                    Ok publishedArtifactContent ->
+                      collectContextPackReport verificationValue publishedArtifactContent,
+                    Err message ->
+                      contextStringResultError message
+                  },
+                Err message ->
+                  contextStringResultError message
+              },
+            Err message ->
+              contextStringResultError message
+          },
+        Err message ->
+          contextStringResultError message
+      },
+    Err message ->
+      contextStringResultError message
+  }
+
+main : Str
+main =
+  match runContextPackHarness {
+    Ok report ->
+      report,
     Err message ->
       errorText message
   }

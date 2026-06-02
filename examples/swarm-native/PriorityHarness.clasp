@@ -1,0 +1,284 @@
+module Main
+
+foreign swarmObjectiveCreateRaw : Str -> Str -> Str -> Int -> Int -> Result Str = "swarmObjectiveCreateJson"
+foreign swarmTaskCreateWithDeadlineAndPriorityRaw : Str -> Str -> Str -> Str -> [Str] -> Int -> Int -> Int -> Int -> Result Str = "swarmTaskCreateWithDeadlineAndPriorityJson"
+foreign swarmTaskReprioritizeRaw : Str -> Str -> Str -> Int -> Result Str = "swarmTaskReprioritizeJson"
+foreign swarmStatusRaw : Str -> Str -> Result Str = "swarmStatusJson"
+foreign swarmReadyRaw : Str -> Str -> Result Str = "swarmReadyJson"
+foreign swarmManagerNextRaw : Str -> Str -> Result Str = "swarmManagerNextJson"
+foreign swarmHistoryRaw : Str -> Str -> Result Str = "swarmHistoryJson"
+
+record SwarmRoot = { path : Str }
+record ObjectiveHandle = { root : SwarmRoot, objectiveId : Str }
+record TaskHandle = { root : SwarmRoot, taskId : Str, actor : Str }
+
+record SwarmObjective = {
+  createdAtMs : Int,
+  deadlineAtMs : Int,
+  objectiveId : Str,
+  detail : Str,
+  maxRuns : Int,
+  maxTasks : Int,
+  projectedStatus : Str,
+  status : Str,
+  taskCount : Int,
+  runCount : Int,
+  updatedAtMs : Int
+}
+
+record SwarmTask = {
+  attempts : Int,
+  taskId : Str,
+  status : Str,
+  objectiveId : Str,
+  detail : Str,
+  dependencies : [Str],
+  ready : Bool,
+  blockedBy : [Str],
+  createdAtMs : Int,
+  deadlineAtMs : Int,
+  heartbeatSeen : Bool,
+  lastError : Str,
+  lastHeartbeatAtMs : Int,
+  leaseActor : Str,
+  leaseExpired : Bool,
+  leaseTimeoutMs : Int,
+  maxRuns : Int,
+  priority : Int,
+  objectiveDeadlineAtMs : Int,
+  updatedAtMs : Int
+}
+
+record SwarmManagerAction = {
+  objectiveId : Str,
+  status : Str,
+  action : Str,
+  suggestedCommand : [Str],
+  taskId : Str,
+  taskStatus : Str,
+  taskPriority : Int,
+  blockedBy : [Str],
+  blockerTaskIds : [Str],
+  requiredApprovals : [Str],
+  requiredVerifiers : [Str],
+  latestRunId : Int,
+  latestRunRole : Str,
+  latestRunName : Str,
+  latestRunStatus : Str,
+  latestRunExitCode : Int,
+  latestVerifier : Str,
+  latestVerifierStatus : Str,
+  latestVerifierExitCode : Int,
+  mergegateName : Str,
+  mergegateVerdict : Str,
+  mergegateDetail : Str
+}
+
+record SwarmEvent = {
+  actor : Str,
+  atMs : Int,
+  detail : Str,
+  kind : Str,
+  taskId : Str,
+}
+
+record PriorityHarnessReport = {
+  firstPriority : Int,
+  secondPriority : Int,
+  readyBefore : [Str],
+  managerBeforeTask : Str,
+  managerBeforePriority : Int,
+  reprioritizedPriority : Int,
+  readyAfter : [Str],
+  managerAfterTask : Str,
+  managerAfterPriority : Int,
+  statusPriority : Int,
+  historyKinds : [Str]
+}
+
+emptyTaskDependencies : [Str]
+emptyTaskDependencies = []
+
+noDeadlineAtMs : Int
+noDeadlineAtMs = 0
+
+swarmRoot : Str -> SwarmRoot
+swarmRoot path = SwarmRoot { path = path }
+
+objectiveHandle : SwarmRoot -> Str -> ObjectiveHandle
+objectiveHandle root objectiveId = ObjectiveHandle { root = root, objectiveId = objectiveId }
+
+taskHandle : SwarmRoot -> Str -> Str -> TaskHandle
+taskHandle root taskId actor = TaskHandle { root = root, taskId = taskId, actor = actor }
+
+objectiveResultError : Str -> Result SwarmObjective
+objectiveResultError message = Err message
+
+taskResultError : Str -> Result SwarmTask
+taskResultError message = Err message
+
+taskListResultError : Str -> Result [SwarmTask]
+taskListResultError message = Err message
+
+managerActionResultError : Str -> Result SwarmManagerAction
+managerActionResultError message = Err message
+
+eventListResultError : Str -> Result [SwarmEvent]
+eventListResultError message = Err message
+
+objectiveResult : Result Str -> Result SwarmObjective
+objectiveResult value = match value {
+  Ok raw -> Ok (decode SwarmObjective raw),
+  Err message -> objectiveResultError message
+}
+
+taskResult : Result Str -> Result SwarmTask
+taskResult value = match value {
+  Ok raw -> Ok (decode SwarmTask raw),
+  Err message -> taskResultError message
+}
+
+taskListResult : Result Str -> Result [SwarmTask]
+taskListResult value = match value {
+  Ok raw -> Ok (decode [SwarmTask] raw),
+  Err message -> taskListResultError message
+}
+
+managerActionResult : Result Str -> Result SwarmManagerAction
+managerActionResult value = match value {
+  Ok raw -> Ok (decode SwarmManagerAction raw),
+  Err message -> managerActionResultError message
+}
+
+eventListResult : Result Str -> Result [SwarmEvent]
+eventListResult value = match value {
+  Ok raw -> Ok (decode [SwarmEvent] raw),
+  Err message -> eventListResultError message
+}
+
+objectiveCreate : SwarmRoot -> Str -> Str -> Int -> Int -> Result SwarmObjective
+objectiveCreate root objectiveId detail maxTasks maxRuns =
+  objectiveResult (swarmObjectiveCreateRaw root.path objectiveId detail maxTasks maxRuns)
+
+taskCreateWithDeadlineAndPriority : ObjectiveHandle -> Str -> Str -> [Str] -> Int -> Int -> Int -> Int -> Result SwarmTask
+taskCreateWithDeadlineAndPriority handle taskId detail dependencies maxRuns deadlineAtMs priority leaseTimeoutMs =
+  taskResult (swarmTaskCreateWithDeadlineAndPriorityRaw handle.root.path handle.objectiveId taskId detail dependencies maxRuns deadlineAtMs priority leaseTimeoutMs)
+
+taskCreateWithPriority : ObjectiveHandle -> Str -> Str -> [Str] -> Int -> Int -> Int -> Result SwarmTask
+taskCreateWithPriority handle taskId detail dependencies maxRuns priority leaseTimeoutMs =
+  taskCreateWithDeadlineAndPriority handle taskId detail dependencies maxRuns noDeadlineAtMs priority leaseTimeoutMs
+
+taskReprioritize : TaskHandle -> Int -> Result SwarmTask
+taskReprioritize handle priority =
+  taskResult (swarmTaskReprioritizeRaw handle.root.path handle.taskId handle.actor priority)
+
+status : TaskHandle -> Result SwarmTask
+status handle = taskResult (swarmStatusRaw handle.root.path handle.taskId)
+
+ready : ObjectiveHandle -> Result [SwarmTask]
+ready handle = taskListResult (swarmReadyRaw handle.root.path handle.objectiveId)
+
+managerNext : ObjectiveHandle -> Result SwarmManagerAction
+managerNext handle = managerActionResult (swarmManagerNextRaw handle.root.path handle.objectiveId)
+
+history : TaskHandle -> Result [SwarmEvent]
+history handle = eventListResult (swarmHistoryRaw handle.root.path handle.taskId)
+
+readyTaskId : SwarmTask -> Str
+readyTaskId task = task.taskId
+
+stateRootPath : Str
+stateRootPath =
+  if textJoin "" argv == "" then
+    "swarm-native-priority-state"
+  else
+    pathJoin argv
+
+root : SwarmRoot
+root = swarmRoot stateRootPath
+
+objective : ObjectiveHandle
+objective = objectiveHandle root "priority-objective"
+
+firstHandle : TaskHandle
+firstHandle = taskHandle root "first" "manager"
+
+secondHandle : TaskHandle
+secondHandle = taskHandle root "second" "manager"
+
+eventKind : SwarmEvent -> Str
+eventKind event = event.kind
+
+errorText : Str -> Str
+errorText message = textConcat ["error:", message]
+
+main : Str
+main =
+  match mkdirAll stateRootPath {
+    Ok rootCreated ->
+      match objectiveCreate root objective.objectiveId "Choose ready work by manager-controlled task priority." 4 8 {
+        Ok objectiveValue ->
+          match taskCreateWithPriority objective firstHandle.taskId "Lower priority first task." emptyTaskDependencies 4 1 60000 {
+            Ok firstTask ->
+              match taskCreateWithPriority objective secondHandle.taskId "Higher priority second task." emptyTaskDependencies 4 9 60000 {
+                Ok secondTask ->
+                  match ready objective {
+                    Ok readyBeforeTasks ->
+                      match managerNext objective {
+                        Ok managerBefore ->
+                          match taskReprioritize firstHandle 12 {
+                            Ok reprioritized ->
+                              match ready objective {
+                                Ok readyAfterTasks ->
+                                  match managerNext objective {
+                                    Ok managerAfter ->
+                                      match status firstHandle {
+                                        Ok statusValue ->
+                                          match history firstHandle {
+                                            Ok historyValue ->
+                                              encode (PriorityHarnessReport {
+                                                firstPriority = firstTask.priority,
+                                                secondPriority = secondTask.priority,
+                                                readyBefore = map readyTaskId readyBeforeTasks,
+                                                managerBeforeTask = managerBefore.taskId,
+                                                managerBeforePriority = managerBefore.taskPriority,
+                                                reprioritizedPriority = reprioritized.priority,
+                                                readyAfter = map readyTaskId readyAfterTasks,
+                                                managerAfterTask = managerAfter.taskId,
+                                                managerAfterPriority = managerAfter.taskPriority,
+                                                statusPriority = statusValue.priority,
+                                                historyKinds = map eventKind historyValue
+                                              }),
+                                            Err message ->
+                                              errorText message
+                                          },
+                                        Err message ->
+                                          errorText message
+                                      },
+                                    Err message ->
+                                      errorText message
+                                  },
+                                Err message ->
+                                  errorText message
+                              },
+                            Err message ->
+                              errorText message
+                          },
+                        Err message ->
+                          errorText message
+                      },
+                    Err message ->
+                      errorText message
+                  },
+                Err message ->
+                  errorText message
+              },
+            Err message ->
+              errorText message
+          },
+        Err message ->
+          errorText message
+      },
+    Err message ->
+      errorText message
+  }

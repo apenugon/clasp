@@ -20,10 +20,16 @@ foreign swarmObjectiveStatusRaw : Str -> Str -> Result Str = "swarmObjectiveStat
 foreign swarmObjectivesRaw : Str -> Result Str = "swarmObjectivesJson"
 foreign swarmTaskCreateRaw : Str -> Str -> Str -> Str -> [Str] -> Int -> Int -> Result Str = "swarmTaskCreateJson"
 foreign swarmTaskCreateWithDeadlineRaw : Str -> Str -> Str -> Str -> [Str] -> Int -> Int -> Int -> Result Str = "swarmTaskCreateWithDeadlineJson"
+foreign swarmTaskCreateWithDeadlineAndPriorityRaw : Str -> Str -> Str -> Str -> [Str] -> Int -> Int -> Int -> Int -> Result Str = "swarmTaskCreateWithDeadlineAndPriorityJson"
+foreign swarmTaskCreateChildWithDeadlineAndPriorityRaw : Str -> Str -> Str -> Str -> Str -> [Str] -> Int -> Int -> Int -> Int -> Int -> Result Str = "swarmTaskCreateChildWithDeadlineAndPriorityJson"
+foreign swarmTaskCreateChildWithPolicyRaw : Str -> Str -> Str -> Str -> Str -> [Str] -> Int -> Int -> Int -> Int -> Int -> Int -> Result Str = "swarmTaskCreateChildWithPolicyJson"
+foreign swarmTaskReprioritizeRaw : Str -> Str -> Str -> Int -> Result Str = "swarmTaskReprioritizeJson"
 foreign swarmPolicySetRaw : Str -> Str -> Str -> [Str] -> [Str] -> Result Str = "swarmPolicySetJson"
 foreign swarmPolicySetWithProcessAccessRaw : Str -> Str -> Str -> [Str] -> [Str] -> [Str] -> Result Str = "swarmPolicySetWithProcessAccessJson"
 foreign swarmPolicySetWithAccessRaw : Str -> Str -> Str -> [Str] -> [Str] -> [Str] -> [Str] -> Result Str = "swarmPolicySetWithAccessJson"
 foreign swarmPolicySetWithCapabilitiesRaw : Str -> Str -> Str -> [Str] -> [Str] -> [Str] -> [Str] -> Str -> Result Str = "swarmPolicySetWithCapabilitiesJson"
+foreign swarmPolicySetWithNetworkAccessRaw : Str -> Str -> Str -> [Str] -> [Str] -> [Str] -> [Str] -> Str -> [Str] -> Result Str = "swarmPolicySetWithNetworkAccessJson"
+foreign swarmPolicySetWithFilesystemAccessRaw : Str -> Str -> Str -> [Str] -> [Str] -> [Str] -> [Str] -> [Str] -> Str -> [Str] -> Result Str = "swarmPolicySetWithFilesystemAccessJson"
 foreign swarmToolRunRaw : Str -> Str -> Str -> Str -> [Str] -> Result Str = "swarmToolRunJson"
 foreign swarmToolRunWithTimeoutRaw : Str -> Str -> Str -> Str -> Int -> [Str] -> Result Str = "swarmToolRunWithTimeoutJson"
 foreign swarmToolRunWithLimitsRaw : Str -> Str -> Str -> Str -> Int -> Int -> [Str] -> Result Str = "swarmToolRunWithLimitsJson"
@@ -44,6 +50,7 @@ foreign swarmMemorySearchRaw : Str -> Str -> Str -> Str -> Int -> Result Str = "
 foreign swarmHistoryRaw : Str -> Str -> Result Str = "swarmHistoryJson"
 foreign swarmTailRaw : Str -> Str -> Int -> Result Str = "swarmTailJson"
 foreign swarmTasksRaw : Str -> Result Str = "swarmTasksJson"
+foreign runCommandTimeoutRaw : Str -> Int -> [Str] -> Result Str = "runCommandTimeoutJson"
 
 record SwarmRoot = { path : Str }
 record ObjectiveHandle = { root : SwarmRoot, objectiveId : Str }
@@ -82,8 +89,32 @@ record SwarmTask = {
   leaseExpired : Bool,
   leaseTimeoutMs : Int,
   maxRuns : Int,
+  parentTaskId : Str,
+  priority : Int,
+  spawnDepth : Int,
+  maxSpawnDepth : Int,
+  maxChildTasks : Int,
+  childTaskIds : [Str],
+  childTaskCount : Int,
+  remainingChildTaskBudget : Int,
   objectiveDeadlineAtMs : Int,
   updatedAtMs : Int
+}
+
+record SwarmSpawnPolicy = {
+  parentTaskId : Str,
+  maxSpawnDepth : Int,
+  maxChildTasks : Int
+}
+
+record SwarmTaskCapabilities = {
+  processes : [Str],
+  filesystemRoots : [Str],
+  readonlyFilesystemRoots : [Str],
+  networkAccess : Str,
+  networkDestinations : [Str],
+  approvals : [Str],
+  verifiers : [Str]
 }
 
 record SwarmPolicy = {
@@ -94,8 +125,26 @@ record SwarmPolicy = {
   requiredVerifiers : [Str],
   allowedProcesses : [Str],
   allowedWorkspaceRoots : [Str],
+  allowedReadonlyRoots : [Str],
   networkAccess : Str,
+  allowedNetworkDestinations : [Str],
+  capabilities : SwarmTaskCapabilities,
   updatedAtMs : Int
+}
+
+record SwarmAccessPolicy = {
+  allowedProcesses : [Str],
+  allowedWorkspaceRoots : [Str],
+  allowedReadonlyRoots : [Str],
+  networkAccess : Str,
+  allowedNetworkDestinations : [Str]
+}
+
+record SwarmVerificationPolicy = {
+  mergegateName : Str,
+  requiredApprovals : [Str],
+  requiredVerifiers : [Str],
+  access : SwarmAccessPolicy
 }
 
 record SwarmRun = {
@@ -194,6 +243,158 @@ record SwarmMemorySearchResult = {
   matchedText : Str
 }
 
+record SwarmSparseEmbedding = {
+  model : Str,
+  dimensions : [Str]
+}
+
+record SwarmEmbeddedMemoryValue = {
+  text : Str,
+  embedding : SwarmSparseEmbedding
+}
+
+record SwarmEmbeddedMemory = {
+  memory : SwarmMemory,
+  text : Str,
+  embedding : SwarmSparseEmbedding
+}
+
+record SwarmEmbeddedMemorySearchResult = {
+  memory : SwarmMemory,
+  text : Str,
+  score : Int,
+  matchedDimensions : [Str],
+  model : Str
+}
+
+record SwarmWeightedEmbeddingDimension = {
+  name : Str,
+  weight : Int
+}
+
+record SwarmWeightedEmbedding = {
+  model : Str,
+  scale : Int,
+  dimensions : [SwarmWeightedEmbeddingDimension]
+}
+
+record SwarmWeightedEmbeddedMemoryValue = {
+  text : Str,
+  embedding : SwarmWeightedEmbedding
+}
+
+record SwarmWeightedEmbeddedMemory = {
+  memory : SwarmMemory,
+  text : Str,
+  embedding : SwarmWeightedEmbedding
+}
+
+record SwarmWeightedEmbeddedMemorySearchResult = {
+  memory : SwarmMemory,
+  text : Str,
+  score : Int,
+  matchedDimensions : [Str],
+  model : Str,
+  scale : Int
+}
+
+record SwarmEmbeddingProviderRequest = {
+  provider : Str,
+  model : Str,
+  inputText : Str,
+  scale : Int,
+  schemaVersion : Int
+}
+
+record UntrustedEmbeddingProviderOutput = {
+  provider : Str,
+  model : Str,
+  status : Str,
+  rawText : Str,
+  trusted : Bool
+}
+
+record TrustedWeightedEmbeddingProviderOutput = {
+  provider : Str,
+  model : Str,
+  trust : Str,
+  embedding : SwarmWeightedEmbedding
+}
+
+record SwarmEmbeddingProviderCommandTransport = {
+  cwd : Str,
+  timeoutMs : Int,
+  commandTemplate : [Str]
+}
+
+record SwarmEmbeddingProviderNetworkAdapter = {
+  provider : Str,
+  model : Str,
+  endpoint : Str,
+  authMode : Str,
+  authEnvVar : Str,
+  networkAccess : Str,
+  allowedDestination : Str,
+  transport : SwarmEmbeddingProviderCommandTransport
+}
+
+record SwarmEmbeddingProviderNetworkAdapterSummary = {
+  valid : Bool,
+  status : Str,
+  provider : Str,
+  model : Str,
+  endpoint : Str,
+  authMode : Str,
+  authEnvVar : Str,
+  networkAccess : Str,
+  allowedDestination : Str,
+  commandValid : Bool,
+  endpointHttps : Bool,
+  authenticated : Bool,
+  allowlisted : Bool,
+  commandHasEndpoint : Bool,
+  commandHasAuthEnv : Bool,
+  commandHasNetworkDestination : Bool,
+  validationMessage : Str
+}
+
+record SwarmEmbeddingProviderProcessResult = {
+  exitCode : Int,
+  stdout : Str,
+  stderr : Str,
+  timedOut : Bool,
+  error : Str
+}
+
+record SwarmWeightedVectorIndexEntry = {
+  memory : SwarmMemory,
+  text : Str,
+  embedding : SwarmWeightedEmbedding
+}
+
+record SwarmWeightedVectorIndex = {
+  provider : Str,
+  model : Str,
+  scale : Int,
+  entries : [SwarmWeightedVectorIndexEntry]
+}
+
+record SwarmWeightedVectorIndexSearchResult = {
+  memory : SwarmMemory,
+  text : Str,
+  score : Int,
+  matchedDimensions : [Str],
+  provider : Str,
+  model : Str,
+  scale : Int
+}
+
+record SwarmWeightedVectorStore = {
+  shardCount : Int,
+  entryCount : Int,
+  shards : [SwarmWeightedVectorIndex]
+}
+
 record SwarmEvent = {
   actor : Str,
   atMs : Int,
@@ -224,6 +425,7 @@ record SwarmManagerAction = {
   suggestedCommand : [Str],
   taskId : Str,
   taskStatus : Str,
+  taskPriority : Int,
   blockedBy : [Str],
   blockerTaskIds : [Str],
   requiredApprovals : [Str],
@@ -310,9 +512,23 @@ record VerificationPlanMailboxSummary = {
   artifactPaths : [Str]
 }
 
+record SwarmTextSearch = {
+  wanted : Str,
+  found : Bool
+}
+
+record SwarmDependencyProjection = {
+  dependencyProjectionIds : [Str],
+  dependencyProjectionStatuses : [Str],
+  dependencyProjectionReady : [Bool]
+}
+
 record SwarmContextPack = {
   task : SwarmTask,
   readyTaskIds : [Str],
+  dependencyTaskIds : [Str],
+  dependencyTaskStatuses : [Str],
+  dependencyTaskReady : [Bool],
   managerAction : SwarmManagerAction,
   mailboxSummary : VerificationPlanMailboxSummary,
   taskMemoryMatches : [SwarmMemorySearchResult],
@@ -345,6 +561,9 @@ record SwarmContextPack = {
 record SwarmEvidencePack = {
   task : SwarmTask,
   query : Str,
+  dependencyTaskIds : [Str],
+  dependencyTaskStatuses : [Str],
+  dependencyTaskReady : [Bool],
   mailboxSummary : VerificationPlanMailboxSummary,
   taskMemoryMatches : [SwarmMemorySearchResult],
   objectiveMemoryMatches : [SwarmMemorySearchResult],
@@ -419,6 +638,112 @@ taskHandle root taskId actor = TaskHandle { root = root, taskId = taskId, actor 
 commandSpec : Str -> [Str] -> SwarmCommand
 commandSpec cwd command = SwarmCommand { cwd = cwd, command = command }
 
+swarmNetworkAmbient : Str
+swarmNetworkAmbient = "ambient"
+
+swarmNetworkDenied : Str
+swarmNetworkDenied = "denied"
+
+swarmNetworkAllowlisted : Str
+swarmNetworkAllowlisted = "allowlisted"
+
+swarmAccessPolicy : [Str] -> [Str] -> Str -> SwarmAccessPolicy
+swarmAccessPolicy allowedProcesses allowedWorkspaceRoots networkAccess =
+  SwarmAccessPolicy {
+    allowedProcesses = allowedProcesses,
+    allowedWorkspaceRoots = allowedWorkspaceRoots,
+    allowedReadonlyRoots = [],
+    networkAccess = networkAccess,
+    allowedNetworkDestinations = []
+  }
+
+swarmAccessPolicyWithNetworkDestinations : [Str] -> [Str] -> Str -> [Str] -> SwarmAccessPolicy
+swarmAccessPolicyWithNetworkDestinations allowedProcesses allowedWorkspaceRoots networkAccess allowedNetworkDestinations =
+  SwarmAccessPolicy {
+    allowedProcesses = allowedProcesses,
+    allowedWorkspaceRoots = allowedWorkspaceRoots,
+    allowedReadonlyRoots = [],
+    networkAccess = networkAccess,
+    allowedNetworkDestinations = allowedNetworkDestinations
+  }
+
+swarmAccessPolicyWithReadonlyRoots : [Str] -> [Str] -> [Str] -> Str -> [Str] -> SwarmAccessPolicy
+swarmAccessPolicyWithReadonlyRoots allowedProcesses allowedWorkspaceRoots allowedReadonlyRoots networkAccess allowedNetworkDestinations =
+  SwarmAccessPolicy {
+    allowedProcesses = allowedProcesses,
+    allowedWorkspaceRoots = allowedWorkspaceRoots,
+    allowedReadonlyRoots = allowedReadonlyRoots,
+    networkAccess = networkAccess,
+    allowedNetworkDestinations = allowedNetworkDestinations
+  }
+
+swarmAmbientAccess : SwarmAccessPolicy
+swarmAmbientAccess =
+  swarmAccessPolicy [] [] swarmNetworkAmbient
+
+swarmDenyNetworkAccess : [Str] -> [Str] -> SwarmAccessPolicy
+swarmDenyNetworkAccess allowedProcesses allowedWorkspaceRoots =
+  swarmAccessPolicy allowedProcesses allowedWorkspaceRoots swarmNetworkDenied
+
+swarmAllowNetworkDestinations : [Str] -> [Str] -> [Str] -> SwarmAccessPolicy
+swarmAllowNetworkDestinations allowedProcesses allowedWorkspaceRoots allowedNetworkDestinations =
+  swarmAccessPolicyWithNetworkDestinations allowedProcesses allowedWorkspaceRoots swarmNetworkAllowlisted allowedNetworkDestinations
+
+swarmTaskCapabilities : [Str] -> [Str] -> Str -> [Str] -> [Str] -> [Str] -> SwarmTaskCapabilities
+swarmTaskCapabilities processes filesystemRoots networkAccess networkDestinations approvals verifiers =
+  SwarmTaskCapabilities {
+    processes = processes,
+    filesystemRoots = filesystemRoots,
+    readonlyFilesystemRoots = [],
+    networkAccess = networkAccess,
+    networkDestinations = networkDestinations,
+    approvals = approvals,
+    verifiers = verifiers
+  }
+
+swarmTaskCapabilitiesDenyNetwork : [Str] -> [Str] -> [Str] -> [Str] -> SwarmTaskCapabilities
+swarmTaskCapabilitiesDenyNetwork processes filesystemRoots approvals verifiers =
+  swarmTaskCapabilities processes filesystemRoots swarmNetworkDenied [] approvals verifiers
+
+swarmTaskCapabilitiesAllowNetworkDestinations : [Str] -> [Str] -> [Str] -> [Str] -> [Str] -> SwarmTaskCapabilities
+swarmTaskCapabilitiesAllowNetworkDestinations processes filesystemRoots networkDestinations approvals verifiers =
+  swarmTaskCapabilities processes filesystemRoots swarmNetworkAllowlisted networkDestinations approvals verifiers
+
+swarmTaskCapabilitiesWithReadonlyRoots : [Str] -> [Str] -> [Str] -> Str -> [Str] -> [Str] -> [Str] -> SwarmTaskCapabilities
+swarmTaskCapabilitiesWithReadonlyRoots processes filesystemRoots readonlyFilesystemRoots networkAccess networkDestinations approvals verifiers =
+  SwarmTaskCapabilities {
+    processes = processes,
+    filesystemRoots = filesystemRoots,
+    readonlyFilesystemRoots = readonlyFilesystemRoots,
+    networkAccess = networkAccess,
+    networkDestinations = networkDestinations,
+    approvals = approvals,
+    verifiers = verifiers
+  }
+
+swarmAccessPolicyForTaskCapabilities : SwarmTaskCapabilities -> SwarmAccessPolicy
+swarmAccessPolicyForTaskCapabilities capabilities =
+  SwarmAccessPolicy {
+    allowedProcesses = capabilities.processes,
+    allowedWorkspaceRoots = capabilities.filesystemRoots,
+    allowedReadonlyRoots = capabilities.readonlyFilesystemRoots,
+    networkAccess = capabilities.networkAccess,
+    allowedNetworkDestinations = capabilities.networkDestinations
+  }
+
+swarmVerificationPolicy : Str -> [Str] -> [Str] -> SwarmAccessPolicy -> SwarmVerificationPolicy
+swarmVerificationPolicy mergegateName requiredApprovals requiredVerifiers access =
+  SwarmVerificationPolicy {
+    mergegateName = mergegateName,
+    requiredApprovals = requiredApprovals,
+    requiredVerifiers = requiredVerifiers,
+    access = access
+  }
+
+swarmVerificationPolicyForTaskCapabilities : Str -> SwarmTaskCapabilities -> SwarmVerificationPolicy
+swarmVerificationPolicyForTaskCapabilities mergegateName capabilities =
+  swarmVerificationPolicy mergegateName capabilities.approvals capabilities.verifiers (swarmAccessPolicyForTaskCapabilities capabilities)
+
 verificationCommand : Str -> SwarmCommand -> VerificationCommand
 verificationCommand verifierName command =
   VerificationCommand { verifierName = verifierName, command = command }
@@ -490,6 +815,12 @@ memoryListResultError message = Err message
 
 memorySearchResultListError : Str -> Result [SwarmMemorySearchResult]
 memorySearchResultListError message = Err message
+
+embeddedMemoryResultError : Str -> Result SwarmEmbeddedMemory
+embeddedMemoryResultError message = Err message
+
+weightedEmbeddedMemoryResultError : Str -> Result SwarmWeightedEmbeddedMemory
+weightedEmbeddedMemoryResultError message = Err message
 
 eventListResultError : Str -> Result [SwarmEvent]
 eventListResultError message = Err message
@@ -648,6 +979,64 @@ memorySearchResultListResult value = match value {
   Err message -> memorySearchResultListError message
 }
 
+embeddedMemoryFromMemory : SwarmMemory -> Result SwarmEmbeddedMemory
+embeddedMemoryFromMemory memory =
+  match tryDecode SwarmEmbeddedMemoryValue memory.value {
+    Ok value ->
+      Ok (SwarmEmbeddedMemory {
+        memory = memory,
+        text = value.text,
+        embedding = value.embedding
+      }),
+    Err message ->
+      embeddedMemoryResultError message
+  }
+
+embeddedMemoriesFromMemory : [SwarmMemory] -> [SwarmEmbeddedMemory]
+embeddedMemoriesFromMemory memories = {
+  let mut decoded = [];
+  for memory in memories {
+    match embeddedMemoryFromMemory memory {
+      Ok embedded -> {
+        decoded = append decoded [embedded];
+        decoded
+      },
+      Err message ->
+        decoded
+    }
+  };
+  decoded
+}
+
+weightedEmbeddedMemoryFromMemory : SwarmMemory -> Result SwarmWeightedEmbeddedMemory
+weightedEmbeddedMemoryFromMemory memory =
+  match tryDecode SwarmWeightedEmbeddedMemoryValue memory.value {
+    Ok value ->
+      Ok (SwarmWeightedEmbeddedMemory {
+        memory = memory,
+        text = value.text,
+        embedding = value.embedding
+      }),
+    Err message ->
+      weightedEmbeddedMemoryResultError message
+  }
+
+weightedEmbeddedMemoriesFromMemory : [SwarmMemory] -> [SwarmWeightedEmbeddedMemory]
+weightedEmbeddedMemoriesFromMemory memories = {
+  let mut decoded = [];
+  for memory in memories {
+    match weightedEmbeddedMemoryFromMemory memory {
+      Ok embedded -> {
+        decoded = append decoded [embedded];
+        decoded
+      },
+      Err message ->
+        decoded
+    }
+  };
+  decoded
+}
+
 eventListResult : Result Str -> Result [SwarmEvent]
 eventListResult value = match value {
   Ok raw -> Ok (decode [SwarmEvent] raw),
@@ -730,6 +1119,46 @@ taskCreateWithDeadline : ObjectiveHandle -> Str -> Str -> [Str] -> Int -> Int ->
 taskCreateWithDeadline handle taskId detail dependencies maxRuns deadlineAtMs leaseTimeoutMs =
   taskResult (swarmTaskCreateWithDeadlineRaw handle.root.path handle.objectiveId taskId detail dependencies maxRuns deadlineAtMs leaseTimeoutMs)
 
+taskReprioritize : TaskHandle -> Int -> Result SwarmTask
+taskReprioritize handle priority =
+  taskResult (swarmTaskReprioritizeRaw handle.root.path handle.taskId handle.actor priority)
+
+taskCreateWithPriority : ObjectiveHandle -> Str -> Str -> [Str] -> Int -> Int -> Int -> Result SwarmTask
+taskCreateWithPriority handle taskId detail dependencies maxRuns priority leaseTimeoutMs =
+  taskCreateWithDeadlineAndPriority handle taskId detail dependencies maxRuns noDeadlineAtMs priority leaseTimeoutMs
+
+taskCreateWithDeadlineAndPriority : ObjectiveHandle -> Str -> Str -> [Str] -> Int -> Int -> Int -> Int -> Result SwarmTask
+taskCreateWithDeadlineAndPriority handle taskId detail dependencies maxRuns deadlineAtMs priority leaseTimeoutMs =
+  taskResult (swarmTaskCreateWithDeadlineAndPriorityRaw handle.root.path handle.objectiveId taskId detail dependencies maxRuns deadlineAtMs priority leaseTimeoutMs)
+
+swarmSpawnPolicy : Str -> Int -> SwarmSpawnPolicy
+swarmSpawnPolicy parentTaskId maxSpawnDepth =
+  SwarmSpawnPolicy {
+    parentTaskId = parentTaskId,
+    maxSpawnDepth = maxSpawnDepth,
+    maxChildTasks = 0
+  }
+
+swarmSpawnPolicyWithChildBudget : Str -> Int -> Int -> SwarmSpawnPolicy
+swarmSpawnPolicyWithChildBudget parentTaskId maxSpawnDepth maxChildTasks =
+  SwarmSpawnPolicy {
+    parentTaskId = parentTaskId,
+    maxSpawnDepth = maxSpawnDepth,
+    maxChildTasks = maxChildTasks
+  }
+
+taskCreateWithSpawnPolicy : ObjectiveHandle -> SwarmSpawnPolicy -> Str -> Str -> [Str] -> Int -> Int -> Int -> Int -> Result SwarmTask
+taskCreateWithSpawnPolicy handle spawn taskId detail dependencies maxRuns deadlineAtMs priority leaseTimeoutMs =
+  taskResult (swarmTaskCreateChildWithPolicyRaw handle.root.path handle.objectiveId spawn.parentTaskId taskId detail dependencies maxRuns deadlineAtMs priority spawn.maxSpawnDepth spawn.maxChildTasks leaseTimeoutMs)
+
+taskCreateChildWithDeadlineAndPriority : ObjectiveHandle -> TaskHandle -> Str -> Str -> [Str] -> Int -> Int -> Int -> Int -> Result SwarmTask
+taskCreateChildWithDeadlineAndPriority objective parent taskId detail dependencies maxRuns deadlineAtMs priority leaseTimeoutMs =
+  taskCreateWithSpawnPolicy objective (swarmSpawnPolicy parent.taskId 0) taskId detail dependencies maxRuns deadlineAtMs priority leaseTimeoutMs
+
+taskCreateChildWithPriority : ObjectiveHandle -> TaskHandle -> Str -> Str -> [Str] -> Int -> Int -> Int -> Result SwarmTask
+taskCreateChildWithPriority objective parent taskId detail dependencies maxRuns priority leaseTimeoutMs =
+  taskCreateChildWithDeadlineAndPriority objective parent taskId detail dependencies maxRuns noDeadlineAtMs priority leaseTimeoutMs
+
 tasks : SwarmRoot -> Result [SwarmTask]
 tasks root = taskListResult (swarmTasksRaw root.path)
 
@@ -747,7 +1176,27 @@ policySetWithAccess handle mergegateName requiredApprovals requiredVerifiers all
 
 policySetWithCapabilities : TaskHandle -> Str -> [Str] -> [Str] -> [Str] -> [Str] -> Str -> Result SwarmPolicy
 policySetWithCapabilities handle mergegateName requiredApprovals requiredVerifiers allowedProcesses allowedWorkspaceRoots networkAccess =
-  policyResult (swarmPolicySetWithCapabilitiesRaw handle.root.path handle.taskId mergegateName requiredApprovals requiredVerifiers allowedProcesses allowedWorkspaceRoots networkAccess)
+  policySetWithNetworkAccess handle mergegateName requiredApprovals requiredVerifiers allowedProcesses allowedWorkspaceRoots networkAccess []
+
+policySetWithNetworkAccess : TaskHandle -> Str -> [Str] -> [Str] -> [Str] -> [Str] -> Str -> [Str] -> Result SwarmPolicy
+policySetWithNetworkAccess handle mergegateName requiredApprovals requiredVerifiers allowedProcesses allowedWorkspaceRoots networkAccess allowedNetworkDestinations =
+  policyResult (swarmPolicySetWithNetworkAccessRaw handle.root.path handle.taskId mergegateName requiredApprovals requiredVerifiers allowedProcesses allowedWorkspaceRoots networkAccess allowedNetworkDestinations)
+
+policySetWithFilesystemAccess : TaskHandle -> Str -> [Str] -> [Str] -> [Str] -> [Str] -> [Str] -> Str -> [Str] -> Result SwarmPolicy
+policySetWithFilesystemAccess handle mergegateName requiredApprovals requiredVerifiers allowedProcesses allowedWorkspaceRoots allowedReadonlyRoots networkAccess allowedNetworkDestinations =
+  policyResult (swarmPolicySetWithFilesystemAccessRaw handle.root.path handle.taskId mergegateName requiredApprovals requiredVerifiers allowedProcesses allowedWorkspaceRoots allowedReadonlyRoots networkAccess allowedNetworkDestinations)
+
+policySetWithTaskCapabilities : TaskHandle -> Str -> SwarmTaskCapabilities -> Result SwarmPolicy
+policySetWithTaskCapabilities handle mergegateName capabilities =
+  policySetWithFilesystemAccess handle mergegateName capabilities.approvals capabilities.verifiers capabilities.processes capabilities.filesystemRoots capabilities.readonlyFilesystemRoots capabilities.networkAccess capabilities.networkDestinations
+
+policySetWithAccessPolicy : TaskHandle -> Str -> [Str] -> [Str] -> SwarmAccessPolicy -> Result SwarmPolicy
+policySetWithAccessPolicy handle mergegateName requiredApprovals requiredVerifiers access =
+  policySetWithFilesystemAccess handle mergegateName requiredApprovals requiredVerifiers access.allowedProcesses access.allowedWorkspaceRoots access.allowedReadonlyRoots access.networkAccess access.allowedNetworkDestinations
+
+policySetVerificationPolicy : TaskHandle -> SwarmVerificationPolicy -> Result SwarmPolicy
+policySetVerificationPolicy handle policy =
+  policySetWithAccessPolicy handle policy.mergegateName policy.requiredApprovals policy.requiredVerifiers policy.access
 
 toolRun : TaskHandle -> SwarmCommand -> Result SwarmRun
 toolRun handle spec =
@@ -860,6 +1309,9 @@ emptySwarmSemanticIndexEntries = []
 
 emptySwarmTexts : [Str]
 emptySwarmTexts = []
+
+emptySwarmBools : [Bool]
+emptySwarmBools = []
 
 semanticIndexSearchResultEntries : SwarmArtifactSearchResult -> [SwarmSemanticIndexEntry]
 semanticIndexSearchResultEntries result =
@@ -1019,6 +1471,944 @@ artifactPath artifact = artifact.path
 readyTaskId : SwarmTask -> Str
 readyTaskId task = task.taskId
 
+swarmTextSearchStep : SwarmTextSearch -> Str -> SwarmTextSearch
+swarmTextSearchStep search value =
+  if search.found then
+    search
+  else
+    SwarmTextSearch { wanted = search.wanted, found = value == search.wanted }
+
+swarmTextListHas : Str -> [Str] -> Bool
+swarmTextListHas wanted values =
+  (fold swarmTextSearchStep (SwarmTextSearch { wanted = wanted, found = false }) values).found
+
+swarmSparseEmbedding : Str -> [Str] -> SwarmSparseEmbedding
+swarmSparseEmbedding model dimensions =
+  SwarmSparseEmbedding {
+    model = model,
+    dimensions = dimensions
+  }
+
+swarmEmbeddedMemoryValue : Str -> SwarmSparseEmbedding -> SwarmEmbeddedMemoryValue
+swarmEmbeddedMemoryValue text embedding =
+  SwarmEmbeddedMemoryValue {
+    text = text,
+    embedding = embedding
+  }
+
+swarmEmbeddedMemoryText : Str -> SwarmSparseEmbedding -> Str
+swarmEmbeddedMemoryText text embedding =
+  encode (swarmEmbeddedMemoryValue text embedding)
+
+swarmSparseEmbeddingMatchedDimensions : SwarmSparseEmbedding -> SwarmSparseEmbedding -> [Str]
+swarmSparseEmbeddingMatchedDimensions query candidate = {
+  let mut matches = [];
+  for dimension in query.dimensions {
+    if swarmTextListHas dimension candidate.dimensions then {
+      matches = append matches [dimension];
+      matches
+    } else
+      matches
+  };
+  matches
+}
+
+swarmSparseEmbeddingScore : SwarmSparseEmbedding -> SwarmSparseEmbedding -> Int
+swarmSparseEmbeddingScore query candidate =
+  if query.model == candidate.model then
+    length (swarmSparseEmbeddingMatchedDimensions query candidate)
+  else
+    0
+
+swarmEmbeddedMemorySearchResult : SwarmSparseEmbedding -> SwarmEmbeddedMemory -> SwarmEmbeddedMemorySearchResult
+swarmEmbeddedMemorySearchResult query embedded = {
+  let matched = swarmSparseEmbeddingMatchedDimensions query embedded.embedding;
+  SwarmEmbeddedMemorySearchResult {
+    memory = embedded.memory,
+    text = embedded.text,
+    score = if query.model == embedded.embedding.model then length matched else 0,
+    matchedDimensions = matched,
+    model = embedded.embedding.model
+  }
+}
+
+swarmEmbeddedMemorySearchInsert : [SwarmEmbeddedMemorySearchResult] -> SwarmEmbeddedMemorySearchResult -> [SwarmEmbeddedMemorySearchResult]
+swarmEmbeddedMemorySearchInsert ranked candidate = {
+  let mut next = [];
+  let mut inserted = false;
+  for existing in ranked {
+    if inserted then {
+      next = append next [existing];
+      next
+    } else if candidate.score > existing.score then {
+      next = append next [candidate, existing];
+      inserted = true;
+      next
+    } else {
+      next = append next [existing];
+      next
+    }
+  };
+  if inserted then
+    next
+  else
+    append next [candidate]
+}
+
+swarmEmbeddedMemorySearchLimit : Int -> [SwarmEmbeddedMemorySearchResult] -> [SwarmEmbeddedMemorySearchResult]
+swarmEmbeddedMemorySearchLimit limit ranked = {
+  let mut kept = [];
+  for item in ranked {
+    if length kept < limit then {
+      kept = append kept [item];
+      kept
+    } else
+      kept
+  };
+  kept
+}
+
+swarmEmbeddedMemorySearch : SwarmSparseEmbedding -> [SwarmEmbeddedMemory] -> Int -> [SwarmEmbeddedMemorySearchResult]
+swarmEmbeddedMemorySearch query candidates limit = {
+  let mut ranked = [];
+  for candidate in candidates {
+    let result = swarmEmbeddedMemorySearchResult query candidate;
+    if result.score > 0 then {
+      ranked = swarmEmbeddedMemorySearchLimit limit (swarmEmbeddedMemorySearchInsert ranked result);
+      ranked
+    } else
+      ranked
+  };
+  ranked
+}
+
+swarmEmbeddedMemorySearchFromMemory : SwarmSparseEmbedding -> [SwarmMemory] -> Int -> [SwarmEmbeddedMemorySearchResult]
+swarmEmbeddedMemorySearchFromMemory query memories limit =
+  swarmEmbeddedMemorySearch query (embeddedMemoriesFromMemory memories) limit
+
+swarmEmbeddedMemorySearchResultText : SwarmEmbeddedMemorySearchResult -> Str
+swarmEmbeddedMemorySearchResultText result = result.text
+
+swarmEmbeddedMemorySearchResultScore : SwarmEmbeddedMemorySearchResult -> Int
+swarmEmbeddedMemorySearchResultScore result = result.score
+
+swarmWeightedEmbeddingDimension : Str -> Int -> SwarmWeightedEmbeddingDimension
+swarmWeightedEmbeddingDimension name weight =
+  SwarmWeightedEmbeddingDimension {
+    name = name,
+    weight = weight
+  }
+
+swarmWeightedEmbedding : Str -> Int -> [SwarmWeightedEmbeddingDimension] -> SwarmWeightedEmbedding
+swarmWeightedEmbedding model scale dimensions =
+  SwarmWeightedEmbedding {
+    model = model,
+    scale = scale,
+    dimensions = dimensions
+  }
+
+swarmWeightedEmbeddedMemoryValue : Str -> SwarmWeightedEmbedding -> SwarmWeightedEmbeddedMemoryValue
+swarmWeightedEmbeddedMemoryValue text embedding =
+  SwarmWeightedEmbeddedMemoryValue {
+    text = text,
+    embedding = embedding
+  }
+
+swarmWeightedEmbeddedMemoryText : Str -> SwarmWeightedEmbedding -> Str
+swarmWeightedEmbeddedMemoryText text embedding =
+  encode (swarmWeightedEmbeddedMemoryValue text embedding)
+
+swarmWeightedDimensionOverlapScore : SwarmWeightedEmbeddingDimension -> SwarmWeightedEmbeddingDimension -> Int
+swarmWeightedDimensionOverlapScore query candidate =
+  if query.name == candidate.name then
+    if query.weight < candidate.weight then query.weight else candidate.weight
+  else
+    0
+
+swarmWeightedDimensionBestScore : SwarmWeightedEmbeddingDimension -> [SwarmWeightedEmbeddingDimension] -> Int
+swarmWeightedDimensionBestScore query candidates = {
+  let mut best = 0;
+  for candidate in candidates {
+    let score = swarmWeightedDimensionOverlapScore query candidate;
+    if score > best then {
+      best = score;
+      best
+    } else
+      best
+  };
+  best
+}
+
+swarmWeightedEmbeddingMatchedDimensions : SwarmWeightedEmbedding -> SwarmWeightedEmbedding -> [Str]
+swarmWeightedEmbeddingMatchedDimensions query candidate = {
+  let mut matches = [];
+  if query.model == candidate.model then
+    if query.scale == candidate.scale then {
+      for dimension in query.dimensions {
+        if swarmWeightedDimensionBestScore dimension candidate.dimensions > 0 then {
+          matches = append matches [dimension.name];
+          matches
+        } else
+          matches
+      };
+      matches
+    } else
+      matches
+  else
+    matches
+}
+
+swarmWeightedEmbeddingScore : SwarmWeightedEmbedding -> SwarmWeightedEmbedding -> Int
+swarmWeightedEmbeddingScore query candidate = {
+  let mut score = 0;
+  if query.model == candidate.model then
+    if query.scale == candidate.scale then {
+      for dimension in query.dimensions {
+        score = intAdd score (swarmWeightedDimensionBestScore dimension candidate.dimensions);
+        score
+      };
+      score
+    } else
+      0
+  else
+    0
+}
+
+swarmWeightedEmbeddedMemorySearchResult : SwarmWeightedEmbedding -> SwarmWeightedEmbeddedMemory -> SwarmWeightedEmbeddedMemorySearchResult
+swarmWeightedEmbeddedMemorySearchResult query embedded =
+  SwarmWeightedEmbeddedMemorySearchResult {
+    memory = embedded.memory,
+    text = embedded.text,
+    score = swarmWeightedEmbeddingScore query embedded.embedding,
+    matchedDimensions = swarmWeightedEmbeddingMatchedDimensions query embedded.embedding,
+    model = embedded.embedding.model,
+    scale = embedded.embedding.scale
+  }
+
+swarmWeightedEmbeddedMemorySearchInsert : [SwarmWeightedEmbeddedMemorySearchResult] -> SwarmWeightedEmbeddedMemorySearchResult -> [SwarmWeightedEmbeddedMemorySearchResult]
+swarmWeightedEmbeddedMemorySearchInsert ranked candidate = {
+  let mut next = [];
+  let mut inserted = false;
+  for existing in ranked {
+    if inserted then {
+      next = append next [existing];
+      next
+    } else if candidate.score > existing.score then {
+      next = append next [candidate, existing];
+      inserted = true;
+      next
+    } else {
+      next = append next [existing];
+      next
+    }
+  };
+  if inserted then
+    next
+  else
+    append next [candidate]
+}
+
+swarmWeightedEmbeddedMemorySearchLimit : Int -> [SwarmWeightedEmbeddedMemorySearchResult] -> [SwarmWeightedEmbeddedMemorySearchResult]
+swarmWeightedEmbeddedMemorySearchLimit limit ranked = {
+  let mut kept = [];
+  for item in ranked {
+    if length kept < limit then {
+      kept = append kept [item];
+      kept
+    } else
+      kept
+  };
+  kept
+}
+
+swarmWeightedEmbeddedMemorySearch : SwarmWeightedEmbedding -> [SwarmWeightedEmbeddedMemory] -> Int -> [SwarmWeightedEmbeddedMemorySearchResult]
+swarmWeightedEmbeddedMemorySearch query candidates limit = {
+  let mut ranked = [];
+  for candidate in candidates {
+    let result = swarmWeightedEmbeddedMemorySearchResult query candidate;
+    if result.score > 0 then {
+      ranked = swarmWeightedEmbeddedMemorySearchLimit limit (swarmWeightedEmbeddedMemorySearchInsert ranked result);
+      ranked
+    } else
+      ranked
+  };
+  ranked
+}
+
+swarmWeightedEmbeddedMemorySearchFromMemory : SwarmWeightedEmbedding -> [SwarmMemory] -> Int -> [SwarmWeightedEmbeddedMemorySearchResult]
+swarmWeightedEmbeddedMemorySearchFromMemory query memories limit =
+  swarmWeightedEmbeddedMemorySearch query (weightedEmbeddedMemoriesFromMemory memories) limit
+
+swarmWeightedEmbeddedMemorySearchResultText : SwarmWeightedEmbeddedMemorySearchResult -> Str
+swarmWeightedEmbeddedMemorySearchResultText result = result.text
+
+swarmWeightedEmbeddedMemorySearchResultScore : SwarmWeightedEmbeddedMemorySearchResult -> Int
+swarmWeightedEmbeddedMemorySearchResultScore result = result.score
+
+swarmTextIncludes : Str -> Str -> Bool
+swarmTextIncludes value needle = length (textSplit value needle) > 1
+
+swarmEmbeddingProviderRequest : Str -> Str -> Str -> Int -> SwarmEmbeddingProviderRequest
+swarmEmbeddingProviderRequest provider model inputText scale =
+  SwarmEmbeddingProviderRequest {
+    provider = provider,
+    model = model,
+    inputText = inputText,
+    scale = scale,
+    schemaVersion = 1
+  }
+
+swarmUntrustedEmbeddingProviderOutput : Str -> Str -> Str -> Str -> Bool -> UntrustedEmbeddingProviderOutput
+swarmUntrustedEmbeddingProviderOutput provider model status rawText trusted =
+  UntrustedEmbeddingProviderOutput {
+    provider = provider,
+    model = model,
+    status = status,
+    rawText = rawText,
+    trusted = trusted
+  }
+
+trustedWeightedEmbeddingProviderOutput : Str -> Str -> SwarmWeightedEmbedding -> TrustedWeightedEmbeddingProviderOutput
+trustedWeightedEmbeddingProviderOutput provider model embedding =
+  TrustedWeightedEmbeddingProviderOutput {
+    provider = provider,
+    model = model,
+    trust = "validated",
+    embedding = embedding
+  }
+
+trustedWeightedEmbeddingProviderOutputResultError : Str -> Result TrustedWeightedEmbeddingProviderOutput
+trustedWeightedEmbeddingProviderOutputResultError message = Err message
+
+swarmAppendWeightedDimensionIf : [SwarmWeightedEmbeddingDimension] -> Bool -> Str -> Int -> [SwarmWeightedEmbeddingDimension]
+swarmAppendWeightedDimensionIf dimensions include name weight =
+  if include then
+    append dimensions [swarmWeightedEmbeddingDimension name weight]
+  else
+    dimensions
+
+swarmLocalWeightedEmbeddingDimensionsForText : Str -> [SwarmWeightedEmbeddingDimension]
+swarmLocalWeightedEmbeddingDimensionsForText text =
+  swarmAppendWeightedDimensionIf
+    (swarmAppendWeightedDimensionIf
+      (swarmAppendWeightedDimensionIf
+        (swarmAppendWeightedDimensionIf
+          (swarmAppendWeightedDimensionIf
+            []
+            (swarmTextIncludes text "compiler")
+            "compiler"
+            800)
+          (swarmTextIncludes text "runtime")
+          "runtime"
+          700)
+        (swarmTextIncludes text "verifier")
+        "verification"
+        500)
+      (swarmTextIncludes text "guard")
+      "resource-guard"
+      600)
+    (swarmTextIncludes text "swarm")
+    "swarm"
+    400
+
+swarmLocalWeightedEmbeddingForText : Str -> Int -> Str -> SwarmWeightedEmbedding
+swarmLocalWeightedEmbeddingForText model scale text =
+  swarmWeightedEmbedding model scale (swarmLocalWeightedEmbeddingDimensionsForText text)
+
+swarmLocalWeightedEmbeddingProviderOutput : SwarmEmbeddingProviderRequest -> UntrustedEmbeddingProviderOutput
+swarmLocalWeightedEmbeddingProviderOutput request =
+  swarmUntrustedEmbeddingProviderOutput
+    request.provider
+    request.model
+    "ok"
+    (encode (swarmLocalWeightedEmbeddingForText request.model request.scale request.inputText))
+    false
+
+validateWeightedEmbeddingProviderOutput : SwarmEmbeddingProviderRequest -> UntrustedEmbeddingProviderOutput -> Result TrustedWeightedEmbeddingProviderOutput
+validateWeightedEmbeddingProviderOutput request output =
+  if output.trusted then
+    trustedWeightedEmbeddingProviderOutputResultError "embedding provider output arrived pretrusted"
+  else if output.status != "ok" then
+    trustedWeightedEmbeddingProviderOutputResultError output.status
+  else if output.provider != request.provider then
+    trustedWeightedEmbeddingProviderOutputResultError "embedding provider mismatch"
+  else if output.model != request.model then
+    trustedWeightedEmbeddingProviderOutputResultError "embedding model mismatch"
+  else
+    match tryDecode SwarmWeightedEmbedding output.rawText {
+      Ok embedding ->
+        if embedding.model != request.model then
+          trustedWeightedEmbeddingProviderOutputResultError "embedding payload model mismatch"
+        else if embedding.scale != request.scale then
+          trustedWeightedEmbeddingProviderOutputResultError "embedding payload scale mismatch"
+        else
+          Ok (trustedWeightedEmbeddingProviderOutput request.provider request.model embedding),
+      Err message ->
+        trustedWeightedEmbeddingProviderOutputResultError message
+    }
+
+swarmEmbeddingProviderCommandTransport : Str -> Int -> [Str] -> SwarmEmbeddingProviderCommandTransport
+swarmEmbeddingProviderCommandTransport cwd timeoutMs commandTemplate =
+  SwarmEmbeddingProviderCommandTransport {
+    cwd = cwd,
+    timeoutMs = timeoutMs,
+    commandTemplate = commandTemplate
+  }
+
+swarmEmbeddingProviderNetworkAdapter : Str -> Str -> Str -> Str -> Str -> Str -> Str -> SwarmEmbeddingProviderCommandTransport -> SwarmEmbeddingProviderNetworkAdapter
+swarmEmbeddingProviderNetworkAdapter provider model endpoint authMode authEnvVar networkAccess allowedDestination transport =
+  SwarmEmbeddingProviderNetworkAdapter {
+    provider = provider,
+    model = model,
+    endpoint = endpoint,
+    authMode = authMode,
+    authEnvVar = authEnvVar,
+    networkAccess = networkAccess,
+    allowedDestination = allowedDestination,
+    transport = transport
+  }
+
+swarmEmbeddingProviderNetworkAdapterCommandTransport : Str -> Int -> Str -> SwarmEmbeddingProviderCommandTransport
+swarmEmbeddingProviderNetworkAdapterCommandTransport cwd timeoutMs commandPath =
+  swarmEmbeddingProviderCommandTransport
+    cwd
+    timeoutMs
+    [
+      commandPath,
+      "--endpoint",
+      "{endpoint}",
+      "--auth-env",
+      "{auth_env}",
+      "--network-destination",
+      "{network_destination}",
+      "--provider",
+      "{provider}",
+      "--model",
+      "{model}",
+      "--input",
+      "{input_text}",
+      "--scale",
+      "{scale}"
+    ]
+
+swarmEmbeddingProviderBearerNetworkAdapter : Str -> Str -> Str -> Str -> Str -> Str -> Int -> Str -> SwarmEmbeddingProviderNetworkAdapter
+swarmEmbeddingProviderBearerNetworkAdapter provider model endpoint authEnvVar allowedDestination cwd timeoutMs commandPath =
+  swarmEmbeddingProviderNetworkAdapter
+    provider
+    model
+    endpoint
+    "bearer-env"
+    authEnvVar
+    "allowlisted"
+    allowedDestination
+    (swarmEmbeddingProviderNetworkAdapterCommandTransport cwd timeoutMs commandPath)
+
+swarmOpenAiEmbeddingProviderNetworkAdapter : Str -> Str -> Int -> Str -> SwarmEmbeddingProviderNetworkAdapter
+swarmOpenAiEmbeddingProviderNetworkAdapter model cwd timeoutMs commandPath =
+  swarmEmbeddingProviderBearerNetworkAdapter
+    "openai"
+    model
+    "https://api.openai.com/v1/embeddings"
+    "OPENAI_API_KEY"
+    "api.openai.com:443"
+    cwd
+    timeoutMs
+    commandPath
+
+swarmTextHasPrefix : Str -> Str -> Bool
+swarmTextHasPrefix value prefix =
+  match textPrefix value prefix {
+    Ok remainder -> true,
+    Err message -> false
+  }
+
+swarmEmbeddingProviderNetworkAdapterEndpointHttps : SwarmEmbeddingProviderNetworkAdapter -> Bool
+swarmEmbeddingProviderNetworkAdapterEndpointHttps adapter =
+  swarmTextHasPrefix adapter.endpoint "https://"
+
+swarmEmbeddingProviderNetworkAdapterAuthValid : SwarmEmbeddingProviderNetworkAdapter -> Bool
+swarmEmbeddingProviderNetworkAdapterAuthValid adapter =
+  if adapter.authMode == "bearer-env" then
+    adapter.authEnvVar != ""
+  else if adapter.authMode == "header-env" then
+    adapter.authEnvVar != ""
+  else
+    adapter.authMode == "none"
+
+swarmEmbeddingProviderNetworkAdapterAuthenticated : SwarmEmbeddingProviderNetworkAdapter -> Bool
+swarmEmbeddingProviderNetworkAdapterAuthenticated adapter =
+  if adapter.authMode == "bearer-env" then
+    adapter.authEnvVar != ""
+  else if adapter.authMode == "header-env" then
+    adapter.authEnvVar != ""
+  else
+    false
+
+swarmEmbeddingProviderNetworkAdapterAllowlisted : SwarmEmbeddingProviderNetworkAdapter -> Bool
+swarmEmbeddingProviderNetworkAdapterAllowlisted adapter =
+  if adapter.networkAccess == "allowlisted" then
+    adapter.allowedDestination != ""
+  else
+    false
+
+swarmEmbeddingProviderNetworkAdapterCommandHasEndpoint : SwarmEmbeddingProviderNetworkAdapter -> Bool
+swarmEmbeddingProviderNetworkAdapterCommandHasEndpoint adapter =
+  swarmEmbeddingProviderCommandTemplateContains adapter.transport "{endpoint}"
+
+swarmEmbeddingProviderNetworkAdapterCommandHasAuthEnv : SwarmEmbeddingProviderNetworkAdapter -> Bool
+swarmEmbeddingProviderNetworkAdapterCommandHasAuthEnv adapter =
+  swarmEmbeddingProviderCommandTemplateContains adapter.transport "{auth_env}"
+
+swarmEmbeddingProviderNetworkAdapterCommandHasNetworkDestination : SwarmEmbeddingProviderNetworkAdapter -> Bool
+swarmEmbeddingProviderNetworkAdapterCommandHasNetworkDestination adapter =
+  swarmEmbeddingProviderCommandTemplateContains adapter.transport "{network_destination}"
+
+swarmEmbeddingProviderNetworkAdapterValidationMessage : SwarmEmbeddingProviderNetworkAdapter -> Str
+swarmEmbeddingProviderNetworkAdapterValidationMessage adapter =
+  if adapter.provider == "" then
+    "embedding-provider-network-adapter-missing-provider"
+  else if adapter.model == "" then
+    "embedding-provider-network-adapter-missing-model"
+  else if swarmEmbeddingProviderNetworkAdapterEndpointHttps adapter == false then
+    "embedding-provider-network-adapter-endpoint-not-https"
+  else if swarmEmbeddingProviderNetworkAdapterAuthValid adapter == false then
+    "embedding-provider-network-adapter-auth-invalid"
+  else if swarmEmbeddingProviderNetworkAdapterAllowlisted adapter == false then
+    "embedding-provider-network-adapter-network-not-allowlisted"
+  else if swarmEmbeddingProviderCommandValidationMessage adapter.transport != "" then
+    swarmEmbeddingProviderCommandValidationMessage adapter.transport
+  else if swarmEmbeddingProviderNetworkAdapterCommandHasEndpoint adapter == false then
+    "embedding-provider-network-adapter-missing-endpoint-placeholder"
+  else if adapter.authMode != "none" && swarmEmbeddingProviderNetworkAdapterCommandHasAuthEnv adapter == false then
+    "embedding-provider-network-adapter-missing-auth-env-placeholder"
+  else if swarmEmbeddingProviderNetworkAdapterCommandHasNetworkDestination adapter == false then
+    "embedding-provider-network-adapter-missing-network-destination-placeholder"
+  else
+    ""
+
+swarmEmbeddingProviderNetworkAdapterSummary : SwarmEmbeddingProviderNetworkAdapter -> SwarmEmbeddingProviderNetworkAdapterSummary
+swarmEmbeddingProviderNetworkAdapterSummary adapter = {
+  let validationMessage = swarmEmbeddingProviderNetworkAdapterValidationMessage adapter;
+  SwarmEmbeddingProviderNetworkAdapterSummary {
+    valid = validationMessage == "",
+    status = if validationMessage == "" then "valid" else "invalid",
+    provider = adapter.provider,
+    model = adapter.model,
+    endpoint = adapter.endpoint,
+    authMode = adapter.authMode,
+    authEnvVar = adapter.authEnvVar,
+    networkAccess = adapter.networkAccess,
+    allowedDestination = adapter.allowedDestination,
+    commandValid = swarmEmbeddingProviderCommandValid adapter.transport,
+    endpointHttps = swarmEmbeddingProviderNetworkAdapterEndpointHttps adapter,
+    authenticated = swarmEmbeddingProviderNetworkAdapterAuthenticated adapter,
+    allowlisted = swarmEmbeddingProviderNetworkAdapterAllowlisted adapter,
+    commandHasEndpoint = swarmEmbeddingProviderNetworkAdapterCommandHasEndpoint adapter,
+    commandHasAuthEnv = swarmEmbeddingProviderNetworkAdapterCommandHasAuthEnv adapter,
+    commandHasNetworkDestination = swarmEmbeddingProviderNetworkAdapterCommandHasNetworkDestination adapter,
+    validationMessage = validationMessage
+  }
+}
+
+swarmEmbeddingProviderProcessResultError : Str -> Result SwarmEmbeddingProviderProcessResult
+swarmEmbeddingProviderProcessResultError message = Err message
+
+swarmEmbeddingProviderProcessResultFromJson : Result Str -> Result SwarmEmbeddingProviderProcessResult
+swarmEmbeddingProviderProcessResultFromJson value = match value {
+  Ok raw -> Ok (decode SwarmEmbeddingProviderProcessResult raw),
+  Err message -> swarmEmbeddingProviderProcessResultError message
+}
+
+swarmEmbeddingProviderCommandTemplateContains : SwarmEmbeddingProviderCommandTransport -> Str -> Bool
+swarmEmbeddingProviderCommandTemplateContains transport needle = {
+  let mut found = false;
+  for arg in transport.commandTemplate {
+    if found then
+      found
+    else {
+      found = swarmTextIncludes arg needle;
+      found
+    }
+  };
+  found
+}
+
+swarmEmbeddingProviderCommandHasTextInput : SwarmEmbeddingProviderCommandTransport -> Bool
+swarmEmbeddingProviderCommandHasTextInput transport =
+  swarmEmbeddingProviderCommandTemplateContains transport "{input_text}"
+
+swarmEmbeddingProviderCommandHasJsonInput : SwarmEmbeddingProviderCommandTransport -> Bool
+swarmEmbeddingProviderCommandHasJsonInput transport =
+  swarmEmbeddingProviderCommandTemplateContains transport "{input_json}"
+
+swarmEmbeddingProviderCommandValidationMessage : SwarmEmbeddingProviderCommandTransport -> Str
+swarmEmbeddingProviderCommandValidationMessage transport =
+  if length transport.commandTemplate == 0 then
+    "embedding-provider-command-missing-template"
+  else if swarmEmbeddingProviderCommandTemplateContains transport "{provider}" == false then
+    "embedding-provider-command-missing-provider"
+  else if swarmEmbeddingProviderCommandTemplateContains transport "{model}" == false then
+    "embedding-provider-command-missing-model"
+  else if swarmEmbeddingProviderCommandHasTextInput transport == false && swarmEmbeddingProviderCommandHasJsonInput transport == false then
+    "embedding-provider-command-missing-input"
+  else if swarmEmbeddingProviderCommandTemplateContains transport "{scale}" == false then
+    "embedding-provider-command-missing-scale"
+  else
+    ""
+
+swarmEmbeddingProviderCommandValid : SwarmEmbeddingProviderCommandTransport -> Bool
+swarmEmbeddingProviderCommandValid transport =
+  swarmEmbeddingProviderCommandValidationMessage transport == ""
+
+swarmEmbeddingProviderCommandReplace : Str -> Str -> Str -> Str
+swarmEmbeddingProviderCommandReplace value needle replacement =
+  textJoin replacement (textSplit value needle)
+
+swarmEmbeddingProviderCommandArg : SwarmEmbeddingProviderRequest -> Str -> Str
+swarmEmbeddingProviderCommandArg request value =
+  swarmEmbeddingProviderCommandReplace
+    (swarmEmbeddingProviderCommandReplace
+      (swarmEmbeddingProviderCommandReplace
+        (swarmEmbeddingProviderCommandReplace
+          (swarmEmbeddingProviderCommandReplace
+            value
+            "{provider}"
+            request.provider)
+          "{model}"
+          request.model)
+        "{input_text}"
+        request.inputText)
+      "{input_json}"
+      (encode request.inputText))
+    "{scale}"
+    (encode request.scale)
+
+swarmEmbeddingProviderCommand : SwarmEmbeddingProviderCommandTransport -> SwarmEmbeddingProviderRequest -> [Str]
+swarmEmbeddingProviderCommand transport request = {
+  let mut rendered = [];
+  for arg in transport.commandTemplate {
+    rendered = append rendered [swarmEmbeddingProviderCommandArg request arg];
+    rendered
+  };
+  rendered
+}
+
+swarmEmbeddingProviderNetworkAdapterCommandArg : SwarmEmbeddingProviderNetworkAdapter -> SwarmEmbeddingProviderRequest -> Str -> Str
+swarmEmbeddingProviderNetworkAdapterCommandArg adapter request value =
+  swarmEmbeddingProviderCommandReplace
+    (swarmEmbeddingProviderCommandReplace
+      (swarmEmbeddingProviderCommandReplace
+        (swarmEmbeddingProviderCommandArg request value)
+        "{endpoint}"
+        adapter.endpoint)
+      "{auth_env}"
+      adapter.authEnvVar)
+    "{network_destination}"
+    adapter.allowedDestination
+
+swarmEmbeddingProviderNetworkAdapterCommand : SwarmEmbeddingProviderNetworkAdapter -> SwarmEmbeddingProviderRequest -> [Str]
+swarmEmbeddingProviderNetworkAdapterCommand adapter request = {
+  let mut rendered = [];
+  for arg in adapter.transport.commandTemplate {
+    rendered = append rendered [swarmEmbeddingProviderNetworkAdapterCommandArg adapter request arg];
+    rendered
+  };
+  rendered
+}
+
+swarmRunEmbeddingProviderCommandResultError : Str -> Result TrustedWeightedEmbeddingProviderOutput
+swarmRunEmbeddingProviderCommandResultError message = Err message
+
+swarmRunEmbeddingProviderProcessResult : SwarmEmbeddingProviderCommandTransport -> SwarmEmbeddingProviderRequest -> Result SwarmEmbeddingProviderProcessResult
+swarmRunEmbeddingProviderProcessResult transport request =
+  swarmEmbeddingProviderProcessResultFromJson
+    (runCommandTimeoutRaw transport.cwd transport.timeoutMs (swarmEmbeddingProviderCommand transport request))
+
+swarmRunEmbeddingProviderCommand : SwarmEmbeddingProviderCommandTransport -> SwarmEmbeddingProviderRequest -> Result TrustedWeightedEmbeddingProviderOutput
+swarmRunEmbeddingProviderCommand transport request = {
+  let validationMessage = swarmEmbeddingProviderCommandValidationMessage transport in
+  if validationMessage != "" then
+    swarmRunEmbeddingProviderCommandResultError validationMessage
+  else
+    match swarmRunEmbeddingProviderProcessResult transport request {
+      Err message ->
+        swarmRunEmbeddingProviderCommandResultError message,
+      Ok process ->
+        if process.timedOut then
+          swarmRunEmbeddingProviderCommandResultError "embedding-provider-command-timeout"
+        else if process.error != "" then
+          swarmRunEmbeddingProviderCommandResultError process.error
+        else if process.exitCode != 0 then
+          swarmRunEmbeddingProviderCommandResultError (textConcat ["embedding-provider-command-exit:", encode process.exitCode, ":", process.stderr])
+        else
+          validateWeightedEmbeddingProviderOutput
+            request
+            (swarmUntrustedEmbeddingProviderOutput request.provider request.model "ok" process.stdout false)
+    }
+}
+
+swarmRunEmbeddingProviderNetworkAdapterProcessResult : SwarmEmbeddingProviderNetworkAdapter -> SwarmEmbeddingProviderRequest -> Result SwarmEmbeddingProviderProcessResult
+swarmRunEmbeddingProviderNetworkAdapterProcessResult adapter request =
+  swarmEmbeddingProviderProcessResultFromJson
+    (runCommandTimeoutRaw adapter.transport.cwd adapter.transport.timeoutMs (swarmEmbeddingProviderNetworkAdapterCommand adapter request))
+
+swarmRunEmbeddingProviderNetworkAdapter : SwarmEmbeddingProviderNetworkAdapter -> SwarmEmbeddingProviderRequest -> Result TrustedWeightedEmbeddingProviderOutput
+swarmRunEmbeddingProviderNetworkAdapter adapter request = {
+  let validationMessage = swarmEmbeddingProviderNetworkAdapterValidationMessage adapter in
+  if validationMessage != "" then
+    swarmRunEmbeddingProviderCommandResultError validationMessage
+  else if request.provider != adapter.provider then
+    swarmRunEmbeddingProviderCommandResultError "embedding-provider-network-adapter-request-provider-mismatch"
+  else if request.model != adapter.model then
+    swarmRunEmbeddingProviderCommandResultError "embedding-provider-network-adapter-request-model-mismatch"
+  else
+    match swarmRunEmbeddingProviderNetworkAdapterProcessResult adapter request {
+      Err message ->
+        swarmRunEmbeddingProviderCommandResultError message,
+      Ok process ->
+        if process.timedOut then
+          swarmRunEmbeddingProviderCommandResultError "embedding-provider-network-adapter-timeout"
+        else if process.error != "" then
+          swarmRunEmbeddingProviderCommandResultError process.error
+        else if process.exitCode != 0 then
+          swarmRunEmbeddingProviderCommandResultError (textConcat ["embedding-provider-network-adapter-exit:", encode process.exitCode, ":", process.stderr])
+        else
+          validateWeightedEmbeddingProviderOutput
+            request
+            (swarmUntrustedEmbeddingProviderOutput request.provider request.model "ok" process.stdout false)
+    }
+}
+
+swarmWeightedVectorIndexEntry : SwarmMemory -> Str -> SwarmWeightedEmbedding -> SwarmWeightedVectorIndexEntry
+swarmWeightedVectorIndexEntry memory text embedding =
+  SwarmWeightedVectorIndexEntry {
+    memory = memory,
+    text = text,
+    embedding = embedding
+  }
+
+swarmWeightedVectorIndexEntryResultError : Str -> Result SwarmWeightedVectorIndexEntry
+swarmWeightedVectorIndexEntryResultError message = Err message
+
+swarmWeightedVectorIndexEntryFromMemory : Str -> Int -> SwarmMemory -> Result SwarmWeightedVectorIndexEntry
+swarmWeightedVectorIndexEntryFromMemory model scale memory =
+  match weightedEmbeddedMemoryFromMemory memory {
+    Ok embedded ->
+      if embedded.embedding.model != model then
+        swarmWeightedVectorIndexEntryResultError "weighted vector index model mismatch"
+      else if embedded.embedding.scale != scale then
+        swarmWeightedVectorIndexEntryResultError "weighted vector index scale mismatch"
+      else
+        Ok (swarmWeightedVectorIndexEntry embedded.memory embedded.text embedded.embedding),
+    Err message ->
+      swarmWeightedVectorIndexEntryResultError message
+  }
+
+swarmWeightedVectorIndexEntriesFromMemory : Str -> Int -> [SwarmMemory] -> [SwarmWeightedVectorIndexEntry]
+swarmWeightedVectorIndexEntriesFromMemory model scale memories = {
+  let mut entries = [];
+  for memory in memories {
+    match swarmWeightedVectorIndexEntryFromMemory model scale memory {
+      Ok entry -> {
+        entries = append entries [entry];
+        entries
+      },
+      Err message ->
+        entries
+    }
+  };
+  entries
+}
+
+swarmWeightedVectorIndex : Str -> Str -> Int -> [SwarmWeightedVectorIndexEntry] -> SwarmWeightedVectorIndex
+swarmWeightedVectorIndex provider model scale entries =
+  SwarmWeightedVectorIndex {
+    provider = provider,
+    model = model,
+    scale = scale,
+    entries = entries
+  }
+
+swarmWeightedVectorIndexFromMemory : Str -> Str -> Int -> [SwarmMemory] -> SwarmWeightedVectorIndex
+swarmWeightedVectorIndexFromMemory provider model scale memories =
+  swarmWeightedVectorIndex provider model scale (swarmWeightedVectorIndexEntriesFromMemory model scale memories)
+
+swarmWeightedVectorIndexText : SwarmWeightedVectorIndex -> Str
+swarmWeightedVectorIndexText index = encode index
+
+swarmWeightedVectorIndexFromText : Str -> Result SwarmWeightedVectorIndex
+swarmWeightedVectorIndexFromText raw = tryDecode SwarmWeightedVectorIndex raw
+
+swarmWeightedVectorIndexEntryCount : SwarmWeightedVectorIndex -> Int
+swarmWeightedVectorIndexEntryCount index = length index.entries
+
+swarmWeightedVectorStoreEntryCount : [SwarmWeightedVectorIndex] -> Int
+swarmWeightedVectorStoreEntryCount shards = {
+  let mut count = 0;
+  for shard in shards {
+    count = intAdd count (swarmWeightedVectorIndexEntryCount shard);
+    count
+  };
+  count
+}
+
+swarmWeightedVectorStore : [SwarmWeightedVectorIndex] -> SwarmWeightedVectorStore
+swarmWeightedVectorStore shards =
+  SwarmWeightedVectorStore {
+    shardCount = length shards,
+    entryCount = swarmWeightedVectorStoreEntryCount shards,
+    shards = shards
+  }
+
+swarmWeightedVectorStoreFromIndexes : [SwarmWeightedVectorIndex] -> SwarmWeightedVectorStore
+swarmWeightedVectorStoreFromIndexes shards = swarmWeightedVectorStore shards
+
+swarmWeightedVectorStoreText : SwarmWeightedVectorStore -> Str
+swarmWeightedVectorStoreText store = encode store
+
+swarmWeightedVectorStoreFromText : Str -> Result SwarmWeightedVectorStore
+swarmWeightedVectorStoreFromText raw =
+  match tryDecode SwarmWeightedVectorStore raw {
+    Ok store -> Ok (swarmWeightedVectorStore store.shards),
+    Err message -> Err message
+  }
+
+swarmWeightedVectorIndexMatches : Str -> Str -> Int -> SwarmWeightedVectorIndex -> Bool
+swarmWeightedVectorIndexMatches provider model scale index =
+  if index.provider == provider then
+    if index.model == model then
+      index.scale == scale
+    else
+      false
+  else
+    false
+
+swarmWeightedVectorStoreShardCountForQuery : Str -> SwarmWeightedEmbedding -> SwarmWeightedVectorStore -> Int
+swarmWeightedVectorStoreShardCountForQuery provider query store = {
+  let mut count = 0;
+  for shard in store.shards {
+    if swarmWeightedVectorIndexMatches provider query.model query.scale shard then {
+      count = intAdd count 1;
+      count
+    } else
+      count
+  };
+  count
+}
+
+swarmWeightedVectorIndexSearchResult : SwarmWeightedEmbedding -> SwarmWeightedVectorIndex -> SwarmWeightedVectorIndexEntry -> SwarmWeightedVectorIndexSearchResult
+swarmWeightedVectorIndexSearchResult query index entry =
+  SwarmWeightedVectorIndexSearchResult {
+    memory = entry.memory,
+    text = entry.text,
+    score = swarmWeightedEmbeddingScore query entry.embedding,
+    matchedDimensions = swarmWeightedEmbeddingMatchedDimensions query entry.embedding,
+    provider = index.provider,
+    model = entry.embedding.model,
+    scale = entry.embedding.scale
+  }
+
+swarmWeightedVectorIndexSearchInsert : [SwarmWeightedVectorIndexSearchResult] -> SwarmWeightedVectorIndexSearchResult -> [SwarmWeightedVectorIndexSearchResult]
+swarmWeightedVectorIndexSearchInsert ranked candidate = {
+  let mut next = [];
+  let mut inserted = false;
+  for existing in ranked {
+    if inserted then {
+      next = append next [existing];
+      next
+    } else if candidate.score > existing.score then {
+      next = append next [candidate, existing];
+      inserted = true;
+      next
+    } else {
+      next = append next [existing];
+      next
+    }
+  };
+  if inserted then
+    next
+  else
+    append next [candidate]
+}
+
+swarmWeightedVectorIndexSearchLimit : Int -> [SwarmWeightedVectorIndexSearchResult] -> [SwarmWeightedVectorIndexSearchResult]
+swarmWeightedVectorIndexSearchLimit limit ranked = {
+  let mut kept = [];
+  for item in ranked {
+    if length kept < limit then {
+      kept = append kept [item];
+      kept
+    } else
+      kept
+  };
+  kept
+}
+
+swarmWeightedVectorIndexSearch : SwarmWeightedEmbedding -> SwarmWeightedVectorIndex -> Int -> [SwarmWeightedVectorIndexSearchResult]
+swarmWeightedVectorIndexSearch query index limit = {
+  let mut ranked = [];
+  if query.model == index.model then
+    if query.scale == index.scale then {
+      for entry in index.entries {
+        let result = swarmWeightedVectorIndexSearchResult query index entry;
+        if result.score > 0 then {
+          ranked = swarmWeightedVectorIndexSearchLimit limit (swarmWeightedVectorIndexSearchInsert ranked result);
+          ranked
+        } else
+          ranked
+      };
+      ranked
+    } else
+      ranked
+  else
+    ranked
+}
+
+swarmWeightedVectorStoreSearch : Str -> SwarmWeightedEmbedding -> SwarmWeightedVectorStore -> Int -> [SwarmWeightedVectorIndexSearchResult]
+swarmWeightedVectorStoreSearch provider query store limit = {
+  let mut ranked = [];
+  for shard in store.shards {
+    if swarmWeightedVectorIndexMatches provider query.model query.scale shard then {
+      for result in swarmWeightedVectorIndexSearch query shard limit {
+        ranked = swarmWeightedVectorIndexSearchLimit limit (swarmWeightedVectorIndexSearchInsert ranked result);
+        ranked
+      };
+      ranked
+    } else
+      ranked
+  };
+  ranked
+}
+
+swarmWeightedVectorIndexSearchResultText : SwarmWeightedVectorIndexSearchResult -> Str
+swarmWeightedVectorIndexSearchResultText result = result.text
+
+swarmWeightedVectorIndexSearchResultScore : SwarmWeightedVectorIndexSearchResult -> Int
+swarmWeightedVectorIndexSearchResultScore result = result.score
+
+emptyDependencyProjection : [Str] -> SwarmDependencyProjection
+emptyDependencyProjection dependencyIds =
+  SwarmDependencyProjection {
+    dependencyProjectionIds = dependencyIds,
+    dependencyProjectionStatuses = emptySwarmTexts,
+    dependencyProjectionReady = emptySwarmBools
+  }
+
+dependencyProjectionStep : SwarmDependencyProjection -> SwarmTask -> SwarmDependencyProjection
+dependencyProjectionStep projection task =
+  if swarmTextListHas task.taskId projection.dependencyProjectionIds then
+    SwarmDependencyProjection {
+      dependencyProjectionIds = projection.dependencyProjectionIds,
+      dependencyProjectionStatuses = append projection.dependencyProjectionStatuses [task.status],
+      dependencyProjectionReady = append projection.dependencyProjectionReady [task.ready]
+    }
+  else
+    projection
+
+dependencyProjectionFrom : [Str] -> [SwarmTask] -> SwarmDependencyProjection
+dependencyProjectionFrom dependencyIds taskValues =
+  fold dependencyProjectionStep (emptyDependencyProjection dependencyIds) taskValues
+
 memorySearchResultMemoryValue : SwarmMemorySearchResult -> Str
 memorySearchResultMemoryValue item = item.memory.value
 
@@ -1112,36 +2502,45 @@ taskEvidencePack handle query limit =
                                 Ok artifactContentValues ->
                                   let memoryMatches = append taskMemoryMatchesValue objectiveMemoryMatchesValue in
                                   let mailboxSummary = verificationPlanMailboxSummary mailboxValue in
-                                  Ok (SwarmEvidencePack {
-                                    task = taskValue,
-                                    query = query,
-                                    mailboxSummary = mailboxSummary,
-                                    taskMemoryMatches = taskMemoryMatchesValue,
-                                    objectiveMemoryMatches = objectiveMemoryMatchesValue,
-                                    benchmarkMemoryMatches = benchmarkMemoryMatchesValue,
-                                    artifactSearchMatches = searchResultsValue,
-                                    semanticArtifactMatches = semanticSearchResultsValue,
-                                    memoryValues = map memorySearchResultMemoryValue memoryMatches,
-                                    memoryMatchedText = map memorySearchResultMatchedText memoryMatches,
-                                    memoryScores = map memorySearchResultScore memoryMatches,
-                                    benchmarkValues = map memorySearchResultMemoryValue benchmarkMemoryMatchesValue,
-                                    benchmarkMatchedText = map memorySearchResultMatchedText benchmarkMemoryMatchesValue,
-                                    benchmarkScores = map memorySearchResultScore benchmarkMemoryMatchesValue,
-                                    artifactSearchMatchedText = map artifactSearchResultMatchedText searchResultsValue,
-                                    artifactSearchScores = map artifactSearchResultScore searchResultsValue,
-                                    semanticArtifactMatchedText = map artifactSearchResultMatchedText semanticSearchResultsValue,
-                                    semanticArtifactScores = map artifactSearchResultScore semanticSearchResultsValue,
-                                    semanticIndexEntries = semanticIndexEntriesValue,
-                                    semanticIndexEntryIds = map semanticIndexEntryId semanticIndexEntriesValue,
-                                    semanticIndexEditFiles = semanticIndexEntryEditFiles semanticIndexEntriesValue,
-                                    semanticIndexArtifactRefs = semanticIndexEntryArtifactRefs semanticIndexEntriesValue,
-                                    semanticIndexSurfaceIds = semanticIndexEntrySurfaceIds semanticIndexEntriesValue,
-                                    semanticIndexQueryTexts = map semanticIndexEntryQueryText semanticIndexEntriesValue,
-                                    runTrace = map runTraceEntry mailboxValue.runs,
-                                    artifactKinds = mailboxSummary.artifactKinds,
-                                    artifactPaths = mailboxSummary.artifactPaths,
-                                    artifactExcerpts = artifactContentValues
-                                  }),
+                                  match tasks handle.root {
+                                    Ok taskValues ->
+                                      let dependencyProjection = dependencyProjectionFrom taskValue.dependencies taskValues in
+                                      Ok (SwarmEvidencePack {
+                                        task = taskValue,
+                                        query = query,
+                                        dependencyTaskIds = dependencyProjection.dependencyProjectionIds,
+                                        dependencyTaskStatuses = dependencyProjection.dependencyProjectionStatuses,
+                                        dependencyTaskReady = dependencyProjection.dependencyProjectionReady,
+                                        mailboxSummary = mailboxSummary,
+                                        taskMemoryMatches = taskMemoryMatchesValue,
+                                        objectiveMemoryMatches = objectiveMemoryMatchesValue,
+                                        benchmarkMemoryMatches = benchmarkMemoryMatchesValue,
+                                        artifactSearchMatches = searchResultsValue,
+                                        semanticArtifactMatches = semanticSearchResultsValue,
+                                        memoryValues = map memorySearchResultMemoryValue memoryMatches,
+                                        memoryMatchedText = map memorySearchResultMatchedText memoryMatches,
+                                        memoryScores = map memorySearchResultScore memoryMatches,
+                                        benchmarkValues = map memorySearchResultMemoryValue benchmarkMemoryMatchesValue,
+                                        benchmarkMatchedText = map memorySearchResultMatchedText benchmarkMemoryMatchesValue,
+                                        benchmarkScores = map memorySearchResultScore benchmarkMemoryMatchesValue,
+                                        artifactSearchMatchedText = map artifactSearchResultMatchedText searchResultsValue,
+                                        artifactSearchScores = map artifactSearchResultScore searchResultsValue,
+                                        semanticArtifactMatchedText = map artifactSearchResultMatchedText semanticSearchResultsValue,
+                                        semanticArtifactScores = map artifactSearchResultScore semanticSearchResultsValue,
+                                        semanticIndexEntries = semanticIndexEntriesValue,
+                                        semanticIndexEntryIds = map semanticIndexEntryId semanticIndexEntriesValue,
+                                        semanticIndexEditFiles = semanticIndexEntryEditFiles semanticIndexEntriesValue,
+                                        semanticIndexArtifactRefs = semanticIndexEntryArtifactRefs semanticIndexEntriesValue,
+                                        semanticIndexSurfaceIds = semanticIndexEntrySurfaceIds semanticIndexEntriesValue,
+                                        semanticIndexQueryTexts = map semanticIndexEntryQueryText semanticIndexEntriesValue,
+                                        runTrace = map runTraceEntry mailboxValue.runs,
+                                        artifactKinds = mailboxSummary.artifactKinds,
+                                        artifactPaths = mailboxSummary.artifactPaths,
+                                        artifactExcerpts = artifactContentValues
+                                      }),
+                                    Err message ->
+                                      evidencePackResultError message
+                                  },
                                 Err message ->
                                   evidencePackResultError message
                               },
@@ -1172,6 +2571,9 @@ contextPackFromEvidence evidence readyTasks managerActionValue =
   SwarmContextPack {
     task = evidence.task,
     readyTaskIds = map readyTaskId readyTasks,
+    dependencyTaskIds = evidence.dependencyTaskIds,
+    dependencyTaskStatuses = evidence.dependencyTaskStatuses,
+    dependencyTaskReady = evidence.dependencyTaskReady,
     managerAction = managerActionValue,
     mailboxSummary = evidence.mailboxSummary,
     taskMemoryMatches = evidence.taskMemoryMatches,
@@ -1630,6 +3032,18 @@ policySetForVerificationPlanWithAccess handle mergegateName requiredApprovals pl
 policySetForVerificationPlanWithCapabilities : TaskHandle -> Str -> [Str] -> VerificationPlan -> [Str] -> [Str] -> Str -> Result SwarmPolicy
 policySetForVerificationPlanWithCapabilities handle mergegateName requiredApprovals plan allowedProcesses allowedWorkspaceRoots networkAccess =
   policySetWithCapabilities handle mergegateName requiredApprovals plan.requiredVerifierNames allowedProcesses allowedWorkspaceRoots networkAccess
+
+policySetForVerificationPlanWithNetworkAccess : TaskHandle -> Str -> [Str] -> VerificationPlan -> [Str] -> [Str] -> Str -> [Str] -> Result SwarmPolicy
+policySetForVerificationPlanWithNetworkAccess handle mergegateName requiredApprovals plan allowedProcesses allowedWorkspaceRoots networkAccess allowedNetworkDestinations =
+  policySetWithNetworkAccess handle mergegateName requiredApprovals plan.requiredVerifierNames allowedProcesses allowedWorkspaceRoots networkAccess allowedNetworkDestinations
+
+policySetForVerificationPlanWithAccessPolicy : TaskHandle -> Str -> [Str] -> VerificationPlan -> SwarmAccessPolicy -> Result SwarmPolicy
+policySetForVerificationPlanWithAccessPolicy handle mergegateName requiredApprovals plan access =
+  policySetWithAccessPolicy handle mergegateName requiredApprovals plan.requiredVerifierNames access
+
+verificationPolicyForPlan : Str -> [Str] -> VerificationPlan -> SwarmAccessPolicy -> SwarmVerificationPolicy
+verificationPolicyForPlan mergegateName requiredApprovals plan access =
+  swarmVerificationPolicy mergegateName requiredApprovals plan.requiredVerifierNames access
 
 mergegateDecideVerificationPlan : TaskHandle -> Str -> VerificationPlan -> Result SwarmMergeDecision
 mergegateDecideVerificationPlan handle mergegateName plan =

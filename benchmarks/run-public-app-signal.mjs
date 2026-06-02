@@ -16,7 +16,7 @@ const projectRoot = path.resolve(".");
 const benchmarkRoot = path.join(projectRoot, "benchmarks");
 const defaultTaskSet = "app";
 const defaultHarness = "codex";
-const defaultModel = "gpt-5.4";
+const defaultModel = "gpt-5.5";
 const defaultMode = "raw-repo";
 const defaultWorkflowAssistance = "unspecified";
 const missingComparisonScoreValue = -100;
@@ -232,7 +232,7 @@ function shellQuote(value) {
 
 function buildAgentCommand(model) {
   const harnessPath = path.join(projectRoot, "benchmarks", "run-codex-harness.sh");
-  return `CODEX_MODEL=${shellQuote(model)} CODEX_REASONING_EFFORT=high bash ${shellQuote(harnessPath)} "$CLASP_BENCHMARK_PROMPT_FILE" "$CLASP_BENCHMARK_WORKSPACE"`;
+  return `CODEX_MODEL=${shellQuote(model)} CODEX_REASONING_EFFORT=${shellQuote(process.env.CODEX_REASONING_EFFORT || "xhigh")} bash ${shellQuote(harnessPath)} "$CLASP_BENCHMARK_PROMPT_FILE" "$CLASP_BENCHMARK_WORKSPACE"`;
 }
 
 async function runProcess(command, cwd, env, { allowFailure = false } = {}) {

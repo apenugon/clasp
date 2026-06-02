@@ -4,6 +4,43 @@ set -euo pipefail
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$project_root/scripts/clasp-swarm-common.sh"
 
+launch_profile="${CLASP_SWARM_PROFILE:-}"
+start_args=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --profile|--launch-profile)
+      if [[ $# -lt 2 ]]; then
+        printf 'clasp-swarm-start: %s requires a value\n' "$1" >&2
+        exit 2
+      fi
+      launch_profile="$2"
+      shift 2
+      ;;
+    --profile=*|--launch-profile=*)
+      launch_profile="${1#*=}"
+      shift
+      ;;
+    *)
+      start_args+=("$1")
+      shift
+      ;;
+  esac
+done
+set -- "${start_args[@]}"
+if [[ -n "$launch_profile" ]]; then
+  export CLASP_SWARM_PROFILE="$launch_profile"
+fi
+
+if [[ "${1:-}" == "--preflight" ]]; then
+  shift
+  exec bash "$project_root/scripts/clasp-swarm-preflight.sh" --include-repository-gate "$@"
+fi
+
+if [[ "${1:-}" == "--preflight-json" ]]; then
+  shift
+  exec bash "$project_root/scripts/clasp-swarm-preflight.sh" --json --include-repository-gate "$@"
+fi
+
 wave_name="${1:-$(clasp_swarm_default_wave)}"
 trunk_branch="${CLASP_SWARM_TRUNK_BRANCH:-agents/swarm-trunk}"
 main_branch="${CLASP_SWARM_MAIN_BRANCH:-main}"
@@ -12,13 +49,31 @@ allow_dirty="${CLASP_SWARM_ALLOW_DIRTY:-0}"
 batch_filter="${CLASP_SWARM_BATCH:-}"
 max_running_lanes="${CLASP_SWARM_MAX_RUNNING_LANES:-1}"
 lane_memory_mb="${CLASP_SWARM_LANE_MEMORY_MB:-8192}"
-min_available_memory_mb="${CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB:-40960}"
+min_available_memory_mb="${CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB:-45056}"
+min_available_disk_mb="${CLASP_SWARM_MIN_AVAILABLE_DISK_MB:-16384}"
+min_disk_headroom_mb="${CLASP_SWARM_MIN_DISK_HEADROOM_MB:-${CLASP_GENERATED_STATE_MIN_HEADROOM_MB:-1024}}"
 native_jobs_max="${CLASP_SWARM_NATIVE_JOBS_MAX:-1}"
 native_bundle_jobs="${CLASP_SWARM_NATIVE_BUNDLE_JOBS:-1}"
 native_image_section_jobs="${CLASP_SWARM_NATIVE_IMAGE_SECTION_JOBS:-1}"
 native_image_section_jobs_max="${CLASP_SWARM_NATIVE_IMAGE_SECTION_JOBS_MAX:-1}"
 native_image_module_decl_fresh_process="${CLASP_SWARM_NATIVE_IMAGE_MODULE_DECL_FRESH_PROCESS:-1}"
-native_export_host_idle_timeout_secs="${CLASP_SWARM_NATIVE_EXPORT_HOST_IDLE_TIMEOUT_SECS:-30}"
+native_image_module_decl_chunk_size="${CLASP_SWARM_NATIVE_IMAGE_MODULE_DECL_CHUNK_SIZE:-8}"
+native_export_host_idle_timeout_secs="${CLASP_SWARM_NATIVE_EXPORT_HOST_IDLE_TIMEOUT_SECS:-5}"
+
+apply_launch_profile() {
+  case "$launch_profile" in
+    ""|default)
+      ;;
+    bounded-low-memory)
+      lane_memory_mb=4096
+      min_available_memory_mb=32768
+      ;;
+    *)
+      printf 'clasp-swarm-start: unknown launch profile: %s\n' "$launch_profile" >&2
+      exit 2
+      ;;
+  esac
+}
 
 validate_non_negative_integer() {
   local name="$1"
@@ -34,6 +89,12 @@ available_memory_mb() {
   awk '/MemAvailable:/ { printf "%d\n", int($2 / 1024); found = 1 } END { if (!found) print 0 }' /proc/meminfo 2>/dev/null || printf '0\n'
 }
 
+available_disk_mb() {
+  df -Pm "$project_root" 2>/dev/null |
+    awk 'NR == 2 { printf "%d\n", $4; found = 1 } END { if (!found) print 0 }' ||
+    printf '0\n'
+}
+
 lane_runtime_is_running() {
   local runtime_root="$1"
   local job_file="$runtime_root/job"
@@ -47,7 +108,7 @@ lane_runtime_is_running() {
     if [[ -f "$job_dir/pid" && -f "$job_dir/status" ]]; then
       pid="$(tr -d '[:space:]' <"$job_dir/pid")"
       status="$(sed -n '1p' "$job_dir/status")"
-      if [[ "$status" != "completed" && "$status" != "failed" && "$status" != "stopped" ]] &&
+      if [[ -f "$pid_file" && "$status" != "completed" && "$status" != "failed" && "$status" != "stopped" ]] &&
          kill -0 "$pid" >/dev/null 2>&1; then
         return 0
       fi
@@ -79,14 +140,19 @@ running_lane_count_for_wave() {
   printf '%s\n' "$count"
 }
 
+apply_launch_profile
+
 validate_non_negative_integer "CLASP_SWARM_MAX_RUNNING_LANES" "$max_running_lanes"
 validate_non_negative_integer "CLASP_SWARM_LANE_MEMORY_MB" "$lane_memory_mb"
 validate_non_negative_integer "CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB" "$min_available_memory_mb"
+validate_non_negative_integer "CLASP_SWARM_MIN_AVAILABLE_DISK_MB" "$min_available_disk_mb"
+validate_non_negative_integer "CLASP_SWARM_MIN_DISK_HEADROOM_MB" "$min_disk_headroom_mb"
 validate_non_negative_integer "CLASP_SWARM_NATIVE_JOBS_MAX" "$native_jobs_max"
 validate_non_negative_integer "CLASP_SWARM_NATIVE_BUNDLE_JOBS" "$native_bundle_jobs"
 validate_non_negative_integer "CLASP_SWARM_NATIVE_IMAGE_SECTION_JOBS" "$native_image_section_jobs"
 validate_non_negative_integer "CLASP_SWARM_NATIVE_IMAGE_SECTION_JOBS_MAX" "$native_image_section_jobs_max"
 validate_non_negative_integer "CLASP_SWARM_NATIVE_IMAGE_MODULE_DECL_FRESH_PROCESS" "$native_image_module_decl_fresh_process"
+validate_non_negative_integer "CLASP_SWARM_NATIVE_IMAGE_MODULE_DECL_CHUNK_SIZE" "$native_image_module_decl_chunk_size"
 validate_non_negative_integer "CLASP_SWARM_NATIVE_EXPORT_HOST_IDLE_TIMEOUT_SECS" "$native_export_host_idle_timeout_secs"
 
 if [[ "${1:-}" == "--list-lanes" ]]; then
@@ -98,6 +164,7 @@ fi
 if [[ "${1:-}" == "--list-batches" ]]; then
   wave_name="${2:-$(clasp_swarm_default_wave)}"
   batch_labels=()
+  all_task_files=()
   while IFS= read -r lane_dir; do
     task_files=()
     task_files_output="$(clasp_swarm_task_files "$lane_dir")"
@@ -105,12 +172,14 @@ if [[ "${1:-}" == "--list-batches" ]]; then
       mapfile -t task_files <<< "$task_files_output"
     fi
 
-    for task_file in "${task_files[@]}"; do
-      batch_label="$(clasp_swarm_task_batch_label "$task_file")"
-      [[ -n "$batch_label" ]] || continue
-      batch_labels+=("$batch_label")
-    done
+    all_task_files+=("${task_files[@]}")
   done < <(clasp_swarm_lane_dirs "$wave_name" "$project_root")
+  if [[ "${#all_task_files[@]}" -gt 0 ]]; then
+    batch_labels_output="$(clasp_swarm_task_batch_labels "${all_task_files[@]}")"
+    if [[ -n "$batch_labels_output" ]]; then
+      mapfile -t batch_labels <<< "$batch_labels_output"
+    fi
+  fi
   if [[ "${#batch_labels[@]}" -gt 0 ]]; then
     printf '%s\n' "${batch_labels[@]}" | sort -u
   fi
@@ -151,18 +220,19 @@ running_lanes="$(running_lane_count_for_wave)"
 while IFS= read -r lane_dir; do
   if [[ -n "$batch_filter" ]]; then
     lane_has_batch=0
+    batch_labels_output=""
     task_files=()
     task_files_output="$(clasp_swarm_task_files "$lane_dir")"
     if [[ -n "$task_files_output" ]]; then
       mapfile -t task_files <<< "$task_files_output"
     fi
 
-    for task_file in "${task_files[@]}"; do
-      if [[ "$(clasp_swarm_task_batch_label "$task_file")" == "$batch_filter" ]]; then
+    if [[ "${#task_files[@]}" -gt 0 ]]; then
+      batch_labels_output="$(clasp_swarm_task_batch_labels "${task_files[@]}")"
+      if grep -Fxq "$batch_filter" <<< "$batch_labels_output"; then
         lane_has_batch=1
-        break
       fi
-    done
+    fi
 
     if [[ "$lane_has_batch" != "1" ]]; then
       continue
@@ -185,7 +255,7 @@ while IFS= read -r lane_dir; do
     if [[ -f "$job_dir/pid" && -f "$job_dir/status" ]]; then
       pid="$(tr -d '[:space:]' <"$job_dir/pid")"
       status="$(sed -n '1p' "$job_dir/status")"
-      if [[ "$status" != "completed" && "$status" != "failed" && "$status" != "stopped" ]] &&
+      if [[ -f "$pid_file" && "$status" != "completed" && "$status" != "failed" && "$status" != "stopped" ]] &&
          kill -0 "$pid" >/dev/null 2>&1; then
         echo "lane $lane_name already running with managed job pid $pid"
         continue
@@ -240,6 +310,22 @@ while IFS= read -r lane_dir; do
     fi
   fi
 
+  if (( min_available_disk_mb > 0 )); then
+    disk_available_mb="$(available_disk_mb)"
+    if (( disk_available_mb < min_available_disk_mb )); then
+      echo "resource guard: not starting lane=$lane_name; available_disk_mb=$disk_available_mb min_available_disk_mb=$min_available_disk_mb"
+      continue
+    fi
+  fi
+  if (( min_disk_headroom_mb > 0 )); then
+    disk_available_mb="$(available_disk_mb)"
+    disk_headroom_mb="$((disk_available_mb - min_available_disk_mb))"
+    if (( disk_headroom_mb < min_disk_headroom_mb )); then
+      echo "resource guard: not starting lane=$lane_name; available_disk_mb=$disk_available_mb min_available_disk_mb=$min_available_disk_mb disk_headroom_mb=$disk_headroom_mb min_disk_headroom_mb=$min_disk_headroom_mb"
+      continue
+    fi
+  fi
+
   managed_job_args=(
     "$project_root/scripts/run-managed-job.sh"
     --jobs-root "$runtime_root/jobs"
@@ -250,20 +336,56 @@ while IFS= read -r lane_dir; do
   if (( min_available_memory_mb > 0 )); then
     managed_job_args+=(--min-available-memory-mb "$min_available_memory_mb")
   fi
+  if (( min_available_disk_mb > 0 )); then
+    managed_job_args+=(--min-available-disk-mb "$min_available_disk_mb" --disk-reserve-path "$project_root")
+  fi
+  if (( min_disk_headroom_mb > 0 )); then
+    managed_job_args+=(--min-disk-headroom-mb "$min_disk_headroom_mb" --disk-reserve-path "$project_root")
+  fi
 
   job_dir="$(
     "${managed_job_args[@]}" \
-      -- bash -c 'log_file="$1"; shift; exec "$@" >>"$log_file" 2>&1' \
-        managed-swarm-lane "$log_file" \
+      -- bash -c '
+        log_file="$1"
+        pid_file="$2"
+        shift 2
+        cleanup() {
+          rm -f "$pid_file"
+        }
+        trap cleanup EXIT
+        "$@" >>"$log_file" 2>&1
+      ' \
+        managed-swarm-lane "$log_file" "$pid_file" \
         env CLASP_SWARM_BATCH="$batch_filter" \
+        CLASP_SWARM_CHILD_MEMORY_MB="${CLASP_SWARM_CHILD_MEMORY_MB:-$lane_memory_mb}" \
+        CLASP_SWARM_CHILD_MIN_AVAILABLE_MEMORY_MB="${CLASP_SWARM_CHILD_MIN_AVAILABLE_MEMORY_MB:-$min_available_memory_mb}" \
+        CLASP_SWARM_CHILD_MIN_AVAILABLE_DISK_MB="${CLASP_SWARM_CHILD_MIN_AVAILABLE_DISK_MB:-$min_available_disk_mb}" \
+        CLASP_SWARM_CHILD_MIN_DISK_HEADROOM_MB="${CLASP_SWARM_CHILD_MIN_DISK_HEADROOM_MB:-$min_disk_headroom_mb}" \
         CLASP_NATIVE_JOBS_MAX="$native_jobs_max" \
         CLASP_NATIVE_BUNDLE_JOBS="$native_bundle_jobs" \
         CLASP_NATIVE_IMAGE_SECTION_JOBS="$native_image_section_jobs" \
         CLASP_NATIVE_IMAGE_SECTION_JOBS_MAX="$native_image_section_jobs_max" \
         CLASP_NATIVE_IMAGE_MODULE_DECL_FRESH_PROCESS="$native_image_module_decl_fresh_process" \
+        CLASP_NATIVE_IMAGE_MODULE_DECL_CHUNK_SIZE="$native_image_module_decl_chunk_size" \
         CLASP_NATIVE_EXPORT_HOST_IDLE_TIMEOUT_SECS="$native_export_host_idle_timeout_secs" \
         bash "$project_root/scripts/clasp-swarm-lane.sh" "$lane_dir"
   )"
+  if clasp_swarm_wait_managed_job_immediate_terminal_status "$job_dir"; then
+    job_status="$(clasp_swarm_managed_job_status "$job_dir")"
+    job_exit_status="$(clasp_swarm_managed_job_exit_status "$job_dir")"
+    if [[ "$job_status" == "completed" && "${job_exit_status:-0}" == "0" ]]; then
+      if [[ -n "$batch_filter" ]]; then
+        echo "lane=$lane_name batch=$batch_filter completed before launch settled job=$job_dir log=$log_file"
+      else
+        echo "lane=$lane_name completed before launch settled job=$job_dir log=$log_file"
+      fi
+    else
+      echo "resource guard: not starting lane=$lane_name; managed_job_status=${job_status:-unknown} managed_job_exit_status=${job_exit_status:-unknown} job=$job_dir"
+      clasp_swarm_print_managed_job_terminal_report "lane=$lane_name" "$job_dir"
+    fi
+    rm -f "$job_file" "$pid_file"
+    continue
+  fi
   pid="$(tr -d '[:space:]' <"$job_dir/pid")"
   printf '%s\n' "$job_dir" > "$job_file"
   printf '%s\n' "$pid" > "$pid_file"

@@ -1,0 +1,10 @@
+module Compiler.Checker.ModuleEnv
+
+import Compiler.Ast
+import Compiler.Checker.Bindings
+import Compiler.Checker.Builtins
+import Compiler.Checker.Types
+
+moduleInitialEnv : [TypeBinding] -> HostedModuleAst -> [HostedTypeDeclAst] -> [TypeBinding]
+moduleInitialEnv importedBindings modl typeDecls =
+  append baseEnv (append (collectConstructorBindings typeDecls) (append (collectForeignBindings modl) (append (collectAnnotatedBindings modl) importedBindings)))

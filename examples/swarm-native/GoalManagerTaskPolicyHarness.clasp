@@ -1,0 +1,150 @@
+module Main
+
+record GoalManagerTaskPolicyReport = {
+  approvalName : Str,
+  mergegateName : Str,
+  requiredApprovals : [Str],
+  requiredVerifiers : [Str],
+  allowedProcesses : [Str],
+  allowedWorkspaceRoots : [Str],
+  allowedReadonlyRoots : [Str],
+  networkAccess : Str,
+  allowedNetworkDestinations : [Str]
+}
+
+record SwarmAccessPolicy = {
+  allowedProcesses : [Str],
+  allowedWorkspaceRoots : [Str],
+  allowedReadonlyRoots : [Str],
+  networkAccess : Str,
+  allowedNetworkDestinations : [Str]
+}
+
+record SwarmVerificationPolicy = {
+  mergegateName : Str,
+  requiredApprovals : [Str],
+  requiredVerifiers : [Str],
+  access : SwarmAccessPolicy
+}
+
+emptyTexts : [Str]
+emptyTexts = []
+
+swarmNetworkAmbient : Str
+swarmNetworkAmbient = "ambient"
+
+swarmNetworkAllowlisted : Str
+swarmNetworkAllowlisted = "allowlisted"
+
+readEnvText : Str -> Str -> Str
+readEnvText name fallback = match envVar name {
+  Ok raw -> if raw == "" then fallback else decode Str raw,
+  Err message -> fallback
+}
+
+readEnvTextList : Str -> [Str] -> [Str]
+readEnvTextList name fallback = match envVar name {
+  Ok raw -> if raw == "" then fallback else decode [Str] raw,
+  Err message -> fallback
+}
+
+swarmAccessPolicy : [Str] -> [Str] -> Str -> SwarmAccessPolicy
+swarmAccessPolicy allowedProcesses allowedWorkspaceRoots networkAccess =
+  SwarmAccessPolicy {
+    allowedProcesses = allowedProcesses,
+    allowedWorkspaceRoots = allowedWorkspaceRoots,
+    allowedReadonlyRoots = [],
+    networkAccess = networkAccess,
+    allowedNetworkDestinations = []
+  }
+
+swarmAccessPolicyWithNetworkDestinations : [Str] -> [Str] -> Str -> [Str] -> SwarmAccessPolicy
+swarmAccessPolicyWithNetworkDestinations allowedProcesses allowedWorkspaceRoots networkAccess allowedNetworkDestinations =
+  SwarmAccessPolicy {
+    allowedProcesses = allowedProcesses,
+    allowedWorkspaceRoots = allowedWorkspaceRoots,
+    allowedReadonlyRoots = [],
+    networkAccess = networkAccess,
+    allowedNetworkDestinations = allowedNetworkDestinations
+  }
+
+swarmAccessPolicyWithReadonlyRoots : [Str] -> [Str] -> [Str] -> Str -> [Str] -> SwarmAccessPolicy
+swarmAccessPolicyWithReadonlyRoots allowedProcesses allowedWorkspaceRoots allowedReadonlyRoots networkAccess allowedNetworkDestinations =
+  SwarmAccessPolicy {
+    allowedProcesses = allowedProcesses,
+    allowedWorkspaceRoots = allowedWorkspaceRoots,
+    allowedReadonlyRoots = allowedReadonlyRoots,
+    networkAccess = networkAccess,
+    allowedNetworkDestinations = allowedNetworkDestinations
+  }
+
+swarmVerificationPolicy : Str -> [Str] -> [Str] -> SwarmAccessPolicy -> SwarmVerificationPolicy
+swarmVerificationPolicy mergegateName requiredApprovals requiredVerifiers access =
+  SwarmVerificationPolicy {
+    mergegateName = mergegateName,
+    requiredApprovals = requiredApprovals,
+    requiredVerifiers = requiredVerifiers,
+    access = access
+  }
+
+plannedTaskApprovalName : Str
+plannedTaskApprovalName =
+  readEnvText "CLASP_MANAGER_TASK_APPROVAL_JSON" "merge-ready"
+
+plannedTaskMergegateName : Str
+plannedTaskMergegateName =
+  readEnvText "CLASP_MANAGER_TASK_MERGEGATE_JSON" "trunk"
+
+plannedTaskRequiredApprovals : [Str]
+plannedTaskRequiredApprovals =
+  readEnvTextList "CLASP_MANAGER_TASK_REQUIRED_APPROVALS_JSON" [plannedTaskApprovalName]
+
+plannedTaskRequiredVerifiers : [Str]
+plannedTaskRequiredVerifiers =
+  readEnvTextList "CLASP_MANAGER_TASK_REQUIRED_VERIFIERS_JSON" emptyTexts
+
+plannedTaskAllowedProcesses : [Str]
+plannedTaskAllowedProcesses =
+  readEnvTextList "CLASP_MANAGER_TASK_ALLOWED_PROCESSES_JSON" emptyTexts
+
+plannedTaskAllowedWorkspaceRoots : [Str]
+plannedTaskAllowedWorkspaceRoots =
+  readEnvTextList "CLASP_MANAGER_TASK_ALLOWED_WORKSPACE_ROOTS_JSON" emptyTexts
+
+plannedTaskAllowedReadonlyRoots : [Str]
+plannedTaskAllowedReadonlyRoots =
+  readEnvTextList "CLASP_MANAGER_TASK_ALLOWED_READONLY_ROOTS_JSON" emptyTexts
+
+plannedTaskAllowedNetworkDestinations : [Str]
+plannedTaskAllowedNetworkDestinations =
+  readEnvTextList "CLASP_MANAGER_TASK_ALLOWED_NETWORK_DESTINATIONS_JSON" emptyTexts
+
+plannedTaskNetworkAccess : Str
+plannedTaskNetworkAccess =
+  readEnvText "CLASP_MANAGER_TASK_NETWORK_ACCESS_JSON" (if length plannedTaskAllowedNetworkDestinations > 0 then swarmNetworkAllowlisted else swarmNetworkAmbient)
+
+plannedTaskAccessPolicy : SwarmAccessPolicy
+plannedTaskAccessPolicy =
+  swarmAccessPolicyWithReadonlyRoots plannedTaskAllowedProcesses plannedTaskAllowedWorkspaceRoots plannedTaskAllowedReadonlyRoots plannedTaskNetworkAccess plannedTaskAllowedNetworkDestinations
+
+plannedTaskVerificationPolicy : SwarmVerificationPolicy
+plannedTaskVerificationPolicy =
+  swarmVerificationPolicy plannedTaskMergegateName plannedTaskRequiredApprovals plannedTaskRequiredVerifiers plannedTaskAccessPolicy
+
+main : Str
+main = {
+  let policy = plannedTaskVerificationPolicy in
+  let access = policy.access in
+  encode
+    (GoalManagerTaskPolicyReport {
+      approvalName = plannedTaskApprovalName,
+      mergegateName = policy.mergegateName,
+      requiredApprovals = policy.requiredApprovals,
+      requiredVerifiers = policy.requiredVerifiers,
+      allowedProcesses = access.allowedProcesses,
+      allowedWorkspaceRoots = access.allowedWorkspaceRoots,
+      allowedReadonlyRoots = access.allowedReadonlyRoots,
+      networkAccess = access.networkAccess,
+      allowedNetworkDestinations = access.allowedNetworkDestinations
+    })
+}

@@ -1,0 +1,25 @@
+module Compiler.Checker.Equality
+
+import Compiler.Checker.Types
+
+supportsHostedEquality : TypeText -> Bool
+supportsHostedEquality typ = match typ {
+  TInt ->
+    true,
+  TStr ->
+    true,
+  TBool ->
+    true,
+  TList itemType ->
+    false,
+  TFunction inputType resultType ->
+    false,
+  TNamed label ->
+    false,
+  TApply label args ->
+    false,
+  TVar label ->
+    false,
+  TUnknown label ->
+    false
+}

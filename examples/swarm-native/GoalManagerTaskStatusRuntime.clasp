@@ -41,6 +41,7 @@ childLoopLaunchMonitorSpec taskId =
     childLoopAwaitTimeoutMs
     0
     999999
+    0
     emptyTexts
 
 childLoopLaunchOutcome : Str -> MonitoredLoopOutcome
@@ -56,6 +57,8 @@ childLoopLaunchState taskId = {
     watchedProcessError outcome.message
   else if outcome.status == "retry-exhausted" then
     watchedProcessError outcome.message
+  else if outcome.status == "output-limit" then
+    watchedProcessError "output-limit"
   else
     Ok outcome.process
 }
@@ -112,6 +115,8 @@ childLoopLaunchCompleted taskId = {
   if outcome.status == "completed-pass" then
     true
   else if outcome.status == "completed-fail" then
+    true
+  else if outcome.status == "output-limit" then
     true
   else if outcome.status == "running" then
     if childLoopLaunchHeartbeatStale outcome.process then

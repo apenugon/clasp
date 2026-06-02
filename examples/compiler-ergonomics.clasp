@@ -24,6 +24,7 @@ record ErgonomicsSnapshot = {
   queueCount : Int,
   blockerCount : Int,
   boxValue : Str,
+  loopSummary : Str,
   summary : Str
 }
 
@@ -61,6 +62,16 @@ statusBox value = Box { value = value }
 
 readBox : Box Str -> Str
 readBox box = box.value
+
+renderTargets : [Str] -> [Str]
+renderTargets targets = {
+  let mut rendered = [];
+  for target in targets {
+    let label = textConcat [target, "!"] in rendered = append rendered [label];
+    rendered
+  };
+  rendered
+}
 
 lookupStatus : Str -> Dict Str Str -> Str
 lookupStatus taskId statuses = match dictGet taskId statuses {
@@ -102,6 +113,7 @@ snapshot = {
     queueCount = length state.queue,
     blockerCount = length blockers,
     boxValue = readBox (statusBox status),
+    loopSummary = textJoin "," (renderTargets ["alpha", "beta"]),
     summary = textJoin ":" [taskId, status, lookupStatus taskId state.statuses, if length blockers == 0 then "unblocked" else "blocked"]
   }
 }

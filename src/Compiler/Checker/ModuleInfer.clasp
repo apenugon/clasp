@@ -1,0 +1,25 @@
+module Compiler.Checker.ModuleInfer
+
+import Compiler.Ast
+import Compiler.Checker.Builtins
+import Compiler.Checker.ModuleEnv
+import Compiler.Checker.ModulePass
+import Compiler.Checker.ModuleValidation
+import Compiler.Checker.Types
+
+inferModuleBindings : HostedModuleAst -> InferModuleResult
+inferModuleBindings modl = inferModuleBindingsWithImportedBindings emptyTypeBindings modl
+
+inferModuleBindingsWithImportedBindings : [TypeBinding] -> HostedModuleAst -> InferModuleResult
+inferModuleBindingsWithImportedBindings importedBindings modl = {
+  let validationError = moduleValidationError modl;
+  if validationError == "" then {
+    let typeDecls = effectiveModuleTypeDecls modl;
+    let recordDecls = effectiveModuleRecordDecls modl;
+    let resolvedEnv = resolveInferModuleBindings typeDecls recordDecls (moduleInitialEnv importedBindings modl typeDecls) (moduleDeclarations modl);
+    let failure = findInferModuleFailure typeDecls recordDecls resolvedEnv (moduleDeclarations modl);
+    if failure == "" then InferredModule resolvedEnv else InferModuleError failure
+  } else {
+    InferModuleError validationError
+  }
+}

@@ -27,7 +27,7 @@ if [[ -f "$job_file" ]]; then
   if [[ -f "$job_dir/status" ]]; then
     job_status="$(sed -n '1p' "$job_dir/status")"
   fi
-  if [[ -n "$pid" && "$job_status" != "completed" && "$job_status" != "failed" && "$job_status" != "stopped" ]] &&
+  if [[ -f "$pid_file" && -n "$pid" && "$job_status" != "completed" && "$job_status" != "failed" && "$job_status" != "stopped" ]] &&
      kill -0 "$pid" >/dev/null 2>&1; then
     echo "status: running"
     echo "pid: $pid"

@@ -13,7 +13,7 @@ goal_manager_shared_cache_root="${CLASP_GOAL_MANAGER_SHARED_CACHE_PROJECT_ROOT:-
 goal_manager_default_binary_cache="${CLASP_GOAL_MANAGER_GLOBAL_CACHE_DIR:-/tmp/clasp-nix-cache/goal-manager-fast}"
 goal_manager_build_cache_dir="${CLASP_GOAL_MANAGER_CACHE_DIR:-$goal_manager_default_binary_cache}"
 goal_manager_build_xdg_cache_home="${CLASP_GOAL_MANAGER_BUILD_XDG_CACHE_HOME:-$goal_manager_shared_cache_root/.clasp-loops/.cache/goal-manager-fast/xdg-cache}"
-export CLASP_GOAL_MANAGER_COMPILE_TIMEOUT_SECS="${CLASP_GOAL_MANAGER_COMPILE_TIMEOUT_SECS:-180}"
+export CLASP_GOAL_MANAGER_COMPILE_TIMEOUT_SECS="${CLASP_GOAL_MANAGER_COMPILE_TIMEOUT_SECS:-0}"
 export CLASP_GOAL_MANAGER_COMPILE_ATTEMPTS="${CLASP_GOAL_MANAGER_COMPILE_ATTEMPTS:-2}"
 export CLASP_GOAL_MANAGER_ALLOW_STALE_ON_COMPILE_FAILURE="${CLASP_GOAL_MANAGER_ALLOW_STALE_ON_COMPILE_FAILURE:-1}"
 
@@ -157,7 +157,6 @@ stop_goal_manager_service() {
   rm -f "$state_root/service/supervisor.lock"
 }
 
-claspc_bin="$("$project_root/scripts/resolve-claspc.sh")"
 fake_codex_bin="$test_root_abs/codex"
 fake_child_claspc_bin="$test_root_abs/fake-claspc"
 fake_passing_benchmark_bin="$test_root_abs/fake-benchmark-passing"
@@ -170,6 +169,11 @@ goal_manager_binary_fresh=1
 grep -F 'plannerPromptFor wave benchmarkSummary' "$project_root/examples/swarm-native/GoalManagerBootstrapPlanner.clasp" >/dev/null
 grep -F 'import GoalManagerServiceMain' "$goal_manager_wrapper_source" >/dev/null
 grep -F 'runManagedServiceBootstrap' "$goal_manager_monolithic_source" >/dev/null
+grep -F 'run-managed-job may write memory-exceeded/disk-exceeded before finalizing' "$project_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
+grep -F 'exit_status=137' "$project_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
+grep -F 'wait_for_goal_manager_compile_memory_reserve' "$project_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
+grep -F 'CLASP_MANAGED_JOB_MAX_MEMORY_MB="${CLASP_MANAGED_JOB_MAX_MEMORY_MB:-$compile_memory_mb}"' "$project_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
+grep -F 'CLASP_NATIVE_IMAGE_MODULE_DECL_CHUNK_SIZE="$goal_manager_native_image_module_decl_chunk_size"' "$project_root/scripts/ensure-goal-manager-binary.sh" >/dev/null
 mkdir -p "$test_root_abs/bin"
 
 fake_ensure_claspc_bin="$test_root_abs/fake-ensure-claspc"
@@ -222,11 +226,16 @@ chmod +x "$fake_ensure_claspc_bin"
 
 ensure_probe_cache="$test_root_abs/ensure-goal-manager-cache"
 ensure_probe_alias="$test_root_abs/ensure-goal-manager-alias/swarm-goal-manager"
+ensure_probe_compile_memory_mb="${CLASP_GOAL_MANAGER_FAST_CACHE_PROBE_COMPILE_MEMORY_MB:-64}"
+ensure_probe_min_available_memory_mb="${CLASP_GOAL_MANAGER_FAST_CACHE_PROBE_MIN_AVAILABLE_MEMORY_MB:-0}"
 mkdir -p "$(dirname "$ensure_probe_alias")"
 printf '#!/usr/bin/env bash\nexit 42\n' >"$ensure_probe_alias"
 chmod +x "$ensure_probe_alias"
 ensure_probe_binary_one="$(
   CLASP_TEST_FAKE_ENSURE_CLASPC_LOG="$fake_ensure_log" \
+    CLASP_GOAL_MANAGER_COMPILE_MANAGED=0 \
+    CLASP_GOAL_MANAGER_COMPILE_MEMORY_MB="$ensure_probe_compile_memory_mb" \
+    CLASP_GOAL_MANAGER_COMPILE_MIN_AVAILABLE_MEMORY_MB="$ensure_probe_min_available_memory_mb" \
     CLASP_GOAL_MANAGER_CLASPC_BIN="$fake_ensure_claspc_bin" \
     CLASP_GOAL_MANAGER_CACHE_DIR="$ensure_probe_cache" \
     "$project_root/scripts/ensure-goal-manager-binary.sh" \
@@ -234,6 +243,9 @@ ensure_probe_binary_one="$(
 )"
 ensure_probe_binary_two="$(
   CLASP_TEST_FAKE_ENSURE_CLASPC_LOG="$fake_ensure_log" \
+    CLASP_GOAL_MANAGER_COMPILE_MANAGED=0 \
+    CLASP_GOAL_MANAGER_COMPILE_MEMORY_MB="$ensure_probe_compile_memory_mb" \
+    CLASP_GOAL_MANAGER_COMPILE_MIN_AVAILABLE_MEMORY_MB="$ensure_probe_min_available_memory_mb" \
     CLASP_GOAL_MANAGER_CLASPC_BIN="$fake_ensure_claspc_bin" \
     CLASP_GOAL_MANAGER_CACHE_DIR="$ensure_probe_cache" \
     "$project_root/scripts/ensure-goal-manager-binary.sh"
@@ -250,7 +262,10 @@ grep -F '"kind": "clasp-goal-manager-binary"' "$ensure_probe_binary_one.metadata
 
 ensure_probe_binary_build_mode="$(
   CLASP_TEST_FAKE_ENSURE_CLASPC_LOG="$fake_ensure_log" \
-    CLASP_NATIVE_IMAGE_MONOLITHIC_DECL_THRESHOLD=1 \
+    CLASP_NATIVE_IMAGE_MONOLITHIC_DECL_THRESHOLD=2 \
+    CLASP_GOAL_MANAGER_COMPILE_MANAGED=0 \
+    CLASP_GOAL_MANAGER_COMPILE_MEMORY_MB="$ensure_probe_compile_memory_mb" \
+    CLASP_GOAL_MANAGER_COMPILE_MIN_AVAILABLE_MEMORY_MB="$ensure_probe_min_available_memory_mb" \
     CLASP_GOAL_MANAGER_CLASPC_BIN="$fake_ensure_claspc_bin" \
     CLASP_GOAL_MANAGER_CACHE_DIR="$ensure_probe_cache" \
     "$project_root/scripts/ensure-goal-manager-binary.sh" \
@@ -259,11 +274,14 @@ ensure_probe_binary_build_mode="$(
 [[ "$ensure_probe_binary_build_mode" != "$ensure_probe_binary_one" ]]
 [[ "$(grep -c '^compile-source=' "$fake_ensure_log")" == "2" ]]
 cmp -s "$ensure_probe_binary_build_mode" "$ensure_probe_alias"
-"$ensure_probe_alias" | grep -F 'compiled-threshold=1' >/dev/null
+"$ensure_probe_alias" | grep -F 'compiled-threshold=2' >/dev/null
 
 ensure_probe_monolithic_binary="$(
   CLASP_TEST_FAKE_ENSURE_CLASPC_LOG="$fake_ensure_log" \
     CLASP_GOAL_MANAGER_SOURCE="$goal_manager_monolithic_source" \
+    CLASP_GOAL_MANAGER_COMPILE_MANAGED=0 \
+    CLASP_GOAL_MANAGER_COMPILE_MEMORY_MB="$ensure_probe_compile_memory_mb" \
+    CLASP_GOAL_MANAGER_COMPILE_MIN_AVAILABLE_MEMORY_MB="$ensure_probe_min_available_memory_mb" \
     CLASP_GOAL_MANAGER_CLASPC_BIN="$fake_ensure_claspc_bin" \
     CLASP_GOAL_MANAGER_CACHE_DIR="$ensure_probe_cache" \
     "$project_root/scripts/ensure-goal-manager-binary.sh"
@@ -281,6 +299,8 @@ if [[ "${CLASP_GOAL_MANAGER_FAST_CACHE_PROBE_ONLY:-0}" == "1" ]]; then
   printf 'goal-manager-fast-cache-probe-ok\n'
   exit 0
 fi
+
+claspc_bin="$("$project_root/scripts/resolve-claspc.sh")"
 
 cat >"$fake_codex_bin" <<'EOF'
 #!/usr/bin/env bash
@@ -800,6 +820,8 @@ run_manager_binary() {
     -u CLASP_RT_SERVICE_ROOT_JSON \
     -u CLASP_RT_SERVICE_SUPERVISED_JSON \
     XDG_CACHE_HOME="$state_root/host-xdg-cache" \
+    CLASP_ALLOW_UNMANAGED_AGENT_RUNTIME=1 \
+    CLASP_TEST_CODEX_MODE=builder \
     CLASP_TEST_FAKE_CODEX_SLEEP_SECS="${CLASP_TEST_FAKE_CODEX_SLEEP_SECS:-0.05}" \
     CLASP_LOOP_CODEX_BIN_JSON="\"$fake_codex_bin\"" \
     CLASP_LOOP_WORKSPACE_JSON="\"$workspace_root\"" \
@@ -878,6 +900,8 @@ run_goal_manager_status_with_binary() {
     -u CLASP_RT_SERVICE_ROOT_JSON \
     -u CLASP_RT_SERVICE_SUPERVISED_JSON \
     XDG_CACHE_HOME="$state_root/host-xdg-cache" \
+    CLASP_ALLOW_UNMANAGED_AGENT_RUNTIME=1 \
+    CLASP_TEST_CODEX_MODE=builder \
     CLASP_TEST_FAKE_CODEX_SLEEP_SECS="${CLASP_TEST_FAKE_CODEX_SLEEP_SECS:-0.05}" \
     CLASP_LOOP_CODEX_BIN_JSON="\"$fake_codex_bin\"" \
     CLASP_LOOP_WORKSPACE_JSON="\"$workspace_root\"" \
@@ -1837,10 +1861,10 @@ cat >"$stale_child_loop/state.json" <<'JSON'
 {"attempt":1,"phase":"builder-running","verdict":"pending","completed":false,"builderRuns":1,"verifierRuns":0,"healthy":true,"needsAttention":false,"attentionReason":"","final":false}
 JSON
 cat >"$stale_child_loop/loop.process.heartbeat.json" <<JSON
-{"completed":false,"exitCode":-1,"heartbeatPath":"$stale_child_loop/loop.process.heartbeat.json","pid":$$,"running":true,"stderrPath":"$stale_child_loop/loop.stderr.log","stdoutPath":"$stale_child_loop/loop.stdout.log","updatedAtMs":0}
+{"completed":false,"error":"","exitCode":-1,"heartbeatPath":"$stale_child_loop/loop.process.heartbeat.json","outputLimitBytes":4194304,"pid":$$,"running":true,"status":"running","stderrPath":"$stale_child_loop/loop.stderr.log","stderrTruncated":false,"stdoutPath":"$stale_child_loop/loop.stdout.log","stdoutTruncated":false,"timedOut":false,"updatedAtMs":0}
 JSON
 cat >"$stale_child_loop/builder-1.heartbeat.json" <<JSON
-{"completed":true,"exitCode":-1,"heartbeatPath":"$stale_child_loop/builder-1.heartbeat.json","pid":0,"running":false,"stderrPath":"$stale_child_loop/builder-1.stderr.log","stdoutPath":"$stale_child_loop/builder-1.stdout.jsonl","updatedAtMs":0}
+{"completed":true,"error":"","exitCode":-1,"heartbeatPath":"$stale_child_loop/builder-1.heartbeat.json","outputLimitBytes":4194304,"pid":0,"running":false,"status":"completed-fail","stderrPath":"$stale_child_loop/builder-1.stderr.log","stderrTruncated":false,"stdoutPath":"$stale_child_loop/builder-1.stdout.jsonl","stdoutTruncated":false,"timedOut":false,"updatedAtMs":0}
 JSON
 touch "$stale_child_loop/loop.stderr.log" "$stale_child_loop/loop.stdout.log" "$stale_child_loop/builder-1.stderr.log" "$stale_child_loop/builder-1.stdout.jsonl"
 run_goal_manager "$stale_child_state" "$stale_child_workspace" \
@@ -2298,7 +2322,7 @@ stale_output="$test_root_abs/stale-service-output.txt"
 mkdir -p "$stale_service_workspace" "$stale_run_root"
 
 cat >"$stale_heartbeat" <<JSON
-{"completed":false,"exitCode":-1,"heartbeatPath":"$stale_heartbeat","pid":0,"running":true,"stderrPath":"$stale_run_root/service.stderr.log","stdoutPath":"$stale_run_root/service.stdout.log","updatedAtMs":0}
+{"completed":false,"error":"","exitCode":-1,"heartbeatPath":"$stale_heartbeat","outputLimitBytes":4194304,"pid":0,"running":true,"status":"running","stderrPath":"$stale_run_root/service.stderr.log","stderrTruncated":false,"stdoutPath":"$stale_run_root/service.stdout.log","stdoutTruncated":false,"timedOut":false,"updatedAtMs":0}
 JSON
 cat >"$stale_service_root/service.json" <<JSON
 {"exitCode":-1,"generation":99,"heartbeatPath":"$stale_heartbeat","ownerPid":0,"serviceId":"goal-manager","serviceRoot":"$stale_service_root","snapshotPath":"","status":"active","transactionPath":"$stale_service_root/supervisor.config.json","updatedAtMs":0}

@@ -1,0 +1,130 @@
+module HostResourcesHarness
+
+import HostResources
+
+record HostResourcesReport = {
+  availableMb : Int,
+  availableError : Str,
+  reserveZero : Bool,
+  reserveOne : Bool,
+  invalidPathError : Str,
+  fileSizeMb : Int,
+  fileSizeError : Str,
+  missingFileSizeError : Str,
+  capFileSizeMb : Int,
+  capFileError : Str,
+  availableMemoryMb : Int,
+  availableMemoryError : Str,
+  memoryReserveZero : Bool,
+  memoryReserveOne : Bool,
+  livePidAlive : Bool,
+  invalidPidAlive : Bool,
+  processName : Str,
+  processNameCount : Int,
+  unmanagedProcessNameCount : Int,
+  unmanagedProcessNameRssMb : Int,
+  missingProcessNameCount : Int
+}
+
+readEnvText : Str -> Str -> Str
+readEnvText name fallback = match envVar name {
+  Ok raw -> if raw == "" then fallback else raw,
+  Err message -> fallback
+}
+
+main : Str
+main =
+  let availableResult = hostAvailableDiskMb "/" in
+  let reserveZeroResult = hostDiskReserveMet "/" 0 in
+  let reserveOneResult = hostDiskReserveMet "/" 1 in
+  let invalidPathResult = hostAvailableDiskMb "/definitely-not-a-clasp-host-resource-path" in
+  let fileSizePath = readEnvText "CLASP_HOST_RESOURCES_FILE_SIZE_PATH" "" in
+  let fileSizeResult = if fileSizePath == "" then Err "missing-fixture-path" else hostFileSizeMb fileSizePath in
+  let capFileResult = if fileSizePath == "" then Err "missing-fixture-path" else hostCapFileTailMb fileSizePath 1 in
+  let missingFileSizeResult = hostFileSizeMb "/definitely-not-a-clasp-host-resource-file" in
+  let availableMemoryResult = hostAvailableMemoryMb in
+  let memoryReserveZeroResult = hostMemoryReserveMet 0 in
+  let memoryReserveOneResult = hostMemoryReserveMet 1 in
+  let livePid = readEnvText "CLASP_HOST_RESOURCES_LIVE_PID" "" in
+  let processName = readEnvText "CLASP_HOST_RESOURCES_PROCESS_NAME" "definitely-not-a-clasp-process-name" in
+  let processNameCountResult = hostProcessCountByName [processName] in
+  let unmanagedProcessNameCountResult = hostUnmanagedProcessCountByName [processName] in
+  let unmanagedProcessNameRssMbResult = hostUnmanagedProcessRssMbByName [processName] in
+  let missingProcessNameCountResult = hostProcessCountByName ["definitely-not-a-clasp-process-name"] in
+  encode (HostResourcesReport {
+    availableMb = match availableResult {
+      Ok value -> value,
+      Err message -> 0
+    },
+    availableError = match availableResult {
+      Ok value -> "",
+      Err message -> message
+    },
+    reserveZero = match reserveZeroResult {
+      Ok value -> value,
+      Err message -> false
+    },
+    reserveOne = match reserveOneResult {
+      Ok value -> value,
+      Err message -> false
+    },
+    invalidPathError = match invalidPathResult {
+      Ok value -> "unexpected-ok",
+      Err message -> message
+    },
+    fileSizeMb = match fileSizeResult {
+      Ok value -> value,
+      Err message -> 0
+    },
+    fileSizeError = match fileSizeResult {
+      Ok value -> "",
+      Err message -> message
+    },
+    missingFileSizeError = match missingFileSizeResult {
+      Ok value -> "unexpected-ok",
+      Err message -> message
+    },
+    capFileSizeMb = match capFileResult {
+      Ok value -> value,
+      Err message -> 0
+    },
+    capFileError = match capFileResult {
+      Ok value -> "",
+      Err message -> message
+    },
+    availableMemoryMb = match availableMemoryResult {
+      Ok value -> value,
+      Err message -> 0
+    },
+    availableMemoryError = match availableMemoryResult {
+      Ok value -> "",
+      Err message -> message
+    },
+    memoryReserveZero = match memoryReserveZeroResult {
+      Ok value -> value,
+      Err message -> false
+    },
+    memoryReserveOne = match memoryReserveOneResult {
+      Ok value -> value,
+      Err message -> false
+    },
+    livePidAlive = if livePid == "" then false else hostProcessAliveOrFalse livePid,
+    invalidPidAlive = hostProcessAliveOrFalse "definitely-not-a-pid",
+    processName = processName,
+    processNameCount = match processNameCountResult {
+      Ok value -> value,
+      Err message -> -1
+    },
+    unmanagedProcessNameCount = match unmanagedProcessNameCountResult {
+      Ok value -> value,
+      Err message -> -1
+    },
+    unmanagedProcessNameRssMb = match unmanagedProcessNameRssMbResult {
+      Ok value -> value,
+      Err message -> -1
+    },
+    missingProcessNameCount = match missingProcessNameCountResult {
+      Ok value -> value,
+      Err message -> -1
+    }
+  })

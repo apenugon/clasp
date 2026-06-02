@@ -16,6 +16,7 @@ trap cleanup EXIT
 claspc_bin="$(env -u CLASP_CLASPC -u CLASPC_BIN -u RUSTC "$project_root/scripts/resolve-claspc.sh")"
 state_root="$test_root/readiness-state"
 output_path="$test_root/readiness-benchmark.json"
+benchmark_timeout_secs="${CLASP_SWARM_READY_BENCHMARK_TIMEOUT_SECS:-240}"
 
 env RUSTC=/definitely-missing-rustc \
   "$claspc_bin" --json check "$project_root/examples/swarm-native/SwarmReadyBenchmark.clasp" >/dev/null
@@ -25,7 +26,7 @@ env RUSTC=/definitely-missing-rustc \
   CLASP_MANAGER_BENCHMARK_WAVE=3 \
   CLASP_MANAGER_BENCHMARK_RUN_ID="fixture-run" \
   CLASP_MANAGER_BENCHMARK_STATE_ROOT="$state_root" \
-  timeout 120 \
+  timeout "$benchmark_timeout_secs" \
   "$claspc_bin" run "$project_root/examples/swarm-native/SwarmReadyBenchmark.clasp" \
   >"$output_path"
 
@@ -48,6 +49,7 @@ assert(signal.scoreValue >= 10, `scoreValue ${signal.scoreValue}`);
 assert(signal.summary.includes("native readiness passed wave 3 run fixture-run"), signal.summary);
 assert(signal.summary.includes("verifier=passed"), signal.summary);
 assert(signal.summary.includes("merge=pass"), signal.summary);
+assert(signal.summary.includes("semanticEntries=1"), signal.summary);
 EOF
 
 printf 'swarm-ready-benchmark-ok\n'

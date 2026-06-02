@@ -1,0 +1,409 @@
+module GoalManagerPlannerInputFingerprint
+
+foreign runCommandRaw : Str -> [Str] -> Result Str = "runCommandJson"
+
+record ProcessResult = {
+  exitCode : Int,
+  stdout : Str,
+  stderr : Str
+}
+
+record PlannerFingerprintMailboxMessage = {
+  source : Str,
+  taskId : Str,
+  wave : Int,
+  summary : Str,
+  details : [Str]
+}
+
+emptyPlannerFingerprintMailboxMessages : [PlannerFingerprintMailboxMessage]
+emptyPlannerFingerprintMailboxMessages = []
+
+plannerInputEmptyTexts : [Str]
+plannerInputEmptyTexts = []
+
+plannerInputDefaultMemoryText : Str
+plannerInputDefaultMemoryText = "No prior wave memory is available yet."
+
+plannerInputDefaultBacklogText : Str
+plannerInputDefaultBacklogText = "No prioritized backlog is available yet."
+
+plannerInputDefaultPolicyText : Str
+plannerInputDefaultPolicyText = textJoin "\n" [
+  "Decompose the high-level goal into 1-3 bounded implementation tasks.",
+  "Prefer compiler/runtime/language changes over docs-only work.",
+  "Keep dependencies explicit and acyclic.",
+  "Each planned task should be specific enough to hand directly to a builder/verifier loop.",
+  "Do not assume a fixed named agent taxonomy beyond the minimal substrate. Let coordination patterns emerge from task structure and the shared mailbox."
+]
+
+plannerInputReadEnvText : Str -> Str -> Str
+plannerInputReadEnvText name fallback = match envVar name {
+  Ok raw -> if raw == "" then fallback else decode Str raw,
+  Err message -> fallback
+}
+
+plannerInputRawEnvTextOrEmpty : Str -> Str
+plannerInputRawEnvTextOrEmpty name =
+  match envVar name {
+    Ok raw -> raw,
+    Err message -> ""
+  }
+
+plannerInputBenchmarkCommandLength : Int
+plannerInputBenchmarkCommandLength =
+  match envVar "CLASP_MANAGER_BENCHMARK_COMMAND_JSON" {
+    Ok raw ->
+      if raw == "" then
+        0
+      else
+        length (decode [Str] raw),
+    Err message -> 0
+  }
+
+plannerInputBenchmarkEnabled : Bool
+plannerInputBenchmarkEnabled = plannerInputBenchmarkCommandLength > 0
+
+plannerInputProcessResultError : Str -> Result ProcessResult
+plannerInputProcessResultError message = Err message
+
+plannerInputProcessResult : Result Str -> Result ProcessResult
+plannerInputProcessResult value = match value {
+  Ok raw -> Ok (decode ProcessResult raw),
+  Err message -> plannerInputProcessResultError message
+}
+
+plannerInputRunCommand : Str -> [Str] -> Result ProcessResult
+plannerInputRunCommand cwd command = plannerInputProcessResult (runCommandRaw cwd command)
+
+plannerInputReadTextOrEmpty : Str -> Str
+plannerInputReadTextOrEmpty path = match readFile path {
+  Ok raw -> raw,
+  Err message -> ""
+}
+
+plannerInputReadTextOr : Str -> Str -> Str
+plannerInputReadTextOr path fallback = match readFile path {
+  Ok raw ->
+    if raw == "" then
+      fallback
+    else
+      raw,
+  Err message -> fallback
+}
+
+plannerInputFirstTextOrEmpty : [Str] -> Str
+plannerInputFirstTextOrEmpty values = {
+  let mut first = "";
+  let mut found = false;
+  for value in values {
+    if found then
+      found
+    else {
+      first = value;
+      found = true;
+      found
+    }
+  };
+  first
+}
+
+plannerInputCurrentWorkingDir : Str
+plannerInputCurrentWorkingDir = match plannerInputRunCommand "." ["pwd", "-P"] {
+  Ok process -> plannerInputFirstTextOrEmpty (textSplit process.stdout "\n"),
+  Err message -> "."
+}
+
+plannerInputCanonicalizePathScript : Str
+plannerInputCanonicalizePathScript = textJoin "\n" [
+  "set -euo pipefail",
+  "path=\"$1\"",
+  "if [ -z \"$path\" ]; then",
+  "  exit 2",
+  "fi",
+  "if command -v realpath >/dev/null 2>&1; then",
+  "  realpath -m -- \"$path\"",
+  "else",
+  "  if [ -d \"$path\" ]; then",
+  "    (cd \"$path\" && pwd -P)",
+  "  else",
+  "    parent=\"$(dirname -- \"$path\")\"",
+  "    name=\"$(basename -- \"$path\")\"",
+  "    mkdir -p \"$parent\"",
+  "    parent_abs=\"$(cd \"$parent\" && pwd -P)\"",
+  "    printf '%s/%s\n' \"$parent_abs\" \"$name\"",
+  "  fi",
+  "fi"
+]
+
+plannerInputCanonicalizePath : Str -> Str
+plannerInputCanonicalizePath value =
+  if value == "" then
+    ""
+  else
+    match plannerInputRunCommand "." ["bash", "-c", plannerInputCanonicalizePathScript, "canonicalize-path", value] {
+      Ok process ->
+        if process.exitCode == 0 then
+          plannerInputFirstTextOrEmpty (textSplit process.stdout "\n")
+        else
+          value,
+      Err message -> value
+    }
+
+plannerInputStateRootPath : Str
+plannerInputStateRootPath =
+  if textJoin "" argv == "" then
+    "swarm-native-goal-manager-state"
+  else
+    pathJoin argv
+
+plannerInputProjectRootRecordPath : Str
+plannerInputProjectRootRecordPath = pathJoin [plannerInputStateRootPath, "project-root.txt"]
+
+plannerInputManagerProjectRootRaw : Str
+plannerInputManagerProjectRootRaw = {
+  let configured = plannerInputReadEnvText "CLASP_MANAGER_PROJECT_ROOT_JSON" "" in
+  if configured != "" then
+    configured
+  else {
+    let recorded = plannerInputReadTextOrEmpty plannerInputProjectRootRecordPath in
+    if recorded != "" then
+      recorded
+    else
+      plannerInputCurrentWorkingDir
+  }
+}
+
+plannerInputManagerProjectRoot : Str
+plannerInputManagerProjectRoot = plannerInputCanonicalizePath plannerInputManagerProjectRootRaw
+
+plannerInputIsAbsolutePath : Str -> Bool
+plannerInputIsAbsolutePath value = match textPrefix value "/" {
+  Ok remainder -> true,
+  Err message -> false
+}
+
+plannerInputResolveProjectPath : Str -> Str
+plannerInputResolveProjectPath value =
+  if value == "" then
+    ""
+  else if plannerInputIsAbsolutePath value then
+    value
+  else
+    pathJoin [plannerInputManagerProjectRoot, value]
+
+plannerInputResolveWorkspacePath : Str -> Str
+plannerInputResolveWorkspacePath value =
+  if value == "" then
+    ""
+  else if plannerInputIsAbsolutePath value then
+    value
+  else
+    pathJoin [plannerInputCurrentWorkingDir, value]
+
+plannerInputWorkspaceRoot : Str
+plannerInputWorkspaceRoot = plannerInputReadEnvText "CLASP_LOOP_WORKSPACE_JSON" "."
+
+plannerInputRequestedWorkspaceRoot : Str
+plannerInputRequestedWorkspaceRoot = plannerInputResolveWorkspacePath plannerInputWorkspaceRoot
+
+plannerInputCanonicalRequestedWorkspaceRoot : Str
+plannerInputCanonicalRequestedWorkspaceRoot = plannerInputCanonicalizePath plannerInputRequestedWorkspaceRoot
+
+plannerInputCanonicalManagerProjectRoot : Str
+plannerInputCanonicalManagerProjectRoot = plannerInputCanonicalizePath plannerInputManagerProjectRoot
+
+plannerInputManagerWorkspaceFallbackRoot : Str
+plannerInputManagerWorkspaceFallbackRoot =
+  plannerInputCanonicalizePath (pathJoin [plannerInputStateRootPath, "manager-workspace"])
+
+plannerInputWorkspaceRootNeedsManagerFallback : Bool
+plannerInputWorkspaceRootNeedsManagerFallback =
+  if plannerInputCanonicalRequestedWorkspaceRoot == "" then
+    false
+  else if plannerInputCanonicalRequestedWorkspaceRoot == "/" then
+    true
+  else
+    plannerInputCanonicalRequestedWorkspaceRoot == plannerInputCanonicalManagerProjectRoot
+
+plannerInputResolvedWorkspaceRoot : Str
+plannerInputResolvedWorkspaceRoot =
+  if plannerInputWorkspaceRootNeedsManagerFallback then
+    plannerInputManagerWorkspaceFallbackRoot
+  else
+    plannerInputCanonicalRequestedWorkspaceRoot
+
+plannerInputPlannerSchemaPath : Str
+plannerInputPlannerSchemaPath =
+  plannerInputReadEnvText "CLASP_MANAGER_PLANNER_SCHEMA_JSON" "agents/schemas/planner-report.schema.json"
+
+plannerInputResolvedPlannerSchemaPath : Str
+plannerInputResolvedPlannerSchemaPath = plannerInputResolveProjectPath plannerInputPlannerSchemaPath
+
+plannerInputGoalText : Str
+plannerInputGoalText =
+  plannerInputReadEnvText
+    "CLASP_MANAGER_GOAL_JSON"
+    "Improve Clasp by planning bounded native compiler/runtime/language tasks and closing them with ordinary Clasp loops."
+
+plannerInputPlannerPolicyPath : Str
+plannerInputPlannerPolicyPath = pathJoin [plannerInputStateRootPath, "planner-policy.md"]
+
+plannerInputPlannerPolicyFallbackText : Str
+plannerInputPlannerPolicyFallbackText =
+  if fileExists plannerInputPlannerPolicyPath then
+    plannerInputReadTextOr plannerInputPlannerPolicyPath plannerInputDefaultPolicyText
+  else
+    plannerInputDefaultPolicyText
+
+plannerInputPlannerPolicyText : Str
+plannerInputPlannerPolicyText =
+  plannerInputReadEnvText "CLASP_MANAGER_PLANNER_POLICY_JSON" plannerInputPlannerPolicyFallbackText
+
+plannerInputMemoryPathFor : Int -> Str
+plannerInputMemoryPathFor wave =
+  pathJoin [plannerInputStateRootPath, textConcat ["planner-memory-", encode wave, ".md"]]
+
+plannerInputBacklogPathFor : Int -> Str
+plannerInputBacklogPathFor wave =
+  pathJoin [plannerInputStateRootPath, textConcat ["planner-backlog-", encode wave, ".md"]]
+
+plannerInputMemoryLatestPath : Str
+plannerInputMemoryLatestPath = pathJoin [plannerInputStateRootPath, "planner-memory-latest.md"]
+
+plannerInputBacklogLatestPath : Str
+plannerInputBacklogLatestPath = pathJoin [plannerInputStateRootPath, "planner-backlog-latest.md"]
+
+plannerInputMemoryTextFor : Int -> Str
+plannerInputMemoryTextFor wave =
+  if fileExists (plannerInputMemoryPathFor wave) then
+    plannerInputReadTextOr (plannerInputMemoryPathFor wave) plannerInputDefaultMemoryText
+  else if fileExists plannerInputMemoryLatestPath then
+    plannerInputReadTextOr plannerInputMemoryLatestPath plannerInputDefaultMemoryText
+  else
+    plannerInputDefaultMemoryText
+
+plannerInputBacklogTextFor : Int -> Str
+plannerInputBacklogTextFor wave =
+  if fileExists (plannerInputBacklogPathFor wave) then
+    plannerInputReadTextOr (plannerInputBacklogPathFor wave) plannerInputDefaultBacklogText
+  else if fileExists plannerInputBacklogLatestPath then
+    plannerInputReadTextOr plannerInputBacklogLatestPath plannerInputDefaultBacklogText
+  else
+    plannerInputDefaultBacklogText
+
+plannerInputCatalogRawFingerprint : Str -> Str
+plannerInputCatalogRawFingerprint raw =
+  if raw == "" then
+    "missing"
+  else
+    textFingerprint64Hex raw
+
+plannerInputCatalogFileFingerprint : Str -> Str
+plannerInputCatalogFileFingerprint path =
+  if path == "" then
+    "missing"
+  else if fileExists path then
+    textConcat [path, ":", textFingerprint64Hex (plannerInputReadTextOrEmpty path)]
+  else
+    textConcat [path, ":missing"]
+
+plannerInputWorkspaceTaskCatalogPathFor : Str -> Str
+plannerInputWorkspaceTaskCatalogPathFor workspaceRoot =
+  pathJoin [workspaceRoot, ".clasp-local-planner", "task-catalog.json"]
+
+plannerInputTaskCatalogFingerprintSourceFor : Str -> Str
+plannerInputTaskCatalogFingerprintSourceFor workspaceRoot =
+  textJoin "\n" [
+    textConcat [
+      "env-json:",
+      plannerInputCatalogRawFingerprint (plannerInputRawEnvTextOrEmpty "CLASP_LOCAL_PLANNER_TASK_CATALOG_JSON")
+    ],
+    textConcat [
+      "env-path:",
+      plannerInputCatalogFileFingerprint (plannerInputRawEnvTextOrEmpty "CLASP_LOCAL_PLANNER_TASK_CATALOG_PATH")
+    ],
+    textConcat [
+      "workspace-path:",
+      plannerInputCatalogFileFingerprint (plannerInputWorkspaceTaskCatalogPathFor workspaceRoot)
+    ]
+  ]
+
+plannerInputMailboxPath : Str
+plannerInputMailboxPath = pathJoin [plannerInputStateRootPath, "mailbox.json"]
+
+plannerInputMailboxMessagesFromRaw : Str -> [PlannerFingerprintMailboxMessage]
+plannerInputMailboxMessagesFromRaw raw =
+  match tryDecode [PlannerFingerprintMailboxMessage] raw {
+    Ok messages -> messages,
+    Err message -> emptyPlannerFingerprintMailboxMessages
+  }
+
+plannerInputReadMailboxMessagesPath : Str -> [PlannerFingerprintMailboxMessage]
+plannerInputReadMailboxMessagesPath path = match readFile path {
+  Ok raw -> plannerInputMailboxMessagesFromRaw raw,
+  Err message -> emptyPlannerFingerprintMailboxMessages
+}
+
+plannerInputMailboxMessageLine : PlannerFingerprintMailboxMessage -> Str
+plannerInputMailboxMessageLine message =
+  if message.taskId == "" then
+    textConcat ["[", message.source, " wave ", encode message.wave, "] ", message.summary]
+  else
+    textConcat ["[", message.source, " ", message.taskId, " wave ", encode message.wave, "] ", message.summary]
+
+plannerInputMailboxMessageLines : PlannerFingerprintMailboxMessage -> [Str]
+plannerInputMailboxMessageLines message = {
+  let mut rendered = [plannerInputMailboxMessageLine message];
+  for detail in message.details {
+    if detail == "" then
+      rendered
+    else {
+      rendered = append rendered [textConcat ["  - ", detail]];
+      rendered
+    }
+  };
+  rendered
+}
+
+plannerInputRenderMailboxMessages : [PlannerFingerprintMailboxMessage] -> [Str]
+plannerInputRenderMailboxMessages messages = {
+  let mut rendered = plannerInputEmptyTexts;
+  for message in messages {
+    rendered = append rendered (plannerInputMailboxMessageLines message);
+    rendered
+  };
+  rendered
+}
+
+plannerInputMailboxSummaryText : Int -> Str
+plannerInputMailboxSummaryText wave =
+  if fileExists plannerInputMailboxPath then {
+    let messages = plannerInputReadMailboxMessagesPath plannerInputMailboxPath in
+    if length messages == 0 then
+      "No prior swarm mailbox messages are available yet."
+    else
+      textJoin "\n" (plannerInputRenderMailboxMessages messages)
+  }
+  else
+    "No prior swarm mailbox messages are available yet."
+
+plannerInputFingerprintSourceFor : Int -> Str -> Str
+plannerInputFingerprintSourceFor wave benchmarkSummary =
+  let mailboxSummary = plannerInputMailboxSummaryText wave in
+  let plannerMemory = plannerInputMemoryTextFor wave in
+  let plannerBacklog = plannerInputBacklogTextFor wave in
+  textJoin "\n" [
+    textConcat ["goal:", plannerInputGoalText],
+    textConcat ["planner-policy:", plannerInputPlannerPolicyText],
+    textConcat ["schema-path:", plannerInputResolvedPlannerSchemaPath],
+    textConcat ["project-root:", plannerInputManagerProjectRoot],
+    textConcat ["workspace-root:", plannerInputResolvedWorkspaceRoot],
+    textConcat ["wave:", encode wave],
+    textConcat ["benchmark-enabled:", encode plannerInputBenchmarkEnabled],
+    textConcat ["benchmark-summary:", benchmarkSummary],
+    textConcat ["planner-memory:", plannerMemory],
+    textConcat ["planner-backlog:", plannerBacklog],
+    textConcat ["planner-task-catalog:", plannerInputTaskCatalogFingerprintSourceFor plannerInputResolvedWorkspaceRoot],
+    textConcat ["mailbox-summary:", mailboxSummary]
+  ]

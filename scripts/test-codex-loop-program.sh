@@ -74,11 +74,16 @@ EOF
 chmod +x "$fake_codex"
 
 claspc_bin="$("$project_root/scripts/resolve-claspc.sh")"
-demo_path="$project_root/examples/feedback-loop/CodexLoopDemo.clasp"
+demo_path="$project_root/examples/feedback-loop/CodexLoopHarness.clasp"
 codex_json="$(node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "$fake_codex")"
 
 if grep -F '"bash"' "$demo_path" >/dev/null; then
-  printf 'CodexLoopDemo should invoke Codex directly, not a shell wrapper\n' >&2
+  printf 'CodexLoopHarness should invoke Codex directly, not a shell wrapper\n' >&2
+  exit 1
+fi
+
+if grep -F 'import Process' "$demo_path" >/dev/null; then
+  printf 'Codex loop harness must stay single-source; found import Process\n' >&2
   exit 1
 fi
 

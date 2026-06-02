@@ -161,6 +161,18 @@ agentCommandTemplate = readEnvCommandTextList "CLASP_LOOP_AGENT_COMMAND_JSON" em
 watchPollMs : Int
 watchPollMs = readEnvInt "CLASP_LOOP_WATCH_POLL_MS_JSON" 1000
 
+agentMemoryLimitMb : Int
+agentMemoryLimitMb = readEnvInt "CLASP_LOOP_AGENT_MEMORY_MB_JSON" 8192
+
+watchMemoryLimitMb : Int
+watchMemoryLimitMb = readEnvInt "CLASP_LOOP_WATCH_MEMORY_MB_JSON" agentMemoryLimitMb
+
+builderMemoryLimitMb : Int
+builderMemoryLimitMb = readEnvInt "CLASP_LOOP_BUILDER_MEMORY_MB_JSON" watchMemoryLimitMb
+
+verifierMemoryLimitMb : Int
+verifierMemoryLimitMb = readEnvInt "CLASP_LOOP_VERIFIER_MEMORY_MB_JSON" watchMemoryLimitMb
+
 watchModeEnabled : Bool
 watchModeEnabled = match envVar "CLASP_LOOP_WATCH_POLL_MS_JSON" {
   Ok raw -> true,
@@ -172,6 +184,26 @@ verificationTier = readEnvText "CLASP_LOOP_VERIFICATION_TIER_JSON" "focused"
 
 focusedVerifyCommands : [Str]
 focusedVerifyCommands = readEnvCommandTextList "CLASP_LOOP_FOCUSED_VERIFY_COMMANDS_JSON" emptyTexts
+
+affectedVerificationPlanInlineJson : Str
+affectedVerificationPlanInlineJson = readEnvText "CLASP_LOOP_AFFECTED_VERIFICATION_PLAN_JSON" ""
+
+affectedVerificationPlanPath : Str
+affectedVerificationPlanPath = readEnvText "CLASP_LOOP_AFFECTED_VERIFICATION_PLAN_PATH_JSON" ""
+
+affectedVerificationPlanJson : Str
+affectedVerificationPlanJson =
+  affectedVerificationPlanInlineJson
+
+affectedVerificationLaunchPolicyInlineJson : Str
+affectedVerificationLaunchPolicyInlineJson = readEnvText "CLASP_LOOP_AFFECTED_VERIFICATION_LAUNCH_POLICY_JSON" ""
+
+affectedVerificationLaunchPolicyPath : Str
+affectedVerificationLaunchPolicyPath = readEnvText "CLASP_LOOP_AFFECTED_VERIFICATION_LAUNCH_POLICY_PATH_JSON" ""
+
+affectedVerificationLaunchPolicyJson : Str
+affectedVerificationLaunchPolicyJson =
+  affectedVerificationLaunchPolicyInlineJson
 
 defaultNativeCacheReportPaths : [Str]
 defaultNativeCacheReportPaths = [
@@ -512,8 +544,26 @@ stepReportReady step =
     recoverStepReportFromStdout step
 
 spawnStep : StepHandle -> [Str] -> Result WatchedProcess
-spawnStep step command =
-  spawn (watchedCommandSpec launcherCwd step.stdoutPath step.stderrPath step.heartbeatPath watchPollMs command)
+spawnStep step command = {
+  let memoryLimitMb =
+    if step.prefix == "builder" then
+      builderMemoryLimitMb
+    else if step.prefix == "verifier" then
+      verifierMemoryLimitMb
+    else
+      watchMemoryLimitMb;
+  if memoryLimitMb > 0 then
+    spawnWatchedProcessWithLimits
+      launcherCwd
+      step.stdoutPath
+      step.stderrPath
+      step.heartbeatPath
+      watchPollMs
+      memoryLimitMb
+      command
+  else
+    spawn (watchedCommandSpec launcherCwd step.stdoutPath step.stderrPath step.heartbeatPath watchPollMs command)
+}
 
 reconcileStep : StepHandle -> Result WatchedProcess
 reconcileStep step = reconcile step.heartbeatPath
@@ -529,26 +579,13 @@ resumeStep step = match awaitStep step {
     failedProcessResult message
 }
 
-terminateWatchedProcess : WatchedProcess -> Str
-terminateWatchedProcess process =
-  if process.pid < 1 then
-    ""
-  else {
-    let killed = runProcess launcherCwd [
-      "bash",
-      "-lc",
-      textConcat [
-        "kill -TERM ",
-        encode process.pid,
-        " 2>/dev/null || true; pkill -TERM -P ",
-        encode process.pid,
-        " 2>/dev/null || true"
-      ]
-    ] in
-    if killed.exitCode == 0 then
+cancelWatchedStep : StepHandle -> Str
+cancelWatchedStep step =
+  match cancel step.heartbeatPath {
+    Ok process ->
       ""
-    else
-      killed.stderr
+    Err message ->
+      textConcat ["cancel watched process failed: ", message]
   }
 
 resumeStepWithTimeout : StepHandle -> Int -> ProcessResult
@@ -560,11 +597,7 @@ resumeStepWithTimeout step timeoutMs =
       Ok process ->
         processResultFromStep step process.exitCode,
       Err message ->
-        let reconciled = reconcileStep step in
-        let killed = match reconciled {
-          Ok process -> terminateWatchedProcess process,
-          Err reconcileMessage -> reconcileMessage
-        } in
+        let killed = cancelWatchedStep step in
         ProcessResult {
           exitCode = 124,
           stdout = readTextOrEmpty step.stdoutPath,
@@ -857,6 +890,59 @@ verifierPolicySection attempt =
     textConcat ["Current verifier policy from ", verifierPolicyPath, ":"],
     readPolicyText verifierPolicyPath defaultVerifierPolicyText
   ]
+
+promptJsonBlockOrEmpty : Str -> Str -> Str -> Str
+promptJsonBlockOrEmpty header footer raw =
+  if raw == "" then
+    ""
+  else
+    textJoin "\n" [header, raw, footer]
+
+promptPathBlockOrEmpty : Str -> Str -> Str -> Str
+promptPathBlockOrEmpty header footer path =
+  if path == "" then
+    ""
+  else
+    textJoin "\n" [header, path, footer]
+
+affectedVerificationPlanPromptBlock : Str
+affectedVerificationPlanPromptBlock =
+  promptJsonBlockOrEmpty
+    "Affected verification plan JSON:"
+    "End affected verification plan JSON."
+    affectedVerificationPlanJson
+
+affectedVerificationPlanPathPromptBlock : Str
+affectedVerificationPlanPathPromptBlock =
+  promptPathBlockOrEmpty
+    "Affected verification plan path:"
+    "End affected verification plan path."
+    affectedVerificationPlanPath
+
+affectedVerificationLaunchPolicyPromptBlock : Str
+affectedVerificationLaunchPolicyPromptBlock =
+  promptJsonBlockOrEmpty
+    "Affected verification launch policy JSON:"
+    "End affected verification launch policy JSON."
+    affectedVerificationLaunchPolicyJson
+
+affectedVerificationLaunchPolicyPathPromptBlock : Str
+affectedVerificationLaunchPolicyPathPromptBlock =
+  promptPathBlockOrEmpty
+    "Affected verification launch policy path:"
+    "End affected verification launch policy path."
+    affectedVerificationLaunchPolicyPath
+
+affectedVerificationVerifierPromptSection : Str
+affectedVerificationVerifierPromptSection =
+  textJoin
+    "\n"
+    (filter nonEmptyText [
+      affectedVerificationPlanPromptBlock,
+      affectedVerificationPlanPathPromptBlock,
+      affectedVerificationLaunchPolicyPromptBlock,
+      affectedVerificationLaunchPolicyPathPromptBlock
+    ])
 
 isFullVerificationTier : Bool
 isFullVerificationTier =
@@ -1390,6 +1476,7 @@ verifierPrompt attempt =
     "Evaluate the whole repository against the autonomous swarm confidence goal and required capability categories.",
     verifierPolicySection attempt,
     verifierVerificationInstructions attempt,
+    affectedVerificationVerifierPromptSection,
     textConcat ["Attempt: ", encode attempt]
   ]
 

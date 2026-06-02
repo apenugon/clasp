@@ -156,6 +156,7 @@ grep -F 'clasp-codex-loop.sh refuses to launch agent work outside the managed-jo
 grep -F 'scripts/clasp-codex-loop-start.sh' "$test_root/unmanaged-loop.err" >/dev/null
 
 export CLASP_ALLOW_UNMANAGED_AGENT_RUNTIME=1
+export CLASP_TEST_CODEX_MODE=builder
 
 (
   cd "$project_dir"
@@ -509,6 +510,7 @@ start_output="$(
   cd "$project_dir" && \
   CLASP_CODEX_LOOP_MEMORY_MB=256 \
   CLASP_CODEX_LOOP_MIN_AVAILABLE_MEMORY_MB=1 \
+  CLASP_CODEX_LOOP_MIN_AVAILABLE_DISK_MB=0 \
     bash scripts/clasp-codex-loop-start.sh task.md "$workspace_dir" "$runtime_dir_5"
 )"
 printf '%s\n' "$start_output" | grep -F 'started codex loop pid=' >/dev/null
@@ -544,6 +546,27 @@ if kill -0 "$pid_5" >/dev/null 2>&1; then
   echo "detached codex loop should have stopped" >&2
   exit 1
 fi
+
+runtime_dir_launch_failure="$project_dir/runtime-launch-failure"
+set +e
+launch_failure_output="$(
+  cd "$project_dir" && \
+  CLASP_CODEX_LOOP_MEMORY_MB=256 \
+  CLASP_CODEX_LOOP_MIN_AVAILABLE_MEMORY_MB=999999999 \
+  CLASP_CODEX_LOOP_MIN_AVAILABLE_DISK_MB=0 \
+    bash scripts/clasp-codex-loop-start.sh task.md "$workspace_dir" "$runtime_dir_launch_failure" 2>&1
+)"
+launch_failure_status="$?"
+set -e
+if [[ "$launch_failure_status" -eq 0 ]]; then
+  echo "codex loop start should fail when managed-job admission fails immediately" >&2
+  exit 1
+fi
+printf '%s\n' "$launch_failure_output" | grep -F 'codex loop managed job reached terminal status before launch settled' >/dev/null
+printf '%s\n' "$launch_failure_output" | grep -F 'memory-exceeded:' >/dev/null
+printf '%s\n' "$launch_failure_output" | grep -F 'min_available_memory_mb=999999999' >/dev/null
+[[ ! -f "$runtime_dir_launch_failure/loop.pid" ]]
+[[ ! -f "$runtime_dir_launch_failure/loop.job" ]]
 
 runtime_dir_6="$project_dir/runtime-unmanaged-stop-refusal"
 mkdir -p "$runtime_dir_6"

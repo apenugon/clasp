@@ -13,12 +13,25 @@ cleanup() {
 
 trap cleanup EXIT
 
+shared_cache_root="${CLASP_TEST_SHARED_XDG_CACHE_HOME:-${XDG_CACHE_HOME:-$tmp_root/clasp-test-xdg-cache}}"
+if [[ "${CLASP_TEST_ISOLATED_XDG_CACHE:-0}" == "1" ]]; then
+  shared_cache_root="$test_root/xdg-cache"
+fi
+export XDG_CACHE_HOME="$shared_cache_root"
+mkdir -p "$XDG_CACHE_HOME"
+export CLASP_NATIVE_JOBS_MAX="${CLASP_NATIVE_JOBS_MAX:-1}"
+export CLASP_NATIVE_BUNDLE_JOBS="${CLASP_NATIVE_BUNDLE_JOBS:-1}"
+export CLASP_NATIVE_IMAGE_SECTION_JOBS_MAX="${CLASP_NATIVE_IMAGE_SECTION_JOBS_MAX:-1}"
+export CLASP_NATIVE_IMAGE_MODULE_DECL_FRESH_PROCESS="${CLASP_NATIVE_IMAGE_MODULE_DECL_FRESH_PROCESS:-0}"
+export CLASP_NATIVE_IMAGE_MODULE_DECL_CHUNK_SIZE="${CLASP_SWARM_CONTEXT_PACK_MODULE_DECL_CHUNK_SIZE:-1}"
+context_pack_timeout_secs="${CLASP_SWARM_CONTEXT_PACK_TIMEOUT_SECS:-700}"
+
 claspc_bin="$(env -u CLASP_CLASPC -u CLASPC_BIN -u RUSTC "$project_root/scripts/resolve-claspc.sh")"
 program_state_root="$test_root/program-state"
 output_path="$test_root/context-pack-harness.json"
 
 env RUSTC=/definitely-missing-rustc \
-  timeout 120 \
+  timeout "$context_pack_timeout_secs" \
   "$claspc_bin" run "$project_root/examples/swarm-native/ContextPackHarness.clasp" -- "$program_state_root" \
   >"$output_path"
 
@@ -44,6 +57,16 @@ function includes(list, value, label) {
 assert(report.taskId === "context-repair", `task id ${report.taskId}`);
 assert(report.taskStatus === "completed", `task status ${report.taskStatus}`);
 assert(report.verificationPassed === false, "verification should fail to prove failed trace context");
+includes(report.dependencyTaskIds, "context-plan", "dependency task ids");
+includes(report.dependencyTaskStatuses, "completed", "dependency task statuses");
+assert(
+  report.dependencyTaskReady.length === report.dependencyTaskIds.length,
+  `dependency ready length ${report.dependencyTaskReady.length} vs ids ${report.dependencyTaskIds.length}`,
+);
+assert(
+  report.dependencyTaskReady.every((value) => typeof value === "boolean"),
+  `dependency ready flags should be booleans: ${JSON.stringify(report.dependencyTaskReady)}`,
+);
 includes(report.failedVerifiers, "context-pack-fail", "failed verifiers");
 assert(report.taskMemoryCount === 1, `task memory count ${report.taskMemoryCount}`);
 assert(report.objectiveMemoryCount === 1, `objective memory count ${report.objectiveMemoryCount}`);
@@ -126,6 +149,18 @@ assert(report.evidenceTaskId === "context-repair", `evidence task id ${report.ev
 assert(
   report.evidenceQuery === "focused compiler verifier ordinary clasp",
   `evidence query ${JSON.stringify(report.evidenceQuery)}`,
+);
+assert(
+  JSON.stringify(report.evidenceDependencyTaskIds) === JSON.stringify(report.dependencyTaskIds),
+  `evidence dependency task ids diverged: ${JSON.stringify(report.evidenceDependencyTaskIds)} vs ${JSON.stringify(report.dependencyTaskIds)}`,
+);
+assert(
+  JSON.stringify(report.evidenceDependencyTaskStatuses) === JSON.stringify(report.dependencyTaskStatuses),
+  `evidence dependency statuses diverged: ${JSON.stringify(report.evidenceDependencyTaskStatuses)} vs ${JSON.stringify(report.dependencyTaskStatuses)}`,
+);
+assert(
+  JSON.stringify(report.evidenceDependencyTaskReady) === JSON.stringify(report.dependencyTaskReady),
+  `evidence dependency ready diverged: ${JSON.stringify(report.evidenceDependencyTaskReady)} vs ${JSON.stringify(report.dependencyTaskReady)}`,
 );
 assert(
   JSON.stringify(report.evidenceMemoryValues) === JSON.stringify(report.memoryValues),

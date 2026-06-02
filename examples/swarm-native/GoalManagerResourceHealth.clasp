@@ -1,0 +1,1613 @@
+module GoalManagerResourceHealth
+
+import GoalManagerResourceContext
+import AgentErgonomics
+import ResourceGuardPolicy
+import ResourceRecoveryPolicy
+import GoalManagerGeneratedCleanupHealth
+import HostResources
+
+record ManagerExternalAgentPressure = {
+  count : Int,
+  rssMb : Int,
+  reservedMemoryMb : Int
+}
+
+record ManagerWorktreeCheckpoint = {
+  schemaVersion : Int,
+  kind : Str,
+  projectRoot : Str,
+  statusText : Str
+}
+
+managerDiskReserveResolvedPath : Str
+managerDiskReserveResolvedPath =
+  if managerDiskReservePath == "" then
+    resolvedWorkspaceRoot
+  else
+    resolveWorkspacePath managerDiskReservePath
+
+managerAvailableDiskMbAt : Str -> Result Int
+managerAvailableDiskMbAt path = hostAvailableDiskMb path
+
+managerAvailableMemoryMb : Result Int
+managerAvailableMemoryMb = hostAvailableMemoryMb
+
+managerResourceBoolText : Bool -> Str
+managerResourceBoolText value = if value then "true" else "false"
+
+managerDiskHeadroomMbFromAvailable : Int -> Int
+managerDiskHeadroomMbFromAvailable availableMb = intSubtract availableMb managerMinAvailableDiskMb
+
+managerDiskReserveMetFromAvailable : Int -> Bool
+managerDiskReserveMetFromAvailable availableMb =
+  if managerMinAvailableDiskMb < 1 then
+    true
+  else
+    availableMb >= managerMinAvailableDiskMb
+
+managerDiskHeadroomMetFromAvailable : Int -> Bool
+managerDiskHeadroomMetFromAvailable availableMb =
+  if managerMinDiskHeadroomMb < 1 then
+    true
+  else
+    managerDiskHeadroomMbFromAvailable availableMb >= managerMinDiskHeadroomMb
+
+managerMemoryReserveMetFromAvailable : Int -> Bool
+managerMemoryReserveMetFromAvailable availableMb =
+  resourceGuardMemoryReserveMet managerMinAvailableMemoryMb availableMb
+
+managerMemoryLaunchRequiredMb : Int
+managerMemoryLaunchRequiredMb =
+  resourceGuardMemoryLaunchRequiredMb managerMinAvailableMemoryMb managerChildMemoryReserveMb
+
+managerPlannerMemoryLaunchRequiredMb : Int
+managerPlannerMemoryLaunchRequiredMb =
+  resourceGuardMemoryLaunchRequiredMb managerMinAvailableMemoryMb managerPlannerMemoryReserveMb
+
+managerBenchmarkMemoryLaunchRequiredMb : Int
+managerBenchmarkMemoryLaunchRequiredMb =
+  resourceGuardMemoryLaunchRequiredMb managerMinAvailableMemoryMb managerBenchmarkMemoryReserveMb
+
+managerServiceMemoryLaunchRequiredMb : Int
+managerServiceMemoryLaunchRequiredMb =
+  resourceGuardMemoryLaunchRequiredMb managerMinAvailableMemoryMb managerServiceMemoryReserveMb
+
+managerUpgradeMemoryLaunchRequiredMb : Int
+managerUpgradeMemoryLaunchRequiredMb =
+  resourceGuardMemoryLaunchRequiredMb managerMinAvailableMemoryMb managerUpgradeMemoryReserveMb
+
+managerMemoryLaunchRequiredMbForActiveChildren : Int -> Int
+managerMemoryLaunchRequiredMbForActiveChildren projectedActiveChildren =
+  resourceGuardMemoryProjectedLaunchRequiredMb
+    managerMinAvailableMemoryMb
+    managerChildMemoryReserveMb
+    projectedActiveChildren
+
+managerExternalAgentProcessCount : Result Int
+managerExternalAgentProcessCount =
+  if managerExternalAgentReserveMb < 1 then
+    Ok 0
+  else if length managerExternalAgentProcessNames < 1 then
+    Ok 0
+  else
+    hostUnmanagedProcessCountByName managerExternalAgentProcessNames
+
+managerExternalAgentRssMb : Result Int
+managerExternalAgentRssMb =
+  if managerExternalAgentReserveMb < 1 then
+    Ok 0
+  else if length managerExternalAgentProcessNames < 1 then
+    Ok 0
+  else
+    hostUnmanagedProcessRssMbByName managerExternalAgentProcessNames
+
+managerExternalAgentReservedMemoryMbFromCount : Int -> Int
+managerExternalAgentReservedMemoryMbFromCount externalAgentCount =
+  resourceGuardExternalAgentReserveMb managerExternalAgentReserveMb externalAgentCount
+
+managerExternalAgentReservedMemoryMbFromStats : Int -> Int -> Int
+managerExternalAgentReservedMemoryMbFromStats externalAgentCount externalAgentRssMb =
+  resourceGuardExternalAgentReservedMemoryMb managerExternalAgentReserveMb externalAgentCount externalAgentRssMb
+
+managerExternalAgentPressure : Result ManagerExternalAgentPressure
+managerExternalAgentPressure =
+  match managerExternalAgentProcessCount {
+    Err message -> Err message,
+    Ok externalAgentCount ->
+      match managerExternalAgentRssMb {
+        Err message -> Err message,
+        Ok externalAgentRssMb ->
+          Ok (ManagerExternalAgentPressure {
+            count = externalAgentCount,
+            rssMb = externalAgentRssMb,
+            reservedMemoryMb =
+              managerExternalAgentReservedMemoryMbFromStats
+                externalAgentCount
+                externalAgentRssMb
+          })
+      }
+  }
+
+managerMemoryLaunchRequiredWithExternalMbForActiveChildren : Int -> Int -> Int
+managerMemoryLaunchRequiredWithExternalMbForActiveChildren projectedActiveChildren externalAgentCount =
+  resourceGuardMemoryProjectedLaunchRequiredWithExternalMb
+    managerMinAvailableMemoryMb
+    managerChildMemoryReserveMb
+    projectedActiveChildren
+    managerExternalAgentReserveMb
+    externalAgentCount
+
+managerMemoryLaunchRequiredWithExternalStatsMbForActiveChildren : Int -> Int -> Int -> Int
+managerMemoryLaunchRequiredWithExternalStatsMbForActiveChildren projectedActiveChildren externalAgentCount externalAgentRssMb =
+  resourceGuardMemoryProjectedLaunchRequiredWithExternalStatsMb
+    managerMinAvailableMemoryMb
+    managerChildMemoryReserveMb
+    projectedActiveChildren
+    managerExternalAgentReserveMb
+    externalAgentCount
+    externalAgentRssMb
+
+managerPlannerMemoryLaunchRequiredWithExternalMb : Int -> Int
+managerPlannerMemoryLaunchRequiredWithExternalMb externalAgentCount =
+  intAdd
+    managerPlannerMemoryLaunchRequiredMb
+    (managerExternalAgentReservedMemoryMbFromCount externalAgentCount)
+
+managerPlannerMemoryLaunchRequiredWithExternalStatsMb : Int -> Int -> Int
+managerPlannerMemoryLaunchRequiredWithExternalStatsMb externalAgentCount externalAgentRssMb =
+  intAdd
+    managerPlannerMemoryLaunchRequiredMb
+    (managerExternalAgentReservedMemoryMbFromStats externalAgentCount externalAgentRssMb)
+
+managerBenchmarkMemoryLaunchRequiredWithExternalMb : Int -> Int
+managerBenchmarkMemoryLaunchRequiredWithExternalMb externalAgentCount =
+  intAdd
+    managerBenchmarkMemoryLaunchRequiredMb
+    (managerExternalAgentReservedMemoryMbFromCount externalAgentCount)
+
+managerBenchmarkMemoryLaunchRequiredWithExternalStatsMb : Int -> Int -> Int
+managerBenchmarkMemoryLaunchRequiredWithExternalStatsMb externalAgentCount externalAgentRssMb =
+  intAdd
+    managerBenchmarkMemoryLaunchRequiredMb
+    (managerExternalAgentReservedMemoryMbFromStats externalAgentCount externalAgentRssMb)
+
+managerServiceMemoryLaunchRequiredWithExternalMb : Int -> Int
+managerServiceMemoryLaunchRequiredWithExternalMb externalAgentCount =
+  intAdd
+    managerServiceMemoryLaunchRequiredMb
+    (managerExternalAgentReservedMemoryMbFromCount externalAgentCount)
+
+managerServiceMemoryLaunchRequiredWithExternalStatsMb : Int -> Int -> Int
+managerServiceMemoryLaunchRequiredWithExternalStatsMb externalAgentCount externalAgentRssMb =
+  intAdd
+    managerServiceMemoryLaunchRequiredMb
+    (managerExternalAgentReservedMemoryMbFromStats externalAgentCount externalAgentRssMb)
+
+managerUpgradeMemoryLaunchRequiredWithExternalMb : Int -> Int
+managerUpgradeMemoryLaunchRequiredWithExternalMb externalAgentCount =
+  intAdd
+    managerUpgradeMemoryLaunchRequiredMb
+    (managerExternalAgentReservedMemoryMbFromCount externalAgentCount)
+
+managerUpgradeMemoryLaunchRequiredWithExternalStatsMb : Int -> Int -> Int
+managerUpgradeMemoryLaunchRequiredWithExternalStatsMb externalAgentCount externalAgentRssMb =
+  intAdd
+    managerUpgradeMemoryLaunchRequiredMb
+    (managerExternalAgentReservedMemoryMbFromStats externalAgentCount externalAgentRssMb)
+
+managerMemoryLaunchHeadroomMbFromAvailable : Int -> Int
+managerMemoryLaunchHeadroomMbFromAvailable availableMb =
+  resourceGuardMemoryHeadroomMb managerMinAvailableMemoryMb availableMb
+
+managerMemoryLaunchReserveMetFromAvailable : Int -> Bool
+managerMemoryLaunchReserveMetFromAvailable availableMb =
+  resourceGuardMemoryLaunchReserveMet managerMinAvailableMemoryMb managerChildMemoryReserveMb availableMb
+
+managerMemoryProjectedLaunchReserveMetFromAvailable : Int -> Int -> Bool
+managerMemoryProjectedLaunchReserveMetFromAvailable projectedActiveChildren availableMb =
+  resourceGuardMemoryProjectedLaunchReserveMet
+    managerMinAvailableMemoryMb
+    managerChildMemoryReserveMb
+    projectedActiveChildren
+    availableMb
+
+managerResourceHealthDiskSummary : Str
+managerResourceHealthDiskSummary =
+  match managerAvailableDiskMbAt managerDiskReserveResolvedPath {
+    Err message ->
+      textConcat [
+        "disk: path=",
+        managerDiskReserveResolvedPath,
+        " availableMb=unknown requiredMb=",
+        encode managerMinAvailableDiskMb,
+        " requiredHeadroomMb=",
+        encode managerMinDiskHeadroomMb,
+        " error=",
+        message
+      ],
+    Ok availableMb ->
+      textConcat [
+        "disk: path=",
+        managerDiskReserveResolvedPath,
+        " availableMb=",
+        encode availableMb,
+        " requiredMb=",
+        encode managerMinAvailableDiskMb,
+        " headroomMb=",
+        encode (managerDiskHeadroomMbFromAvailable availableMb),
+        " requiredHeadroomMb=",
+        encode managerMinDiskHeadroomMb,
+        " reserveMet=",
+        managerResourceBoolText (managerDiskReserveMetFromAvailable availableMb),
+        " headroomMet=",
+        managerResourceBoolText (managerDiskHeadroomMetFromAvailable availableMb)
+      ]
+  }
+
+managerResourceHealthMemorySummaryFromAvailable : Int -> Str
+managerResourceHealthMemorySummaryFromAvailable availableMb =
+  textConcat [
+    "memory: availableMb=",
+    encode availableMb,
+    " requiredMb=",
+    encode managerMinAvailableMemoryMb,
+    " childReserveMb=",
+    encode managerChildMemoryReserveMb,
+    " launchRequiredMb=",
+    encode managerMemoryLaunchRequiredMb,
+    " launchHeadroomMb=",
+    encode (managerMemoryLaunchHeadroomMbFromAvailable availableMb),
+    " reserveMet=",
+    managerResourceBoolText (managerMemoryReserveMetFromAvailable availableMb),
+    " launchReserveMet=",
+    managerResourceBoolText (managerMemoryLaunchReserveMetFromAvailable availableMb)
+  ]
+
+managerResourceHealthMemoryUnavailableSummary : Str -> Str
+managerResourceHealthMemoryUnavailableSummary message =
+  textConcat [
+    "memory: availableMb=unknown requiredMb=",
+    encode managerMinAvailableMemoryMb,
+    " childReserveMb=",
+    encode managerChildMemoryReserveMb,
+    " launchRequiredMb=",
+    encode managerMemoryLaunchRequiredMb,
+    " error=",
+    message
+  ]
+
+managerResourceHealthMemorySummary : Str
+managerResourceHealthMemorySummary =
+  match managerAvailableMemoryMb {
+    Err message -> managerResourceHealthMemoryUnavailableSummary message,
+    Ok availableMb -> managerResourceHealthMemorySummaryFromAvailable availableMb
+  }
+
+managerResourceHealthExternalAgentSummaryFromPressure : ManagerExternalAgentPressure -> Str
+managerResourceHealthExternalAgentSummaryFromPressure pressure =
+  textConcat [
+    "external-agents: processNames=",
+    encode managerExternalAgentProcessNames,
+    " unmanagedCount=",
+    encode pressure.count,
+    " unmanagedRssMb=",
+    encode pressure.rssMb,
+    " reserveMb=",
+    encode managerExternalAgentReserveMb,
+    " reservedMemoryMb=",
+    encode pressure.reservedMemoryMb
+  ]
+
+managerResourceHealthExternalAgentSummary : Str
+managerResourceHealthExternalAgentSummary =
+  match managerExternalAgentPressure {
+    Err message ->
+      textConcat [
+        "external-agents: processNames=",
+        encode managerExternalAgentProcessNames,
+        " unmanagedCount=unknown unmanagedRssMb=unknown reserveMb=",
+        encode managerExternalAgentReserveMb,
+        " error=",
+        message
+      ],
+    Ok pressure -> managerResourceHealthExternalAgentSummaryFromPressure pressure
+  }
+
+managerMemoryAdmissionDecisionWithExternalStatsForActiveChildren : Int -> Int -> Int -> Int -> ResourceGuardAdmissionDecision
+managerMemoryAdmissionDecisionWithExternalStatsForActiveChildren projectedActiveChildren externalAgentCount externalAgentRssMb availableMb =
+  resourceGuardMemoryAdmissionDecisionWithExternalStats
+    managerMinAvailableMemoryMb
+    managerChildMemoryReserveMb
+    projectedActiveChildren
+    managerExternalAgentReserveMb
+    externalAgentCount
+    externalAgentRssMb
+    availableMb
+
+managerMemoryConcurrencyDecisionWithExternalStats : Int -> Int -> Int -> ResourceGuardConcurrencyDecision
+managerMemoryConcurrencyDecisionWithExternalStats externalAgentCount externalAgentRssMb availableMb =
+  resourceGuardMemoryConcurrencyDecisionWithExternalStats
+    managerMinAvailableMemoryMb
+    managerChildMemoryReserveMb
+    managerConfiguredMaxConcurrentChildren
+    managerExternalAgentReserveMb
+    externalAgentCount
+    externalAgentRssMb
+    availableMb
+
+managerResourceHealthMemoryConcurrencySummaryFromDecision : ResourceGuardConcurrencyDecision -> Str
+managerResourceHealthMemoryConcurrencySummaryFromDecision decision =
+  textConcat [
+    "memory-concurrency-admission: status=",
+    decision.status,
+    " reason=",
+    decision.reason,
+    " configuredMaxChildren=",
+    encode decision.configuredMaxChildren,
+    " capacityLimit=",
+    encode decision.capacityLimit,
+    " admittedChildCapacity=",
+    encode decision.admittedChildCapacity,
+    " effectiveMaxChildren=",
+    encode decision.effectiveMaxChildren,
+    " availableMb=",
+    encode decision.availableMb,
+    " requiredMb=",
+    encode decision.requiredMb,
+    " headroomMb=",
+    encode decision.headroomMb,
+    " childReserveMb=",
+    encode decision.childReserveMb,
+    " externalAgentReservedMb=",
+    encode decision.externalAgentReservedMb,
+    " action=",
+    decision.recommendedAction
+  ]
+
+managerResourceHealthMemoryConcurrencySummaryFromAvailable : Int -> Str
+managerResourceHealthMemoryConcurrencySummaryFromAvailable availableMb =
+  match managerExternalAgentPressure {
+    Err message ->
+      textConcat [
+        "memory-concurrency-admission: status=blocked reason=external-agent-stats-unavailable configuredMaxChildren=",
+        encode managerConfiguredMaxConcurrentChildren,
+        " admittedChildCapacity=0 effectiveMaxChildren=0 availableMb=",
+        encode availableMb,
+        " requiredMb=",
+        encode (managerMemoryLaunchRequiredMbForActiveChildren managerConfiguredMaxConcurrentChildren),
+        " headroomMb=",
+        encode (managerMemoryLaunchHeadroomMbFromAvailable availableMb),
+        " action=wait-for-external-agent-pressure-or-lower-concurrency error=",
+        message
+      ],
+    Ok pressure ->
+      managerResourceHealthMemoryConcurrencySummaryFromDecision
+        (managerMemoryConcurrencyDecisionWithExternalStats pressure.count pressure.rssMb availableMb)
+  }
+
+managerResourceHealthMemoryConcurrencySummary : Str
+managerResourceHealthMemoryConcurrencySummary =
+  if managerResourceGuardEnabled == false then
+    textConcat [
+      "memory-concurrency-admission: status=admitted reason=guard-disabled configuredMaxChildren=",
+      encode managerConfiguredMaxConcurrentChildren,
+      " admittedChildCapacity=",
+      encode managerConfiguredMaxConcurrentChildren,
+      " effectiveMaxChildren=",
+      encode managerConfiguredMaxConcurrentChildren,
+      " action=launch-managed-job"
+    ]
+  else
+    match managerAvailableMemoryMb {
+      Err message ->
+        textConcat [
+          "memory-concurrency-admission: status=blocked reason=host-memory-stats-unavailable configuredMaxChildren=",
+          encode managerConfiguredMaxConcurrentChildren,
+          " admittedChildCapacity=0 effectiveMaxChildren=0 requiredMb=",
+          encode (managerMemoryLaunchRequiredMbForActiveChildren managerConfiguredMaxConcurrentChildren),
+          " action=wait-for-memory-or-lower-concurrency-before-launch error=",
+          message
+        ],
+      Ok availableMb -> managerResourceHealthMemoryConcurrencySummaryFromAvailable availableMb
+    }
+
+managerResourceHealthMemoryAdmissionSummaryFromDecision : ResourceGuardAdmissionDecision -> Str
+managerResourceHealthMemoryAdmissionSummaryFromDecision decision =
+  textConcat [
+    "memory-admission: status=",
+    decision.status,
+    " reason=",
+    decision.reason,
+    " availableMb=",
+    encode decision.availableMb,
+    " requiredMb=",
+    encode decision.requiredMb,
+    " headroomMb=",
+    encode decision.headroomMb,
+    " projectedActiveChildren=",
+    encode decision.projectedActiveChildren,
+    " externalAgentReservedMb=",
+    encode decision.externalAgentReservedMb,
+    " action=",
+    decision.recommendedAction
+  ]
+
+managerResourceHealthMemoryAdmissionSummaryFromAvailableForActiveChildren : Int -> Int -> Str
+managerResourceHealthMemoryAdmissionSummaryFromAvailableForActiveChildren projectedActiveChildren availableMb =
+  match managerExternalAgentPressure {
+    Err message ->
+      textConcat [
+        "memory-admission: status=blocked reason=external-agent-stats-unavailable availableMb=",
+        encode availableMb,
+        " requiredMb=",
+        encode (managerMemoryLaunchRequiredMbForActiveChildren projectedActiveChildren),
+        " headroomMb=",
+        encode (managerMemoryLaunchHeadroomMbFromAvailable availableMb),
+        " projectedActiveChildren=",
+        encode (resourceGuardProjectedChildCount projectedActiveChildren),
+        " action=wait-for-external-agent-pressure-or-lower-concurrency error=",
+        message
+      ],
+    Ok pressure ->
+      managerResourceHealthMemoryAdmissionSummaryFromDecision
+        (managerMemoryAdmissionDecisionWithExternalStatsForActiveChildren
+          projectedActiveChildren
+          pressure.count
+          pressure.rssMb
+          availableMb)
+  }
+
+managerResourceHealthMemoryAdmissionSummaryForActiveChildren : Int -> Str
+managerResourceHealthMemoryAdmissionSummaryForActiveChildren projectedActiveChildren =
+  if managerResourceGuardEnabled == false then
+    "memory-admission: status=admitted reason=guard-disabled action=launch-managed-job"
+  else
+    match managerAvailableMemoryMb {
+      Err message ->
+        textConcat [
+          "memory-admission: status=blocked reason=host-memory-stats-unavailable requiredMb=",
+          encode (managerMemoryLaunchRequiredMbForActiveChildren projectedActiveChildren),
+          " projectedActiveChildren=",
+          encode (resourceGuardProjectedChildCount projectedActiveChildren),
+          " action=wait-for-memory-or-stop-only-managed-jobs-by-metadata error=",
+          message
+        ],
+      Ok availableMb ->
+        managerResourceHealthMemoryAdmissionSummaryFromAvailableForActiveChildren
+          projectedActiveChildren
+          availableMb
+    }
+
+managerResourceHealthMemoryAdmissionSummary : Str
+managerResourceHealthMemoryAdmissionSummary =
+  managerResourceHealthMemoryAdmissionSummaryForActiveChildren 1
+
+managerDiskResourceGuardBlockMessage : Str -> Str
+managerDiskResourceGuardBlockMessage availableText =
+  textConcat [
+    "manager resource guard blocked child launch: disk reserve unmet: path=",
+    managerDiskReserveResolvedPath,
+    ":availableMb=",
+    availableText,
+    ":requiredMb=",
+    encode managerMinAvailableDiskMb
+  ]
+
+managerDiskHeadroomResourceGuardBlockMessage : Str -> Str -> Str
+managerDiskHeadroomResourceGuardBlockMessage availableText headroomText =
+  textConcat [
+    "manager resource guard blocked child launch: disk headroom unmet: path=",
+    managerDiskReserveResolvedPath,
+    ":availableMb=",
+    availableText,
+    ":requiredMb=",
+    encode managerMinAvailableDiskMb,
+    ":headroomMb=",
+    headroomText,
+    ":requiredHeadroomMb=",
+    encode managerMinDiskHeadroomMb
+  ]
+
+managerPlannerDiskResourceGuardBlockMessage : Str -> Str
+managerPlannerDiskResourceGuardBlockMessage availableText =
+  textConcat [
+    "manager resource guard blocked planner launch: disk reserve unmet: path=",
+    managerDiskReserveResolvedPath,
+    ":availableMb=",
+    availableText,
+    ":requiredMb=",
+    encode managerMinAvailableDiskMb
+  ]
+
+managerPlannerDiskHeadroomResourceGuardBlockMessage : Str -> Str -> Str
+managerPlannerDiskHeadroomResourceGuardBlockMessage availableText headroomText =
+  textConcat [
+    "manager resource guard blocked planner launch: disk headroom unmet: path=",
+    managerDiskReserveResolvedPath,
+    ":availableMb=",
+    availableText,
+    ":requiredMb=",
+    encode managerMinAvailableDiskMb,
+    ":headroomMb=",
+    headroomText,
+    ":requiredHeadroomMb=",
+    encode managerMinDiskHeadroomMb
+  ]
+
+managerBenchmarkDiskResourceGuardBlockMessage : Str -> Str
+managerBenchmarkDiskResourceGuardBlockMessage availableText =
+  textConcat [
+    "manager resource guard blocked benchmark launch: disk reserve unmet: path=",
+    managerDiskReserveResolvedPath,
+    ":availableMb=",
+    availableText,
+    ":requiredMb=",
+    encode managerMinAvailableDiskMb
+  ]
+
+managerBenchmarkDiskHeadroomResourceGuardBlockMessage : Str -> Str -> Str
+managerBenchmarkDiskHeadroomResourceGuardBlockMessage availableText headroomText =
+  textConcat [
+    "manager resource guard blocked benchmark launch: disk headroom unmet: path=",
+    managerDiskReserveResolvedPath,
+    ":availableMb=",
+    availableText,
+    ":requiredMb=",
+    encode managerMinAvailableDiskMb,
+    ":headroomMb=",
+    headroomText,
+    ":requiredHeadroomMb=",
+    encode managerMinDiskHeadroomMb
+  ]
+
+managerScopedDiskResourceGuardBlockMessage : Str -> Str -> Str
+managerScopedDiskResourceGuardBlockMessage scope availableText =
+  textConcat [
+    "manager resource guard blocked ",
+    scope,
+    " launch: disk reserve unmet: path=",
+    managerDiskReserveResolvedPath,
+    ":availableMb=",
+    availableText,
+    ":requiredMb=",
+    encode managerMinAvailableDiskMb
+  ]
+
+managerScopedDiskHeadroomResourceGuardBlockMessage : Str -> Str -> Str -> Str
+managerScopedDiskHeadroomResourceGuardBlockMessage scope availableText headroomText =
+  textConcat [
+    "manager resource guard blocked ",
+    scope,
+    " launch: disk headroom unmet: path=",
+    managerDiskReserveResolvedPath,
+    ":availableMb=",
+    availableText,
+    ":requiredMb=",
+    encode managerMinAvailableDiskMb,
+    ":headroomMb=",
+    headroomText,
+    ":requiredHeadroomMb=",
+    encode managerMinDiskHeadroomMb
+  ]
+
+managerWorkspaceMaterializationDiskResourceGuardBlockMessage : Str -> Str
+managerWorkspaceMaterializationDiskResourceGuardBlockMessage availableText =
+  textConcat [
+    "manager resource guard blocked workspace materialization: disk reserve unmet: path=",
+    managerDiskReserveResolvedPath,
+    ":availableMb=",
+    availableText,
+    ":requiredMb=",
+    encode managerMinAvailableDiskMb
+  ]
+
+managerWorkspaceMaterializationDiskHeadroomResourceGuardBlockMessage : Str -> Str -> Str
+managerWorkspaceMaterializationDiskHeadroomResourceGuardBlockMessage availableText headroomText =
+  textConcat [
+    "manager resource guard blocked workspace materialization: disk headroom unmet: path=",
+    managerDiskReserveResolvedPath,
+    ":availableMb=",
+    availableText,
+    ":requiredMb=",
+    encode managerMinAvailableDiskMb,
+    ":headroomMb=",
+    headroomText,
+    ":requiredHeadroomMb=",
+    encode managerMinDiskHeadroomMb
+  ]
+
+managerMemoryResourceGuardBlockMessage : Str -> Str
+managerMemoryResourceGuardBlockMessage availableText =
+  textConcat [
+    "manager resource guard blocked child launch: memory reserve unmet: availableMb=",
+    availableText,
+    ":requiredMb=",
+    encode managerMinAvailableMemoryMb
+  ]
+
+managerPlannerMemoryReserveBlockMessage : Str -> Str
+managerPlannerMemoryReserveBlockMessage availableText =
+  textConcat [
+    "manager resource guard blocked planner launch: memory reserve unmet: availableMb=",
+    availableText,
+    ":requiredMb=",
+    encode managerMinAvailableMemoryMb
+  ]
+
+managerBenchmarkMemoryReserveBlockMessage : Str -> Str
+managerBenchmarkMemoryReserveBlockMessage availableText =
+  textConcat [
+    "manager resource guard blocked benchmark launch: memory reserve unmet: availableMb=",
+    availableText,
+    ":requiredMb=",
+    encode managerMinAvailableMemoryMb
+  ]
+
+managerChildMemoryResourceGuardBlockMessage : Str -> Str -> Str
+managerChildMemoryResourceGuardBlockMessage availableText headroomText =
+  textConcat [
+    "manager resource guard blocked child launch: memory child reserve unmet: availableMb=",
+    availableText,
+    ":requiredMb=",
+    encode managerMinAvailableMemoryMb,
+    ":childReserveMb=",
+    encode managerChildMemoryReserveMb,
+    ":launchRequiredMb=",
+    encode managerMemoryLaunchRequiredMb,
+    ":launchHeadroomMb=",
+    headroomText
+  ]
+
+managerPlannerMemoryResourceGuardBlockMessage : Str -> Str -> Str
+managerPlannerMemoryResourceGuardBlockMessage availableText headroomText =
+  textConcat [
+    "manager resource guard blocked planner launch: memory planner reserve unmet: availableMb=",
+    availableText,
+    ":requiredMb=",
+    encode managerMinAvailableMemoryMb,
+    ":plannerReserveMb=",
+    encode managerPlannerMemoryReserveMb,
+    ":launchRequiredMb=",
+    encode managerPlannerMemoryLaunchRequiredMb,
+    ":launchHeadroomMb=",
+    headroomText
+  ]
+
+managerBenchmarkMemoryResourceGuardBlockMessage : Str -> Str -> Str
+managerBenchmarkMemoryResourceGuardBlockMessage availableText headroomText =
+  textConcat [
+    "manager resource guard blocked benchmark launch: memory benchmark reserve unmet: availableMb=",
+    availableText,
+    ":requiredMb=",
+    encode managerMinAvailableMemoryMb,
+    ":benchmarkReserveMb=",
+    encode managerBenchmarkMemoryReserveMb,
+    ":launchRequiredMb=",
+    encode managerBenchmarkMemoryLaunchRequiredMb,
+    ":launchHeadroomMb=",
+    headroomText
+  ]
+
+managerScopedMemoryReserveBlockMessage : Str -> Str -> Str
+managerScopedMemoryReserveBlockMessage scope availableText =
+  textConcat [
+    "manager resource guard blocked ",
+    scope,
+    " launch: memory reserve unmet: availableMb=",
+    availableText,
+    ":requiredMb=",
+    encode managerMinAvailableMemoryMb
+  ]
+
+managerScopedMemoryResourceGuardBlockMessage : Str -> Str -> Int -> Int -> Str -> Str -> Str
+managerScopedMemoryResourceGuardBlockMessage scope reserveName reserveMb launchRequiredMb availableText headroomText =
+  textConcat [
+    "manager resource guard blocked ",
+    scope,
+    " launch: memory ",
+    scope,
+    " reserve unmet: availableMb=",
+    availableText,
+    ":requiredMb=",
+    encode managerMinAvailableMemoryMb,
+    ":",
+    reserveName,
+    "=",
+    encode reserveMb,
+    ":launchRequiredMb=",
+    encode launchRequiredMb,
+    ":launchHeadroomMb=",
+    headroomText
+  ]
+
+managerProjectedChildMemoryResourceGuardBlockMessage : Int -> Str -> Str -> Str
+managerProjectedChildMemoryResourceGuardBlockMessage projectedActiveChildren availableText headroomText =
+  textConcat [
+    "manager resource guard blocked child launch: memory projected child reserve unmet: availableMb=",
+    availableText,
+    ":requiredMb=",
+    encode managerMinAvailableMemoryMb,
+    ":childReserveMb=",
+    encode managerChildMemoryReserveMb,
+    ":projectedActiveChildren=",
+    encode (resourceGuardProjectedChildCount projectedActiveChildren),
+    ":launchRequiredMb=",
+    encode (managerMemoryLaunchRequiredMbForActiveChildren projectedActiveChildren),
+    ":launchHeadroomMb=",
+    headroomText
+  ]
+
+managerExternalAgentMemoryResourceGuardBlockMessage : Int -> Int -> Int -> Str -> Str -> Str
+managerExternalAgentMemoryResourceGuardBlockMessage projectedActiveChildren externalAgentCount externalAgentRssMb availableText headroomText =
+  textConcat [
+    "manager resource guard blocked child launch: memory external agent reserve unmet: availableMb=",
+    availableText,
+    ":requiredMb=",
+    encode managerMinAvailableMemoryMb,
+    ":childReserveMb=",
+    encode managerChildMemoryReserveMb,
+    ":projectedActiveChildren=",
+    encode (resourceGuardProjectedChildCount projectedActiveChildren),
+    ":externalAgentReserveMb=",
+    encode managerExternalAgentReserveMb,
+    ":externalAgentProcessNames=",
+    encode managerExternalAgentProcessNames,
+    ":externalAgentCount=",
+    encode externalAgentCount,
+    ":externalAgentRssMb=",
+    encode externalAgentRssMb,
+    ":externalAgentReservedMb=",
+    encode (managerExternalAgentReservedMemoryMbFromStats externalAgentCount externalAgentRssMb),
+    ":launchRequiredMb=",
+    encode (managerMemoryLaunchRequiredWithExternalStatsMbForActiveChildren projectedActiveChildren externalAgentCount externalAgentRssMb),
+    ":launchHeadroomMb=",
+    headroomText
+  ]
+
+managerBenchmarkExternalAgentMemoryResourceGuardBlockMessage : Int -> Int -> Str -> Str -> Str
+managerBenchmarkExternalAgentMemoryResourceGuardBlockMessage externalAgentCount externalAgentRssMb availableText headroomText =
+  textConcat [
+    "manager resource guard blocked benchmark launch: memory external agent reserve unmet: availableMb=",
+    availableText,
+    ":requiredMb=",
+    encode managerMinAvailableMemoryMb,
+    ":benchmarkReserveMb=",
+    encode managerBenchmarkMemoryReserveMb,
+    ":externalAgentReserveMb=",
+    encode managerExternalAgentReserveMb,
+    ":externalAgentProcessNames=",
+    encode managerExternalAgentProcessNames,
+    ":externalAgentCount=",
+    encode externalAgentCount,
+    ":externalAgentRssMb=",
+    encode externalAgentRssMb,
+    ":externalAgentReservedMb=",
+    encode (managerExternalAgentReservedMemoryMbFromStats externalAgentCount externalAgentRssMb),
+    ":launchRequiredMb=",
+    encode (managerBenchmarkMemoryLaunchRequiredWithExternalStatsMb externalAgentCount externalAgentRssMb),
+    ":launchHeadroomMb=",
+    headroomText
+  ]
+
+managerScopedExternalAgentMemoryResourceGuardBlockMessage : Str -> Str -> Int -> Int -> Int -> Int -> Str -> Str -> Str
+managerScopedExternalAgentMemoryResourceGuardBlockMessage scope reserveName reserveMb launchRequiredMb externalAgentCount externalAgentRssMb availableText headroomText =
+  textConcat [
+    "manager resource guard blocked ",
+    scope,
+    " launch: memory external agent reserve unmet: availableMb=",
+    availableText,
+    ":requiredMb=",
+    encode managerMinAvailableMemoryMb,
+    ":",
+    reserveName,
+    "=",
+    encode reserveMb,
+    ":externalAgentReserveMb=",
+    encode managerExternalAgentReserveMb,
+    ":externalAgentProcessNames=",
+    encode managerExternalAgentProcessNames,
+    ":externalAgentCount=",
+    encode externalAgentCount,
+    ":externalAgentRssMb=",
+    encode externalAgentRssMb,
+    ":externalAgentReservedMb=",
+    encode (managerExternalAgentReservedMemoryMbFromStats externalAgentCount externalAgentRssMb),
+    ":launchRequiredMb=",
+    encode launchRequiredMb,
+    ":launchHeadroomMb=",
+    headroomText
+  ]
+
+managerPlannerExternalAgentMemoryResourceGuardBlockMessage : Int -> Int -> Str -> Str -> Str
+managerPlannerExternalAgentMemoryResourceGuardBlockMessage externalAgentCount externalAgentRssMb availableText headroomText =
+  textConcat [
+    "manager resource guard blocked planner launch: memory external agent reserve unmet: availableMb=",
+    availableText,
+    ":requiredMb=",
+    encode managerMinAvailableMemoryMb,
+    ":plannerReserveMb=",
+    encode managerPlannerMemoryReserveMb,
+    ":externalAgentReserveMb=",
+    encode managerExternalAgentReserveMb,
+    ":externalAgentProcessNames=",
+    encode managerExternalAgentProcessNames,
+    ":externalAgentCount=",
+    encode externalAgentCount,
+    ":externalAgentRssMb=",
+    encode externalAgentRssMb,
+    ":externalAgentReservedMb=",
+    encode (managerExternalAgentReservedMemoryMbFromStats externalAgentCount externalAgentRssMb),
+    ":launchRequiredMb=",
+    encode (managerPlannerMemoryLaunchRequiredWithExternalStatsMb externalAgentCount externalAgentRssMb),
+    ":launchHeadroomMb=",
+    headroomText
+  ]
+
+managerExternalAgentCountUnavailableBlockMessage : Str -> Str
+managerExternalAgentCountUnavailableBlockMessage message =
+  textConcat [
+    "manager resource guard blocked child launch: memory external agent reserve unavailable: processNames=",
+    encode managerExternalAgentProcessNames,
+    ":externalAgentReserveMb=",
+    encode managerExternalAgentReserveMb,
+    ":error=",
+    message
+  ]
+
+managerBenchmarkExternalAgentCountUnavailableBlockMessage : Str -> Str
+managerBenchmarkExternalAgentCountUnavailableBlockMessage message =
+  textConcat [
+    "manager resource guard blocked benchmark launch: memory external agent reserve unavailable: processNames=",
+    encode managerExternalAgentProcessNames,
+    ":externalAgentReserveMb=",
+    encode managerExternalAgentReserveMb,
+    ":error=",
+    message
+  ]
+
+managerScopedExternalAgentCountUnavailableBlockMessage : Str -> Str -> Str
+managerScopedExternalAgentCountUnavailableBlockMessage scope message =
+  textConcat [
+    "manager resource guard blocked ",
+    scope,
+    " launch: memory external agent reserve unavailable: processNames=",
+    encode managerExternalAgentProcessNames,
+    ":externalAgentReserveMb=",
+    encode managerExternalAgentReserveMb,
+    ":error=",
+    message
+  ]
+
+managerPlannerExternalAgentCountUnavailableBlockMessage : Str -> Str
+managerPlannerExternalAgentCountUnavailableBlockMessage message =
+  textConcat [
+    "manager resource guard blocked planner launch: memory external agent reserve unavailable: processNames=",
+    encode managerExternalAgentProcessNames,
+    ":externalAgentReserveMb=",
+    encode managerExternalAgentReserveMb,
+    ":error=",
+    message
+  ]
+
+managerDiskLaunchResourceError : Str
+managerDiskLaunchResourceError =
+  if managerMinAvailableDiskMb < 1 then
+    ""
+  else
+    match managerAvailableDiskMbAt managerDiskReserveResolvedPath {
+      Err message ->
+        textConcat [
+          "manager resource guard blocked child launch: disk reserve unavailable: path=",
+          managerDiskReserveResolvedPath,
+          ":requiredMb=",
+          encode managerMinAvailableDiskMb,
+          ":error=",
+          message
+        ],
+      Ok availableMb ->
+        if availableMb < managerMinAvailableDiskMb then
+          managerDiskResourceGuardBlockMessage (encode availableMb)
+        else if managerMinDiskHeadroomMb > 0 && managerDiskHeadroomMbFromAvailable availableMb < managerMinDiskHeadroomMb then
+          managerDiskHeadroomResourceGuardBlockMessage (encode availableMb) (encode (managerDiskHeadroomMbFromAvailable availableMb))
+        else
+          ""
+    }
+
+managerBenchmarkDiskLaunchResourceError : Str
+managerBenchmarkDiskLaunchResourceError =
+  if managerMinAvailableDiskMb < 1 then
+    ""
+  else
+    match managerAvailableDiskMbAt managerDiskReserveResolvedPath {
+      Err message ->
+        textConcat [
+          "manager resource guard blocked benchmark launch: disk reserve unavailable: path=",
+          managerDiskReserveResolvedPath,
+          ":requiredMb=",
+          encode managerMinAvailableDiskMb,
+          ":error=",
+          message
+        ],
+      Ok availableMb ->
+        if availableMb < managerMinAvailableDiskMb then
+          managerBenchmarkDiskResourceGuardBlockMessage (encode availableMb)
+        else if managerMinDiskHeadroomMb > 0 && managerDiskHeadroomMbFromAvailable availableMb < managerMinDiskHeadroomMb then
+          managerBenchmarkDiskHeadroomResourceGuardBlockMessage (encode availableMb) (encode (managerDiskHeadroomMbFromAvailable availableMb))
+        else
+          ""
+    }
+
+managerScopedDiskLaunchResourceError : Str -> Str
+managerScopedDiskLaunchResourceError scope =
+  if managerMinAvailableDiskMb < 1 then
+    ""
+  else
+    match managerAvailableDiskMbAt managerDiskReserveResolvedPath {
+      Err message ->
+        textConcat [
+          "manager resource guard blocked ",
+          scope,
+          " launch: disk reserve unavailable: path=",
+          managerDiskReserveResolvedPath,
+          ":requiredMb=",
+          encode managerMinAvailableDiskMb,
+          ":error=",
+          message
+        ],
+      Ok availableMb ->
+        if availableMb < managerMinAvailableDiskMb then
+          managerScopedDiskResourceGuardBlockMessage scope (encode availableMb)
+        else if managerMinDiskHeadroomMb > 0 && managerDiskHeadroomMbFromAvailable availableMb < managerMinDiskHeadroomMb then
+          managerScopedDiskHeadroomResourceGuardBlockMessage scope (encode availableMb) (encode (managerDiskHeadroomMbFromAvailable availableMb))
+        else
+          ""
+    }
+
+managerServiceDiskLaunchResourceError : Str
+managerServiceDiskLaunchResourceError =
+  managerScopedDiskLaunchResourceError "service"
+
+managerUpgradeDiskLaunchResourceError : Str
+managerUpgradeDiskLaunchResourceError =
+  managerScopedDiskLaunchResourceError "upgrade"
+
+managerWorkspaceMaterializationDiskResourceError : Str
+managerWorkspaceMaterializationDiskResourceError =
+  if managerMinAvailableDiskMb < 1 then
+    ""
+  else
+    match managerAvailableDiskMbAt managerDiskReserveResolvedPath {
+      Err message ->
+        textConcat [
+          "manager resource guard blocked workspace materialization: disk reserve unavailable: path=",
+          managerDiskReserveResolvedPath,
+          ":requiredMb=",
+          encode managerMinAvailableDiskMb,
+          ":error=",
+          message
+        ],
+      Ok availableMb ->
+        if availableMb < managerMinAvailableDiskMb then
+          managerWorkspaceMaterializationDiskResourceGuardBlockMessage (encode availableMb)
+        else if managerMinDiskHeadroomMb > 0 && managerDiskHeadroomMbFromAvailable availableMb < managerMinDiskHeadroomMb then
+          managerWorkspaceMaterializationDiskHeadroomResourceGuardBlockMessage (encode availableMb) (encode (managerDiskHeadroomMbFromAvailable availableMb))
+        else
+          ""
+    }
+
+managerPlannerDiskLaunchResourceError : Str
+managerPlannerDiskLaunchResourceError =
+  if managerMinAvailableDiskMb < 1 then
+    ""
+  else
+    match managerAvailableDiskMbAt managerDiskReserveResolvedPath {
+      Err message ->
+        textConcat [
+          "manager resource guard blocked planner launch: disk reserve unavailable: path=",
+          managerDiskReserveResolvedPath,
+          ":requiredMb=",
+          encode managerMinAvailableDiskMb,
+          ":error=",
+          message
+        ],
+      Ok availableMb ->
+        if availableMb < managerMinAvailableDiskMb then
+          managerPlannerDiskResourceGuardBlockMessage (encode availableMb)
+        else if managerMinDiskHeadroomMb > 0 && managerDiskHeadroomMbFromAvailable availableMb < managerMinDiskHeadroomMb then
+          managerPlannerDiskHeadroomResourceGuardBlockMessage (encode availableMb) (encode (managerDiskHeadroomMbFromAvailable availableMb))
+        else
+          ""
+    }
+
+managerMemoryLaunchResourceErrorFromAvailable : Int -> Str
+managerMemoryLaunchResourceErrorFromAvailable availableMb =
+  resourceGuardMemoryLaunchErrorFromAvailable
+    managerMinAvailableMemoryMb
+    managerChildMemoryReserveMb
+    availableMb
+
+managerBenchmarkMemoryLaunchResourceErrorFromAvailable : Int -> Str
+managerBenchmarkMemoryLaunchResourceErrorFromAvailable availableMb =
+  if managerMinAvailableMemoryMb > 0 && availableMb < managerMinAvailableMemoryMb then
+    managerBenchmarkMemoryReserveBlockMessage (encode availableMb)
+  else if managerBenchmarkMemoryReserveMb > 0 && availableMb < managerBenchmarkMemoryLaunchRequiredMb then
+    managerBenchmarkMemoryResourceGuardBlockMessage (encode availableMb) (encode (managerMemoryLaunchHeadroomMbFromAvailable availableMb))
+  else
+    match managerExternalAgentPressure {
+      Err message -> managerBenchmarkExternalAgentCountUnavailableBlockMessage message,
+      Ok pressure ->
+        if availableMb < managerBenchmarkMemoryLaunchRequiredWithExternalStatsMb pressure.count pressure.rssMb then
+          managerBenchmarkExternalAgentMemoryResourceGuardBlockMessage pressure.count pressure.rssMb (encode availableMb) (encode (managerMemoryLaunchHeadroomMbFromAvailable availableMb))
+        else
+          ""
+    }
+
+managerScopedMemoryLaunchResourceErrorFromAvailable : Str -> Str -> Int -> Int -> Int -> Str
+managerScopedMemoryLaunchResourceErrorFromAvailable scope reserveName reserveMb launchRequiredMb availableMb =
+  if managerMinAvailableMemoryMb > 0 && availableMb < managerMinAvailableMemoryMb then
+    managerScopedMemoryReserveBlockMessage scope (encode availableMb)
+  else if reserveMb > 0 && availableMb < launchRequiredMb then
+    managerScopedMemoryResourceGuardBlockMessage scope reserveName reserveMb launchRequiredMb (encode availableMb) (encode (managerMemoryLaunchHeadroomMbFromAvailable availableMb))
+  else
+    match managerExternalAgentPressure {
+      Err message -> managerScopedExternalAgentCountUnavailableBlockMessage scope message,
+      Ok pressure -> {
+        let launchRequiredWithExternalMb =
+          intAdd launchRequiredMb pressure.reservedMemoryMb in
+        if availableMb < launchRequiredWithExternalMb then
+          managerScopedExternalAgentMemoryResourceGuardBlockMessage scope reserveName reserveMb launchRequiredWithExternalMb pressure.count pressure.rssMb (encode availableMb) (encode (managerMemoryLaunchHeadroomMbFromAvailable availableMb))
+        else
+          ""
+      }
+    }
+
+managerServiceMemoryLaunchResourceErrorFromAvailable : Int -> Str
+managerServiceMemoryLaunchResourceErrorFromAvailable availableMb =
+  managerScopedMemoryLaunchResourceErrorFromAvailable
+    "service"
+    "serviceReserveMb"
+    managerServiceMemoryReserveMb
+    managerServiceMemoryLaunchRequiredMb
+    availableMb
+
+managerUpgradeMemoryLaunchResourceErrorFromAvailable : Int -> Str
+managerUpgradeMemoryLaunchResourceErrorFromAvailable availableMb =
+  managerScopedMemoryLaunchResourceErrorFromAvailable
+    "upgrade"
+    "upgradeReserveMb"
+    managerUpgradeMemoryReserveMb
+    managerUpgradeMemoryLaunchRequiredMb
+    availableMb
+
+managerPlannerMemoryLaunchResourceErrorFromAvailable : Int -> Str
+managerPlannerMemoryLaunchResourceErrorFromAvailable availableMb =
+  if managerMinAvailableMemoryMb > 0 && availableMb < managerMinAvailableMemoryMb then
+    managerPlannerMemoryReserveBlockMessage (encode availableMb)
+  else if managerPlannerMemoryReserveMb > 0 && availableMb < managerPlannerMemoryLaunchRequiredMb then
+    managerPlannerMemoryResourceGuardBlockMessage (encode availableMb) (encode (managerMemoryLaunchHeadroomMbFromAvailable availableMb))
+  else
+    match managerExternalAgentPressure {
+      Err message -> managerPlannerExternalAgentCountUnavailableBlockMessage message,
+      Ok pressure ->
+        if availableMb < managerPlannerMemoryLaunchRequiredWithExternalStatsMb pressure.count pressure.rssMb then
+          managerPlannerExternalAgentMemoryResourceGuardBlockMessage pressure.count pressure.rssMb (encode availableMb) (encode (managerMemoryLaunchHeadroomMbFromAvailable availableMb))
+        else
+          ""
+    }
+
+managerMemoryLaunchResourceErrorFromAvailableForActiveChildren : Int -> Int -> Str
+managerMemoryLaunchResourceErrorFromAvailableForActiveChildren projectedActiveChildren availableMb =
+  let childError =
+    resourceGuardMemoryProjectedLaunchErrorFromAvailable
+      managerMinAvailableMemoryMb
+      managerChildMemoryReserveMb
+      projectedActiveChildren
+      availableMb in
+  if childError != "" then
+    childError
+  else
+    match managerExternalAgentPressure {
+      Err message -> managerExternalAgentCountUnavailableBlockMessage message,
+      Ok pressure ->
+        if availableMb < managerMemoryLaunchRequiredWithExternalStatsMbForActiveChildren projectedActiveChildren pressure.count pressure.rssMb then
+          managerExternalAgentMemoryResourceGuardBlockMessage projectedActiveChildren pressure.count pressure.rssMb (encode availableMb) (encode (managerMemoryLaunchHeadroomMbFromAvailable availableMb))
+        else
+          ""
+    }
+
+managerMemoryLaunchResourceError : Str
+managerMemoryLaunchResourceError =
+  managerMemoryLaunchResourceErrorForActiveChildren 1
+
+managerMemoryLaunchResourceErrorForActiveChildren : Int -> Str
+managerMemoryLaunchResourceErrorForActiveChildren projectedActiveChildren =
+  if managerMinAvailableMemoryMb < 1 && managerChildMemoryReserveMb < 1 then
+    ""
+  else
+    match managerAvailableMemoryMb {
+      Err message ->
+        textConcat [
+          "manager resource guard blocked child launch: memory reserve unavailable: requiredMb=",
+          encode managerMinAvailableMemoryMb,
+          ":childReserveMb=",
+          encode managerChildMemoryReserveMb,
+          ":launchRequiredMb=",
+          encode (managerMemoryLaunchRequiredMbForActiveChildren projectedActiveChildren),
+          ":projectedActiveChildren=",
+          encode (resourceGuardProjectedChildCount projectedActiveChildren),
+          ":error=",
+          message
+        ],
+      Ok availableMb -> managerMemoryLaunchResourceErrorFromAvailableForActiveChildren projectedActiveChildren availableMb
+    }
+
+managerBenchmarkMemoryLaunchResourceError : Str
+managerBenchmarkMemoryLaunchResourceError =
+  if managerMinAvailableMemoryMb < 1 && managerBenchmarkMemoryReserveMb < 1 then
+    ""
+  else
+    match managerAvailableMemoryMb {
+      Err message ->
+        textConcat [
+          "manager resource guard blocked benchmark launch: memory reserve unavailable: requiredMb=",
+          encode managerMinAvailableMemoryMb,
+          ":benchmarkReserveMb=",
+          encode managerBenchmarkMemoryReserveMb,
+          ":launchRequiredMb=",
+          encode managerBenchmarkMemoryLaunchRequiredMb,
+          ":error=",
+          message
+        ],
+      Ok availableMb -> managerBenchmarkMemoryLaunchResourceErrorFromAvailable availableMb
+    }
+
+managerScopedMemoryLaunchResourceError : Str -> Str -> Int -> Int -> Str
+managerScopedMemoryLaunchResourceError scope reserveName reserveMb launchRequiredMb =
+  if managerMinAvailableMemoryMb < 1 && reserveMb < 1 then
+    ""
+  else
+    match managerAvailableMemoryMb {
+      Err message ->
+        textConcat [
+          "manager resource guard blocked ",
+          scope,
+          " launch: memory reserve unavailable: requiredMb=",
+          encode managerMinAvailableMemoryMb,
+          ":",
+          reserveName,
+          "=",
+          encode reserveMb,
+          ":launchRequiredMb=",
+          encode launchRequiredMb,
+          ":error=",
+          message
+        ],
+      Ok availableMb ->
+        managerScopedMemoryLaunchResourceErrorFromAvailable scope reserveName reserveMb launchRequiredMb availableMb
+    }
+
+managerServiceMemoryLaunchResourceError : Str
+managerServiceMemoryLaunchResourceError =
+  managerScopedMemoryLaunchResourceError
+    "service"
+    "serviceReserveMb"
+    managerServiceMemoryReserveMb
+    managerServiceMemoryLaunchRequiredMb
+
+managerUpgradeMemoryLaunchResourceError : Str
+managerUpgradeMemoryLaunchResourceError =
+  managerScopedMemoryLaunchResourceError
+    "upgrade"
+    "upgradeReserveMb"
+    managerUpgradeMemoryReserveMb
+    managerUpgradeMemoryLaunchRequiredMb
+
+managerPlannerMemoryLaunchResourceError : Str
+managerPlannerMemoryLaunchResourceError =
+  if managerMinAvailableMemoryMb < 1 && managerPlannerMemoryReserveMb < 1 then
+    ""
+  else
+    match managerAvailableMemoryMb {
+      Err message ->
+        textConcat [
+          "manager resource guard blocked planner launch: memory reserve unavailable: requiredMb=",
+          encode managerMinAvailableMemoryMb,
+          ":plannerReserveMb=",
+          encode managerPlannerMemoryReserveMb,
+          ":launchRequiredMb=",
+          encode managerPlannerMemoryLaunchRequiredMb,
+          ":error=",
+          message
+        ],
+      Ok availableMb -> managerPlannerMemoryLaunchResourceErrorFromAvailable availableMb
+    }
+
+managerResourceHealthLaunchSummary : Str
+managerResourceHealthLaunchSummary =
+  if managerResourceGuardEnabled == false then
+    "launch: guardEnabled=false status=allowed"
+  else {
+    let diskError = managerDiskLaunchResourceError in
+    if diskError != "" then
+      textConcat ["launch: guardEnabled=true status=blocked reason=", diskError]
+    else {
+      let memoryError = managerMemoryLaunchResourceError in
+      if memoryError != "" then
+        textConcat ["launch: guardEnabled=true status=blocked reason=", memoryError]
+      else
+        "launch: guardEnabled=true status=allowed"
+    }
+  }
+
+managerWorktreeCheckpointKind : Str
+managerWorktreeCheckpointKind = "clasp-manager-worktree-checkpoint"
+
+managerWorktreeCheckpointPath : Str
+managerWorktreeCheckpointPath =
+  readEnvText
+    "CLASP_MANAGER_WORKTREE_CHECKPOINT_PATH_JSON"
+    (pathJoin [stateRootPath, "worktree-checkpoint.json"])
+
+managerGitWorktreeStatusResult : Result Str
+managerGitWorktreeStatusResult =
+  match runCommand managerProjectRoot ["git", "status", "--porcelain", "--untracked-files=normal"] {
+    Err message -> Err message,
+    Ok process ->
+      if process.exitCode == 0 then
+        Ok process.stdout
+      else
+        Err process.stderr
+  }
+
+managerGitWorktreeStatusTextOrEmpty : Str
+managerGitWorktreeStatusTextOrEmpty =
+  match managerGitWorktreeStatusResult {
+    Ok statusText -> statusText,
+    Err message -> ""
+  }
+
+managerGitWorktreeStatusFingerprint64Hex : Str
+managerGitWorktreeStatusFingerprint64Hex =
+  textFingerprint64Hex managerGitWorktreeStatusTextOrEmpty
+
+managerGitWorktreeDirtyDefault : Bool -> Bool
+managerGitWorktreeDirtyDefault fallback =
+  match managerGitWorktreeStatusResult {
+    Ok statusText -> statusText != "",
+    Err message -> fallback
+  }
+
+managerReadWorktreeCheckpoint : Result ManagerWorktreeCheckpoint
+managerReadWorktreeCheckpoint =
+  if fileExists managerWorktreeCheckpointPath then
+    match readFile managerWorktreeCheckpointPath {
+      Ok raw -> tryDecode ManagerWorktreeCheckpoint raw,
+      Err message -> Err message
+    }
+  else
+    Err "missing-manager-worktree-checkpoint"
+
+managerWorktreeCheckpointMatchesCurrentStatus : Bool
+managerWorktreeCheckpointMatchesCurrentStatus =
+  match managerGitWorktreeStatusResult {
+    Err message -> false,
+    Ok statusText ->
+      match managerReadWorktreeCheckpoint {
+        Err checkpointMessage -> false,
+        Ok checkpoint ->
+          if checkpoint.schemaVersion != 1 then
+            false
+          else if checkpoint.kind != managerWorktreeCheckpointKind then
+            false
+          else if checkpoint.projectRoot != managerProjectRoot then
+            false
+          else
+            checkpoint.statusText == statusText
+      }
+  }
+
+managerWorkspaceCheckpointReadyDefault : Bool
+managerWorkspaceCheckpointReadyDefault =
+  if managerGitWorktreeDirtyDefault true == false then
+    true
+  else
+    managerWorktreeCheckpointMatchesCurrentStatus
+
+managerWorkspaceCheckpointReady : Bool
+managerWorkspaceCheckpointReady =
+  readEnvBool "CLASP_MANAGER_WORKSPACE_CHECKPOINT_READY_JSON" managerWorkspaceCheckpointReadyDefault
+
+managerDirtyWorktree : Bool
+managerDirtyWorktree =
+  readEnvBool "CLASP_MANAGER_DIRTY_WORKTREE_JSON" (managerGitWorktreeDirtyDefault false)
+
+managerLoopAlreadyRunning : Bool
+managerLoopAlreadyRunning =
+  readEnvBool "CLASP_MANAGER_LOOP_ALREADY_RUNNING_JSON" false
+
+managerAutonomousFocusedVerificationReady : Bool
+managerAutonomousFocusedVerificationReady =
+  readEnvBool "CLASP_MANAGER_AUTONOMOUS_FOCUSED_VERIFICATION_READY_JSON" false
+
+managerAutonomousFullVerificationRequested : Bool
+managerAutonomousFullVerificationRequested =
+  readEnvBool "CLASP_MANAGER_AUTONOMOUS_FULL_VERIFICATION_REQUESTED_JSON" false
+
+managerAutonomousPromotionRequested : Bool
+managerAutonomousPromotionRequested =
+  readEnvBool "CLASP_MANAGER_AUTONOMOUS_PROMOTION_REQUESTED_JSON" false
+
+managerAutonomousCompilerMutationRequested : Bool
+managerAutonomousCompilerMutationRequested =
+  readEnvBool "CLASP_MANAGER_AUTONOMOUS_COMPILER_MUTATION_REQUESTED_JSON" false
+
+managerManagedLaunchReady : Bool
+managerManagedLaunchReady =
+  match envVar "CLASP_MANAGED_JOB_ID" {
+    Ok raw -> raw != "",
+    Err message -> readEnvBool "CLASP_MANAGER_ASSUME_MANAGED_LAUNCH_JSON" false
+  }
+
+managerAutonomousRequestedChildAgents : Int
+managerAutonomousRequestedChildAgents =
+  resourceGuardConfiguredChildLimit managerConfiguredMaxConcurrentChildren
+
+managerAutonomousBoundedTaskCount : Int
+managerAutonomousBoundedTaskCount =
+  readEnvInt "CLASP_MANAGER_MAX_TASKS_JSON" 4
+
+managerAutonomousAdmittedChildCapacity : Int
+managerAutonomousAdmittedChildCapacity =
+  if managerResourceGuardEnabled == false then
+    managerAutonomousRequestedChildAgents
+  else
+    match managerAvailableMemoryMb {
+      Err message -> 0,
+      Ok availableMb ->
+        match managerExternalAgentPressure {
+          Err pressureMessage -> 0,
+          Ok pressure ->
+            (managerMemoryConcurrencyDecisionWithExternalStats pressure.count pressure.rssMb availableMb).admittedChildCapacity
+        }
+    }
+
+managerAutonomousResourceAdmissionOkForActiveChildren : Int -> Bool
+managerAutonomousResourceAdmissionOkForActiveChildren projectedActiveChildren =
+  if managerResourceGuardEnabled == false then
+    true
+  else {
+    let diskError = managerDiskLaunchResourceError in
+    if diskError != "" then
+      false
+    else
+      managerMemoryLaunchResourceErrorForActiveChildren projectedActiveChildren == ""
+  }
+
+managerAutonomousLaunchGateInputForActiveChildren : Int -> AgentAutonomousLaunchGateInput
+managerAutonomousLaunchGateInputForActiveChildren projectedActiveChildren =
+  AgentAutonomousLaunchGateInput {
+    workspaceCheckpointReady = managerWorkspaceCheckpointReady,
+    dirtyWorktree = managerDirtyWorktree,
+    resourceAdmissionOk = managerAutonomousResourceAdmissionOkForActiveChildren projectedActiveChildren,
+    loopAlreadyRunning = managerLoopAlreadyRunning,
+    boundedTaskCount = managerAutonomousBoundedTaskCount,
+    requestedChildAgents = managerAutonomousRequestedChildAgents,
+    admittedChildCapacity = managerAutonomousAdmittedChildCapacity,
+    managedLaunch = managerManagedLaunchReady,
+    focusedVerificationReady = managerAutonomousFocusedVerificationReady,
+    fullVerificationRequested = managerAutonomousFullVerificationRequested,
+    promotionRequested = managerAutonomousPromotionRequested,
+    compilerMutationRequested = managerAutonomousCompilerMutationRequested
+  }
+
+managerAutonomousLaunchGateForActiveChildren : Int -> AgentAutonomousLaunchGate
+managerAutonomousLaunchGateForActiveChildren projectedActiveChildren =
+  agentAutonomousLaunchGate (managerAutonomousLaunchGateInputForActiveChildren projectedActiveChildren)
+
+managerAutonomousLaunchGateRepairMaySpawnForActiveChildren : Int -> Bool
+managerAutonomousLaunchGateRepairMaySpawnForActiveChildren projectedActiveChildren =
+  agentAutonomousLaunchGateRepairMaySpawn (managerAutonomousLaunchGateInputForActiveChildren projectedActiveChildren)
+
+managerAutonomousLaunchGateRepairRecommendationForActiveChildren : Int -> Str
+managerAutonomousLaunchGateRepairRecommendationForActiveChildren projectedActiveChildren =
+  agentAutonomousLaunchGateRepairRecommendation (managerAutonomousLaunchGateInputForActiveChildren projectedActiveChildren)
+
+managerAutonomousLaunchGate : AgentAutonomousLaunchGate
+managerAutonomousLaunchGate = managerAutonomousLaunchGateForActiveChildren 1
+
+managerAutonomousLaunchGateJson : Str
+managerAutonomousLaunchGateJson = encode managerAutonomousLaunchGate
+
+managerAutonomousLaunchGateSummary : Str
+managerAutonomousLaunchGateSummary =
+  textJoin "\n" [
+    "Autonomous launch gate:",
+    textConcat ["autonomous-launch-gate-mode:", managerAutonomousLaunchGate.mode],
+    textConcat ["autonomous-launch-gate-ready:", managerResourceBoolText managerAutonomousLaunchGate.ready],
+    textConcat ["autonomous-launch-gate-may-spawn:", managerResourceBoolText managerAutonomousLaunchGate.maySpawn],
+    textConcat ["autonomous-launch-gate-may-spawn-repair:", managerResourceBoolText (managerAutonomousLaunchGateRepairMaySpawnForActiveChildren 1)],
+    textConcat ["autonomous-launch-gate-recommendation:", managerAutonomousLaunchGate.recommendation],
+    textConcat ["autonomous-launch-gate-repair-recommendation:", managerAutonomousLaunchGateRepairRecommendationForActiveChildren 1],
+    textConcat ["autonomous-launch-worktree-checkpoint-path:", managerWorktreeCheckpointPath],
+    textConcat ["autonomous-launch-worktree-status-fingerprint64:", managerGitWorktreeStatusFingerprint64Hex],
+    textConcat ["autonomous-launch-worktree-checkpoint-matches:", managerResourceBoolText managerWorktreeCheckpointMatchesCurrentStatus],
+    "Autonomous launch gate JSON:",
+    managerAutonomousLaunchGateJson,
+    "End autonomous launch gate JSON."
+  ]
+
+managerResourceHealthSummary : Str
+managerResourceHealthSummary =
+  textJoin "\n" [
+    "Planner resource health:",
+    managerResourceHealthDiskSummary,
+    managerGeneratedStateCleanupPlanSummary,
+    managerResourceHealthMemorySummary,
+    managerResourceHealthExternalAgentSummary,
+    managerResourceHealthMemoryAdmissionSummary,
+    managerResourceHealthMemoryConcurrencySummary,
+    managerResourceHealthLaunchSummary,
+    managerAutonomousLaunchGateSummary
+  ]
+
+resourceBlockMessageIsMemoryPressure : Str -> Bool
+resourceBlockMessageIsMemoryPressure message = resourceRecoveryMessageIsMemoryPressure message
+
+resourceBlockRecoveryTaskId : Str -> Str
+resourceBlockRecoveryTaskId message = resourceRecoveryTaskIdForMessage message
+
+resourceBlockRecoveryKind : Str -> Str
+resourceBlockRecoveryKind message = resourceRecoveryKindForMessage message
+
+resourceBlockRecoveryGuidance : Str -> Str
+resourceBlockRecoveryGuidance message = resourceRecoveryGuidanceForMessage message
+
+managerTraceResourceBlock : Str -> Str
+managerTraceResourceBlock blockMessage =
+  let traceError = appendManagerTrace (textConcat ["resource-guard:child-launch-blocked:", blockMessage]) in
+  if traceError != "" then
+    textConcat [blockMessage, "; trace failed: ", traceError]
+  else
+    blockMessage
+
+managerTraceBenchmarkResourceBlock : Str -> Str
+managerTraceBenchmarkResourceBlock blockMessage =
+  let traceError = appendManagerTrace (textConcat ["resource-guard:benchmark-launch-blocked:", blockMessage]) in
+  if traceError != "" then
+    textConcat [blockMessage, "; trace failed: ", traceError]
+  else
+    blockMessage
+
+managerTraceServiceResourceBlock : Str -> Str
+managerTraceServiceResourceBlock blockMessage =
+  let traceError = appendManagerTrace (textConcat ["resource-guard:service-launch-blocked:", blockMessage]) in
+  if traceError != "" then
+    textConcat [blockMessage, "; trace failed: ", traceError]
+  else
+    blockMessage
+
+managerTraceUpgradeResourceBlock : Str -> Str
+managerTraceUpgradeResourceBlock blockMessage =
+  let traceError = appendManagerTrace (textConcat ["resource-guard:upgrade-launch-blocked:", blockMessage]) in
+  if traceError != "" then
+    textConcat [blockMessage, "; trace failed: ", traceError]
+  else
+    blockMessage
+
+managerTracePlannerResourceBlock : Str -> Str
+managerTracePlannerResourceBlock blockMessage =
+  let traceError = appendManagerTrace (textConcat ["resource-guard:planner-launch-blocked:", blockMessage]) in
+  if traceError != "" then
+    textConcat [blockMessage, "; trace failed: ", traceError]
+  else
+    blockMessage
+
+managerTraceWorkspaceMaterializationResourceBlock : Str -> Str
+managerTraceWorkspaceMaterializationResourceBlock blockMessage =
+  let traceError = appendManagerTrace (textConcat ["resource-guard:workspace-materialization-blocked:", blockMessage]) in
+  if traceError != "" then
+    textConcat [blockMessage, "; trace failed: ", traceError]
+  else
+    blockMessage
+
+managerBenchmarkLaunchResourceError : Str
+managerBenchmarkLaunchResourceError =
+  if managerResourceGuardEnabled == false then
+    ""
+  else {
+    let diskError = managerBenchmarkDiskLaunchResourceError in
+    if diskError != "" then
+      managerTraceBenchmarkResourceBlock diskError
+    else {
+      let memoryError = managerBenchmarkMemoryLaunchResourceError in
+      if memoryError != "" then
+        managerTraceBenchmarkResourceBlock memoryError
+      else
+        ""
+    }
+  }
+
+managerServiceLaunchResourceError : Str
+managerServiceLaunchResourceError =
+  if managerResourceGuardEnabled == false then
+    ""
+  else {
+    let diskError = managerServiceDiskLaunchResourceError in
+    if diskError != "" then
+      managerTraceServiceResourceBlock diskError
+    else {
+      let memoryError = managerServiceMemoryLaunchResourceError in
+      if memoryError != "" then
+        managerTraceServiceResourceBlock memoryError
+      else
+        ""
+    }
+  }
+
+managerUpgradeLaunchResourceError : Str
+managerUpgradeLaunchResourceError =
+  if managerResourceGuardEnabled == false then
+    ""
+  else {
+    let diskError = managerUpgradeDiskLaunchResourceError in
+    if diskError != "" then
+      managerTraceUpgradeResourceBlock diskError
+    else {
+      let memoryError = managerUpgradeMemoryLaunchResourceError in
+      if memoryError != "" then
+        managerTraceUpgradeResourceBlock memoryError
+      else
+        ""
+    }
+  }
+
+managerPlannerLaunchResourceError : Str
+managerPlannerLaunchResourceError =
+  if managerResourceGuardEnabled == false then
+    ""
+  else {
+    let diskError = managerPlannerDiskLaunchResourceError in
+    if diskError != "" then
+      managerTracePlannerResourceBlock diskError
+    else {
+      let memoryError = managerPlannerMemoryLaunchResourceError in
+      if memoryError != "" then
+        managerTracePlannerResourceBlock memoryError
+      else
+        ""
+    }
+  }
+
+managerWorkspaceMaterializationResourceError : Str
+managerWorkspaceMaterializationResourceError =
+  if managerResourceGuardEnabled == false then
+    ""
+  else {
+    let diskError = managerWorkspaceMaterializationDiskResourceError in
+    if diskError != "" then
+      managerTraceWorkspaceMaterializationResourceBlock diskError
+    else
+      ""
+  }
+
+managerChildLaunchResourceError : Str
+managerChildLaunchResourceError =
+  managerChildLaunchResourceErrorForActiveChildren 1
+
+managerChildLaunchResourceErrorForActiveChildren : Int -> Str
+managerChildLaunchResourceErrorForActiveChildren projectedActiveChildren =
+  if managerResourceGuardEnabled == false then
+    ""
+  else {
+    let diskError = managerDiskLaunchResourceError in
+    if diskError != "" then
+      managerTraceResourceBlock diskError
+    else {
+      let memoryError = managerMemoryLaunchResourceErrorForActiveChildren projectedActiveChildren in
+      if memoryError != "" then
+        managerTraceResourceBlock memoryError
+      else
+        ""
+    }
+  }

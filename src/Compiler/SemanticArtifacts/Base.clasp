@@ -1,0 +1,157 @@
+module Compiler.SemanticArtifacts.Base
+
+import Compiler.Ast
+import Compiler.Checker
+import Compiler.Checker.Types
+import Compiler.Json
+import Compiler.Project
+
+semanticJsonTextArray : [Str] -> Str
+semanticJsonTextArray values = {
+  let mut encoded = emptyRenderedTexts;
+  for value in values {
+    encoded = appendRenderedText encoded (encode value);
+    encoded
+  };
+  jsonArray encoded
+}
+
+semanticJsonNode : Str -> Str -> [JsonField] -> Str
+semanticJsonNode nodeId kind fields =
+  jsonObject (append [jsonFieldText "id" nodeId, jsonFieldText "kind" kind] fields)
+
+semanticJsonEdge : Str -> Str -> Str -> Str
+semanticJsonEdge fromId toId kind =
+  jsonObject [jsonFieldText "from" fromId, jsonFieldText "to" toId, jsonFieldText "kind" kind]
+
+semanticRouteResponseKind : Str -> Str
+semanticRouteResponseKind responseType =
+  if responseType == "Page" then "page" else if responseType == "Redirect" then "redirect" else "json"
+
+semanticPermissionText : HostedPolicyPermissionAst -> Str
+semanticPermissionText permission =
+  textConcat [renderHostedPolicyPermissionKind (policyPermissionKind permission), ":", policyPermissionValue permission]
+
+semanticPermissionTexts : [HostedPolicyPermissionAst] -> [Str]
+semanticPermissionTexts permissions = {
+  let mut rendered = emptyRenderedTexts;
+  for permission in permissions {
+    rendered = appendRenderedText rendered (semanticPermissionText permission);
+    rendered
+  };
+  rendered
+}
+
+semanticGuideEntryNodeId : Str -> HostedGuideEntryAst -> Str
+semanticGuideEntryNodeId guideName entry =
+  textConcat ["guide-entry:", guideName, ":", guideEntryName entry]
+
+semanticProjectionFieldNodeId : Str -> HostedProjectionFieldDeclAst -> Str
+semanticProjectionFieldNodeId projectionName field =
+  textConcat ["projection-field:", projectionName, ":", projectionFieldDeclName field]
+
+semanticConstructorNodeId : Str -> HostedConstructorDeclAst -> Str
+semanticConstructorNodeId typeName constructorDecl =
+  textConcat ["constructor:", typeName, ":", constructorDeclName constructorDecl]
+
+semanticRecordFieldNodeId : Str -> HostedRecordFieldDeclAst -> Str
+semanticRecordFieldNodeId recordName field =
+  textConcat ["record-field:", recordName, ":", recordFieldDeclName field]
+
+semanticSchemaFieldNodeId : Str -> HostedRecordFieldDeclAst -> Str
+semanticSchemaFieldNodeId recordName field =
+  textConcat ["schema-field:", recordName, ":", recordFieldDeclName field]
+
+semanticImportNodeId : Str -> Str
+semanticImportNodeId importName = textConcat ["import:", importName]
+
+semanticTypeNodeId : HostedTypeDeclAst -> Str
+semanticTypeNodeId typeDecl = textConcat ["type:", typeDeclName typeDecl]
+
+semanticRecordNodeId : HostedRecordDeclAst -> Str
+semanticRecordNodeId recordDecl = textConcat ["record:", recordDeclName recordDecl]
+
+semanticSchemaNodeId : HostedRecordDeclAst -> Str
+semanticSchemaNodeId recordDecl = textConcat ["schema:", recordDeclName recordDecl]
+
+semanticForeignNodeId : HostedForeignDeclAst -> Str
+semanticForeignNodeId foreignDecl = textConcat ["foreign:", foreignDeclName foreignDecl]
+
+semanticDeclNodeId : HostedDeclAst -> Str
+semanticDeclNodeId decl = textConcat ["decl:", declName decl]
+
+semanticGuideNodeId : HostedGuideDeclAst -> Str
+semanticGuideNodeId guideDecl = textConcat ["guide:", guideDeclName guideDecl]
+
+semanticPolicyNodeId : HostedPolicyDeclAst -> Str
+semanticPolicyNodeId policyDecl = textConcat ["policy:", policyDeclName policyDecl]
+
+semanticProjectionNodeId : HostedProjectionDeclAst -> Str
+semanticProjectionNodeId projectionDecl = textConcat ["projection:", projectionDeclName projectionDecl]
+
+semanticAgentRoleNodeId : HostedAgentRoleDeclAst -> Str
+semanticAgentRoleNodeId roleDecl = textConcat ["agent-role:", agentRoleDeclName roleDecl]
+
+semanticAgentNodeId : HostedAgentDeclAst -> Str
+semanticAgentNodeId agentDecl = textConcat ["agent:", agentDeclName agentDecl]
+
+semanticWorkflowNodeId : HostedWorkflowDeclAst -> Str
+semanticWorkflowNodeId workflowDecl = textConcat ["workflow:", workflowDeclName workflowDecl]
+
+semanticRouteNodeId : HostedRouteDeclAst -> Str
+semanticRouteNodeId routeDecl = textConcat ["route:", routeDeclName routeDecl]
+
+semanticHookNodeId : HostedHookDeclAst -> Str
+semanticHookNodeId hookDecl = textConcat ["hook:", hookDeclName hookDecl]
+
+semanticToolServerNodeId : HostedToolServerDeclAst -> Str
+semanticToolServerNodeId toolServerDecl = textConcat ["toolserver:", toolServerDeclName toolServerDecl]
+
+semanticToolNodeId : HostedToolDeclAst -> Str
+semanticToolNodeId toolDecl = textConcat ["tool:", toolDeclName toolDecl]
+
+semanticVerifierNodeId : HostedVerifierDeclAst -> Str
+semanticVerifierNodeId verifierDecl = textConcat ["verifier:", verifierDeclName verifierDecl]
+
+semanticMergeGateNodeId : HostedMergeGateDeclAst -> Str
+semanticMergeGateNodeId mergeGateDecl = textConcat ["mergegate:", mergeGateDeclName mergeGateDecl]
+
+semanticConstructorNodeIds : HostedTypeDeclAst -> [Str]
+semanticConstructorNodeIds typeDecl = {
+  let mut nodeIds = emptyRenderedTexts;
+  for constructorDecl in typeDeclConstructors typeDecl {
+    nodeIds = appendRenderedText nodeIds (semanticConstructorNodeId (typeDeclName typeDecl) constructorDecl);
+    nodeIds
+  };
+  nodeIds
+}
+
+semanticRecordFieldNodeIds : HostedRecordDeclAst -> [Str]
+semanticRecordFieldNodeIds recordDecl = {
+  let mut nodeIds = emptyRenderedTexts;
+  for field in recordDeclFields recordDecl {
+    nodeIds = appendRenderedText nodeIds (semanticRecordFieldNodeId (recordDeclName recordDecl) field);
+    nodeIds
+  };
+  nodeIds
+}
+
+semanticGuideEntryNodeIds : HostedGuideDeclAst -> [Str]
+semanticGuideEntryNodeIds guideDecl = {
+  let mut nodeIds = emptyRenderedTexts;
+  for entry in guideDeclEntries guideDecl {
+    nodeIds = appendRenderedText nodeIds (semanticGuideEntryNodeId (guideDeclName guideDecl) entry);
+    nodeIds
+  };
+  nodeIds
+}
+
+semanticProjectionFieldNodeIds : HostedProjectionDeclAst -> [Str]
+semanticProjectionFieldNodeIds projectionDecl = {
+  let mut nodeIds = emptyRenderedTexts;
+  for field in projectionDeclFields projectionDecl {
+    nodeIds = appendRenderedText nodeIds (semanticProjectionFieldNodeId (projectionDeclName projectionDecl) field);
+    nodeIds
+  };
+  nodeIds
+}
