@@ -513,6 +513,32 @@ set -e
 [[ "$unknown_profile_output" == *"unknown launch profile: not-a-profile"* ]]
 [[ ! -e builder-events.log ]]
 
+terminal_runtime=".clasp-swarm/test-wave/01-foundation"
+terminal_job="$terminal_runtime/jobs/terminal-memory"
+mkdir -p "$terminal_job"
+printf '%s\n' "$terminal_job" > "$terminal_runtime/job"
+printf '%s\n' "$$" > "$terminal_runtime/pid"
+printf '%s\n' "$$" > "$terminal_job/pid"
+printf '137\n' > "$terminal_job/exit-status"
+printf 'memory-exceeded\n' > "$terminal_job/status"
+terminal_json="$(
+  CLASP_MANAGED_JOB_EXTERNAL_AGENT_RESERVE_MB=0 \
+  CLASP_MANAGED_JOB_MEMORY_BUDGET_SCOPE=current-root \
+  CLASP_SWARM_MAX_RUNNING_LANES=1 \
+  CLASP_SWARM_LANE_MEMORY_MB=1 \
+  CLASP_SWARM_MIN_AVAILABLE_MEMORY_MB=1 \
+  CLASP_SWARM_MIN_AVAILABLE_DISK_MB=0 \
+  CLASP_SWARM_MIN_DISK_HEADROOM_MB=0 \
+    bash scripts/clasp-swarm-preflight.sh --json --batch foundation test-wave
+)"
+node -e '
+const report = JSON.parse(process.argv[1]);
+if (report.status !== "admitted") throw new Error(`terminal managed lane should not count as running: ${JSON.stringify(report)}`);
+if (report.runningLanes !== 0) throw new Error(`terminal managed lane should report zero running lanes: ${JSON.stringify(report)}`);
+' "$terminal_json"
+rm -rf "$terminal_runtime"
+[[ ! -e builder-events.log ]]
+
 mkdir -p .clasp-swarm/test-wave/01-foundation
 printf '%s\n' "$$" > .clasp-swarm/test-wave/01-foundation/pid
 sleep 30 &

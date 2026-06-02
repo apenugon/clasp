@@ -592,7 +592,8 @@ lane_runtime_is_running() {
     if [[ -f "$job_dir/pid" && -f "$job_dir/status" ]]; then
       pid="$(tr -d '[:space:]' <"$job_dir/pid")"
       status="$(sed -n '1p' "$job_dir/status")"
-      if [[ -f "$pid_file" && "$status" != "completed" && "$status" != "failed" && "$status" != "stopped" ]] &&
+      if [[ -f "$pid_file" ]] &&
+         ! clasp_swarm_managed_job_status_is_terminal "$status" &&
          kill -0 "$pid" >/dev/null 2>&1; then
         return 0
       fi
