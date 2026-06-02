@@ -36,7 +36,7 @@ Supervisor status is available in both human and machine-readable forms:
 - `bash scripts/clasp-swarm-summary.sh`: pass rate, timeout rate, and mean time grouped by task family for the current wave
 - `bash scripts/clasp-swarm-summary.sh --markdown`: dashboard-friendly table output for reports or PR comments
 - `bash scripts/clasp-swarm-summary.sh --json`: structured summary metrics for automation
-- `claspc run examples/swarm-native/SwarmSupervisor.clasp -- .clasp-swarm-supervisor`: ordinary Clasp supervisor loop that observes swarm status JSON, runs managed preflight, and starts another lane only when preflight admits one
+- `claspc run examples/swarm-native/SwarmSupervisor.clasp -- .clasp-swarm-supervisor`: ordinary Clasp supervisor loop that observes swarm status JSON, runs managed preflight, starts another lane only when preflight admits one, and persists `supervisor-report.json` plus `supervisor-events.jsonl`; set `CLASP_SWARM_SUPERVISOR_MODE_JSON='"status"'` to read the latest report without launching
 
 When a lane starts, it also prunes leftover per-run baseline worktrees and discards stale incomplete runs that no longer have a usable task worktree to resume.
 

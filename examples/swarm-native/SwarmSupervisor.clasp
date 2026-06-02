@@ -74,6 +74,9 @@ stateRootPath =
 reportPath : Str
 reportPath = pathJoin [stateRootPath, "supervisor-report.json"]
 
+eventLogPath : Str
+eventLogPath = pathJoin [stateRootPath, "supervisor-events.jsonl"]
+
 readEnvText : Str -> Str -> Str
 readEnvText name fallback = match envVar name {
   Ok raw -> if raw == "" then fallback else decode Str raw,
@@ -118,6 +121,9 @@ commandTimeoutMs = readEnvInt "CLASP_SWARM_SUPERVISOR_COMMAND_TIMEOUT_MS_JSON" 1
 
 dryRun : Bool
 dryRun = readEnvBool "CLASP_SWARM_SUPERVISOR_DRY_RUN_JSON" false
+
+supervisorMode : Str
+supervisorMode = readEnvText "CLASP_SWARM_SUPERVISOR_MODE_JSON" "run"
 
 statusCommand : [Str]
 statusCommand =
@@ -233,6 +239,48 @@ incrementAdmittedStarts report =
     observedBlockedCount = report.observedBlockedCount,
     events = report.events
   }
+
+writeSupervisorReport : SupervisorReport -> Str
+writeSupervisorReport report =
+  match writeFile reportPath (encode report) {
+    Ok written -> "",
+    Err message -> message
+  }
+
+appendSupervisorEvent : SupervisorEvent -> Str
+appendSupervisorEvent event =
+  match appendFile eventLogPath (textConcat [encode event, "\n"]) {
+    Ok written -> "",
+    Err message -> message
+  }
+
+appendSupervisorEvents : [SupervisorEvent] -> Str
+appendSupervisorEvents events = {
+  let mut error = "";
+  for event in events {
+    if error == "" then {
+      let eventError = appendSupervisorEvent event;
+      if eventError == "" then
+        error
+      else {
+        error = eventError;
+        error
+      }
+    } else
+      error
+  };
+  error
+}
+
+persistStepState : SupervisorReport -> SupervisorReport -> Str
+persistStepState report step = {
+  let logError = appendSupervisorEvents step.events;
+  let reportError = writeSupervisorReport report;
+  if logError != "" then
+    logError
+  else
+    reportError
+}
 
 runStartCommand : Int -> SwarmStatusDocument -> SwarmPreflightDocument -> SupervisorReport
 runStartCommand iteration statusDoc preflight = {
@@ -425,11 +473,14 @@ sleepIfNeeded iteration =
 
 runSupervisorLoop : Int -> SupervisorReport -> SupervisorReport
 runSupervisorLoop iteration report =
-  if iteration > maxIterations then
-    markReportStatus report "completed"
-  else {
+  if iteration > maxIterations then {
+    let completed = markReportStatus report "completed";
+    let persisted = writeSupervisorReport completed;
+    completed
+  } else {
     let step = runSupervisorStep iteration;
     let merged = mergeStepReport report step;
+    let persisted = persistStepState merged step;
     let slept = sleepIfNeeded iteration;
     runSupervisorLoop (intAdd iteration 1) merged
   }
@@ -437,30 +488,55 @@ runSupervisorLoop iteration report =
 runSupervisor : SupervisorReport
 runSupervisor = runSupervisorLoop 1 emptyReport
 
-main : Str
-main =
-  match mkdirAll stateRootPath {
+statusOutput : Str
+statusOutput =
+  match readFile reportPath {
+    Ok raw -> raw,
     Err message ->
       encode
         (SupervisorReport {
-          supervisorStatus = "error",
+          supervisorStatus = "missing-report",
           waveName = waveName,
           profileName = profileName,
           maxIterations = maxIterations,
           pollMs = pollMs,
           dryRun = dryRun,
           admittedStarts = 0,
-          lastAction = "mkdir-failed",
+          lastAction = "status",
           lastReason = message,
           observedRunningCount = 0,
           observedBlockedCount = 0,
           events = emptyEvents
-        }),
-    Ok created -> {
-      let report = runSupervisor;
-      match writeFile reportPath (encode report) {
-        Ok written -> encode report,
-        Err message -> encode (markReportStatus report (textConcat ["write-report-error:", message]))
+        })
+  }
+
+main : Str
+main =
+  if supervisorMode == "status" then
+    statusOutput
+  else
+    match mkdirAll stateRootPath {
+      Err message ->
+        encode
+          (SupervisorReport {
+            supervisorStatus = "error",
+            waveName = waveName,
+            profileName = profileName,
+            maxIterations = maxIterations,
+            pollMs = pollMs,
+            dryRun = dryRun,
+            admittedStarts = 0,
+            lastAction = "mkdir-failed",
+            lastReason = message,
+            observedRunningCount = 0,
+            observedBlockedCount = 0,
+            events = emptyEvents
+          }),
+      Ok created -> {
+        let report = runSupervisor;
+        match writeFile reportPath (encode report) {
+          Ok written -> encode report,
+          Err message -> encode (markReportStatus report (textConcat ["write-report-error:", message]))
+        }
       }
     }
-  }

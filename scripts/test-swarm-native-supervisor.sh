@@ -18,6 +18,7 @@ state_root="$test_root/state"
 fake_tool="$test_root/fake-swarm-control"
 tool_state="$test_root/tool-state"
 output_path="$test_root/output.json"
+status_output_path="$test_root/status-output.json"
 
 cat >"$fake_tool" <<'EOF'
 #!/usr/bin/env bash
@@ -82,12 +83,18 @@ CLASP_TEST_SWARM_TOOL_STATE="$tool_state" \
   "$claspc_bin" run "$project_root/examples/swarm-native/SwarmSupervisor.clasp" -- "$state_root" \
   >"$output_path"
 
-node - "$output_path" "$state_root/supervisor-report.json" "$tool_state" <<'EOF'
+CLASP_SWARM_SUPERVISOR_MODE_JSON='"status"' \
+  "$claspc_bin" run "$project_root/examples/swarm-native/SwarmSupervisor.clasp" -- "$state_root" \
+  >"$status_output_path"
+
+node - "$output_path" "$status_output_path" "$state_root/supervisor-report.json" "$state_root/supervisor-events.jsonl" "$tool_state" <<'EOF'
 const fs = require("node:fs");
 
-const [outputPath, reportPath, toolState] = process.argv.slice(2);
+const [outputPath, statusOutputPath, reportPath, eventLogPath, toolState] = process.argv.slice(2);
 const report = JSON.parse(fs.readFileSync(outputPath, "utf8"));
+const statusReport = JSON.parse(fs.readFileSync(statusOutputPath, "utf8"));
 const persisted = JSON.parse(fs.readFileSync(reportPath, "utf8"));
+const eventLines = fs.readFileSync(eventLogPath, "utf8").trimEnd().split(/\n/).map((line) => JSON.parse(line));
 
 function assert(condition, message) {
   if (!condition) {
@@ -100,6 +107,7 @@ function count(name) {
 }
 
 assert(JSON.stringify(report) === JSON.stringify(persisted), "persisted supervisor report should match stdout");
+assert(JSON.stringify(statusReport) === JSON.stringify(persisted), "status mode should return the persisted supervisor report");
 assert(report.supervisorStatus === "completed", `status ${report.supervisorStatus}`);
 assert(report.waveName === "full", `wave ${report.waveName}`);
 assert(report.profileName === "bounded-memory-pressure", `profile ${report.profileName}`);
@@ -117,6 +125,8 @@ assert(report.events[1].action === "observed-running", `event1 ${report.events[1
 assert(report.events[1].runningCount === 1, `event1 running ${report.events[1].runningCount}`);
 assert(report.events[2].action === "preflight-blocked", `event2 ${report.events[2].action}`);
 assert(report.events[2].preflightReason === "no-ready-task", `event2 reason ${report.events[2].preflightReason}`);
+assert(eventLines.length === 3, `event log length ${eventLines.length}`);
+assert(JSON.stringify(eventLines) === JSON.stringify(report.events), "event log should persist each iteration event in order");
 assert(count("status") === 3, `status count ${count("status")}`);
 assert(count("preflight") === 2, `preflight count ${count("preflight")}`);
 assert(count("start") === 1, `start count ${count("start")}`);
