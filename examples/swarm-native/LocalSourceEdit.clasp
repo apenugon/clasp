@@ -252,8 +252,8 @@ sourceEditPatchLineFromPromptLine rawLine =
   match textPrefix rawLine "- " {
     Ok patchLine -> match textSplitFirst patchLine sourceEditPatchTargetSeparator {
       Ok targetPayload -> {
-        let target = firstLine targetPayload in
-        let operation = remainingLines targetPayload in
+        let target = firstLine targetPayload;
+        let operation = remainingLines targetPayload;
         match textSplitFirst operation sourceEditPatchReplacementSeparator {
           Ok replacementPayload ->
             ParsedSourceEditPatch
@@ -467,8 +467,8 @@ sourceEditTargetsHavePatches targets patches = {
 
 promptHasSourceEditPlan : Str -> Bool
 promptHasSourceEditPlan prompt = {
-  let targets = sourceEditPlanTargetsFromPrompt prompt in
-  let patches = sourceEditPatchesFromPrompt prompt in
+  let targets = sourceEditPlanTargetsFromPrompt prompt;
+  let patches = sourceEditPatchesFromPrompt prompt;
   if length targets > 1 then
     if length patches > 1 then
       if sourceEditPlanTargetsAllowed targets then
@@ -486,7 +486,7 @@ promptHasSourceEditPlan prompt = {
 
 promptHasRepoScaleSourceEditPlan : Str -> Bool
 promptHasRepoScaleSourceEditPlan prompt = {
-  let targets = sourceEditPlanTargetsFromPrompt prompt in
+  let targets = sourceEditPlanTargetsFromPrompt prompt;
   if promptHasSourceEditPlan prompt then
     sourceEditTargetsAreRepoScale targets
   else
@@ -745,7 +745,7 @@ standaloneSwarmDirectSourceEditProofTextWithPostcheck workspaceRoot content targ
 
 sourceEditTargetPatchable : Str -> Str -> [SourceEditPatch] -> Bool
 sourceEditTargetPatchable workspaceRoot target patches = {
-  let existingSource = localSourceEditWorkspaceReadTextOr workspaceRoot target "" in
+  let existingSource = localSourceEditWorkspaceReadTextOr workspaceRoot target "";
   sourceEditPatchesMatchTarget target existingSource patches
 }
 
@@ -789,7 +789,7 @@ replaceSourceEditPatchesForTarget workspaceRoot target patches = {
     if error != "" then
       error
     else if patch.target == target then {
-      let patchError = localSourceEditWorkspaceReplaceTextOrMessage workspaceRoot target patch.findText patch.replaceText in
+      let patchError = localSourceEditWorkspaceReplaceTextOrMessage workspaceRoot target patch.findText patch.replaceText;
       if patchError != "" then {
         error = patchError;
         error
@@ -815,20 +815,20 @@ writeSourceEditTargetsUnchecked workspaceRoot targets patches content = {
     if error != "" then
       error
     else {
-      let sourceDirError = localSourceEditWorkspaceEnsureDirOrMessage workspaceRoot (pathDirname target) in
+      let sourceDirError = localSourceEditWorkspaceEnsureDirOrMessage workspaceRoot (pathDirname target);
       if sourceDirError != "" then {
         error = sourceDirError;
         error
       } else {
-        let existingSource = localSourceEditWorkspaceReadTextOr workspaceRoot target "" in
+        let existingSource = localSourceEditWorkspaceReadTextOr workspaceRoot target "";
         if sourceEditPatchesMatchTarget target existingSource patches then {
-          let patchError = replaceSourceEditPatchesForTarget workspaceRoot target patches in
+          let patchError = replaceSourceEditPatchesForTarget workspaceRoot target patches;
           if patchError != "" then {
             error = patchError;
             error
           } else {
-            let patchedSource = localSourceEditWorkspaceReadTextOr workspaceRoot target "" in
-            let evidenceError = addSourceEditEvidenceForTarget workspaceRoot target existingSource patchedSource content in
+            let patchedSource = localSourceEditWorkspaceReadTextOr workspaceRoot target "";
+            let evidenceError = addSourceEditEvidenceForTarget workspaceRoot target existingSource patchedSource content;
             if evidenceError != "" then {
               error = evidenceError;
               error
@@ -859,17 +859,17 @@ writeStandaloneSwarmDirectSourceEdit workspaceRoot route content prompt =
   else if promptHasSourceEditPlan prompt == false then
     ""
   else {
-    let targets = sourceEditPlanTargetsFromPrompt prompt in
-    let patches = sourceEditPatchesFromPrompt prompt in
-    let srcError = localSourceEditWorkspaceEnsureDirOrMessage workspaceRoot "src" in
+    let targets = sourceEditPlanTargetsFromPrompt prompt;
+    let patches = sourceEditPatchesFromPrompt prompt;
+    let srcError = localSourceEditWorkspaceEnsureDirOrMessage workspaceRoot "src";
     if srcError != "" then
       srcError
     else {
-      let notesError = localSourceEditWorkspaceEnsureDirOrMessage workspaceRoot "notes" in
+      let notesError = localSourceEditWorkspaceEnsureDirOrMessage workspaceRoot "notes";
       if notesError != "" then
         notesError
       else {
-        let sourceError = writeSourceEditTargets workspaceRoot targets patches content in
+        let sourceError = writeSourceEditTargets workspaceRoot targets patches content;
         if sourceError != "" then
           sourceError
         else
@@ -878,7 +878,7 @@ writeStandaloneSwarmDirectSourceEdit workspaceRoot route content prompt =
               localSourceEditWorkspaceWriteTextOrMessage
                 workspaceRoot
                 standaloneSwarmDirectSourceEditManifestPath
-                (standaloneSwarmDirectSourceEditManifestJson workspaceRoot targets) in
+                (standaloneSwarmDirectSourceEditManifestJson workspaceRoot targets);
             if manifestError != "" then
               manifestError
             else
@@ -900,7 +900,7 @@ sourceEditTargetProofPresent proof target =
 
 sourceEditTargetPostcheckProofPresent : Str -> Str -> Str -> Bool
 sourceEditTargetPostcheckProofPresent workspaceRoot proof target = {
-  let source = localSourceEditWorkspaceReadTextOr workspaceRoot target "" in
+  let source = localSourceEditWorkspaceReadTextOr workspaceRoot target "";
   if localSourceEditTextIncludes proof (textConcat ["targetPostcheck=", target, ":present"]) then
     localSourceEditTextIncludes proof (textConcat ["targetResultFingerprint=", target, ":", textFingerprint64Hex source])
   else
@@ -912,7 +912,7 @@ sourceEditTargetsPresent workspaceRoot proof targets = {
   let mut ok = true;
   for target in targets {
     if ok then {
-      let source = localSourceEditWorkspaceReadTextOr workspaceRoot target "" in
+      let source = localSourceEditWorkspaceReadTextOr workspaceRoot target "";
       if source != "" then
         if sourceEditTargetProofPresent proof target then
           if sourceEditTargetPostcheckProofPresent workspaceRoot proof target then
@@ -937,7 +937,7 @@ sourceEditTargetsPresent workspaceRoot proof targets = {
 
 sourceEditPatchSourcePresent : Str -> SourceEditPatch -> Bool
 sourceEditPatchSourcePresent workspaceRoot patch = {
-  let source = localSourceEditWorkspaceReadTextOr workspaceRoot patch.target "" in
+  let source = localSourceEditWorkspaceReadTextOr workspaceRoot patch.target "";
   localSourceEditTextIncludes source patch.replaceText
 }
 
@@ -991,16 +991,15 @@ sourceEditAppendIssue issues ok message =
 
 sourceEditManifestTargetPresent : Str -> Str -> Str -> Bool
 sourceEditManifestTargetPresent workspaceRoot manifest target = {
-  let source = localSourceEditWorkspaceReadTextOr workspaceRoot target "" in
+  let source = localSourceEditWorkspaceReadTextOr workspaceRoot target "";
   if localSourceEditTextIncludes manifest (textConcat ["\"path\":", encode target]) then
     localSourceEditTextIncludes manifest (textConcat ["\"fingerprint64Hex\":", encode (textFingerprint64Hex source)])
   else
     false
 }
 
-sourceEditManifestTargetsPresent : Str -> [Str] -> Bool
-sourceEditManifestTargetsPresent workspaceRoot targets = {
-  let manifest = localSourceEditWorkspaceReadTextOr workspaceRoot standaloneSwarmDirectSourceEditManifestPath "" in
+sourceEditManifestTargetsPresentWithManifest : Str -> Str -> [Str] -> Bool
+sourceEditManifestTargetsPresentWithManifest workspaceRoot manifest targets = {
   let mut ok = true;
   for target in targets {
     if ok then {
@@ -1015,6 +1014,13 @@ sourceEditManifestTargetsPresent workspaceRoot targets = {
   };
   ok
 }
+
+sourceEditManifestTargetsPresent : Str -> [Str] -> Bool
+sourceEditManifestTargetsPresent workspaceRoot targets =
+  sourceEditManifestTargetsPresentWithManifest
+    workspaceRoot
+    (localSourceEditWorkspaceReadTextOr workspaceRoot standaloneSwarmDirectSourceEditManifestPath "")
+    targets
 
 standaloneSwarmDirectSourceEditProofMetadataPresent : Str -> Int -> Int -> Bool
 standaloneSwarmDirectSourceEditProofMetadataPresent proof targetCount patchCount =
@@ -1075,9 +1081,9 @@ standaloneSwarmDirectSourceEditPresent workspaceRoot route prompt =
   else if promptHasSourceEditPlan prompt == false then
     true
   else {
-    let targets = sourceEditPlanTargetsFromPrompt prompt in
-    let patches = sourceEditPatchesFromPrompt prompt in
-    let proof = localSourceEditWorkspaceReadTextOr workspaceRoot "notes/direct-source-edit.txt" "" in
+    let targets = sourceEditPlanTargetsFromPrompt prompt;
+    let patches = sourceEditPatchesFromPrompt prompt;
+    let proof = localSourceEditWorkspaceReadTextOr workspaceRoot "notes/direct-source-edit.txt" "";
     if length targets > 1 then
       if sourceEditTargetsPresent workspaceRoot proof targets then
         if sourceEditPatchesPresent workspaceRoot patches then
@@ -1103,9 +1109,9 @@ standaloneSwarmDirectSourceEditIssueTexts workspaceRoot route prompt =
   else if promptHasSourceEditPlan prompt == false then
     localSourceEditEmptyTexts
   else {
-    let targets = sourceEditPlanTargetsFromPrompt prompt in
-    let patches = sourceEditPatchesFromPrompt prompt in
-    let proof = localSourceEditWorkspaceReadTextOr workspaceRoot "notes/direct-source-edit.txt" "" in
+    let targets = sourceEditPlanTargetsFromPrompt prompt;
+    let patches = sourceEditPatchesFromPrompt prompt;
+    let proof = localSourceEditWorkspaceReadTextOr workspaceRoot "notes/direct-source-edit.txt" "";
     let mut issues = localSourceEditEmptyTexts;
     issues = sourceEditAppendIssue issues (proof != "") "standalone-source-edit:proof-file-missing";
     issues = sourceEditAppendIssue issues (length targets > 1) "standalone-source-edit:missing-multi-target-plan";

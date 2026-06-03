@@ -158,18 +158,26 @@ verifierRunStatusPath = "artifacts/verifier.run.json"
 workLimit : Int
 workLimit = 2
 
-agentTaskQueue : [AgentLoopTask]
-agentTaskQueue = [
+builderAgentTask : AgentLoopTask
+builderAgentTask =
   AgentLoopTask {
     taskId = "task-builder",
     role = "builder",
     artifactPath = builderFinalPath
-  },
+  }
+
+verifierAgentTask : AgentLoopTask
+verifierAgentTask =
   AgentLoopTask {
     taskId = "task-verifier",
     role = "verifier",
     artifactPath = outputPath
   }
+
+agentTaskQueue : [AgentLoopTask]
+agentTaskQueue = [
+  builderAgentTask,
+  verifierAgentTask
 ]
 
 emptyTexts : [Str]
@@ -398,12 +406,15 @@ persistMonitoredProcessRecord record =
     Err message -> monitoredProcessRecordError message
   }
 
+monitoredProcessRecordFromRunResult : MonitoredCommandSpec -> Result ProcessResult -> MonitoredProcessRecord
+monitoredProcessRecordFromRunResult spec processResultValue = match processResultValue {
+  Ok result -> monitoredProcessRecordFromResult spec result,
+  Err message -> monitoredProcessRecordFromError spec message
+}
+
 finishMonitoredProcessRun : MonitoredCommandSpec -> Result ProcessResult -> Result MonitoredProcessRecord
 finishMonitoredProcessRun spec processResultValue = {
-  let record = match processResultValue {
-    Ok result -> monitoredProcessRecordFromResult spec result,
-    Err message -> monitoredProcessRecordFromError spec message
-  };
+  let record = monitoredProcessRecordFromRunResult spec processResultValue;
   match persistMonitoredProcessRecord record {
     Err message -> monitoredProcessRecordError message,
     Ok persisted -> {
@@ -664,19 +675,18 @@ processQueuedTask state task =
   else
     deferTask state task
 
+processAgentTask : AgentLoopState -> Int -> AgentLoopTask -> AgentLoopState
+processAgentTask state limit task =
+  if length state.processedTaskIds < limit then
+    processQueuedTask state task
+  else
+    deferTask state task
+
 processAgentTaskQueue : [AgentLoopTask] -> Int -> Str -> AgentEvent -> AgentLoopState
 processAgentTaskQueue tasks limit inputText loopStarted = {
-  let mut state = initialAgentLoopState inputText loopStarted;
-  for task in tasks {
-    let nextState =
-      if length state.processedTaskIds < limit then
-        processQueuedTask state task
-      else
-        deferTask state task;
-    state = nextState;
-    state
-  };
-  state
+  let initial = initialAgentLoopState inputText loopStarted;
+  let afterBuilder = processAgentTask initial limit builderAgentTask;
+  processAgentTask afterBuilder limit verifierAgentTask
 }
 
 loopFinalStatus : AgentLoopStep -> AgentLoopStep -> Str

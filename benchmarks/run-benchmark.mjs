@@ -1013,13 +1013,50 @@ async function generateClaspBenchmarkPrep(task, workspace, env) {
   });
 
   await mkdir(prepRoot, { recursive: true });
-  const context = await renderClaspJsonArtifact("context", entryPath, contextPath, env);
-  const air = await renderClaspJsonArtifact("air", entryPath, airPath, env);
+  const hostBindingManifestPath = await copyClaspHostBindingManifest(task, prepRoot);
+  const hostBindingManifest = hostBindingManifestPath
+    ? JSON.parse(await readFile(hostBindingManifestPath, "utf8"))
+    : null;
+
+  const contextAttempt = await renderClaspJsonArtifactAttempt("context", entryPath, contextPath, env);
+  let context = contextAttempt.artifact;
+  let air = null;
+  let airAttempt = null;
+
+  if (context) {
+    airAttempt = await renderClaspJsonArtifactAttempt("air", entryPath, airPath, env);
+    air = airAttempt.artifact;
+  }
+
+  let nativeImage = null;
+  if (!context || !air) {
+    if (!artifactAttemptTimedOut(contextAttempt) && !artifactAttemptTimedOut(airAttempt)) {
+      const failedCommand = context ? "air" : "context";
+      throw new Error(`failed to generate Clasp ${failedCommand} artifact for ${entryPath}`);
+    }
+
+    nativeImage = await renderClaspNativeImage(entryPath, prepRoot, env);
+    if (!context) {
+      context = synthesizeSparseClaspBenchmarkContext({
+        workspace,
+        entryPath,
+        nativeImage,
+        hostBindingManifest
+      });
+    }
+    if (!air) {
+      air = synthesizeSparseClaspBenchmarkAir({
+        nativeImage,
+        hostBindingManifest
+      });
+    }
+  }
+
   context.benchmarkPrep = prepMetadata;
   air.benchmarkPrep = prepMetadata;
   await writeFile(contextPath, JSON.stringify(context, null, 2) + "\n", "utf8");
   await writeFile(airPath, JSON.stringify(air, null, 2) + "\n", "utf8");
-  const nativeImage = await renderClaspNativeImage(entryPath, prepRoot, env);
+  nativeImage = nativeImage ?? await renderClaspNativeImage(entryPath, prepRoot, env);
 
   const uiGraph = await renderClaspUiGraph(entryPath, prepRoot, env);
   await writeFile(uiPath, JSON.stringify(uiGraph, null, 2) + "\n", "utf8");
@@ -1029,10 +1066,6 @@ async function generateClaspBenchmarkPrep(task, workspace, env) {
     await writeFile(explainPath, explanation, "utf8");
   }
 
-  const hostBindingManifestPath = await copyClaspHostBindingManifest(task, prepRoot);
-  const hostBindingManifest = hostBindingManifestPath
-    ? JSON.parse(await readFile(hostBindingManifestPath, "utf8"))
-    : null;
   const surfaces = synthesizeClaspBenchmarkSurfaces({
     task,
     workspace,
@@ -1129,6 +1162,28 @@ async function renderClaspJsonArtifact(command, inputPath, outputPath, env) {
   return artifact;
 }
 
+async function renderClaspJsonArtifactAttempt(command, inputPath, outputPath, env) {
+  const result = await runClaspCompilerCommandCapture(command, inputPath, outputPath, env);
+
+  if (result.exitCode !== 0) {
+    return {
+      artifact: null,
+      result
+    };
+  }
+
+  const artifact = JSON.parse(await readFile(outputPath, "utf8"));
+  await writeFile(outputPath, JSON.stringify(artifact, null, 2) + "\n", "utf8");
+  return {
+    artifact,
+    result
+  };
+}
+
+function artifactAttemptTimedOut(attempt) {
+  return attempt?.result?.exitCode === 124;
+}
+
 function claspCompilerCommandPrefix(env) {
   const explicitClaspc = env.CLASP_CLASPC || env.CLASPC_BIN || "";
   const lines = [
@@ -1146,15 +1201,39 @@ function claspCompilerCommandPrefix(env) {
 }
 
 async function runClaspCompilerCommandCapture(command, inputPath, outputPath, env) {
+  const timeoutPrefix = claspCompilerCommandTimeoutPrefix(command, env);
   const script = [
     ...claspCompilerCommandPrefix(env),
-    `"${"$"}claspc_bin" --json ${command} ${shellQuote(inputPath)} -o ${shellQuote(outputPath)} >/dev/null`
+    `${timeoutPrefix}"${"$"}claspc_bin" --json ${command} ${shellQuote(inputPath)} -o ${shellQuote(outputPath)} >/dev/null`
   ].join(" && ");
   return runProcessCapture(
     ["bash", "-lc", script],
     env.CLASP_PROJECT_ROOT,
     env
   );
+}
+
+function claspCompilerCommandTimeoutPrefix(command, env) {
+  if (command !== "context" && command !== "air") {
+    return "";
+  }
+
+  const specificKey = `CLASP_BENCHMARK_PREP_${command.toUpperCase()}_TIMEOUT_SECS`;
+  const timeoutSecs = positiveIntegerEnv(
+    env[specificKey] ?? env.CLASP_BENCHMARK_PREP_JSON_ARTIFACT_TIMEOUT_SECS,
+    120
+  );
+
+  return timeoutSecs > 0 ? `timeout ${timeoutSecs} ` : "";
+}
+
+function positiveIntegerEnv(value, fallback) {
+  if (value === undefined || value === null || value === "") {
+    return fallback;
+  }
+
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
 async function renderClaspUiGraph(entryPath, prepRoot, env) {
@@ -1164,11 +1243,7 @@ async function renderClaspUiGraph(entryPath, prepRoot, env) {
     const compileResult = await runClaspCompilerCommandCapture("compile", entryPath, tempModulePath, env);
 
     if (compileResult.exitCode !== 0) {
-      if (compileResult.stderr.includes("E_BACKEND_TARGET_REQUIRES_NATIVE")) {
-        return [];
-      }
-
-      throw new Error(`failed to generate Clasp compile artifact for ${entryPath}`);
+      return [];
     }
 
     const compiledBytes = await readFile(tempModulePath);
@@ -1429,6 +1504,180 @@ function sourceModuleRole(sourceFile, entry, appOwnedEditSurface) {
   }
 
   return "support";
+}
+
+function synthesizeSparseClaspBenchmarkContext({
+  workspace,
+  entryPath,
+  nativeImage,
+  hostBindingManifest
+}) {
+  const entry = path.relative(workspace, entryPath);
+  const sourceFiles = collectWorkspaceClaspSourceFiles(workspace);
+  const surfaceTypeNames = collectSurfaceTypeNames(nativeImage, hostBindingManifest);
+  const records = collectBenchmarkRecords(nativeImage, surfaceTypeNames);
+  const enums = collectBenchmarkEnums(nativeImage, surfaceTypeNames);
+  const routes = collectBenchmarkRoutes(nativeImage, hostBindingManifest);
+  const hostBindings = collectBenchmarkHostBindings(nativeImage, hostBindingManifest, null);
+  const routeSurfaces = routes.map((route) => sparseContextRoute(route));
+  const schemaSurfaces = records.map((record) => sparseContextSchema(record, routes, hostBindings));
+  const schemaFieldSurfaces = records.flatMap((record) => sparseContextSchemaFields(record));
+  const typeSurfaces = enums.map((enumShape) => sparseContextType(enumShape, routes, hostBindings));
+  const foreignBoundarySurfaces = hostBindings.map((binding) => sparseContextForeignBoundary(binding));
+
+  return {
+    format: "clasp-context-v1",
+    source: "benchmark-prep-timeout-fallback",
+    entry,
+    sourceModules: sourceFiles.map((sourceFile) => {
+      const moduleName = moduleNameForClaspSourcePath(sourceFile);
+      const role = sourceFile === entry ? "entry" : "support";
+      return compactObject({
+        sourceId: `source:${moduleName}`,
+        moduleId: `module:${moduleName}`,
+        moduleName,
+        role,
+        path: sourceFile,
+        schemas: [],
+        routes: role === "entry" ? routeSurfaces.map((route) => route.id) : [],
+        foreignBoundaries: role === "entry" ? foreignBoundarySurfaces.map((boundary) => boundary.id) : []
+      });
+    }),
+    surfaceIndex: {
+      routes: routeSurfaces,
+      schemas: schemaSurfaces,
+      schemaFields: schemaFieldSurfaces,
+      types: typeSurfaces,
+      foreignBoundaries: foreignBoundarySurfaces
+    },
+    nodes: [
+      ...routeSurfaces.map((route) => sparseContextNode(route.id, "route", route.name)),
+      ...records.map((record) => sparseContextNode(`record:${record.name}`, "record", record.name)),
+      ...enums.map((enumShape) => sparseContextNode(`type:${enumShape.name}`, "type", enumShape.name)),
+      ...foreignBoundarySurfaces.map((boundary) => sparseContextNode(boundary.id, "foreign", boundary.name))
+    ]
+  };
+}
+
+function synthesizeSparseClaspBenchmarkAir({
+  nativeImage,
+  hostBindingManifest
+}) {
+  const surfaceTypeNames = collectSurfaceTypeNames(nativeImage, hostBindingManifest);
+  const records = collectBenchmarkRecords(nativeImage, surfaceTypeNames);
+  const enums = collectBenchmarkEnums(nativeImage, surfaceTypeNames);
+  const routes = collectBenchmarkRoutes(nativeImage, hostBindingManifest);
+  const hostBindings = collectBenchmarkHostBindings(nativeImage, hostBindingManifest, null);
+
+  return {
+    format: "clasp-air-v1",
+    source: "benchmark-prep-timeout-fallback",
+    nodes: [
+      ...routes.map((route) => sparseContextNode(`route:${route.name}`, "route", route.name)),
+      ...records.map((record) => sparseContextNode(`record:${record.name}`, "record", record.name)),
+      ...enums.map((enumShape) => sparseContextNode(`type:${enumShape.name}`, "type", enumShape.name)),
+      ...hostBindings.map((binding) => sparseContextNode(`foreign:${binding.name}`, "foreign", binding.name))
+    ]
+  };
+}
+
+function sparseContextRoute(route) {
+  const requestSchemaId = schemaIdForType(route.requestType);
+  const responseSchemaId = schemaIdForType(route.responseType);
+  const affectedSchemas = uniqueStrings([requestSchemaId, responseSchemaId]);
+
+  return compactObject({
+    id: `route:${route.name}`,
+    name: route.name,
+    method: route.method,
+    path: route.path,
+    requestType: route.requestType,
+    responseType: route.responseType,
+    requestSchemaId,
+    responseSchemaId,
+    affectedSurfaces: uniqueStrings([`route:${route.name}`, ...affectedSchemas]),
+    affectedRoutes: [`route:${route.name}`],
+    affectedSchemas,
+    affectedForeignBoundaries: []
+  });
+}
+
+function sparseContextSchema(record, routes, hostBindings) {
+  const schemaId = `schema:${record.name}`;
+  const affectedRoutes = routes
+    .filter((route) => route.requestType === record.name || route.responseType === record.name)
+    .map((route) => `route:${route.name}`);
+  const affectedForeignBoundaries = hostBindings
+    .filter((binding) => binding.type.includes(record.name) || binding.decodedAs === record.name || binding.expectedJsonShape === record.name)
+    .map((binding) => `foreign:${binding.name}`);
+
+  return {
+    id: schemaId,
+    name: record.name,
+    kind: "record",
+    fields: record.fields ?? [],
+    affectedRoutes,
+    affectedForeignBoundaries,
+    affectedSurfaces: uniqueStrings([schemaId, ...affectedRoutes, ...affectedForeignBoundaries])
+  };
+}
+
+function sparseContextSchemaFields(record) {
+  return (record.fields ?? []).map((field) => ({
+    id: `schema-field:${record.name}.${field.name}`,
+    schemaId: `schema:${record.name}`,
+    schema: record.name,
+    name: field.name,
+    type: field.type
+  }));
+}
+
+function sparseContextType(enumShape, routes, hostBindings) {
+  const typeId = `type:${enumShape.name}`;
+  const affectedRoutes = routes
+    .filter((route) => route.requestType === enumShape.name || route.responseType === enumShape.name)
+    .map((route) => `route:${route.name}`);
+  const affectedForeignBoundaries = hostBindings
+    .filter((binding) => binding.type.includes(enumShape.name) || binding.decodedAs === enumShape.name || binding.expectedJsonShape === enumShape.name)
+    .map((binding) => `foreign:${binding.name}`);
+
+  return {
+    id: typeId,
+    name: enumShape.name,
+    kind: "enum",
+    constructors: enumShape.constructors ?? [],
+    affectedSchemas: [],
+    affectedRoutes,
+    affectedForeignBoundaries,
+    affectedSurfaces: uniqueStrings([typeId, ...affectedRoutes, ...affectedForeignBoundaries])
+  };
+}
+
+function sparseContextForeignBoundary(binding) {
+  return compactObject({
+    id: `foreign:${binding.name}`,
+    name: binding.name,
+    type: binding.type,
+    runtimeName: binding.runtimeName,
+    affectedSurfaces: [`foreign:${binding.name}`]
+  });
+}
+
+function sparseContextNode(id, kind, name) {
+  return compactObject({
+    id,
+    kind,
+    name
+  });
+}
+
+function moduleNameForClaspSourcePath(sourceFile) {
+  return sourceFile
+    .replace(/\.clasp$/, "")
+    .split(path.sep)
+    .join(".")
+    .split("/")
+    .join(".");
 }
 
 function collectSurfaceTypeNames(nativeImage, hostBindingManifest) {

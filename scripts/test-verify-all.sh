@@ -21,8 +21,23 @@ unset CLASP_VERIFY_RESUME_REPORT_MODE
 unset CLASP_VERIFY_START_AT
 unset CLASP_VERIFY_START_AFTER
 unset CLASP_VERIFY_DIRECT_HOST_RESERVE
+unset CLASP_VERIFY_PARALLEL_COMMANDS
+unset CLASP_VERIFY_SEQUENTIAL_COMMANDS
+unset CLASP_VERIFY_FALLBACK_COMMANDS
+unset CLASP_VERIFY_NESTED_COMMANDS
+unset CLASP_PROJECT_ROOT
 unset CLASP_CLASPC
 unset CLASPC_BIN
+unset CLASP_MANAGED_JOB_ID
+unset CLASP_MANAGED_JOB_ROOT
+unset CLASP_MANAGED_JOB_TOKEN
+unset CLASP_MANAGED_JOB_STOP_REQUEST
+unset CLASP_MANAGED_JOB_MEMORY_MB
+unset CLASP_MANAGED_JOB_MIN_AVAILABLE_MEMORY_MB
+unset CLASP_MANAGED_JOB_MIN_AVAILABLE_DISK_MB
+unset CLASP_MANAGED_JOB_MIN_DISK_HEADROOM_MB
+unset CLASP_MANAGED_JOB_DISK_RESERVE_PATH
+unset CLASP_MANAGED_JOB_WORKLOAD
 export CLASP_VERIFY_MANAGED=0
 export CLASP_VERIFY_DIRECT_HOST_RESERVE=0
 export CLASP_GOAL_MANAGER_COMPILE_MANAGED=0
@@ -328,9 +343,15 @@ grep -F 'bash scripts/test-monitored-workflow.sh' "$test_root/scripts/verify-all
 grep -F 'bash scripts/test-codex-loop-program.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash examples/agent-loop-scenario/scripts/verify.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-agent-command-template.sh' "$test_root/scripts/verify-all.sh" >/dev/null
-grep -F 'bash scripts/test-agent-ergonomics-helpers.sh' "$test_root/scripts/verify-all.sh" >/dev/null
-grep -F 'CLASP_AGENT_COMMAND_TEMPLATE_COMMON=0 CLASP_AGENT_COMMAND_TEMPLATE_FEEDBACK=0 CLASP_AGENT_COMMAND_TEMPLATE_NATIVE=1 bash scripts/test-agent-command-template.sh' "$test_root/scripts/verify-all.sh" >/dev/null
-grep -F 'bash scripts/test-goal-manager-agent-command-template.sh' "$test_root/scripts/verify-all.sh" >/dev/null
+grep -F 'bash scripts/test-agent-ergonomics-helpers.sh static' "$test_root/scripts/verify-all.sh" >/dev/null
+if grep -F 'CLASP_AGENT_COMMAND_TEMPLATE_COMMON=0 CLASP_AGENT_COMMAND_TEMPLATE_FEEDBACK=0 CLASP_AGENT_COMMAND_TEMPLATE_NATIVE=1 bash scripts/test-agent-command-template.sh' "$test_root/scripts/verify-all.sh" >/dev/null 2>&1; then
+  printf 'verify-all should not run the heavyweight native-only agent command template by default\n' >&2
+  exit 1
+fi
+if grep -F 'bash scripts/test-goal-manager-agent-command-template.sh' "$test_root/scripts/verify-all.sh" >/dev/null 2>&1; then
+  printf 'verify-all should not run the heavyweight goal-manager agent command template by default\n' >&2
+  exit 1
+fi
 grep -F 'bash scripts/test-goal-manager-default-planner-command.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash scripts/test-goal-manager-mailbox-capability-details.sh' "$test_root/scripts/verify-all.sh" >/dev/null
 grep -F 'bash examples/browser-counter/scripts/verify.sh' "$test_root/scripts/verify-all.sh" >/dev/null

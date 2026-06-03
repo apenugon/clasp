@@ -3475,6 +3475,14 @@ fn stable_fingerprint_parts(parts: &[&[u8]]) -> String {
     format!("{hash:016x}")
 }
 
+fn format_decl_name_chunk(decl_names: &[String]) -> String {
+    if decl_names.is_empty() {
+        String::new()
+    } else {
+        format!("{}\n--CLASP-DECL-NAMES-END--", decl_names.join("\n"))
+    }
+}
+
 fn split_decl_name_chunks(decl_names: &[String], max_jobs: usize) -> Vec<String> {
     if decl_names.is_empty() {
         return Vec::new();
@@ -3483,7 +3491,7 @@ fn split_decl_name_chunks(decl_names: &[String], max_jobs: usize) -> Vec<String>
     let chunk_size = decl_names.len().div_ceil(chunk_count);
     decl_names
         .chunks(chunk_size)
-        .map(|chunk| chunk.join("\n"))
+        .map(format_decl_name_chunk)
         .collect()
 }
 
@@ -3498,11 +3506,11 @@ fn split_decl_name_count_chunks(decl_names_text: &str, max_names_per_chunk: usiz
         return Vec::new();
     }
     if max_names_per_chunk == 0 || decl_names.len() <= max_names_per_chunk {
-        return vec![decl_names.join("\n")];
+        return vec![format_decl_name_chunk(&decl_names)];
     }
     decl_names
         .chunks(max_names_per_chunk)
-        .map(|chunk| chunk.join("\n"))
+        .map(format_decl_name_chunk)
         .collect()
 }
 
@@ -5569,9 +5577,9 @@ main = textJoim "," ["a", "b"]
         assert_eq!(
             chunks,
             vec![
-                "alpha\nbeta".to_owned(),
-                "gamma\ndelta".to_owned(),
-                "epsilon".to_owned()
+                "alpha\nbeta\n--CLASP-DECL-NAMES-END--".to_owned(),
+                "gamma\ndelta\n--CLASP-DECL-NAMES-END--".to_owned(),
+                "epsilon\n--CLASP-DECL-NAMES-END--".to_owned()
             ]
         );
     }
@@ -5582,8 +5590,8 @@ main = textJoim "," ["a", "b"]
         assert_eq!(
             chunks,
             vec![
-                "alpha\nbeta".to_owned(),
-                "gamma\ndelta".to_owned()
+                "alpha\nbeta\n--CLASP-DECL-NAMES-END--".to_owned(),
+                "gamma\ndelta\n--CLASP-DECL-NAMES-END--".to_owned()
             ]
         );
     }
@@ -5591,7 +5599,10 @@ main = textJoim "," ["a", "b"]
     #[test]
     fn split_decl_name_count_chunks_zero_disables_splitting() {
         let chunks = split_decl_name_count_chunks("alpha\nbeta\ngamma\n", 0);
-        assert_eq!(chunks, vec!["alpha\nbeta\ngamma".to_owned()]);
+        assert_eq!(
+            chunks,
+            vec!["alpha\nbeta\ngamma\n--CLASP-DECL-NAMES-END--".to_owned()]
+        );
     }
 
     #[test]

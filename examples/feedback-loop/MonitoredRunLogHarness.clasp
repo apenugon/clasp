@@ -334,12 +334,16 @@ persistMonitoredRunRecord record =
     Err message -> monitoredRunRecordError message
   }
 
-finishMonitoredRunLog : MonitoredRunSpec -> Result MonitoredStepResult -> Result MonitoredRunRecord
-finishMonitoredRunLog spec stepResult = {
-  let record = match stepResult {
+monitoredRunRecordFromStepResult : MonitoredRunSpec -> Result MonitoredStepResult -> MonitoredRunRecord
+monitoredRunRecordFromStepResult spec stepResult =
+  match stepResult {
     Ok result -> monitoredRunRecordFromResult spec result,
     Err message -> monitoredRunRecordFromError spec message
-  };
+  }
+
+finishMonitoredRunLog : MonitoredRunSpec -> Result MonitoredStepResult -> Result MonitoredRunRecord
+finishMonitoredRunLog spec stepResult = {
+  let record = monitoredRunRecordFromStepResult spec stepResult;
   match persistMonitoredRunRecord record {
     Err message -> monitoredRunRecordError message,
     Ok persisted -> {

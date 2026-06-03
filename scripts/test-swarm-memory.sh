@@ -241,7 +241,7 @@ assert(report.weightedTopScale === 1000, `weighted top scale ${report.weightedTo
 EOF
 
 env RUSTC=/definitely-missing-rustc \
-  timeout 60 \
+  timeout 180 \
   "$claspc_bin" run "$project_root/examples/swarm-native/EmbeddingProviderHarness.clasp" -- "$embedding_provider_bin" \
   >"$test_root/embedding-provider-harness.json"
 

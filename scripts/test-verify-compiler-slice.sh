@@ -69,7 +69,7 @@ if [[ "$json_mode" == "0" && "$command" == "run" ]]; then
       printf '{"moduleName":"Compiler.Parser","imports":"|Compiler.Loader|Compiler.Renderers","signatures":"|parseModule : Str -> Str|main : Str","declarations":"|parseModule source|main"}\n'
       ;;
     examples/compiler-checker.clasp)
-      printf '{"roster":"ok:[Str]","matrix":"ok:[[Int]]","mixed":"error:expected Str but found Int"}\n'
+      printf '{"roster":"ok:[Str]","matrix":"ok:[[Int]]","mixed":"error:expected Str but found Int","nestedPattern":"accepted:Ada|rejected|none","wildcardPattern":"any"}\n'
       ;;
     examples/compiler-lower.clasp)
       printf '{"listExpr":"list:[literal:Ada, literal:Grace]","letExpr":"let names = list:[literal:Ada, literal:Grace] in call renderNames(name:names)","callExpr":"call score(int:7, name:weight)"}\n'

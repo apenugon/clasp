@@ -170,12 +170,15 @@ persistMonitoredProcessRecord record =
     Err message -> monitoredProcessRecordError message
   }
 
+monitoredProcessRecordFromRunResult : MonitoredCommandSpec -> Result ProcessResult -> MonitoredProcessRecord
+monitoredProcessRecordFromRunResult spec processResultValue = match processResultValue {
+  Ok result -> monitoredProcessRecordFromResult spec result,
+  Err message -> monitoredProcessRecordFromError spec message
+}
+
 finishMonitoredProcessRun : MonitoredCommandSpec -> Result ProcessResult -> Result MonitoredProcessRecord
 finishMonitoredProcessRun spec processResultValue = {
-  let record = match processResultValue {
-    Ok result -> monitoredProcessRecordFromResult spec result,
-    Err message -> monitoredProcessRecordFromError spec message
-  };
+  let record = monitoredProcessRecordFromRunResult spec processResultValue;
   match persistMonitoredProcessRecord record {
     Err message -> monitoredProcessRecordError message,
     Ok persisted -> {

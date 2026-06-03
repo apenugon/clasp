@@ -233,7 +233,7 @@ checkedCoreRecordFieldList typeDecls recordDecls env localEnv fnContext fields =
 checkedCoreMatchBranch : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedTypeDeclAst -> TypeText -> HostedMatchBranchAst -> CheckedCoreMatchBranchBuildResult
 checkedCoreMatchBranch typeDecls recordDecls env localEnv fnContext typeDecl subjectType branch = {
   let pattern = branchPatternAst branch;
-  match bindPattern typeDecl subjectType pattern {
+  match bindPattern typeDecls typeDecl subjectType pattern {
     PatternBindError message ->
       CheckedCoreMatchBranchBuildError message,
     BoundPattern bindings ->

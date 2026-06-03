@@ -1210,6 +1210,7 @@ containsText values target = {
 
 findMissingBranchName : HostedTypeDeclAst -> [Str] -> Str
 findMissingBranchName typeDecl seen = {
+  if containsText seen "_" then return "" else "";
   for constructorDecl in typeDeclConstructors typeDecl {
     let constructorName = constructorDeclName constructorDecl;
     if containsText seen constructorName then {
@@ -1221,8 +1222,156 @@ findMissingBranchName typeDecl seen = {
   ""
 }
 
-bindPatternArgs : Str -> [HostedTypeAst] -> [Str] -> [TypeSubstitution] -> PatternBindResult
-bindPatternArgs constructorName payloadTypes binders substitutions = {
+appendPatternBindings : [TypeBinding] -> [TypeBinding] -> [TypeBinding]
+appendPatternBindings left right = {
+  let mut bindings = left;
+  for binding in right {
+    bindings = appendTypeBinding bindings binding;
+    bindings
+  };
+  bindings
+}
+
+patternAtomText : Str -> Str
+patternAtomText rawValue = {
+  let value = trimSpaces rawValue;
+  match unwrapDelimited value "(" ")" {
+    ParsedText payload ->
+      trimSpaces payload,
+    MissingText notParenthesized ->
+      value
+  }
+}
+
+patternAtomHead : Str -> Str
+patternAtomHead rawValue = firstText (splitTopLevel (patternAtomText rawValue) " ")
+
+patternAtomStartsConstructor : Str -> Bool
+patternAtomStartsConstructor rawValue = {
+  let head = patternAtomHead rawValue;
+  if head == "" then false else startsWithUppercase head
+}
+
+patternAtomCoverageKey : Str -> Str
+patternAtomCoverageKey rawValue = {
+  let atom = patternAtomText rawValue;
+  let parts = splitTopLevel atom " ";
+  let head = firstText parts;
+  if head == "" then {
+    "_"
+  } else if startsWithUppercase head then {
+    let mut keys = emptyRenderedTexts;
+    for nestedPattern in remainingTexts parts {
+      keys = appendRenderedText keys (patternAtomCoverageKey nestedPattern);
+      keys
+    };
+    if firstText keys == "" then head else textConcat [head, "(", textJoin "," keys, ")"]
+  } else {
+    "_"
+  }
+}
+
+patternCoverageKey : HostedPatternAst -> Str
+patternCoverageKey pattern = {
+  let constructorName = patternConstructorName pattern;
+  if constructorName == "_" then {
+    "_"
+  } else {
+    let mut keys = emptyRenderedTexts;
+    for binder in patternBinders pattern {
+      keys = appendRenderedText keys (patternAtomCoverageKey binder);
+      keys
+    };
+    if firstText keys == "" then constructorName else textConcat [constructorName, "(", textJoin "," keys, ")"]
+  }
+}
+
+patternCoversFullConstructor : HostedPatternAst -> Bool
+patternCoversFullConstructor pattern = {
+  let constructorName = patternConstructorName pattern;
+  if constructorName == "_" then {
+    true
+  } else {
+    let mut full = true;
+    for binder in patternBinders pattern {
+      if patternAtomStartsConstructor binder then {
+        full = false;
+        full
+      } else {
+        full
+      }
+    };
+    full
+  }
+}
+
+patternAlreadyCovered : [Str] -> HostedPatternAst -> Bool
+patternAlreadyCovered seen pattern = {
+  let constructorName = patternConstructorName pattern;
+  if containsText seen "_" then {
+    true
+  } else if constructorName == "_" then {
+    false
+  } else if containsText seen constructorName then {
+    true
+  } else if patternCoversFullConstructor pattern then {
+    false
+  } else {
+    containsText seen (patternCoverageKey pattern)
+  }
+}
+
+patternCoverageToken : HostedPatternAst -> Str
+patternCoverageToken pattern = if patternCoversFullConstructor pattern then patternConstructorName pattern else patternCoverageKey pattern
+
+bindPatternForSubjectType : [HostedTypeDeclAst] -> TypeText -> HostedPatternAst -> PatternBindResult
+bindPatternForSubjectType typeDecls subjectType pattern = match subjectType {
+  TNamed typeName ->
+    match lookupTypeDecl typeDecls typeName {
+      FoundTypeDecl typeDecl ->
+        bindPattern typeDecls typeDecl subjectType pattern,
+      MissingTypeDecl missing ->
+        PatternBindError (textConcat ["Pattern constructor `", patternConstructorName pattern, "` cannot match non-variant type `", missing, "`."])
+    },
+  TApply typeName args ->
+    match lookupTypeDecl typeDecls typeName {
+      FoundTypeDecl typeDecl ->
+        bindPattern typeDecls typeDecl subjectType pattern,
+      MissingTypeDecl missing ->
+        PatternBindError (textConcat ["Pattern constructor `", patternConstructorName pattern, "` cannot match non-variant type `", missing, "`."])
+    },
+  TInt ->
+    PatternBindError (textConcat ["Pattern constructor `", patternConstructorName pattern, "` cannot match `Int`."]),
+  TStr ->
+    PatternBindError (textConcat ["Pattern constructor `", patternConstructorName pattern, "` cannot match `Str`."]),
+  TBool ->
+    PatternBindError (textConcat ["Pattern constructor `", patternConstructorName pattern, "` cannot match `Bool`."]),
+  TList itemType ->
+    PatternBindError (textConcat ["Pattern constructor `", patternConstructorName pattern, "` cannot match a list."]),
+  TFunction input result ->
+    PatternBindError (textConcat ["Pattern constructor `", patternConstructorName pattern, "` cannot match a function."]),
+  TVar label ->
+    PatternBindError (textConcat ["Pattern constructor `", patternConstructorName pattern, "` cannot match unresolved type `", label, "`."]),
+  TUnknown label ->
+    PatternBindError (textConcat ["Pattern constructor `", patternConstructorName pattern, "` cannot match unresolved type `", label, "`."])
+}
+
+bindPatternAtom : [HostedTypeDeclAst] -> Str -> TypeText -> PatternBindResult
+bindPatternAtom typeDecls rawPattern expectedType = {
+  let atom = patternAtomText rawPattern;
+  if atom == "_" then {
+    BoundPattern emptyTypeBindings
+  } else if startsWithUppercase atom then {
+    bindPatternForSubjectType typeDecls expectedType (parsePattern atom)
+  } else if atom == "" then {
+    PatternBindError "Pattern payload is empty."
+  } else {
+    BoundPattern (appendTypeBinding emptyTypeBindings (TypeBinding atom expectedType))
+  }
+}
+
+bindPatternArgs : [HostedTypeDeclAst] -> Str -> [HostedTypeAst] -> [Str] -> [TypeSubstitution] -> PatternBindResult
+bindPatternArgs typeDecls constructorName payloadTypes binders substitutions = {
   let mut remainingBinders = binders;
   let mut bindings = emptyTypeBindings;
   for payloadType in payloadTypes {
@@ -1230,22 +1379,33 @@ bindPatternArgs constructorName payloadTypes binders substitutions = {
     if binder == "" then {
       return PatternBindError (textConcat ["Pattern for constructor `", constructorName, "` is missing a binder."])
     } else {
-      bindings = appendTypeBinding bindings (TypeBinding binder (instantiateTypeFromSubstitutions (typeFromHostedTypeAst payloadType) substitutions));
-      remainingBinders = remainingTexts remainingBinders;
-      BoundPattern bindings
+      let expectedType = instantiateTypeFromSubstitutions (typeFromHostedTypeAst payloadType) substitutions;
+      match bindPatternAtom typeDecls binder expectedType {
+        PatternBindError message ->
+          return PatternBindError message,
+        BoundPattern nestedBindings -> {
+          bindings = appendPatternBindings bindings nestedBindings;
+          remainingBinders = remainingTexts remainingBinders;
+          BoundPattern bindings
+        }
+      }
     }
   };
   if firstText remainingBinders == "" then BoundPattern bindings else PatternBindError (textConcat ["Pattern for constructor `", constructorName, "` binds too many values."])
 }
 
-bindPattern : HostedTypeDeclAst -> TypeText -> HostedPatternAst -> PatternBindResult
-bindPattern typeDecl subjectType pattern = {
+bindPattern : [HostedTypeDeclAst] -> HostedTypeDeclAst -> TypeText -> HostedPatternAst -> PatternBindResult
+bindPattern typeDecls typeDecl subjectType pattern = {
   let constructorName = patternConstructorName pattern;
-  match lookupTypeConstructor typeDecl constructorName {
-    FoundTypeConstructor constructorDecl ->
-      bindPatternArgs constructorName (constructorDeclPayloadTypes constructorDecl) (patternBinders pattern) (typeDeclInstantiations typeDecl subjectType),
-    MissingTypeConstructor missing ->
-      PatternBindError (textConcat ["Constructor `", missing, "` is not part of `", typeDeclName typeDecl, "`."])
+  if constructorName == "_" then {
+    if firstText (patternBinders pattern) == "" then BoundPattern emptyTypeBindings else PatternBindError "Wildcard pattern cannot bind payload values."
+  } else {
+    match lookupTypeConstructor typeDecl constructorName {
+      FoundTypeConstructor constructorDecl ->
+        bindPatternArgs typeDecls constructorName (constructorDeclPayloadTypes constructorDecl) (patternBinders pattern) (typeDeclInstantiations typeDecl subjectType),
+      MissingTypeConstructor missing ->
+        PatternBindError (textConcat ["Constructor `", missing, "` is not part of `", typeDeclName typeDecl, "`."])
+    }
   }
 }
 

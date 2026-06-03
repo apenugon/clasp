@@ -1207,7 +1207,7 @@ inferMatchBranch : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding]
 inferMatchBranch typeDecls recordDecls env localEnv fnContext typeDecl subjectType branch = {
   let pattern = branchPatternAst branch;
   let constructorName = patternConstructorName pattern;
-  match bindPattern typeDecl subjectType pattern {
+  match bindPattern typeDecls typeDecl subjectType pattern {
     PatternBindError message ->
       InferMatchBranchError message,
     BoundPattern bindings ->
@@ -1237,22 +1237,23 @@ inferMatchExpr typeDecls recordDecls env localEnv fnContext subject branches = m
                 SeenMatchError message ->
                   SeenMatchError message,
                 WaitingForBranch seen -> {
-                  let constructorName = patternConstructorName (branchPatternAst branch);
-                  if containsText seen constructorName then {
-                    SeenMatchError (textConcat ["Duplicate match branch for constructor `", constructorName, "`."])
+                  let pattern = branchPatternAst branch;
+                  if patternAlreadyCovered seen pattern then {
+                    SeenMatchError (textConcat ["Duplicate match branch for pattern `", patternCoverageKey pattern, "`."])
                   } else {
                     match inferMatchBranch typeDecls recordDecls env localEnv fnContext typeDecl subjectType branch {
                       InferMatchBranchError message ->
                         SeenMatchError message,
                       InferredMatchBranch seenConstructor bodyType ->
-                        SeenBranchType (append seen [seenConstructor]) bodyType
+                        SeenBranchType (append seen [patternCoverageToken pattern]) bodyType
                     }
                   }
                 },
                 SeenBranchType seen currentType -> {
-                  let constructorName = patternConstructorName (branchPatternAst branch);
-                  if containsText seen constructorName then {
-                    SeenMatchError (textConcat ["Duplicate match branch for constructor `", constructorName, "`."])
+                  let pattern = branchPatternAst branch;
+                  let constructorName = patternConstructorName pattern;
+                  if patternAlreadyCovered seen pattern then {
+                    SeenMatchError (textConcat ["Duplicate match branch for pattern `", patternCoverageKey pattern, "`."])
                   } else {
                     match inferMatchBranch typeDecls recordDecls env localEnv fnContext typeDecl subjectType branch {
                       InferMatchBranchError message ->
@@ -1260,7 +1261,7 @@ inferMatchExpr typeDecls recordDecls env localEnv fnContext subject branches = m
                       InferredMatchBranch seenConstructor bodyType ->
                         match unifyTypes currentType bodyType emptyTypeSubstitutions {
                           UnifiedTypes substitutions ->
-                            SeenBranchType (append seen [seenConstructor]) (applyTypeSubstitutions currentType substitutions),
+                            SeenBranchType (append seen [patternCoverageToken pattern]) (applyTypeSubstitutions currentType substitutions),
                           TypeUnifyError ->
                             SeenMatchError (typeMismatchMessage constructorName currentType bodyType)
                         }
@@ -1293,22 +1294,23 @@ inferMatchExpr typeDecls recordDecls env localEnv fnContext subject branches = m
                 SeenMatchError message ->
                   SeenMatchError message,
                 WaitingForBranch seen -> {
-                  let constructorName = patternConstructorName (branchPatternAst branch);
-                  if containsText seen constructorName then {
-                    SeenMatchError (textConcat ["Duplicate match branch for constructor `", constructorName, "`."])
+                  let pattern = branchPatternAst branch;
+                  if patternAlreadyCovered seen pattern then {
+                    SeenMatchError (textConcat ["Duplicate match branch for pattern `", patternCoverageKey pattern, "`."])
                   } else {
                     match inferMatchBranch typeDecls recordDecls env localEnv fnContext typeDecl subjectType branch {
                       InferMatchBranchError message ->
                         SeenMatchError message,
                       InferredMatchBranch seenConstructor bodyType ->
-                        SeenBranchType (append seen [seenConstructor]) bodyType
+                        SeenBranchType (append seen [patternCoverageToken pattern]) bodyType
                     }
                   }
                 },
                 SeenBranchType seen currentType -> {
-                  let constructorName = patternConstructorName (branchPatternAst branch);
-                  if containsText seen constructorName then {
-                    SeenMatchError (textConcat ["Duplicate match branch for constructor `", constructorName, "`."])
+                  let pattern = branchPatternAst branch;
+                  let constructorName = patternConstructorName pattern;
+                  if patternAlreadyCovered seen pattern then {
+                    SeenMatchError (textConcat ["Duplicate match branch for pattern `", patternCoverageKey pattern, "`."])
                   } else {
                     match inferMatchBranch typeDecls recordDecls env localEnv fnContext typeDecl subjectType branch {
                       InferMatchBranchError message ->
@@ -1316,7 +1318,7 @@ inferMatchExpr typeDecls recordDecls env localEnv fnContext subject branches = m
                       InferredMatchBranch seenConstructor bodyType ->
                         match unifyTypes currentType bodyType emptyTypeSubstitutions {
                           UnifiedTypes substitutions ->
-                            SeenBranchType (append seen [seenConstructor]) (applyTypeSubstitutions currentType substitutions),
+                            SeenBranchType (append seen [patternCoverageToken pattern]) (applyTypeSubstitutions currentType substitutions),
                           TypeUnifyError ->
                             SeenMatchError (typeMismatchMessage constructorName currentType bodyType)
                         }

@@ -103,6 +103,8 @@ cargo_args_path="$test_root/cargo-args.txt"
 
 resolved="$(
   env \
+  -u CLASP_CLASPC \
+  -u CLASPC_BIN \
   -u CLASP_MANAGED_JOB_ID \
   -u CLASP_MANAGED_JOB_ROOT \
   -u CLASP_MANAGED_JOB_TOKEN \
@@ -134,6 +136,8 @@ grep -Fx '111' "$managed_args_path" >/dev/null
 rm -f "$repo_root/runtime/target/debug/claspc" "$managed_args_path" "$cargo_env_path" "$cargo_args_path"
 resolved_inside_managed="$(
   env \
+  -u CLASP_CLASPC \
+  -u CLASPC_BIN \
   -u CLASP_MANAGED_JOB_ROOT \
   -u CLASP_MANAGED_JOB_TOKEN \
   -u CLASP_MANAGED_JOB_STOP_REQUEST \
@@ -151,7 +155,7 @@ resolved_inside_managed="$(
 [[ ! -e "$managed_args_path" ]]
 grep -F 'CARGO_BUILD_JOBS=2' "$cargo_env_path" >/dev/null
 
-if CLASP_PROJECT_ROOT="$repo_root" CLASP_CARGO_BUILD_JOBS=0 "$repo_root/scripts/resolve-claspc.sh" >"$test_root/invalid.out" 2>"$test_root/invalid.err"; then
+if env -u CLASP_CLASPC -u CLASPC_BIN CLASP_PROJECT_ROOT="$repo_root" CLASP_CARGO_BUILD_JOBS=0 "$repo_root/scripts/resolve-claspc.sh" >"$test_root/invalid.out" 2>"$test_root/invalid.err"; then
   printf 'resolve-claspc unexpectedly accepted CLASP_CARGO_BUILD_JOBS=0\n' >&2
   exit 1
 fi

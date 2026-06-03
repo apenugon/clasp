@@ -150,6 +150,46 @@ invalidPlannerRaw : Str
 invalidPlannerRaw =
   "{\"objectiveSummary\":\"Missing task list\",\"strategy\":\"This should fail schema validation.\"}"
 
+plannerResultAccepted : Result TrustedPlannerModelOutput -> Bool
+plannerResultAccepted result = match result {
+  Ok trusted ->
+    trusted.trust == "validated",
+  Err message ->
+    false
+}
+
+plannerResultTrust : Result TrustedPlannerModelOutput -> Str
+plannerResultTrust result = match result {
+  Ok trusted ->
+    trusted.trust,
+  Err message ->
+    ""
+}
+
+plannerResultTaskCount : Result TrustedPlannerModelOutput -> Int
+plannerResultTaskCount result = match result {
+  Ok trusted ->
+    length trusted.report.tasks,
+  Err message ->
+    0
+}
+
+plannerResultRejected : Result TrustedPlannerModelOutput -> Bool
+plannerResultRejected result = match result {
+  Ok trusted ->
+    false,
+  Err message ->
+    true
+}
+
+plannerResultReason : Result TrustedPlannerModelOutput -> Str
+plannerResultReason result = match result {
+  Ok trusted ->
+    "",
+  Err message ->
+    message
+}
+
 main : Str
 main = {
   let request =
@@ -180,17 +220,17 @@ main = {
   let schemaResult = validatePlannerModelOutput request schemaOutput;
   let statusResult = validatePlannerModelOutput request failedOutput;
   let pretrustedResult = validatePlannerModelOutput request alreadyTrustedOutput;
-  let validAccepted = match validResult { Ok trusted -> trusted.trust == "validated", Err message -> false };
-  let validTrust = match validResult { Ok trusted -> trusted.trust, Err message -> "" };
-  let validTaskCount = match validResult { Ok trusted -> length trusted.report.tasks, Err message -> 0 };
-  let invalidRejected = match invalidResult { Ok trusted -> false, Err message -> true };
-  let invalidReason = match invalidResult { Ok trusted -> "", Err message -> message };
-  let schemaRejected = match schemaResult { Ok trusted -> false, Err message -> true };
-  let schemaReason = match schemaResult { Ok trusted -> "", Err message -> message };
-  let statusRejected = match statusResult { Ok trusted -> false, Err message -> true };
-  let statusReason = match statusResult { Ok trusted -> "", Err message -> message };
-  let pretrustedRejected = match pretrustedResult { Ok trusted -> false, Err message -> true };
-  let pretrustedReason = match pretrustedResult { Ok trusted -> "", Err message -> message };
+  let validAccepted = plannerResultAccepted validResult;
+  let validTrust = plannerResultTrust validResult;
+  let validTaskCount = plannerResultTaskCount validResult;
+  let invalidRejected = plannerResultRejected invalidResult;
+  let invalidReason = plannerResultReason invalidResult;
+  let schemaRejected = plannerResultRejected schemaResult;
+  let schemaReason = plannerResultReason schemaResult;
+  let statusRejected = plannerResultRejected statusResult;
+  let statusReason = plannerResultReason statusResult;
+  let pretrustedRejected = plannerResultRejected pretrustedResult;
+  let pretrustedReason = plannerResultReason pretrustedResult;
   encode
     (ModelBoundaryHarnessReport {
       requestProvider = request.provider,

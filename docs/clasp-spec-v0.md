@@ -63,7 +63,6 @@ It does not yet include:
 
 - Full module-wide polymorphic inference
 - Higher-rank polymorphism
-- Nested patterns
 - Effects
 - Dedicated schema syntax separate from records
 - Agent control-plane declarations such as repo memory, policies, commands, hooks, agents, verifier rules, and traces
@@ -522,7 +521,8 @@ list-expr   ::= "[" (expr ("," expr)*)? "]"
 record-field-expr ::= lower-ident "=" expr
 match-expr  ::= "match" expr "{" match-branch ("," match-branch)* "}"
 match-branch ::= pattern "->" expr
-pattern     ::= upper-ident lower-ident*
+pattern     ::= "_" | upper-ident pattern-arg*
+pattern-arg ::= lower-ident | "_" | "(" pattern ")"
 type        ::= type-atom ("->" type-atom)*
 type-atom   ::= type-base type-base*
 type-base   ::= "Int" | "Str" | "Bool" | upper-ident | lower-ident | "[" type "]" | "(" type ")"
@@ -654,7 +654,7 @@ Once `v0` is stable, the next additions should be:
 - More complete inference, especially around higher-order code and future generic types
 - Dedicated schema syntax once records no longer need to carry the entire boundary story alone
 - Multi-file namespace control beyond the current flattened import model
-- Richer pattern forms, including nested destructuring and wildcards
+- Richer record and list destructuring patterns beyond constructor nesting and wildcards
 - Stronger Bun/runtime interop and eventually non-JS server runtimes
 - Typed workflows, hot-swap checkpoints, and self-update compatibility rules
 - Further diagnostic normalization for agent-facing output

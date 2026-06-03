@@ -3,7 +3,9 @@ module Main
 record CheckSnapshot = {
   roster : Str,
   matrix : Str,
-  mixed : Str
+  mixed : Str,
+  nestedPattern : Str,
+  wildcardPattern : Str
 }
 
 type TypeText = TInt | TStr | TBool | TList TypeText
@@ -11,6 +13,8 @@ type ExprText = IntExpr Int | StrExpr Str | BoolExpr Bool | ListExpr [ExprText]
 type TypeEquality = SameType | DifferentType
 type InferResult = Inferred TypeText | InferError Str
 type ListState = WaitingForFirst | SeenItem TypeText | SeenError Str
+type Approval = Accepted Str | Rejected Str
+type MaybeApproval = NoApproval | SomeApproval Approval
 
 renderAtomicType : TypeText -> Str
 renderAtomicType typeText = match typeText {
@@ -153,8 +157,33 @@ matrixExpr = ListExpr [ListExpr [IntExpr 10, IntExpr 20], ListExpr [IntExpr 30]]
 mixedExpr : ExprText
 mixedExpr = ListExpr [StrExpr "Ada", IntExpr 7]
 
+nestedPatternSummary : MaybeApproval -> Str
+nestedPatternSummary approval = match approval {
+  SomeApproval (Accepted name) ->
+    textConcat ["accepted:", name],
+  SomeApproval (Rejected _) ->
+    "rejected",
+  SomeApproval _ ->
+    "unknown",
+  NoApproval ->
+    "none"
+}
+
+wildcardPatternSummary : MaybeApproval -> Str
+wildcardPatternSummary approval = match approval {
+  _ ->
+    "any"
+}
+
 snapshot : CheckSnapshot
-snapshot = CheckSnapshot { roster = renderResult (inferExpr rosterExpr), matrix = renderResult (inferExpr matrixExpr), mixed = renderResult (inferExpr mixedExpr) }
+snapshot =
+  CheckSnapshot {
+    roster = renderResult (inferExpr rosterExpr),
+    matrix = renderResult (inferExpr matrixExpr),
+    mixed = renderResult (inferExpr mixedExpr),
+    nestedPattern = textJoin "|" [nestedPatternSummary (SomeApproval (Accepted "Ada")), nestedPatternSummary (SomeApproval (Rejected "blocked")), nestedPatternSummary NoApproval],
+    wildcardPattern = wildcardPatternSummary (SomeApproval (Accepted "Ada"))
+  }
 
 snapshotJson : Str
 snapshotJson = encode snapshot

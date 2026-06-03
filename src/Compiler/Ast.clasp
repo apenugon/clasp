@@ -1808,21 +1808,27 @@ parseForeignSourceAst rawValue = {
   }
 }
 
+parseForeignDeclUnsafeInterop : Str -> Bool
+parseForeignDeclUnsafeInterop value = match textPrefix value "unsafe " {
+  Ok tail ->
+    true,
+  Err notUnsafe ->
+    false
+}
+
+parseForeignDeclBody : Str -> Str
+parseForeignDeclBody value = match textPrefix value "unsafe " {
+  Ok tail ->
+    tail,
+  Err notUnsafe ->
+    value
+}
+
 parseForeignDecl : Str -> HostedForeignDeclAst
 parseForeignDecl rawValue = {
   let value = trimSpaces rawValue;
-  let unsafeInterop = match textPrefix value "unsafe " {
-    Ok tail ->
-      true,
-    Err notUnsafe ->
-      false
-  };
-  let body = match textPrefix value "unsafe " {
-    Ok tail ->
-      tail,
-    Err notUnsafe ->
-      value
-  };
+  let unsafeInterop = parseForeignDeclUnsafeInterop value;
+  let body = parseForeignDeclBody value;
   match textSplitFirst body " : " {
     Ok annotationPayload -> {
       let name = trimSpaces (firstSegment annotationPayload);
@@ -1914,17 +1920,20 @@ renderHostedPolicyPermissionKind kind = match kind {
 parsePolicyPermissionKind : Str -> HostedPolicyPermissionKindAst
 parsePolicyPermissionKind value = if value == "network" then HostedPolicyPermissionNetwork else if value == "process" then HostedPolicyPermissionProcess else if value == "secret" then HostedPolicyPermissionSecret else HostedPolicyPermissionFile
 
+parsePolicyPermissionValue : Str -> Str
+parsePolicyPermissionValue targetText = match unwrapStringLiteral targetText {
+  ParsedText target ->
+    target,
+  MissingText missingTarget ->
+    trimSpaces targetText
+}
+
 parsePolicyPermission : Str -> HostedPolicyPermissionAst
 parsePolicyPermission rawValue = {
   let parts = splitWords rawValue;
   let kindText = firstText parts;
   let targetText = textJoin " " (remainingTexts parts);
-  let value = match unwrapStringLiteral targetText {
-    ParsedText target ->
-      target,
-    MissingText missingTarget ->
-      trimSpaces targetText
-  };
+  let value = parsePolicyPermissionValue targetText;
   hostedPolicyPermissionAst (parsePolicyPermissionKind kindText) value
 }
 
@@ -3282,8 +3291,15 @@ logicalLines source = astTextLogicalLines source
 
 parsePattern : Str -> HostedPatternAst
 parsePattern rawValue = {
-  let parts = splitWords (trimSpaces rawValue);
-  if hasAdditionalText parts then hostedPatternAst (firstText parts) (remainingTexts parts) else hostedPatternAst (firstText parts) emptyRenderedTexts
+  let value = trimSpaces rawValue;
+  match unwrapDelimited value "(" ")" {
+    ParsedText payload ->
+      parsePattern payload,
+    MissingText notParenthesized -> {
+      let parts = splitTopLevel value " ";
+      if hasAdditionalText parts then hostedPatternAst (firstText parts) (remainingTexts parts) else hostedPatternAst (firstText parts) emptyRenderedTexts
+    }
+  }
 }
 
 parseMatchBranch : Str -> HostedMatchBranchAst

@@ -5,7 +5,7 @@
   "summaries": [
     {
       "moduleName": "Compiler.AstText",
-      "cacheKey": "f7a196b7f07010e2.cache",
+      "cacheKey": "562f89bb1f07c554.cache",
       "sourceFingerprint": "53472e027f83bf0f",
       "declFingerprints": {
         "astTextAppendChar": "b6356c40d145790b",
@@ -51,8 +51,8 @@
     },
     {
       "moduleName": "Compiler.Ast",
-      "cacheKey": "2e90e2b8fac92526.cache",
-      "sourceFingerprint": "4d30cd26ada3568f",
+      "cacheKey": "a883b2c65e4e26b4.cache",
+      "sourceFingerprint": "9ff8df0c069bd260",
       "declFingerprints": {
         "renderStringLiteral": "c2e6c2c04b0295ae",
         "keepNoRenderedText": "dfd63aca9b56d04d",
@@ -338,13 +338,16 @@
         "parseRecordDecl": "9bc185b41410a5e6",
         "parsePackageImportKind": "1097c7c7d4e306f9",
         "parseForeignSourceAst": "a6b76d806841da79",
-        "parseForeignDecl": "63a8bdcddde03123",
+        "parseForeignDeclUnsafeInterop": "69c28d93acd2b914",
+        "parseForeignDeclBody": "86b54f21381beb73",
+        "parseForeignDecl": "aa8f8d2a4e08cc10",
         "parseGuideEntry": "0bc21efe0db673c9",
         "parseGuideEntries": "ab5b59912c4629ad",
         "parseGuideDecl": "f2b6039e9f753fda",
         "renderHostedPolicyPermissionKind": "68d57e8e86636760",
         "parsePolicyPermissionKind": "93335b47a68d4704",
-        "parsePolicyPermission": "e9627754f7a150a9",
+        "parsePolicyPermissionValue": "b20a17ebaee97063",
+        "parsePolicyPermission": "7558169dc662b351",
         "parsePolicyPermissions": "083a1c9b7c4a2c25",
         "parsePolicyClassifications": "0d300006f8ccfee8",
         "parsePolicyDecl": "f663377b70db5bd8",
@@ -434,7 +437,7 @@
         "scanOpenGroupState": "c26a4b004e49c011",
         "hasOpenGroup": "16126034a3bc744d",
         "logicalLines": "be9c5d688722131f",
-        "parsePattern": "8cc3a96dfa1b0d48",
+        "parsePattern": "d37e885f4f61b6da",
         "parseMatchBranch": "e9f3646845957ab0",
         "parseMatchBranches": "35383eeb665c524a",
         "splitMatchSubjectAndBody": "3f10691062b5e6a7",
@@ -496,11 +499,11 @@
         "declAnnotationTextByName": "7870ca259ceddf31",
         "renderMainExpr": "34e7204e9a91fce8"
       },
-      "summary": "renderStringLiteral : Str -> Str\nkeepNoRenderedText : Str -> Bool\nemptyRenderedTexts : [Str]\nkeepNoHostedForeignDecl : HostedForeignDeclAst -> Bool\nemptyHostedForeignDecls : [HostedForeignDeclAst]\nkeepNoHostedType : HostedTypeAst -> Bool\nemptyHostedTypes : [HostedTypeAst]\nkeepNoHostedConstructorDecl : HostedConstructorDeclAst -> Bool\nemptyHostedConstructorDecls : [HostedConstructorDeclAst]\nkeepNoHostedRecordFieldDecl : HostedRecordFieldDeclAst -> Bool\nemptyHostedRecordFieldDecls : [HostedRecordFieldDeclAst]\nkeepNoHostedGuideEntry : HostedGuideEntryAst -> Bool\nemptyHostedGuideEntries : [HostedGuideEntryAst]\nkeepNoHostedPolicyPermission : HostedPolicyPermissionAst -> Bool\nemptyHostedPolicyPermissions : [HostedPolicyPermissionAst]\nkeepNoHostedProjectionFieldDecl : HostedProjectionFieldDeclAst -> Bool\nemptyHostedProjectionFieldDecls : [HostedProjectionFieldDeclAst]\nkeepNoHostedRecordFieldExpr : HostedRecordFieldExprAst -> Bool\nemptyHostedRecordFieldExprs : [HostedRecordFieldExprAst]\nkeepNoHostedExpr : HostedExprAst -> Bool\nemptyHostedExprs : [HostedExprAst]\nkeepNoHostedMatchBranch : HostedMatchBranchAst -> Bool\nemptyHostedMatchBranches : [HostedMatchBranchAst]\nkeepNoHostedDecl : HostedDeclAst -> Bool\nemptyHostedDecls : [HostedDeclAst]\nkeepNoHostedTypeDecl : HostedTypeDeclAst -> Bool\nemptyHostedTypeDecls : [HostedTypeDeclAst]\nkeepNoHostedRecordDecl : HostedRecordDeclAst -> Bool\nemptyHostedRecordDecls : [HostedRecordDeclAst]\nkeepNoHostedGuideDecl : HostedGuideDeclAst -> Bool\nemptyHostedGuideDecls : [HostedGuideDeclAst]\nkeepNoHostedPolicyDecl : HostedPolicyDeclAst -> Bool\nemptyHostedPolicyDecls : [HostedPolicyDeclAst]\nkeepNoHostedProjectionDecl : HostedProjectionDeclAst -> Bool\nemptyHostedProjectionDecls : [HostedProjectionDeclAst]\nkeepNoHostedAgentRoleDecl : HostedAgentRoleDeclAst -> Bool\nemptyHostedAgentRoleDecls : [HostedAgentRoleDeclAst]\nkeepNoHostedAgentDecl : HostedAgentDeclAst -> Bool\nemptyHostedAgentDecls : [HostedAgentDeclAst]\nkeepNoHostedWorkflowDecl : HostedWorkflowDeclAst -> Bool\nemptyHostedWorkflowDecls : [HostedWorkflowDeclAst]\nkeepNoHostedRouteDecl : HostedRouteDeclAst -> Bool\nemptyHostedRouteDecls : [HostedRouteDeclAst]\nkeepNoHostedHookDecl : HostedHookDeclAst -> Bool\nemptyHostedHookDecls : [HostedHookDeclAst]\nkeepNoHostedToolServerDecl : HostedToolServerDeclAst -> Bool\nemptyHostedToolServerDecls : [HostedToolServerDeclAst]\nkeepNoHostedToolDecl : HostedToolDeclAst -> Bool\nemptyHostedToolDecls : [HostedToolDeclAst]\nkeepNoHostedVerifierDecl : HostedVerifierDeclAst -> Bool\nemptyHostedVerifierDecls : [HostedVerifierDeclAst]\nkeepNoHostedMergeGateDecl : HostedMergeGateDeclAst -> Bool\nemptyHostedMergeGateDecls : [HostedMergeGateDeclAst]\nrenderHostedAtomicType : HostedTypeAst -> Str\nrenderHostedType : HostedTypeAst -> Str\nmissingAnnotation : HostedAnnotationAst\npresentAnnotation : HostedTypeAst -> HostedAnnotationAst\nannotationTypeAst : HostedAnnotationAst -> HostedTypeAst\nhasAnnotationAst : HostedAnnotationAst -> Bool\nrenderAnnotationAst : HostedAnnotationAst -> Str\nhostedDeclAst : Str -> HostedAnnotationAst -> [Str] -> HostedExprAst -> HostedDeclAst\nhostedConstructorDeclAst : Str -> [HostedTypeAst] -> HostedConstructorDeclAst\nconstructorDeclName : HostedConstructorDeclAst -> Str\nconstructorDeclPayloadTypes : HostedConstructorDeclAst -> [HostedTypeAst]\nhostedTypeDeclAst : Str -> [HostedConstructorDeclAst] -> HostedTypeDeclAst\nhostedTypeDeclAstWithParams : Str -> [Str] -> [HostedConstructorDeclAst] -> HostedTypeDeclAst\ntypeDeclName : HostedTypeDeclAst -> Str\ntypeDeclParams : HostedTypeDeclAst -> [Str]\ntypeDeclConstructors : HostedTypeDeclAst -> [HostedConstructorDeclAst]\nhostedForeignDeclAst : Str -> Bool -> HostedTypeAst -> Str -> HostedForeignSourceAst -> Str -> HostedForeignDeclAst\nforeignDeclName : HostedForeignDeclAst -> Str\nforeignDeclUnsafeInterop : HostedForeignDeclAst -> Bool\nforeignDeclTypeAst : HostedForeignDeclAst -> HostedTypeAst\nforeignDeclRuntimeName : HostedForeignDeclAst -> Str\nforeignDeclSource : HostedForeignDeclAst -> HostedForeignSourceAst\nforeignDeclSignature : HostedForeignDeclAst -> Str\nhostedGuideEntryAst : Str -> Str -> HostedGuideEntryAst\nguideEntryName : HostedGuideEntryAst -> Str\nguideEntryValue : HostedGuideEntryAst -> Str\nhostedGuideDeclAst : Str -> Str -> [HostedGuideEntryAst] -> HostedGuideDeclAst\nguideDeclName : HostedGuideDeclAst -> Str\nguideDeclExtends : HostedGuideDeclAst -> Str\nguideDeclEntries : HostedGuideDeclAst -> [HostedGuideEntryAst]\nhostedPolicyPermissionAst : HostedPolicyPermissionKindAst -> Str -> HostedPolicyPermissionAst\npolicyPermissionKind : HostedPolicyPermissionAst -> HostedPolicyPermissionKindAst\npolicyPermissionValue : HostedPolicyPermissionAst -> Str\nhostedPolicyDeclAst : Str -> [Str] -> [HostedPolicyPermissionAst] -> HostedPolicyDeclAst\npolicyDeclName : HostedPolicyDeclAst -> Str\npolicyDeclAllowedClassifications : HostedPolicyDeclAst -> [Str]\npolicyDeclPermissions : HostedPolicyDeclAst -> [HostedPolicyPermissionAst]\nhostedProjectionFieldDeclAst : Str -> HostedProjectionFieldDeclAst\nprojectionFieldDeclName : HostedProjectionFieldDeclAst -> Str\nhostedProjectionDeclAst : Str -> Str -> Str -> [HostedProjectionFieldDeclAst] -> HostedProjectionDeclAst\nprojectionDeclName : HostedProjectionDeclAst -> Str\nprojectionDeclSourceRecordName : HostedProjectionDeclAst -> Str\nprojectionDeclPolicyName : HostedProjectionDeclAst -> Str\nprojectionDeclFields : HostedProjectionDeclAst -> [HostedProjectionFieldDeclAst]\nhostedAgentRoleDeclAst : Str -> Str -> Str -> Str -> Str -> HostedAgentRoleDeclAst\nagentRoleDeclName : HostedAgentRoleDeclAst -> Str\nagentRoleDeclGuideName : HostedAgentRoleDeclAst -> Str\nagentRoleDeclPolicyName : HostedAgentRoleDeclAst -> Str\nagentRoleDeclApprovalPolicy : HostedAgentRoleDeclAst -> Str\nagentRoleDeclSandboxPolicy : HostedAgentRoleDeclAst -> Str\nhostedAgentDeclAst : Str -> Str -> HostedAgentDeclAst\nagentDeclName : HostedAgentDeclAst -> Str\nagentDeclRoleName : HostedAgentDeclAst -> Str\nhostedWorkflowDeclAst : Str -> Str -> HostedTypeAst -> HostedWorkflowDeclAst\nworkflowDeclName : HostedWorkflowDeclAst -> Str\nworkflowDeclIdentity : HostedWorkflowDeclAst -> Str\nworkflowDeclStateTypeAst : HostedWorkflowDeclAst -> HostedTypeAst\nhostedRouteDeclAst : Str -> Str -> Str -> Str -> Str -> Str -> Str -> HostedRouteDeclAst\nrouteDeclName : HostedRouteDeclAst -> Str\nrouteDeclIdentity : HostedRouteDeclAst -> Str\nrouteDeclMethod : HostedRouteDeclAst -> Str\nrouteDeclPath : HostedRouteDeclAst -> Str\nrouteDeclRequestType : HostedRouteDeclAst -> Str\nrouteDeclResponseType : HostedRouteDeclAst -> Str\nrouteDeclHandlerName : HostedRouteDeclAst -> Str\nhostedHookDeclAst : Str -> Str -> Str -> Str -> Str -> HostedHookDeclAst\nhookDeclName : HostedHookDeclAst -> Str\nhookDeclEvent : HostedHookDeclAst -> Str\nhookDeclRequestType : HostedHookDeclAst -> Str\nhookDeclResponseType : HostedHookDeclAst -> Str\nhookDeclHandlerName : HostedHookDeclAst -> Str\nhostedToolServerDeclAst : Str -> Str -> Str -> Str -> HostedToolServerDeclAst\ntoolServerDeclName : HostedToolServerDeclAst -> Str\ntoolServerDeclProtocol : HostedToolServerDeclAst -> Str\ntoolServerDeclLocation : HostedToolServerDeclAst -> Str\ntoolServerDeclPolicyName : HostedToolServerDeclAst -> Str\nhostedToolDeclAst : Str -> Str -> Str -> Str -> Str -> HostedToolDeclAst\ntoolDeclName : HostedToolDeclAst -> Str\ntoolDeclServerName : HostedToolDeclAst -> Str\ntoolDeclOperation : HostedToolDeclAst -> Str\ntoolDeclRequestType : HostedToolDeclAst -> Str\ntoolDeclResponseType : HostedToolDeclAst -> Str\nhostedVerifierDeclAst : Str -> Str -> HostedVerifierDeclAst\nverifierDeclName : HostedVerifierDeclAst -> Str\nverifierDeclToolName : HostedVerifierDeclAst -> Str\nhostedMergeGateDeclAst : Str -> [Str] -> HostedMergeGateDeclAst\nmergeGateDeclName : HostedMergeGateDeclAst -> Str\nmergeGateDeclVerifierNames : HostedMergeGateDeclAst -> [Str]\nhostedPatternAst : Str -> [Str] -> HostedPatternAst\npatternConstructorName : HostedPatternAst -> Str\npatternBinders : HostedPatternAst -> [Str]\nhostedMatchBranchAst : HostedPatternAst -> HostedExprAst -> HostedMatchBranchAst\nbranchPatternAst : HostedMatchBranchAst -> HostedPatternAst\nbranchBodyExpr : HostedMatchBranchAst -> HostedExprAst\ndeclName : HostedDeclAst -> Str\ndeclAnnotation : HostedDeclAst -> HostedAnnotationAst\ndeclParams : HostedDeclAst -> [Str]\ndeclBody : HostedDeclAst -> HostedExprAst\ndeclHasExactlyOneParam : HostedDeclAst -> Bool\ndeclBodyIsStringLiteral : HostedDeclAst -> Bool\ndeclIsMetadataName : HostedDeclAst -> Bool\ndeclIsMetadataDeclaration : HostedDeclAst -> Bool\nmetadataDeclKey : HostedDeclAst -> Str\nmetadataDeclStringValue : HostedDeclAst -> Str\nhostedRecordFieldExprAst : Str -> HostedExprAst -> HostedRecordFieldExprAst\nrecordExprFieldName : HostedRecordFieldExprAst -> Str\nrecordExprFieldValue : HostedRecordFieldExprAst -> HostedExprAst\nhostedRecordFieldDeclAst : Str -> HostedTypeAst -> HostedRecordFieldDeclAst\nhostedRecordFieldDeclAstClassified : Str -> HostedTypeAst -> Str -> HostedRecordFieldDeclAst\nrecordFieldDeclName : HostedRecordFieldDeclAst -> Str\nrecordFieldDeclType : HostedRecordFieldDeclAst -> HostedTypeAst\nrecordFieldDeclClassification : HostedRecordFieldDeclAst -> Str\nhostedRecordDeclAst : Str -> [HostedRecordFieldDeclAst] -> HostedRecordDeclAst\nhostedRecordDeclAstWithParams : Str -> [Str] -> [HostedRecordFieldDeclAst] -> HostedRecordDeclAst\nrecordDeclName : HostedRecordDeclAst -> Str\nrecordDeclParams : HostedRecordDeclAst -> [Str]\nrecordDeclFields : HostedRecordDeclAst -> [HostedRecordFieldDeclAst]\nrenderHostedTypeList : [HostedTypeAst] -> [Str]\nrenderRecordFieldTypeSummaries : HostedRecordDeclAst -> [Str]\nrenderConstructorSummary : HostedConstructorDeclAst -> Str\nrenderConstructorSummaries : HostedTypeDeclAst -> [Str]\nhostedModuleAst : Str -> [Str] -> [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [HostedForeignDeclAst] -> [HostedDeclAst] -> [HostedGuideDeclAst] -> [HostedPolicyDeclAst] -> [HostedProjectionDeclAst] -> [HostedAgentRoleDeclAst] -> [HostedAgentDeclAst] -> [HostedWorkflowDeclAst] -> [HostedRouteDeclAst] -> [HostedHookDeclAst] -> [HostedToolServerDeclAst] -> [HostedToolDeclAst] -> [HostedVerifierDeclAst] -> [HostedMergeGateDeclAst] -> Str -> HostedModuleAst\nmoduleNameOf : HostedModuleAst -> Str\nmoduleImports : HostedModuleAst -> [Str]\nmoduleTypeDeclarations : HostedModuleAst -> [HostedTypeDeclAst]\nmoduleRecordDeclarations : HostedModuleAst -> [HostedRecordDeclAst]\nmoduleForeignDeclarations : HostedModuleAst -> [HostedForeignDeclAst]\nmoduleDeclarations : HostedModuleAst -> [HostedDeclAst]\nmoduleGuideDeclarations : HostedModuleAst -> [HostedGuideDeclAst]\nmodulePolicyDeclarations : HostedModuleAst -> [HostedPolicyDeclAst]\nmoduleProjectionDeclarations : HostedModuleAst -> [HostedProjectionDeclAst]\nmoduleAgentRoleDeclarations : HostedModuleAst -> [HostedAgentRoleDeclAst]\nmoduleAgentDeclarations : HostedModuleAst -> [HostedAgentDeclAst]\nmoduleWorkflowDeclarations : HostedModuleAst -> [HostedWorkflowDeclAst]\nmoduleRouteDeclarations : HostedModuleAst -> [HostedRouteDeclAst]\nmoduleHookDeclarations : HostedModuleAst -> [HostedHookDeclAst]\nmoduleToolServerDeclarations : HostedModuleAst -> [HostedToolServerDeclAst]\nmoduleToolDeclarations : HostedModuleAst -> [HostedToolDeclAst]\nmoduleVerifierDeclarations : HostedModuleAst -> [HostedVerifierDeclAst]\nmoduleMergeGateDeclarations : HostedModuleAst -> [HostedMergeGateDeclAst]\nmoduleMainExprSummary : HostedModuleAst -> Str\nparserState : Str -> [Str] -> [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [HostedForeignDeclAst] -> [HostedDeclAst] -> [HostedGuideDeclAst] -> [HostedPolicyDeclAst] -> [HostedProjectionDeclAst] -> [HostedAgentRoleDeclAst] -> [HostedAgentDeclAst] -> [HostedWorkflowDeclAst] -> [HostedRouteDeclAst] -> [HostedHookDeclAst] -> [HostedToolServerDeclAst] -> [HostedToolDeclAst] -> [HostedVerifierDeclAst] -> [HostedMergeGateDeclAst] -> HostedAnnotationAst -> Str -> ParserState\nstateModuleName : ParserState -> Str\nstateImports : ParserState -> [Str]\nstateTypeDeclarations : ParserState -> [HostedTypeDeclAst]\nstateRecordDeclarations : ParserState -> [HostedRecordDeclAst]\nstateForeignDeclarations : ParserState -> [HostedForeignDeclAst]\nstateDeclarations : ParserState -> [HostedDeclAst]\nstateGuideDeclarations : ParserState -> [HostedGuideDeclAst]\nstatePolicyDeclarations : ParserState -> [HostedPolicyDeclAst]\nstateProjectionDeclarations : ParserState -> [HostedProjectionDeclAst]\nstateAgentRoleDeclarations : ParserState -> [HostedAgentRoleDeclAst]\nstateAgentDeclarations : ParserState -> [HostedAgentDeclAst]\nstateWorkflowDeclarations : ParserState -> [HostedWorkflowDeclAst]\nstateRouteDeclarations : ParserState -> [HostedRouteDeclAst]\nstateHookDeclarations : ParserState -> [HostedHookDeclAst]\nstateToolServerDeclarations : ParserState -> [HostedToolServerDeclAst]\nstateToolDeclarations : ParserState -> [HostedToolDeclAst]\nstateVerifierDeclarations : ParserState -> [HostedVerifierDeclAst]\nstateMergeGateDeclarations : ParserState -> [HostedMergeGateDeclAst]\nstatePendingAnnotation : ParserState -> HostedAnnotationAst\nstateMainExprSummary : ParserState -> Str\nappendTypeDecl : [HostedTypeDeclAst] -> HostedTypeDeclAst -> [HostedTypeDeclAst]\nappendRecordDecl : [HostedRecordDeclAst] -> HostedRecordDeclAst -> [HostedRecordDeclAst]\nappendForeignDecl : [HostedForeignDeclAst] -> HostedForeignDeclAst -> [HostedForeignDeclAst]\napplyForeignSignature : HostedForeignDeclAst -> Str -> Str -> HostedForeignDeclAst\napplyForeignSignatureList : [HostedForeignDeclAst] -> Str -> Str -> [HostedForeignDeclAst]\nappendDecl : [HostedDeclAst] -> HostedDeclAst -> [HostedDeclAst]\nappendGuideDecl : [HostedGuideDeclAst] -> HostedGuideDeclAst -> [HostedGuideDeclAst]\nappendPolicyDecl : [HostedPolicyDeclAst] -> HostedPolicyDeclAst -> [HostedPolicyDeclAst]\nappendProjectionDecl : [HostedProjectionDeclAst] -> HostedProjectionDeclAst -> [HostedProjectionDeclAst]\nappendAgentRoleDecl : [HostedAgentRoleDeclAst] -> HostedAgentRoleDeclAst -> [HostedAgentRoleDeclAst]\nappendAgentDecl : [HostedAgentDeclAst] -> HostedAgentDeclAst -> [HostedAgentDeclAst]\nappendWorkflowDecl : [HostedWorkflowDeclAst] -> HostedWorkflowDeclAst -> [HostedWorkflowDeclAst]\nappendRouteDecl : [HostedRouteDeclAst] -> HostedRouteDeclAst -> [HostedRouteDeclAst]\nappendHookDecl : [HostedHookDeclAst] -> HostedHookDeclAst -> [HostedHookDeclAst]\nappendToolServerDecl : [HostedToolServerDeclAst] -> HostedToolServerDeclAst -> [HostedToolServerDeclAst]\nappendToolDecl : [HostedToolDeclAst] -> HostedToolDeclAst -> [HostedToolDeclAst]\nappendVerifierDecl : [HostedVerifierDeclAst] -> HostedVerifierDeclAst -> [HostedVerifierDeclAst]\nappendMergeGateDecl : [HostedMergeGateDeclAst] -> HostedMergeGateDeclAst -> [HostedMergeGateDeclAst]\nappendGuideEntry : [HostedGuideEntryAst] -> HostedGuideEntryAst -> [HostedGuideEntryAst]\nappendPolicyPermission : [HostedPolicyPermissionAst] -> HostedPolicyPermissionAst -> [HostedPolicyPermissionAst]\nappendRenderedText : [Str] -> Str -> [Str]\nprependRenderedText : [Str] -> Str -> [Str]\nappendRecordFieldDecl : [HostedRecordFieldDeclAst] -> HostedRecordFieldDeclAst -> [HostedRecordFieldDeclAst]\nappendRecordFieldExpr : [HostedRecordFieldExprAst] -> HostedRecordFieldExprAst -> [HostedRecordFieldExprAst]\nappendConstructorDecl : [HostedConstructorDeclAst] -> HostedConstructorDeclAst -> [HostedConstructorDeclAst]\nappendMatchBranch : [HostedMatchBranchAst] -> HostedMatchBranchAst -> [HostedMatchBranchAst]\nappendExpr : [HostedExprAst] -> HostedExprAst -> [HostedExprAst]\nappendChar : Str -> Str -> Str\ntextFromReversedChars : [Str] -> Str\ntrimSpaces : Str -> Str\nisLayoutWhitespaceChar : Str -> Bool\nnormalizeLayoutText : Str -> Str\nappendNonEmptyText : [Str] -> Str -> [Str]\nfirstSegment : Str -> Str\nremainingSegments : Str -> Str\nsplitWords : Str -> [Str]\nfirstCharText : Str -> Str\nlastCharText : Str -> Str\nisUppercaseChar : Str -> Bool\nstartsWithUppercase : Str -> Bool\nstripToken : Str -> Str -> Str\nstripDigits : Str -> Str\nisIntLiteral : Str -> Bool\nincreaseDepth : NestDepth -> NestDepth\ndecreaseDepth : NestDepth -> NestDepth\nisZeroDepth : NestDepth -> Bool\nisTopLevel : NestDepth -> NestDepth -> NestDepth -> Bool\nsplitTopLevel : Str -> Str -> [Str]\ntopLevelRepeatedSeparatorOnly : Str -> Str -> Bool\nfirstText : [Str] -> Str\nremainingTexts : [Str] -> [Str]\nhasAdditionalText : [Str] -> Bool\nunwrapDelimited : Str -> Str -> Str -> ParserTextResult\nunwrapStringLiteral : Str -> ParserTextResult\nparseQuotedPrefix : Str -> QuotedPrefixResult\nbetweenBrackets : Str -> Str\nisListLiteral : Str -> Bool\nbetweenBraces : Str -> Str\nparseAtomicHostedType : Str -> HostedTypeAst\nparseHostedType : Str -> HostedTypeAst\nparseConstructorDecl : Str -> HostedConstructorDeclAst\nparseHostedTypes : [Str] -> [HostedTypeAst]\nparseConstructorDecls : Str -> [HostedConstructorDeclAst]\nparseTypeDecl : Str -> HostedTypeDeclAst\nparseRecordFieldDecl : Str -> HostedRecordFieldDeclAst\nparseRecordFieldDecls : Str -> [HostedRecordFieldDeclAst]\nparseRecordDecl : Str -> HostedRecordDeclAst\nparsePackageImportKind : Str -> HostedPackageImportKindAst\nparseForeignSourceAst : Str -> HostedForeignSourceAst\nparseForeignDecl : Str -> HostedForeignDeclAst\nparseGuideEntry : Str -> HostedGuideEntryAst\nparseGuideEntries : Str -> [HostedGuideEntryAst]\nparseGuideDecl : Str -> HostedGuideDeclAst\nrenderHostedPolicyPermissionKind : HostedPolicyPermissionKindAst -> Str\nparsePolicyPermissionKind : Str -> HostedPolicyPermissionKindAst\nparsePolicyPermission : Str -> HostedPolicyPermissionAst\nparsePolicyPermissions : Str -> [HostedPolicyPermissionAst]\nparsePolicyClassifications : Str -> [Str]\nparsePolicyDecl : Str -> HostedPolicyDeclAst\nparseProjectionFieldDecls : Str -> [HostedProjectionFieldDeclAst]\nparseProjectionDecl : Str -> HostedProjectionDeclAst\nlookupMetadataFieldValue : [Str] -> Str -> Str\nparseRoleDecl : Str -> HostedAgentRoleDeclAst\nparseAgentDecl : Str -> HostedAgentDeclAst\nparseWorkflowDecl : Str -> HostedWorkflowDeclAst\nparseRouteDecl : Str -> HostedRouteDeclAst\nparseHookDecl : Str -> HostedHookDeclAst\nparseToolServerDecl : Str -> HostedToolServerDeclAst\nparseToolDecl : Str -> HostedToolDeclAst\nparseVerifierDecl : Str -> HostedVerifierDeclAst\nparseMergeGateDecl : Str -> HostedMergeGateDeclAst\nparseRecordFieldExpr : Str -> HostedRecordFieldExprAst\nparseRecordFieldExprs : Str -> [HostedRecordFieldExprAst]\nrecordDestructureTempName : Str\nrecordUpdateBuiltinName : Str\nrecordUpdatePlaceholderName : Str\nblockSequenceDiscardName : Str\nparseRecordBinderNames : Str -> [Str]\nbuildRecordDestructureBindings : Str -> [Str] -> HostedExprAst -> HostedExprAst\nparseFieldAccessChain : HostedExprAst -> [Str] -> HostedExprAst\nparseRecordLiteral : Str -> RecordLiteralParseResult\nparseRecordUpdateExpr : Str -> RecordUpdateParseResult\nparseExprItems : Str -> [HostedExprAst]\nparseExprArgs : [Str] -> [HostedExprAst]\nsplitLetParts : [Str] -> LetPartsResult\nsplitTokensAt : Str -> [Str] -> TokenSplitResult\nparseLetExpr : Str -> LetParseResult\nparseAssignmentExprWithMutable : Str -> [Str] -> BlockExprParseResult\nparseLetExprWithMutable : Str -> [Str] -> LetParseResult\nparseExprWithMutable : Str -> [Str] -> HostedExprAst\nparseBlockStatementExpr : Str -> [Str] -> BlockExprParseResult\nparseForBlockBinding : Str -> [Str] -> ForBlockParseResult\nsplitForIterableAndBody : Str -> ForBodySplitResult\nparseBlockBinding : Str -> [Str] -> BlockBindingParseResult\nappendBlockName : [Str] -> Str -> [Str]\ncontainsBlockName : [Str] -> Str -> Bool\napplyBlockBindingExpr : HostedBlockBindingAst -> HostedExprAst -> HostedExprAst\nparseBlockExprSegments : [Str] -> [Str] -> BlockExprParseResult\nparseBlockExprWithMutable : Str -> [Str] -> BlockExprParseResult\nparseBlockExpr : Str -> BlockExprParseResult\nparseReturnExpr : Str -> ReturnParseResult\nsplitIfParts : [Str] -> IfPartsResult\nparseIfExpr : Str -> IfParseResult\nparseNonBinaryExpr : Str -> HostedExprAst\nparseFallbackExpr : Str -> HostedExprAst\nparseComparisonOrFallbackExpr : Str -> HostedExprAst\nparseArithmeticOrFallbackExpr : Str -> HostedExprAst\nparseEqualityOrFallbackExpr : Str -> HostedExprAst\nstartsWithOperatorPrefix : Str -> Str -> Bool\nstripLeadingOperatorPrefix : Str -> Str -> Str\nnormalizeTrailingOperatorParts : Str -> [Str] -> [Str]\nallRemainingPartsStartWith : Str -> [Str] -> Bool\nfirstComparisonSegmentEndsWithComparator : [Str] -> Bool\nparseBinaryComparisonChain : Str -> [Str] -> HostedExprAst\nparseBinaryComparisonChainFromLeft : Str -> HostedExprAst -> [Str] -> HostedExprAst\nparseBinarySubtractionChain : [Str] -> HostedExprAst\nparseBinarySubtractionChainFromLeft : HostedExprAst -> [Str] -> HostedExprAst\nparseSubtractionExpr : Str -> BinaryExprParseResult\nparseComparisonExpr : Str -> BinaryExprParseResult\nparseBinaryEqualityChain : Str -> [Str] -> HostedExprAst\nparseBinaryEqualityChainFromLeft : Str -> HostedExprAst -> [Str] -> HostedExprAst\nparseEqualityExpr : Str -> BinaryExprParseResult\nparseLogicalAndOrFallbackExpr : Str -> HostedExprAst\nparseBinaryLogicalAndChain : [Str] -> HostedExprAst\nparseBinaryLogicalAndChainFromLeft : HostedExprAst -> [Str] -> HostedExprAst\nparseLogicalAndExpr : Str -> BinaryExprParseResult\nparseBinaryLogicalOrChain : [Str] -> HostedExprAst\nparseBinaryLogicalOrChainFromLeft : HostedExprAst -> [Str] -> HostedExprAst\nparseLogicalOrExpr : Str -> BinaryExprParseResult\nparseExpr : Str -> HostedExprAst\nstartsWithIndent : Str -> Bool\nappendLogicalLine : [Str] -> Str -> [Str]\nprependLogicalLine : [Str] -> Str -> [Str]\nopenGroupState : NestDepth -> NestDepth -> NestDepth -> Bool -> Bool -> OpenGroupState\nemptyOpenGroupState : OpenGroupState\nopenGroupParenDepth : OpenGroupState -> NestDepth\nopenGroupBracketDepth : OpenGroupState -> NestDepth\nopenGroupBraceDepth : OpenGroupState -> NestDepth\nopenGroupInString : OpenGroupState -> Bool\nopenGroupEscapeNext : OpenGroupState -> Bool\nopenGroupHasOpenGroup : OpenGroupState -> Bool\nstepOpenGroupState : OpenGroupState -> Str -> OpenGroupState\nscanOpenGroupState : OpenGroupState -> Str -> OpenGroupState\nhasOpenGroup : Str -> Bool\nlogicalLines : Str -> [Str]\nparsePattern : Str -> HostedPatternAst\nparseMatchBranch : Str -> HostedMatchBranchAst\nparseMatchBranches : Str -> [HostedMatchBranchAst]\nsplitMatchSubjectAndBody : Str -> MatchSubjectSplitResult\nparseMatchExpr : Str -> MatchParseResult\nrenderExprSummaries : [HostedExprAst] -> [Str]\nrenderBoolLiteral : Bool -> Str\nrenderRecordFieldExprSummaries : [HostedRecordFieldExprAst] -> [Str]\nrenderPatternSummary : HostedPatternAst -> Str\nrenderMatchBranchSummary : HostedMatchBranchAst -> Str\nrenderMatchBranchSummaries : [HostedMatchBranchAst] -> [Str]\nexpressionSummary : HostedExprAst -> Str\ndeclarationHead : Str -> Str\ndeclarationParams : Str -> [Str]\nappendDefinition : ParserState -> Str -> Str -> ParserState\nappendTypeDefinition : ParserState -> Str -> ParserState\nappendRecordDefinition : ParserState -> Str -> ParserState\nappendForeignDefinition : ParserState -> Str -> ParserState\nappendForeignSignatureDefinition : ParserState -> Str -> ParserState\nappendGuideDefinition : ParserState -> Str -> ParserState\nappendPolicyDefinition : ParserState -> Str -> ParserState\nappendProjectionDefinition : ParserState -> Str -> ParserState\nappendRoleDefinition : ParserState -> Str -> ParserState\nappendAgentDefinition : ParserState -> Str -> ParserState\nappendWorkflowDefinition : ParserState -> Str -> ParserState\nappendRouteDefinition : ParserState -> Str -> ParserState\nappendHookDefinition : ParserState -> Str -> ParserState\nappendToolServerDefinition : ParserState -> Str -> ParserState\nappendToolDefinition : ParserState -> Str -> ParserState\nappendVerifierDefinition : ParserState -> Str -> ParserState\nappendMergeGateDefinition : ParserState -> Str -> ParserState\nappendMainDefinition : ParserState -> Str -> ParserState\nstepParserDefinition : ParserState -> [Str] -> ParserState\nstepParserAnnotationOrDefinition : ParserState -> [Str] -> ParserState\nstepParserPlain : ParserState -> Str -> ParserState\nstepParserHostedSignature : ParserState -> Str -> ParserState\nstepParserForeign : ParserState -> Str -> ParserState\nstepParserMergeGate : ParserState -> Str -> ParserState\nstepParserVerifier : ParserState -> Str -> ParserState\nstepParserTool : ParserState -> Str -> ParserState\nstepParserToolServer : ParserState -> Str -> ParserState\nstepParserHook : ParserState -> Str -> ParserState\nstepParserWorkflow : ParserState -> Str -> ParserState\nstepParserRoute : ParserState -> Str -> ParserState\nstepParserAgent : ParserState -> Str -> ParserState\nstepParserRole : ParserState -> Str -> ParserState\nstepParserProjection : ParserState -> Str -> ParserState\nstepParserPolicy : ParserState -> Str -> ParserState\nstepParserGuide : ParserState -> Str -> ParserState\nstepParserRecord : ParserState -> Str -> ParserState\nstepParserType : ParserState -> Str -> ParserState\nstepParserImport : ParserState -> Str -> ParserState\nstepParser : ParserState -> Str -> ParserState\nparseModuleAst : Str -> HostedModuleAst\ndeclNames : HostedModuleAst -> [Str]\nrecordDeclNames : HostedModuleAst -> [Str]\nfirstRecordDecl : HostedModuleAst -> HostedRecordDeclAst\ntypeDeclNames : HostedModuleAst -> [Str]\nfirstTypeDecl : HostedModuleAst -> HostedTypeDeclAst\ndeclAnnotationTextByName : HostedModuleAst -> Str -> Str\nrenderMainExpr : HostedModuleAst -> Str"
+      "summary": "renderStringLiteral : Str -> Str\nkeepNoRenderedText : Str -> Bool\nemptyRenderedTexts : [Str]\nkeepNoHostedForeignDecl : HostedForeignDeclAst -> Bool\nemptyHostedForeignDecls : [HostedForeignDeclAst]\nkeepNoHostedType : HostedTypeAst -> Bool\nemptyHostedTypes : [HostedTypeAst]\nkeepNoHostedConstructorDecl : HostedConstructorDeclAst -> Bool\nemptyHostedConstructorDecls : [HostedConstructorDeclAst]\nkeepNoHostedRecordFieldDecl : HostedRecordFieldDeclAst -> Bool\nemptyHostedRecordFieldDecls : [HostedRecordFieldDeclAst]\nkeepNoHostedGuideEntry : HostedGuideEntryAst -> Bool\nemptyHostedGuideEntries : [HostedGuideEntryAst]\nkeepNoHostedPolicyPermission : HostedPolicyPermissionAst -> Bool\nemptyHostedPolicyPermissions : [HostedPolicyPermissionAst]\nkeepNoHostedProjectionFieldDecl : HostedProjectionFieldDeclAst -> Bool\nemptyHostedProjectionFieldDecls : [HostedProjectionFieldDeclAst]\nkeepNoHostedRecordFieldExpr : HostedRecordFieldExprAst -> Bool\nemptyHostedRecordFieldExprs : [HostedRecordFieldExprAst]\nkeepNoHostedExpr : HostedExprAst -> Bool\nemptyHostedExprs : [HostedExprAst]\nkeepNoHostedMatchBranch : HostedMatchBranchAst -> Bool\nemptyHostedMatchBranches : [HostedMatchBranchAst]\nkeepNoHostedDecl : HostedDeclAst -> Bool\nemptyHostedDecls : [HostedDeclAst]\nkeepNoHostedTypeDecl : HostedTypeDeclAst -> Bool\nemptyHostedTypeDecls : [HostedTypeDeclAst]\nkeepNoHostedRecordDecl : HostedRecordDeclAst -> Bool\nemptyHostedRecordDecls : [HostedRecordDeclAst]\nkeepNoHostedGuideDecl : HostedGuideDeclAst -> Bool\nemptyHostedGuideDecls : [HostedGuideDeclAst]\nkeepNoHostedPolicyDecl : HostedPolicyDeclAst -> Bool\nemptyHostedPolicyDecls : [HostedPolicyDeclAst]\nkeepNoHostedProjectionDecl : HostedProjectionDeclAst -> Bool\nemptyHostedProjectionDecls : [HostedProjectionDeclAst]\nkeepNoHostedAgentRoleDecl : HostedAgentRoleDeclAst -> Bool\nemptyHostedAgentRoleDecls : [HostedAgentRoleDeclAst]\nkeepNoHostedAgentDecl : HostedAgentDeclAst -> Bool\nemptyHostedAgentDecls : [HostedAgentDeclAst]\nkeepNoHostedWorkflowDecl : HostedWorkflowDeclAst -> Bool\nemptyHostedWorkflowDecls : [HostedWorkflowDeclAst]\nkeepNoHostedRouteDecl : HostedRouteDeclAst -> Bool\nemptyHostedRouteDecls : [HostedRouteDeclAst]\nkeepNoHostedHookDecl : HostedHookDeclAst -> Bool\nemptyHostedHookDecls : [HostedHookDeclAst]\nkeepNoHostedToolServerDecl : HostedToolServerDeclAst -> Bool\nemptyHostedToolServerDecls : [HostedToolServerDeclAst]\nkeepNoHostedToolDecl : HostedToolDeclAst -> Bool\nemptyHostedToolDecls : [HostedToolDeclAst]\nkeepNoHostedVerifierDecl : HostedVerifierDeclAst -> Bool\nemptyHostedVerifierDecls : [HostedVerifierDeclAst]\nkeepNoHostedMergeGateDecl : HostedMergeGateDeclAst -> Bool\nemptyHostedMergeGateDecls : [HostedMergeGateDeclAst]\nrenderHostedAtomicType : HostedTypeAst -> Str\nrenderHostedType : HostedTypeAst -> Str\nmissingAnnotation : HostedAnnotationAst\npresentAnnotation : HostedTypeAst -> HostedAnnotationAst\nannotationTypeAst : HostedAnnotationAst -> HostedTypeAst\nhasAnnotationAst : HostedAnnotationAst -> Bool\nrenderAnnotationAst : HostedAnnotationAst -> Str\nhostedDeclAst : Str -> HostedAnnotationAst -> [Str] -> HostedExprAst -> HostedDeclAst\nhostedConstructorDeclAst : Str -> [HostedTypeAst] -> HostedConstructorDeclAst\nconstructorDeclName : HostedConstructorDeclAst -> Str\nconstructorDeclPayloadTypes : HostedConstructorDeclAst -> [HostedTypeAst]\nhostedTypeDeclAst : Str -> [HostedConstructorDeclAst] -> HostedTypeDeclAst\nhostedTypeDeclAstWithParams : Str -> [Str] -> [HostedConstructorDeclAst] -> HostedTypeDeclAst\ntypeDeclName : HostedTypeDeclAst -> Str\ntypeDeclParams : HostedTypeDeclAst -> [Str]\ntypeDeclConstructors : HostedTypeDeclAst -> [HostedConstructorDeclAst]\nhostedForeignDeclAst : Str -> Bool -> HostedTypeAst -> Str -> HostedForeignSourceAst -> Str -> HostedForeignDeclAst\nforeignDeclName : HostedForeignDeclAst -> Str\nforeignDeclUnsafeInterop : HostedForeignDeclAst -> Bool\nforeignDeclTypeAst : HostedForeignDeclAst -> HostedTypeAst\nforeignDeclRuntimeName : HostedForeignDeclAst -> Str\nforeignDeclSource : HostedForeignDeclAst -> HostedForeignSourceAst\nforeignDeclSignature : HostedForeignDeclAst -> Str\nhostedGuideEntryAst : Str -> Str -> HostedGuideEntryAst\nguideEntryName : HostedGuideEntryAst -> Str\nguideEntryValue : HostedGuideEntryAst -> Str\nhostedGuideDeclAst : Str -> Str -> [HostedGuideEntryAst] -> HostedGuideDeclAst\nguideDeclName : HostedGuideDeclAst -> Str\nguideDeclExtends : HostedGuideDeclAst -> Str\nguideDeclEntries : HostedGuideDeclAst -> [HostedGuideEntryAst]\nhostedPolicyPermissionAst : HostedPolicyPermissionKindAst -> Str -> HostedPolicyPermissionAst\npolicyPermissionKind : HostedPolicyPermissionAst -> HostedPolicyPermissionKindAst\npolicyPermissionValue : HostedPolicyPermissionAst -> Str\nhostedPolicyDeclAst : Str -> [Str] -> [HostedPolicyPermissionAst] -> HostedPolicyDeclAst\npolicyDeclName : HostedPolicyDeclAst -> Str\npolicyDeclAllowedClassifications : HostedPolicyDeclAst -> [Str]\npolicyDeclPermissions : HostedPolicyDeclAst -> [HostedPolicyPermissionAst]\nhostedProjectionFieldDeclAst : Str -> HostedProjectionFieldDeclAst\nprojectionFieldDeclName : HostedProjectionFieldDeclAst -> Str\nhostedProjectionDeclAst : Str -> Str -> Str -> [HostedProjectionFieldDeclAst] -> HostedProjectionDeclAst\nprojectionDeclName : HostedProjectionDeclAst -> Str\nprojectionDeclSourceRecordName : HostedProjectionDeclAst -> Str\nprojectionDeclPolicyName : HostedProjectionDeclAst -> Str\nprojectionDeclFields : HostedProjectionDeclAst -> [HostedProjectionFieldDeclAst]\nhostedAgentRoleDeclAst : Str -> Str -> Str -> Str -> Str -> HostedAgentRoleDeclAst\nagentRoleDeclName : HostedAgentRoleDeclAst -> Str\nagentRoleDeclGuideName : HostedAgentRoleDeclAst -> Str\nagentRoleDeclPolicyName : HostedAgentRoleDeclAst -> Str\nagentRoleDeclApprovalPolicy : HostedAgentRoleDeclAst -> Str\nagentRoleDeclSandboxPolicy : HostedAgentRoleDeclAst -> Str\nhostedAgentDeclAst : Str -> Str -> HostedAgentDeclAst\nagentDeclName : HostedAgentDeclAst -> Str\nagentDeclRoleName : HostedAgentDeclAst -> Str\nhostedWorkflowDeclAst : Str -> Str -> HostedTypeAst -> HostedWorkflowDeclAst\nworkflowDeclName : HostedWorkflowDeclAst -> Str\nworkflowDeclIdentity : HostedWorkflowDeclAst -> Str\nworkflowDeclStateTypeAst : HostedWorkflowDeclAst -> HostedTypeAst\nhostedRouteDeclAst : Str -> Str -> Str -> Str -> Str -> Str -> Str -> HostedRouteDeclAst\nrouteDeclName : HostedRouteDeclAst -> Str\nrouteDeclIdentity : HostedRouteDeclAst -> Str\nrouteDeclMethod : HostedRouteDeclAst -> Str\nrouteDeclPath : HostedRouteDeclAst -> Str\nrouteDeclRequestType : HostedRouteDeclAst -> Str\nrouteDeclResponseType : HostedRouteDeclAst -> Str\nrouteDeclHandlerName : HostedRouteDeclAst -> Str\nhostedHookDeclAst : Str -> Str -> Str -> Str -> Str -> HostedHookDeclAst\nhookDeclName : HostedHookDeclAst -> Str\nhookDeclEvent : HostedHookDeclAst -> Str\nhookDeclRequestType : HostedHookDeclAst -> Str\nhookDeclResponseType : HostedHookDeclAst -> Str\nhookDeclHandlerName : HostedHookDeclAst -> Str\nhostedToolServerDeclAst : Str -> Str -> Str -> Str -> HostedToolServerDeclAst\ntoolServerDeclName : HostedToolServerDeclAst -> Str\ntoolServerDeclProtocol : HostedToolServerDeclAst -> Str\ntoolServerDeclLocation : HostedToolServerDeclAst -> Str\ntoolServerDeclPolicyName : HostedToolServerDeclAst -> Str\nhostedToolDeclAst : Str -> Str -> Str -> Str -> Str -> HostedToolDeclAst\ntoolDeclName : HostedToolDeclAst -> Str\ntoolDeclServerName : HostedToolDeclAst -> Str\ntoolDeclOperation : HostedToolDeclAst -> Str\ntoolDeclRequestType : HostedToolDeclAst -> Str\ntoolDeclResponseType : HostedToolDeclAst -> Str\nhostedVerifierDeclAst : Str -> Str -> HostedVerifierDeclAst\nverifierDeclName : HostedVerifierDeclAst -> Str\nverifierDeclToolName : HostedVerifierDeclAst -> Str\nhostedMergeGateDeclAst : Str -> [Str] -> HostedMergeGateDeclAst\nmergeGateDeclName : HostedMergeGateDeclAst -> Str\nmergeGateDeclVerifierNames : HostedMergeGateDeclAst -> [Str]\nhostedPatternAst : Str -> [Str] -> HostedPatternAst\npatternConstructorName : HostedPatternAst -> Str\npatternBinders : HostedPatternAst -> [Str]\nhostedMatchBranchAst : HostedPatternAst -> HostedExprAst -> HostedMatchBranchAst\nbranchPatternAst : HostedMatchBranchAst -> HostedPatternAst\nbranchBodyExpr : HostedMatchBranchAst -> HostedExprAst\ndeclName : HostedDeclAst -> Str\ndeclAnnotation : HostedDeclAst -> HostedAnnotationAst\ndeclParams : HostedDeclAst -> [Str]\ndeclBody : HostedDeclAst -> HostedExprAst\ndeclHasExactlyOneParam : HostedDeclAst -> Bool\ndeclBodyIsStringLiteral : HostedDeclAst -> Bool\ndeclIsMetadataName : HostedDeclAst -> Bool\ndeclIsMetadataDeclaration : HostedDeclAst -> Bool\nmetadataDeclKey : HostedDeclAst -> Str\nmetadataDeclStringValue : HostedDeclAst -> Str\nhostedRecordFieldExprAst : Str -> HostedExprAst -> HostedRecordFieldExprAst\nrecordExprFieldName : HostedRecordFieldExprAst -> Str\nrecordExprFieldValue : HostedRecordFieldExprAst -> HostedExprAst\nhostedRecordFieldDeclAst : Str -> HostedTypeAst -> HostedRecordFieldDeclAst\nhostedRecordFieldDeclAstClassified : Str -> HostedTypeAst -> Str -> HostedRecordFieldDeclAst\nrecordFieldDeclName : HostedRecordFieldDeclAst -> Str\nrecordFieldDeclType : HostedRecordFieldDeclAst -> HostedTypeAst\nrecordFieldDeclClassification : HostedRecordFieldDeclAst -> Str\nhostedRecordDeclAst : Str -> [HostedRecordFieldDeclAst] -> HostedRecordDeclAst\nhostedRecordDeclAstWithParams : Str -> [Str] -> [HostedRecordFieldDeclAst] -> HostedRecordDeclAst\nrecordDeclName : HostedRecordDeclAst -> Str\nrecordDeclParams : HostedRecordDeclAst -> [Str]\nrecordDeclFields : HostedRecordDeclAst -> [HostedRecordFieldDeclAst]\nrenderHostedTypeList : [HostedTypeAst] -> [Str]\nrenderRecordFieldTypeSummaries : HostedRecordDeclAst -> [Str]\nrenderConstructorSummary : HostedConstructorDeclAst -> Str\nrenderConstructorSummaries : HostedTypeDeclAst -> [Str]\nhostedModuleAst : Str -> [Str] -> [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [HostedForeignDeclAst] -> [HostedDeclAst] -> [HostedGuideDeclAst] -> [HostedPolicyDeclAst] -> [HostedProjectionDeclAst] -> [HostedAgentRoleDeclAst] -> [HostedAgentDeclAst] -> [HostedWorkflowDeclAst] -> [HostedRouteDeclAst] -> [HostedHookDeclAst] -> [HostedToolServerDeclAst] -> [HostedToolDeclAst] -> [HostedVerifierDeclAst] -> [HostedMergeGateDeclAst] -> Str -> HostedModuleAst\nmoduleNameOf : HostedModuleAst -> Str\nmoduleImports : HostedModuleAst -> [Str]\nmoduleTypeDeclarations : HostedModuleAst -> [HostedTypeDeclAst]\nmoduleRecordDeclarations : HostedModuleAst -> [HostedRecordDeclAst]\nmoduleForeignDeclarations : HostedModuleAst -> [HostedForeignDeclAst]\nmoduleDeclarations : HostedModuleAst -> [HostedDeclAst]\nmoduleGuideDeclarations : HostedModuleAst -> [HostedGuideDeclAst]\nmodulePolicyDeclarations : HostedModuleAst -> [HostedPolicyDeclAst]\nmoduleProjectionDeclarations : HostedModuleAst -> [HostedProjectionDeclAst]\nmoduleAgentRoleDeclarations : HostedModuleAst -> [HostedAgentRoleDeclAst]\nmoduleAgentDeclarations : HostedModuleAst -> [HostedAgentDeclAst]\nmoduleWorkflowDeclarations : HostedModuleAst -> [HostedWorkflowDeclAst]\nmoduleRouteDeclarations : HostedModuleAst -> [HostedRouteDeclAst]\nmoduleHookDeclarations : HostedModuleAst -> [HostedHookDeclAst]\nmoduleToolServerDeclarations : HostedModuleAst -> [HostedToolServerDeclAst]\nmoduleToolDeclarations : HostedModuleAst -> [HostedToolDeclAst]\nmoduleVerifierDeclarations : HostedModuleAst -> [HostedVerifierDeclAst]\nmoduleMergeGateDeclarations : HostedModuleAst -> [HostedMergeGateDeclAst]\nmoduleMainExprSummary : HostedModuleAst -> Str\nparserState : Str -> [Str] -> [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [HostedForeignDeclAst] -> [HostedDeclAst] -> [HostedGuideDeclAst] -> [HostedPolicyDeclAst] -> [HostedProjectionDeclAst] -> [HostedAgentRoleDeclAst] -> [HostedAgentDeclAst] -> [HostedWorkflowDeclAst] -> [HostedRouteDeclAst] -> [HostedHookDeclAst] -> [HostedToolServerDeclAst] -> [HostedToolDeclAst] -> [HostedVerifierDeclAst] -> [HostedMergeGateDeclAst] -> HostedAnnotationAst -> Str -> ParserState\nstateModuleName : ParserState -> Str\nstateImports : ParserState -> [Str]\nstateTypeDeclarations : ParserState -> [HostedTypeDeclAst]\nstateRecordDeclarations : ParserState -> [HostedRecordDeclAst]\nstateForeignDeclarations : ParserState -> [HostedForeignDeclAst]\nstateDeclarations : ParserState -> [HostedDeclAst]\nstateGuideDeclarations : ParserState -> [HostedGuideDeclAst]\nstatePolicyDeclarations : ParserState -> [HostedPolicyDeclAst]\nstateProjectionDeclarations : ParserState -> [HostedProjectionDeclAst]\nstateAgentRoleDeclarations : ParserState -> [HostedAgentRoleDeclAst]\nstateAgentDeclarations : ParserState -> [HostedAgentDeclAst]\nstateWorkflowDeclarations : ParserState -> [HostedWorkflowDeclAst]\nstateRouteDeclarations : ParserState -> [HostedRouteDeclAst]\nstateHookDeclarations : ParserState -> [HostedHookDeclAst]\nstateToolServerDeclarations : ParserState -> [HostedToolServerDeclAst]\nstateToolDeclarations : ParserState -> [HostedToolDeclAst]\nstateVerifierDeclarations : ParserState -> [HostedVerifierDeclAst]\nstateMergeGateDeclarations : ParserState -> [HostedMergeGateDeclAst]\nstatePendingAnnotation : ParserState -> HostedAnnotationAst\nstateMainExprSummary : ParserState -> Str\nappendTypeDecl : [HostedTypeDeclAst] -> HostedTypeDeclAst -> [HostedTypeDeclAst]\nappendRecordDecl : [HostedRecordDeclAst] -> HostedRecordDeclAst -> [HostedRecordDeclAst]\nappendForeignDecl : [HostedForeignDeclAst] -> HostedForeignDeclAst -> [HostedForeignDeclAst]\napplyForeignSignature : HostedForeignDeclAst -> Str -> Str -> HostedForeignDeclAst\napplyForeignSignatureList : [HostedForeignDeclAst] -> Str -> Str -> [HostedForeignDeclAst]\nappendDecl : [HostedDeclAst] -> HostedDeclAst -> [HostedDeclAst]\nappendGuideDecl : [HostedGuideDeclAst] -> HostedGuideDeclAst -> [HostedGuideDeclAst]\nappendPolicyDecl : [HostedPolicyDeclAst] -> HostedPolicyDeclAst -> [HostedPolicyDeclAst]\nappendProjectionDecl : [HostedProjectionDeclAst] -> HostedProjectionDeclAst -> [HostedProjectionDeclAst]\nappendAgentRoleDecl : [HostedAgentRoleDeclAst] -> HostedAgentRoleDeclAst -> [HostedAgentRoleDeclAst]\nappendAgentDecl : [HostedAgentDeclAst] -> HostedAgentDeclAst -> [HostedAgentDeclAst]\nappendWorkflowDecl : [HostedWorkflowDeclAst] -> HostedWorkflowDeclAst -> [HostedWorkflowDeclAst]\nappendRouteDecl : [HostedRouteDeclAst] -> HostedRouteDeclAst -> [HostedRouteDeclAst]\nappendHookDecl : [HostedHookDeclAst] -> HostedHookDeclAst -> [HostedHookDeclAst]\nappendToolServerDecl : [HostedToolServerDeclAst] -> HostedToolServerDeclAst -> [HostedToolServerDeclAst]\nappendToolDecl : [HostedToolDeclAst] -> HostedToolDeclAst -> [HostedToolDeclAst]\nappendVerifierDecl : [HostedVerifierDeclAst] -> HostedVerifierDeclAst -> [HostedVerifierDeclAst]\nappendMergeGateDecl : [HostedMergeGateDeclAst] -> HostedMergeGateDeclAst -> [HostedMergeGateDeclAst]\nappendGuideEntry : [HostedGuideEntryAst] -> HostedGuideEntryAst -> [HostedGuideEntryAst]\nappendPolicyPermission : [HostedPolicyPermissionAst] -> HostedPolicyPermissionAst -> [HostedPolicyPermissionAst]\nappendRenderedText : [Str] -> Str -> [Str]\nprependRenderedText : [Str] -> Str -> [Str]\nappendRecordFieldDecl : [HostedRecordFieldDeclAst] -> HostedRecordFieldDeclAst -> [HostedRecordFieldDeclAst]\nappendRecordFieldExpr : [HostedRecordFieldExprAst] -> HostedRecordFieldExprAst -> [HostedRecordFieldExprAst]\nappendConstructorDecl : [HostedConstructorDeclAst] -> HostedConstructorDeclAst -> [HostedConstructorDeclAst]\nappendMatchBranch : [HostedMatchBranchAst] -> HostedMatchBranchAst -> [HostedMatchBranchAst]\nappendExpr : [HostedExprAst] -> HostedExprAst -> [HostedExprAst]\nappendChar : Str -> Str -> Str\ntextFromReversedChars : [Str] -> Str\ntrimSpaces : Str -> Str\nisLayoutWhitespaceChar : Str -> Bool\nnormalizeLayoutText : Str -> Str\nappendNonEmptyText : [Str] -> Str -> [Str]\nfirstSegment : Str -> Str\nremainingSegments : Str -> Str\nsplitWords : Str -> [Str]\nfirstCharText : Str -> Str\nlastCharText : Str -> Str\nisUppercaseChar : Str -> Bool\nstartsWithUppercase : Str -> Bool\nstripToken : Str -> Str -> Str\nstripDigits : Str -> Str\nisIntLiteral : Str -> Bool\nincreaseDepth : NestDepth -> NestDepth\ndecreaseDepth : NestDepth -> NestDepth\nisZeroDepth : NestDepth -> Bool\nisTopLevel : NestDepth -> NestDepth -> NestDepth -> Bool\nsplitTopLevel : Str -> Str -> [Str]\ntopLevelRepeatedSeparatorOnly : Str -> Str -> Bool\nfirstText : [Str] -> Str\nremainingTexts : [Str] -> [Str]\nhasAdditionalText : [Str] -> Bool\nunwrapDelimited : Str -> Str -> Str -> ParserTextResult\nunwrapStringLiteral : Str -> ParserTextResult\nparseQuotedPrefix : Str -> QuotedPrefixResult\nbetweenBrackets : Str -> Str\nisListLiteral : Str -> Bool\nbetweenBraces : Str -> Str\nparseAtomicHostedType : Str -> HostedTypeAst\nparseHostedType : Str -> HostedTypeAst\nparseConstructorDecl : Str -> HostedConstructorDeclAst\nparseHostedTypes : [Str] -> [HostedTypeAst]\nparseConstructorDecls : Str -> [HostedConstructorDeclAst]\nparseTypeDecl : Str -> HostedTypeDeclAst\nparseRecordFieldDecl : Str -> HostedRecordFieldDeclAst\nparseRecordFieldDecls : Str -> [HostedRecordFieldDeclAst]\nparseRecordDecl : Str -> HostedRecordDeclAst\nparsePackageImportKind : Str -> HostedPackageImportKindAst\nparseForeignSourceAst : Str -> HostedForeignSourceAst\nparseForeignDeclUnsafeInterop : Str -> Bool\nparseForeignDeclBody : Str -> Str\nparseForeignDecl : Str -> HostedForeignDeclAst\nparseGuideEntry : Str -> HostedGuideEntryAst\nparseGuideEntries : Str -> [HostedGuideEntryAst]\nparseGuideDecl : Str -> HostedGuideDeclAst\nrenderHostedPolicyPermissionKind : HostedPolicyPermissionKindAst -> Str\nparsePolicyPermissionKind : Str -> HostedPolicyPermissionKindAst\nparsePolicyPermissionValue : Str -> Str\nparsePolicyPermission : Str -> HostedPolicyPermissionAst\nparsePolicyPermissions : Str -> [HostedPolicyPermissionAst]\nparsePolicyClassifications : Str -> [Str]\nparsePolicyDecl : Str -> HostedPolicyDeclAst\nparseProjectionFieldDecls : Str -> [HostedProjectionFieldDeclAst]\nparseProjectionDecl : Str -> HostedProjectionDeclAst\nlookupMetadataFieldValue : [Str] -> Str -> Str\nparseRoleDecl : Str -> HostedAgentRoleDeclAst\nparseAgentDecl : Str -> HostedAgentDeclAst\nparseWorkflowDecl : Str -> HostedWorkflowDeclAst\nparseRouteDecl : Str -> HostedRouteDeclAst\nparseHookDecl : Str -> HostedHookDeclAst\nparseToolServerDecl : Str -> HostedToolServerDeclAst\nparseToolDecl : Str -> HostedToolDeclAst\nparseVerifierDecl : Str -> HostedVerifierDeclAst\nparseMergeGateDecl : Str -> HostedMergeGateDeclAst\nparseRecordFieldExpr : Str -> HostedRecordFieldExprAst\nparseRecordFieldExprs : Str -> [HostedRecordFieldExprAst]\nrecordDestructureTempName : Str\nrecordUpdateBuiltinName : Str\nrecordUpdatePlaceholderName : Str\nblockSequenceDiscardName : Str\nparseRecordBinderNames : Str -> [Str]\nbuildRecordDestructureBindings : Str -> [Str] -> HostedExprAst -> HostedExprAst\nparseFieldAccessChain : HostedExprAst -> [Str] -> HostedExprAst\nparseRecordLiteral : Str -> RecordLiteralParseResult\nparseRecordUpdateExpr : Str -> RecordUpdateParseResult\nparseExprItems : Str -> [HostedExprAst]\nparseExprArgs : [Str] -> [HostedExprAst]\nsplitLetParts : [Str] -> LetPartsResult\nsplitTokensAt : Str -> [Str] -> TokenSplitResult\nparseLetExpr : Str -> LetParseResult\nparseAssignmentExprWithMutable : Str -> [Str] -> BlockExprParseResult\nparseLetExprWithMutable : Str -> [Str] -> LetParseResult\nparseExprWithMutable : Str -> [Str] -> HostedExprAst\nparseBlockStatementExpr : Str -> [Str] -> BlockExprParseResult\nparseForBlockBinding : Str -> [Str] -> ForBlockParseResult\nsplitForIterableAndBody : Str -> ForBodySplitResult\nparseBlockBinding : Str -> [Str] -> BlockBindingParseResult\nappendBlockName : [Str] -> Str -> [Str]\ncontainsBlockName : [Str] -> Str -> Bool\napplyBlockBindingExpr : HostedBlockBindingAst -> HostedExprAst -> HostedExprAst\nparseBlockExprSegments : [Str] -> [Str] -> BlockExprParseResult\nparseBlockExprWithMutable : Str -> [Str] -> BlockExprParseResult\nparseBlockExpr : Str -> BlockExprParseResult\nparseReturnExpr : Str -> ReturnParseResult\nsplitIfParts : [Str] -> IfPartsResult\nparseIfExpr : Str -> IfParseResult\nparseNonBinaryExpr : Str -> HostedExprAst\nparseFallbackExpr : Str -> HostedExprAst\nparseComparisonOrFallbackExpr : Str -> HostedExprAst\nparseArithmeticOrFallbackExpr : Str -> HostedExprAst\nparseEqualityOrFallbackExpr : Str -> HostedExprAst\nstartsWithOperatorPrefix : Str -> Str -> Bool\nstripLeadingOperatorPrefix : Str -> Str -> Str\nnormalizeTrailingOperatorParts : Str -> [Str] -> [Str]\nallRemainingPartsStartWith : Str -> [Str] -> Bool\nfirstComparisonSegmentEndsWithComparator : [Str] -> Bool\nparseBinaryComparisonChain : Str -> [Str] -> HostedExprAst\nparseBinaryComparisonChainFromLeft : Str -> HostedExprAst -> [Str] -> HostedExprAst\nparseBinarySubtractionChain : [Str] -> HostedExprAst\nparseBinarySubtractionChainFromLeft : HostedExprAst -> [Str] -> HostedExprAst\nparseSubtractionExpr : Str -> BinaryExprParseResult\nparseComparisonExpr : Str -> BinaryExprParseResult\nparseBinaryEqualityChain : Str -> [Str] -> HostedExprAst\nparseBinaryEqualityChainFromLeft : Str -> HostedExprAst -> [Str] -> HostedExprAst\nparseEqualityExpr : Str -> BinaryExprParseResult\nparseLogicalAndOrFallbackExpr : Str -> HostedExprAst\nparseBinaryLogicalAndChain : [Str] -> HostedExprAst\nparseBinaryLogicalAndChainFromLeft : HostedExprAst -> [Str] -> HostedExprAst\nparseLogicalAndExpr : Str -> BinaryExprParseResult\nparseBinaryLogicalOrChain : [Str] -> HostedExprAst\nparseBinaryLogicalOrChainFromLeft : HostedExprAst -> [Str] -> HostedExprAst\nparseLogicalOrExpr : Str -> BinaryExprParseResult\nparseExpr : Str -> HostedExprAst\nstartsWithIndent : Str -> Bool\nappendLogicalLine : [Str] -> Str -> [Str]\nprependLogicalLine : [Str] -> Str -> [Str]\nopenGroupState : NestDepth -> NestDepth -> NestDepth -> Bool -> Bool -> OpenGroupState\nemptyOpenGroupState : OpenGroupState\nopenGroupParenDepth : OpenGroupState -> NestDepth\nopenGroupBracketDepth : OpenGroupState -> NestDepth\nopenGroupBraceDepth : OpenGroupState -> NestDepth\nopenGroupInString : OpenGroupState -> Bool\nopenGroupEscapeNext : OpenGroupState -> Bool\nopenGroupHasOpenGroup : OpenGroupState -> Bool\nstepOpenGroupState : OpenGroupState -> Str -> OpenGroupState\nscanOpenGroupState : OpenGroupState -> Str -> OpenGroupState\nhasOpenGroup : Str -> Bool\nlogicalLines : Str -> [Str]\nparsePattern : Str -> HostedPatternAst\nparseMatchBranch : Str -> HostedMatchBranchAst\nparseMatchBranches : Str -> [HostedMatchBranchAst]\nsplitMatchSubjectAndBody : Str -> MatchSubjectSplitResult\nparseMatchExpr : Str -> MatchParseResult\nrenderExprSummaries : [HostedExprAst] -> [Str]\nrenderBoolLiteral : Bool -> Str\nrenderRecordFieldExprSummaries : [HostedRecordFieldExprAst] -> [Str]\nrenderPatternSummary : HostedPatternAst -> Str\nrenderMatchBranchSummary : HostedMatchBranchAst -> Str\nrenderMatchBranchSummaries : [HostedMatchBranchAst] -> [Str]\nexpressionSummary : HostedExprAst -> Str\ndeclarationHead : Str -> Str\ndeclarationParams : Str -> [Str]\nappendDefinition : ParserState -> Str -> Str -> ParserState\nappendTypeDefinition : ParserState -> Str -> ParserState\nappendRecordDefinition : ParserState -> Str -> ParserState\nappendForeignDefinition : ParserState -> Str -> ParserState\nappendForeignSignatureDefinition : ParserState -> Str -> ParserState\nappendGuideDefinition : ParserState -> Str -> ParserState\nappendPolicyDefinition : ParserState -> Str -> ParserState\nappendProjectionDefinition : ParserState -> Str -> ParserState\nappendRoleDefinition : ParserState -> Str -> ParserState\nappendAgentDefinition : ParserState -> Str -> ParserState\nappendWorkflowDefinition : ParserState -> Str -> ParserState\nappendRouteDefinition : ParserState -> Str -> ParserState\nappendHookDefinition : ParserState -> Str -> ParserState\nappendToolServerDefinition : ParserState -> Str -> ParserState\nappendToolDefinition : ParserState -> Str -> ParserState\nappendVerifierDefinition : ParserState -> Str -> ParserState\nappendMergeGateDefinition : ParserState -> Str -> ParserState\nappendMainDefinition : ParserState -> Str -> ParserState\nstepParserDefinition : ParserState -> [Str] -> ParserState\nstepParserAnnotationOrDefinition : ParserState -> [Str] -> ParserState\nstepParserPlain : ParserState -> Str -> ParserState\nstepParserHostedSignature : ParserState -> Str -> ParserState\nstepParserForeign : ParserState -> Str -> ParserState\nstepParserMergeGate : ParserState -> Str -> ParserState\nstepParserVerifier : ParserState -> Str -> ParserState\nstepParserTool : ParserState -> Str -> ParserState\nstepParserToolServer : ParserState -> Str -> ParserState\nstepParserHook : ParserState -> Str -> ParserState\nstepParserWorkflow : ParserState -> Str -> ParserState\nstepParserRoute : ParserState -> Str -> ParserState\nstepParserAgent : ParserState -> Str -> ParserState\nstepParserRole : ParserState -> Str -> ParserState\nstepParserProjection : ParserState -> Str -> ParserState\nstepParserPolicy : ParserState -> Str -> ParserState\nstepParserGuide : ParserState -> Str -> ParserState\nstepParserRecord : ParserState -> Str -> ParserState\nstepParserType : ParserState -> Str -> ParserState\nstepParserImport : ParserState -> Str -> ParserState\nstepParser : ParserState -> Str -> ParserState\nparseModuleAst : Str -> HostedModuleAst\ndeclNames : HostedModuleAst -> [Str]\nrecordDeclNames : HostedModuleAst -> [Str]\nfirstRecordDecl : HostedModuleAst -> HostedRecordDeclAst\ntypeDeclNames : HostedModuleAst -> [Str]\nfirstTypeDecl : HostedModuleAst -> HostedTypeDeclAst\ndeclAnnotationTextByName : HostedModuleAst -> Str -> Str\nrenderMainExpr : HostedModuleAst -> Str"
     },
     {
       "moduleName": "Compiler.Checker.Types",
-      "cacheKey": "5b8e06fd82fa9d54.cache",
+      "cacheKey": "76192fd53109e4be.cache",
       "sourceFingerprint": "00b82bcae8509731",
       "declFingerprints": {
         "keepNoTypeBinding": "d5431165551067a3",
@@ -517,7 +520,7 @@
     },
     {
       "moduleName": "Compiler.Checker.Builtins",
-      "cacheKey": "4b3c8ef8b717b2ec.cache",
+      "cacheKey": "a02466cfbbd74ace.cache",
       "sourceFingerprint": "54d3d5c3a31ad65e",
       "declFingerprints": {
         "stringBuiltinType": "2716c46e8b6009e2",
@@ -668,8 +671,8 @@
     },
     {
       "moduleName": "Compiler.Checker.TypeOps",
-      "cacheKey": "f8549f6e8f33e374.cache",
-      "sourceFingerprint": "2cbd33de46fd3012",
+      "cacheKey": "d2de98719162e448.cache",
+      "sourceFingerprint": "35992138d4ce38e2",
       "declFingerprints": {
         "appendCheckerRenderedText": "b130a4e06db05e14",
         "firstHostedExpr": "e6a4228f2cfe7169",
@@ -745,19 +748,30 @@
         "recordDeclResultType": "a00058bdf3c3f9da",
         "typeParamTypes": "6994b10ebef54f47",
         "containsText": "b779c122434e5c8f",
-        "findMissingBranchName": "6139e4f0416dda02",
-        "bindPatternArgs": "fa41754eb671072e",
-        "bindPattern": "5f7aff3c3022a58b",
+        "findMissingBranchName": "a0314c523ac33898",
+        "appendPatternBindings": "33f5a11ab97221bf",
+        "patternAtomText": "7126d305d896ad5e",
+        "patternAtomHead": "210218d5360c3230",
+        "patternAtomStartsConstructor": "9847ac7f95bad636",
+        "patternAtomCoverageKey": "131929747d3b8bd8",
+        "patternCoverageKey": "bf453f8776f3d42a",
+        "patternCoversFullConstructor": "b36cc71ed9294f0b",
+        "patternAlreadyCovered": "1b10036aeaef54dd",
+        "patternCoverageToken": "9926f3f27155ee24",
+        "bindPatternForSubjectType": "013b501892b9c279",
+        "bindPatternAtom": "64416568ac156ef3",
+        "bindPatternArgs": "cba00f673b8aafce",
+        "bindPattern": "fd704175a3521f86",
         "typeDeclInstantiations": "75a31db137f236d8",
         "recordDeclInstantiations": "67a318b4789ba766",
         "applyFunctionArgumentType": "c8221adf09e9e301"
       },
-      "summary": "appendCheckerRenderedText : [Str] -> Str -> [Str]\nfirstHostedExpr : [HostedExprAst] -> HostedExprAst\nremainingHostedExprs : [HostedExprAst] -> [HostedExprAst]\nrenderAtomicType : TypeText -> Str\nrenderTypeTextArgs : [TypeText] -> [Str]\nrenderType : TypeText -> Str\nfirstTypeText : [TypeText] -> TypeText\nremainingTypeTexts : [TypeText] -> [TypeText]\nhasTypeTexts : [TypeText] -> Bool\nlookupTypeSubstitution : [TypeSubstitution] -> Str -> LookupResult\nappendTypeSubstitution : [TypeSubstitution] -> TypeSubstitution -> [TypeSubstitution]\napplyTypeSubstitutions : TypeText -> [TypeSubstitution] -> TypeText\napplyTypeSubstitutionList : [TypeText] -> [TypeSubstitution] -> [TypeText]\nbindingTypeText : TypeBinding -> TypeText\nbindingNameText : TypeBinding -> Str\nparseRenderedTypeBinding : Str -> TypeBinding\nparseRenderedTypeBindings : Str -> [TypeBinding]\ntypeContainsUnknown : Str -> TypeText -> Bool\ntypeListContainsUnknown : Str -> [TypeText] -> Bool\ninstantiateGenericUnknownName : Str -> Str -> Str\ninstantiateGenericTypeList : Str -> [TypeText] -> [TypeText]\ninstantiateGenericType : Str -> TypeText -> TypeText\nlookupTypeBindingInstantiated : [TypeBinding] -> Str -> Str -> LookupResult\nlookupTypeBindingLayersInstantiated : [TypeBinding] -> [TypeBinding] -> Str -> Str -> LookupResult\ncollectTypeUnknownLabels : TypeText -> [Str]\ncollectTypeUnknownLabelsList : [TypeText] -> [Str]\nappendUniqueText : [Str] -> Str -> [Str]\nappendUniqueTextList : [Str] -> [Str] -> [Str]\ncollectBindingUnknownLabels : [TypeBinding] -> [Str]\ncollectReturnContextUnknownLabels : ReturnContext -> [Str]\ngeneralizeUnknownTypeExcept : [Str] -> TypeText -> TypeText\ngeneralizeUnknownTypeExceptList : [Str] -> [TypeText] -> [TypeText]\nlastTextOr : [Str] -> Str -> Str\ngeneralizedUnknownVarLabel : Str -> Str\ngeneralizeBindingType : [TypeBinding] -> [TypeBinding] -> ReturnContext -> TypeText -> TypeText\ntypeContainsVar : Str -> TypeText -> Bool\ntypeListContainsVar : Str -> [TypeText] -> Bool\ntypeHasGenericVars : TypeText -> Bool\ntypeListHasGenericVars : [TypeText] -> Bool\ntypeIsFunction : TypeText -> Bool\nunifyTypeVar : Str -> TypeText -> [TypeSubstitution] -> TypeUnifyResult\nunknownLabelIsInstantiatedGeneric : Str -> Bool\nunifyUnknownLabels : Str -> Str -> [TypeSubstitution] -> TypeUnifyResult\nunifyUnknownType : Str -> TypeText -> [TypeSubstitution] -> TypeUnifyResult\nunifyTypeLists : [TypeText] -> [TypeText] -> [TypeSubstitution] -> TypeUnifyResult\nunifyTypes : TypeText -> TypeText -> [TypeSubstitution] -> TypeUnifyResult\nsameTypeList : [TypeText] -> [TypeText] -> Bool\nsameType : TypeText -> TypeText -> Bool\ntypeFromHostedTypeAst : HostedTypeAst -> TypeText\ntypeFromHostedTypes : [HostedTypeAst] -> [TypeText]\nremainingHostedTypes : [HostedTypeAst] -> [HostedTypeAst]\nbuildFunctionType : [HostedTypeAst] -> TypeText -> TypeText\ntypeMismatchMessage : Str -> TypeText -> TypeText -> Str\nunknownNameMessage : Str -> Str\nunknownConstructorMessage : Str -> Str\ncompilerBuiltinDiagnosticName : Str -> Bool\nappendDiagnosticCandidateName : [Str] -> Str -> [Str]\ndiagnosticCandidateNamesFromBindings : [TypeBinding] -> [Str]\nfirstFiveDiagnosticNames : [Str] -> [Str]\nrenderDiagnosticCandidateNames : [Str] -> Str\nunknownNameScopeHint : [TypeBinding] -> [TypeBinding] -> Str\nunknownNameMessageInScope : Str -> [TypeBinding] -> [TypeBinding] -> Str\nlookupTypeDecl : [HostedTypeDeclAst] -> Str -> TypeDeclLookupResult\nlookupRecordDecl : [HostedRecordDeclAst] -> Str -> RecordLookupResult\nlookupRecordField : [HostedRecordFieldDeclAst] -> Str -> RecordFieldLookupResult\nlookupRecordExprField : [HostedRecordFieldExprAst] -> Str -> RecordExprFieldLookupResult\nlookupTypeConstructor : HostedTypeDeclAst -> Str -> TypeConstructorLookupResult\nlookupConstructorDecl : [HostedTypeDeclAst] -> Str -> ConstructorLookupResult\ntypeParamSubstitutions : [Str] -> [TypeText] -> [TypeSubstitution]\ninstantiateTypeFromSubstitutions : TypeText -> [TypeSubstitution] -> TypeText\ntypeDeclResultType : HostedTypeDeclAst -> TypeText\nrecordDeclResultType : HostedRecordDeclAst -> TypeText\ntypeParamTypes : [Str] -> [TypeText]\ncontainsText : [Str] -> Str -> Bool\nfindMissingBranchName : HostedTypeDeclAst -> [Str] -> Str\nbindPatternArgs : Str -> [HostedTypeAst] -> [Str] -> [TypeSubstitution] -> PatternBindResult\nbindPattern : HostedTypeDeclAst -> TypeText -> HostedPatternAst -> PatternBindResult\ntypeDeclInstantiations : HostedTypeDeclAst -> TypeText -> [TypeSubstitution]\nrecordDeclInstantiations : HostedRecordDeclAst -> TypeText -> [TypeSubstitution]\napplyFunctionArgumentType : Str -> TypeText -> TypeText -> [TypeSubstitution] -> ApplyCallResult"
+      "summary": "appendCheckerRenderedText : [Str] -> Str -> [Str]\nfirstHostedExpr : [HostedExprAst] -> HostedExprAst\nremainingHostedExprs : [HostedExprAst] -> [HostedExprAst]\nrenderAtomicType : TypeText -> Str\nrenderTypeTextArgs : [TypeText] -> [Str]\nrenderType : TypeText -> Str\nfirstTypeText : [TypeText] -> TypeText\nremainingTypeTexts : [TypeText] -> [TypeText]\nhasTypeTexts : [TypeText] -> Bool\nlookupTypeSubstitution : [TypeSubstitution] -> Str -> LookupResult\nappendTypeSubstitution : [TypeSubstitution] -> TypeSubstitution -> [TypeSubstitution]\napplyTypeSubstitutions : TypeText -> [TypeSubstitution] -> TypeText\napplyTypeSubstitutionList : [TypeText] -> [TypeSubstitution] -> [TypeText]\nbindingTypeText : TypeBinding -> TypeText\nbindingNameText : TypeBinding -> Str\nparseRenderedTypeBinding : Str -> TypeBinding\nparseRenderedTypeBindings : Str -> [TypeBinding]\ntypeContainsUnknown : Str -> TypeText -> Bool\ntypeListContainsUnknown : Str -> [TypeText] -> Bool\ninstantiateGenericUnknownName : Str -> Str -> Str\ninstantiateGenericTypeList : Str -> [TypeText] -> [TypeText]\ninstantiateGenericType : Str -> TypeText -> TypeText\nlookupTypeBindingInstantiated : [TypeBinding] -> Str -> Str -> LookupResult\nlookupTypeBindingLayersInstantiated : [TypeBinding] -> [TypeBinding] -> Str -> Str -> LookupResult\ncollectTypeUnknownLabels : TypeText -> [Str]\ncollectTypeUnknownLabelsList : [TypeText] -> [Str]\nappendUniqueText : [Str] -> Str -> [Str]\nappendUniqueTextList : [Str] -> [Str] -> [Str]\ncollectBindingUnknownLabels : [TypeBinding] -> [Str]\ncollectReturnContextUnknownLabels : ReturnContext -> [Str]\ngeneralizeUnknownTypeExcept : [Str] -> TypeText -> TypeText\ngeneralizeUnknownTypeExceptList : [Str] -> [TypeText] -> [TypeText]\nlastTextOr : [Str] -> Str -> Str\ngeneralizedUnknownVarLabel : Str -> Str\ngeneralizeBindingType : [TypeBinding] -> [TypeBinding] -> ReturnContext -> TypeText -> TypeText\ntypeContainsVar : Str -> TypeText -> Bool\ntypeListContainsVar : Str -> [TypeText] -> Bool\ntypeHasGenericVars : TypeText -> Bool\ntypeListHasGenericVars : [TypeText] -> Bool\ntypeIsFunction : TypeText -> Bool\nunifyTypeVar : Str -> TypeText -> [TypeSubstitution] -> TypeUnifyResult\nunknownLabelIsInstantiatedGeneric : Str -> Bool\nunifyUnknownLabels : Str -> Str -> [TypeSubstitution] -> TypeUnifyResult\nunifyUnknownType : Str -> TypeText -> [TypeSubstitution] -> TypeUnifyResult\nunifyTypeLists : [TypeText] -> [TypeText] -> [TypeSubstitution] -> TypeUnifyResult\nunifyTypes : TypeText -> TypeText -> [TypeSubstitution] -> TypeUnifyResult\nsameTypeList : [TypeText] -> [TypeText] -> Bool\nsameType : TypeText -> TypeText -> Bool\ntypeFromHostedTypeAst : HostedTypeAst -> TypeText\ntypeFromHostedTypes : [HostedTypeAst] -> [TypeText]\nremainingHostedTypes : [HostedTypeAst] -> [HostedTypeAst]\nbuildFunctionType : [HostedTypeAst] -> TypeText -> TypeText\ntypeMismatchMessage : Str -> TypeText -> TypeText -> Str\nunknownNameMessage : Str -> Str\nunknownConstructorMessage : Str -> Str\ncompilerBuiltinDiagnosticName : Str -> Bool\nappendDiagnosticCandidateName : [Str] -> Str -> [Str]\ndiagnosticCandidateNamesFromBindings : [TypeBinding] -> [Str]\nfirstFiveDiagnosticNames : [Str] -> [Str]\nrenderDiagnosticCandidateNames : [Str] -> Str\nunknownNameScopeHint : [TypeBinding] -> [TypeBinding] -> Str\nunknownNameMessageInScope : Str -> [TypeBinding] -> [TypeBinding] -> Str\nlookupTypeDecl : [HostedTypeDeclAst] -> Str -> TypeDeclLookupResult\nlookupRecordDecl : [HostedRecordDeclAst] -> Str -> RecordLookupResult\nlookupRecordField : [HostedRecordFieldDeclAst] -> Str -> RecordFieldLookupResult\nlookupRecordExprField : [HostedRecordFieldExprAst] -> Str -> RecordExprFieldLookupResult\nlookupTypeConstructor : HostedTypeDeclAst -> Str -> TypeConstructorLookupResult\nlookupConstructorDecl : [HostedTypeDeclAst] -> Str -> ConstructorLookupResult\ntypeParamSubstitutions : [Str] -> [TypeText] -> [TypeSubstitution]\ninstantiateTypeFromSubstitutions : TypeText -> [TypeSubstitution] -> TypeText\ntypeDeclResultType : HostedTypeDeclAst -> TypeText\nrecordDeclResultType : HostedRecordDeclAst -> TypeText\ntypeParamTypes : [Str] -> [TypeText]\ncontainsText : [Str] -> Str -> Bool\nfindMissingBranchName : HostedTypeDeclAst -> [Str] -> Str\nappendPatternBindings : [TypeBinding] -> [TypeBinding] -> [TypeBinding]\npatternAtomText : Str -> Str\npatternAtomHead : Str -> Str\npatternAtomStartsConstructor : Str -> Bool\npatternAtomCoverageKey : Str -> Str\npatternCoverageKey : HostedPatternAst -> Str\npatternCoversFullConstructor : HostedPatternAst -> Bool\npatternAlreadyCovered : [Str] -> HostedPatternAst -> Bool\npatternCoverageToken : HostedPatternAst -> Str\nbindPatternForSubjectType : [HostedTypeDeclAst] -> TypeText -> HostedPatternAst -> PatternBindResult\nbindPatternAtom : [HostedTypeDeclAst] -> Str -> TypeText -> PatternBindResult\nbindPatternArgs : [HostedTypeDeclAst] -> Str -> [HostedTypeAst] -> [Str] -> [TypeSubstitution] -> PatternBindResult\nbindPattern : [HostedTypeDeclAst] -> HostedTypeDeclAst -> TypeText -> HostedPatternAst -> PatternBindResult\ntypeDeclInstantiations : HostedTypeDeclAst -> TypeText -> [TypeSubstitution]\nrecordDeclInstantiations : HostedRecordDeclAst -> TypeText -> [TypeSubstitution]\napplyFunctionArgumentType : Str -> TypeText -> TypeText -> [TypeSubstitution] -> ApplyCallResult"
     },
     {
       "moduleName": "Compiler.Checker.Bindings",
-      "cacheKey": "0764054a7ae9279d.cache",
-      "sourceFingerprint": "7e824ea7e41a25bf",
+      "cacheKey": "0ab03472015d8371.cache",
+      "sourceFingerprint": "7b3f1744a7124dcf",
       "declFingerprints": {
         "collectAnnotatedBindings": "ccfc7d20974f23b1",
         "moduleDeclarationsFullyAnnotated": "69f1b2bec5f60d09",
@@ -775,7 +789,7 @@
     },
     {
       "moduleName": "Compiler.Checker.DeclFunction",
-      "cacheKey": "b9eb2cc1394b4206.cache",
+      "cacheKey": "b0acade2fe672960.cache",
       "sourceFingerprint": "a05ebe55105ba657",
       "declFingerprints": {
         "hasDeclParams": "4a65437bdd9b0a33",
@@ -788,7 +802,7 @@
     },
     {
       "moduleName": "Compiler.Checker.DecodeTarget",
-      "cacheKey": "d832c569044c0f2e.cache",
+      "cacheKey": "fb40c86331a10eda.cache",
       "sourceFingerprint": "c57f012a5035f47e",
       "declFingerprints": {
         "decodeTargetTypeFromExpr": "196b890862d3754d"
@@ -797,7 +811,7 @@
     },
     {
       "moduleName": "Compiler.Checker.Equality",
-      "cacheKey": "a097cd8f4b2bec03.cache",
+      "cacheKey": "ddc5a8a6c96720ad.cache",
       "sourceFingerprint": "a7093abf72fd8a87",
       "declFingerprints": {
         "supportsHostedEquality": "685f8424ffa2d0ec"
@@ -806,7 +820,7 @@
     },
     {
       "moduleName": "Compiler.Checker.RecordValidation",
-      "cacheKey": "37021beacd16b8e5.cache",
+      "cacheKey": "ad2d6815055f3939.cache",
       "sourceFingerprint": "796913c68b18fc9a",
       "declFingerprints": {
         "findRecordLiteralFieldValidationFailure": "5b46f394eb56e1a0"
@@ -815,8 +829,8 @@
     },
     {
       "moduleName": "Compiler.Checker.InferExpr",
-      "cacheKey": "ea29bb19ca368ac4.cache",
-      "sourceFingerprint": "14fef58a41ca3369",
+      "cacheKey": "4b42da5bd0ae266c.cache",
+      "sourceFingerprint": "bbb84fca943624d4",
       "declFingerprints": {
         "inferRecordLiteralSubstitutions": "6fb62248550d0040",
         "stepRecordLiteralSubstitution": "45e77e205f4e5c09",
@@ -851,8 +865,8 @@
         "inferRecordUpdateBuiltinCall": "78f222bca9483463",
         "inferFieldAccessExpr": "7553d3e150bf3067",
         "inferConstructorExpr": "31c181764162ed94",
-        "inferMatchBranch": "188680bb99f04f15",
-        "inferMatchExpr": "86eb217196b15116",
+        "inferMatchBranch": "55ccd008efd9d3c8",
+        "inferMatchExpr": "ac9b1a23820f7c22",
         "applyCallType": "3d02de03e559e20c",
         "applyCallArg": "da2cb4a486c78403"
       },
@@ -860,7 +874,7 @@
     },
     {
       "moduleName": "Compiler.Checker.DeclInfer",
-      "cacheKey": "bd2964e59ddb5c74.cache",
+      "cacheKey": "64a7c46a9b9e0d0c.cache",
       "sourceFingerprint": "5540cbeb9bb81855",
       "declFingerprints": {
         "inferDecl": "1f9f03095207038d",
@@ -871,7 +885,7 @@
     },
     {
       "moduleName": "Compiler.Checker.ModuleEnv",
-      "cacheKey": "0b6d8ef7407d383b.cache",
+      "cacheKey": "89b76d8a311b37ab.cache",
       "sourceFingerprint": "5c5296f8e2adeb80",
       "declFingerprints": {
         "moduleInitialEnv": "9a117f6f8074a630"
@@ -880,7 +894,7 @@
     },
     {
       "moduleName": "Compiler.Checker.ModulePass",
-      "cacheKey": "abedfed3251f815b.cache",
+      "cacheKey": "658332daf9845cbf.cache",
       "sourceFingerprint": "8a77a57144b81841",
       "declFingerprints": {
         "inferModulePassResult": "979ad1737a958598",
@@ -894,7 +908,7 @@
     },
     {
       "moduleName": "Compiler.Checker.ModuleValidation",
-      "cacheKey": "5fd0e1a34312d899.cache",
+      "cacheKey": "bcf0ef5edefc6b31.cache",
       "sourceFingerprint": "c012e4987375a8a1",
       "declFingerprints": {
         "metadataDeclarationShapeError": "a58f60b088d0f482",
@@ -906,7 +920,7 @@
     },
     {
       "moduleName": "Compiler.Checker.ModuleInfer",
-      "cacheKey": "cbc7c2c0174edef6.cache",
+      "cacheKey": "f796c9907196c862.cache",
       "sourceFingerprint": "21b6b1b6b6c57050",
       "declFingerprints": {
         "inferModuleBindings": "d555986d5763622d",
@@ -916,7 +930,7 @@
     },
     {
       "moduleName": "Compiler.Checker.ModuleSummary",
-      "cacheKey": "a589dd420571e393.cache",
+      "cacheKey": "d904ccfbc5fb4df7.cache",
       "sourceFingerprint": "855f5095c19e9865",
       "declFingerprints": {
         "renderModuleSummaryFromEnv": "fcebb0e5b02c520c",
@@ -930,14 +944,14 @@
     },
     {
       "moduleName": "Compiler.Checker",
-      "cacheKey": "4051031c09cea72d.cache",
+      "cacheKey": "5a8f414f6a91e12d.cache",
       "sourceFingerprint": "ef2fefb76f192cd0",
       "declFingerprints": {},
       "summary": ""
     },
     {
       "moduleName": "Compiler.Json",
-      "cacheKey": "b1ea2ac29873b2b0.cache",
+      "cacheKey": "c07336bf1ecf21ce.cache",
       "sourceFingerprint": "1928aa5d2c3c6c44",
       "declFingerprints": {
         "keepNoJsonRenderedText": "c4f6254976f93445",
@@ -959,8 +973,8 @@
     },
     {
       "moduleName": "Compiler.CheckedCore",
-      "cacheKey": "fe6d2c6f336e609f.cache",
-      "sourceFingerprint": "4893c649842ec732",
+      "cacheKey": "19324ee2354feb6f.cache",
+      "sourceFingerprint": "fa9bbf56653ec961",
       "declFingerprints": {
         "keepNoCheckedCoreParamArtifact": "1e55f4bbe876dec1",
         "emptyCheckedCoreParamArtifacts": "c3143e182c52f1c3",
@@ -990,7 +1004,7 @@
         "checkedCorePatternBinderArtifacts": "67c6211fb30e566b",
         "checkedCoreExprList": "ba9fb69008da709e",
         "checkedCoreRecordFieldList": "291dd291b6f1349b",
-        "checkedCoreMatchBranch": "739da690a8ebe256",
+        "checkedCoreMatchBranch": "2dd6f7a53af62933",
         "checkedCoreMatchBranchList": "192b59a4ef83469e",
         "checkedCoreCallArtifact": "56adf039aa2a7bed",
         "checkedCoreExpr": "5b047524a1630476",
@@ -1026,7 +1040,7 @@
     },
     {
       "moduleName": "Compiler.Lower",
-      "cacheKey": "265cd3a37fb00d4d.cache",
+      "cacheKey": "95ff2ec8cf6cb2d9.cache",
       "sourceFingerprint": "5e3f20c9e3ff297a",
       "declFingerprints": {
         "keepNoLowerExpr": "f430839ca1ae06ff",
@@ -1088,7 +1102,7 @@
     },
     {
       "moduleName": "Compiler.Emit.JavaScript.Util",
-      "cacheKey": "f137a8482c72f24f.cache",
+      "cacheKey": "cb700ca607039e25.cache",
       "sourceFingerprint": "ecb1c3173b52fda2",
       "declFingerprints": {
         "appendJsRenderedText": "b9235dcf1f49c218",
@@ -1100,8 +1114,8 @@
     },
     {
       "moduleName": "Compiler.Emit.JavaScript.Expr",
-      "cacheKey": "31ae95b24924f384.cache",
-      "sourceFingerprint": "b08c8555c7dfbe57",
+      "cacheKey": "fbc255bdd92b6bce.cache",
+      "sourceFingerprint": "0faffc95ad4593eb",
       "declFingerprints": {
         "hasReturnInExprs": "ec2bf94186ce7712",
         "hasReturnInRecordFields": "58011d2811192ba2",
@@ -1110,18 +1124,24 @@
         "emitExprs": "08cb8af55cd7c8fd",
         "emitRecordFields": "b24571eb69597c3d",
         "emitRecordField": "9490efcd4ae310e6",
-        "emitMatchBranchLines": "5e9fc568bc8fc226",
+        "emitPatternAtomText": "43a93469d6e410ec",
+        "emitPatternAccessor": "acf9d5396a184011",
+        "emitPatternCondition": "c55066855c206544",
+        "emitPatternBinderLines": "63d87f3babaa482c",
+        "emitMatchBranchConditionFromBinders": "db225b4c0d5cdbb1",
+        "emitMatchBranchBinderLines": "64683cf6494e3251",
+        "emitMatchBranchLines": "91ea295c09c4550f",
         "emitMatchBranchBlocks": "6963701f55bf722d",
         "emitExpr": "adc08769e979d6a2",
         "emitDecl": "19111299dd248d0d",
         "moduleHasReturn": "e354e7502a515116",
         "emitEarlyReturnPrelude": "3b3d6a64e0daa1de"
       },
-      "summary": "hasReturnInExprs : [LowerExprText] -> Bool\nhasReturnInRecordFields : [LowerRecordFieldText] -> Bool\nhasReturnInMatchBranches : [LowerMatchBranchText] -> Bool\nemitExprContainsReturn : LowerExprText -> Bool\nemitExprs : [LowerExprText] -> [Str]\nemitRecordFields : [LowerRecordFieldText] -> [Str]\nemitRecordField : LowerRecordFieldText -> Str\nemitMatchBranchLines : LowerMatchBranchText -> [Str]\nemitMatchBranchBlocks : [LowerMatchBranchText] -> [Str]\nemitExpr : LowerExprText -> Str\nemitDecl : LowerDeclText -> Str\nmoduleHasReturn : [LowerDeclText] -> Bool\nemitEarlyReturnPrelude : [LowerDeclText] -> [Str]"
+      "summary": "hasReturnInExprs : [LowerExprText] -> Bool\nhasReturnInRecordFields : [LowerRecordFieldText] -> Bool\nhasReturnInMatchBranches : [LowerMatchBranchText] -> Bool\nemitExprContainsReturn : LowerExprText -> Bool\nemitExprs : [LowerExprText] -> [Str]\nemitRecordFields : [LowerRecordFieldText] -> [Str]\nemitRecordField : LowerRecordFieldText -> Str\nemitPatternAtomText : Str -> Str\nemitPatternAccessor : Str -> Int -> Str\nemitPatternCondition : Str -> Str -> Str\nemitPatternBinderLines : Str -> Str -> [Str]\nemitMatchBranchConditionFromBinders : Str -> [Str] -> Str\nemitMatchBranchBinderLines : [Str] -> [Str]\nemitMatchBranchLines : LowerMatchBranchText -> [Str]\nemitMatchBranchBlocks : [LowerMatchBranchText] -> [Str]\nemitExpr : LowerExprText -> Str\nemitDecl : LowerDeclText -> Str\nmoduleHasReturn : [LowerDeclText] -> Bool\nemitEarlyReturnPrelude : [LowerDeclText] -> [Str]"
     },
     {
       "moduleName": "Compiler.Emit.JavaScript.Foreign",
-      "cacheKey": "5b6840eda8d2f741.cache",
+      "cacheKey": "00d1a33dfcc9be47.cache",
       "sourceFingerprint": "816770179cf0e9ed",
       "declFingerprints": {
         "defaultForeignParamNames": "91279a0574dad6b6",
@@ -1162,7 +1182,7 @@
     },
     {
       "moduleName": "Compiler.Emit.JavaScript.MetadataCore",
-      "cacheKey": "cc7f6da612495a99.cache",
+      "cacheKey": "d8a1cb6732fb9b9d.cache",
       "sourceFingerprint": "761b9046b98b9ee4",
       "declFingerprints": {
         "lowerDeclHasOneParamText": "0c3975628e6c26ca",
@@ -1191,7 +1211,7 @@
     },
     {
       "moduleName": "Compiler.Emit.JavaScript.MetadataBindings",
-      "cacheKey": "6a66893c9d98f704.cache",
+      "cacheKey": "a60a4a69af76a720.cache",
       "sourceFingerprint": "1a741270e864ae25",
       "declFingerprints": {
         "emitFrontendModuleBindings": "43469da80a400666"
@@ -1200,7 +1220,7 @@
     },
     {
       "moduleName": "Compiler.Emit.JavaScript.MetadataContracts",
-      "cacheKey": "e0cef233e82ab35f.cache",
+      "cacheKey": "5f33bcf2923d1733.cache",
       "sourceFingerprint": "bec9480ba3fb9a4a",
       "declFingerprints": {
         "emitHooks": "85a355d70dbc9f3d",
@@ -1213,14 +1233,14 @@
     },
     {
       "moduleName": "Compiler.Emit.JavaScript.Metadata",
-      "cacheKey": "c6d90d8724efb7db.cache",
+      "cacheKey": "6642d2fb6b74df53.cache",
       "sourceFingerprint": "c5b47cb67bbe057a",
       "declFingerprints": {},
       "summary": ""
     },
     {
       "moduleName": "Compiler.Emit.JavaScript.Needs",
-      "cacheKey": "7c0271e3417dde89.cache",
+      "cacheKey": "e027a392065447d1.cache",
       "sourceFingerprint": "fd867c5caba0e7d6",
       "declFingerprints": {
         "jsBuiltinPreludeName": "eebc8f810b6f6488",
@@ -1249,7 +1269,7 @@
     },
     {
       "moduleName": "Compiler.Emit.JavaScript.Prelude",
-      "cacheKey": "540719bccd7f95f5.cache",
+      "cacheKey": "a501da2a223e5b2d.cache",
       "sourceFingerprint": "fe66ea259af8d4ae",
       "declFingerprints": {
         "builtinPreludeLines": "bdf47fc95021a75c",
@@ -1259,7 +1279,7 @@
     },
     {
       "moduleName": "Compiler.Emit.JavaScript.Runtime",
-      "cacheKey": "22501a383f5f0896.cache",
+      "cacheKey": "f64e21e1464d4428.cache",
       "sourceFingerprint": "57d9c3f8e65c7c70",
       "declFingerprints": {
         "emitSelfHostedRuntimePrelude": "1a75b1f1ada15168"
@@ -1268,7 +1288,7 @@
     },
     {
       "moduleName": "Compiler.Emit.JavaScript.Schema",
-      "cacheKey": "1ddefa9a532d39f2.cache",
+      "cacheKey": "baae5c176e62a688.cache",
       "sourceFingerprint": "cc8527303449a47d",
       "declFingerprints": {
         "emitTypeSchemaDecodeExpr": "0a9a67427cc0c7dc",
@@ -1282,7 +1302,7 @@
     },
     {
       "moduleName": "Compiler.Emit.JavaScript",
-      "cacheKey": "9fe1122b72ff1e32.cache",
+      "cacheKey": "596b1775ff3f6fb6.cache",
       "sourceFingerprint": "64044b9820e359ca",
       "declFingerprints": {
         "emitFrontendModule": "0245a04319fd8043"
@@ -1291,7 +1311,7 @@
     },
     {
       "moduleName": "Compiler.Project",
-      "cacheKey": "268a84414ab0f05e.cache",
+      "cacheKey": "6db302e97b0eeba2.cache",
       "sourceFingerprint": "a7927e07a4802d16",
       "declFingerprints": {
         "keepNoHostedModule": "9c8611c5b49d0668",
@@ -1324,7 +1344,7 @@
     },
     {
       "moduleName": "Compiler.SemanticArtifacts.Base",
-      "cacheKey": "812cf503ea8888f7.cache",
+      "cacheKey": "9e45f9e7095993db.cache",
       "sourceFingerprint": "0b7e90d0bc0b8561",
       "declFingerprints": {
         "semanticJsonTextArray": "e5936281e18d7322",
@@ -1365,7 +1385,7 @@
     },
     {
       "moduleName": "Compiler.SemanticArtifacts.Air",
-      "cacheKey": "bba6c50acf448446.cache",
+      "cacheKey": "6130ebca0fa4adbe.cache",
       "sourceFingerprint": "4e5be22433faa976",
       "declFingerprints": {
         "semanticAirModuleNode": "586989d114ab36a4",
@@ -1394,7 +1414,7 @@
     },
     {
       "moduleName": "Compiler.SemanticArtifacts.Names",
-      "cacheKey": "3551bb045b4e8058.cache",
+      "cacheKey": "f7300fb5e94714b4.cache",
       "sourceFingerprint": "0887277b4ec9f881",
       "declFingerprints": {
         "semanticRecordNames": "4922cc5cf6b6d5cd",
@@ -1422,7 +1442,7 @@
     },
     {
       "moduleName": "Compiler.SemanticArtifacts.Uses",
-      "cacheKey": "a5faf5be19322c96.cache",
+      "cacheKey": "e7746d4b686ed15e.cache",
       "sourceFingerprint": "4270052634ab33fa",
       "declFingerprints": {
         "semanticDeclUseTargetNodeId": "312949670ef33b62",
@@ -1440,7 +1460,7 @@
     },
     {
       "moduleName": "Compiler.SemanticArtifacts.Impact",
-      "cacheKey": "41f45f660af3e7ef.cache",
+      "cacheKey": "16dd3b6da1934ccb.cache",
       "sourceFingerprint": "3a48bb8c23c062a9",
       "declFingerprints": {
         "semanticAppendNonEmptyUniqueText": "6ae53b1607d6c138",
@@ -1508,7 +1528,7 @@
     },
     {
       "moduleName": "Compiler.SemanticArtifacts.ImpactIndex",
-      "cacheKey": "f067a292427cd9ee.cache",
+      "cacheKey": "5f4344c0b18a1866.cache",
       "sourceFingerprint": "73f835e01c218733",
       "declFingerprints": {
         "semanticImpactEntry": "045f76e4ef1c27a0",
@@ -1526,7 +1546,7 @@
     },
     {
       "moduleName": "Compiler.SemanticArtifacts.SurfaceIndex",
-      "cacheKey": "08d5be034944d979.cache",
+      "cacheKey": "b2b80a754c689185.cache",
       "sourceFingerprint": "e05104691734ab50",
       "declFingerprints": {
         "semanticContextVerificationGuidance": "848bc09d12ba084a",
@@ -1551,7 +1571,7 @@
     },
     {
       "moduleName": "Compiler.SemanticArtifacts.ContextNodes",
-      "cacheKey": "0c3e451e94c0999b.cache",
+      "cacheKey": "74ad1afe0aa8ca73.cache",
       "sourceFingerprint": "649aa4e7be8f5569",
       "declFingerprints": {
         "semanticContextModuleNode": "8d4f564c63aa8d20",
@@ -1578,7 +1598,7 @@
     },
     {
       "moduleName": "Compiler.SemanticArtifacts",
-      "cacheKey": "56d05de7aa067c8a.cache",
+      "cacheKey": "5ffc936bf45d2706.cache",
       "sourceFingerprint": "f4392e0305512ec7",
       "declFingerprints": {
         "semanticSourceNodeId": "7f7d5ea8de08a128",
@@ -1618,7 +1638,7 @@
     },
     {
       "moduleName": "Compiler.Driver.Frontend",
-      "cacheKey": "30db4575010147bb.cache",
+      "cacheKey": "3daa6a63b4087491.cache",
       "sourceFingerprint": "6440e74e493f2c83",
       "declFingerprints": {
         "frontendDriverSourceLoweredDecls": "a68438dc249b51a0",
@@ -1645,7 +1665,7 @@
     },
     {
       "moduleName": "Compiler.Emit.Native.Core",
-      "cacheKey": "a3d053e5d342eb63.cache",
+      "cacheKey": "bf36a30fae1c62e3.cache",
       "sourceFingerprint": "10d4b8006c855913",
       "declFingerprints": {
         "appendNativeRenderedText": "031da1a51b657b78",
@@ -1667,7 +1687,7 @@
     },
     {
       "moduleName": "Compiler.Emit.Native.ExprText",
-      "cacheKey": "d48204f1cf61e6c4.cache",
+      "cacheKey": "ffc101cbee6ddcdc.cache",
       "sourceFingerprint": "ba57e8ae5e85e78e",
       "declFingerprints": {
         "nativeExprNameText": "7a19f12f0e9ecc1d",
@@ -1699,7 +1719,7 @@
     },
     {
       "moduleName": "Compiler.Emit.Native.Expr",
-      "cacheKey": "689ebea1734cc156.cache",
+      "cacheKey": "038411929509853e.cache",
       "sourceFingerprint": "f33741edf7d9b917",
       "declFingerprints": {
         "emitNativeExprs": "28f7107a173fae6e",
@@ -1715,7 +1735,7 @@
     },
     {
       "moduleName": "Compiler.Emit.Native.RuntimeCodecs",
-      "cacheKey": "d6ac84a8687b1f93.cache",
+      "cacheKey": "2fd3f8576e4a92a3.cache",
       "sourceFingerprint": "d3745f7dce35b484",
       "declFingerprints": {
         "supportsRuntimeCodecType": "8368b3af9766b9e3",
@@ -1731,7 +1751,7 @@
     },
     {
       "moduleName": "Compiler.Emit.Native.RuntimeBindings",
-      "cacheKey": "30f212ae55bbdb62.cache",
+      "cacheKey": "fbfacb6013917bde.cache",
       "sourceFingerprint": "012c738f0c69dd5d",
       "declFingerprints": {
         "nativeRuntimeBindingSpecName": "db5f16ec5809433b",
@@ -1778,7 +1798,7 @@
     },
     {
       "moduleName": "Compiler.Emit.NativeJson",
-      "cacheKey": "a076eeefd4230656.cache",
+      "cacheKey": "0e515a0b835a661e.cache",
       "sourceFingerprint": "76996efecf592ff9",
       "declFingerprints": {
         "appendNativeJsonText": "b06dd689089b87d6",
@@ -1799,7 +1819,7 @@
     },
     {
       "moduleName": "Compiler.Emit.NativeSurface",
-      "cacheKey": "6196235a15352c9b.cache",
+      "cacheKey": "4170266cb9445d7f.cache",
       "sourceFingerprint": "995d29a6f7476d10",
       "declFingerprints": {
         "appendNativeSurfaceText": "3240ebc669264298",
@@ -1836,7 +1856,7 @@
     },
     {
       "moduleName": "Compiler.Emit.NativeDecls",
-      "cacheKey": "8e1ae9f82f2f8b88.cache",
+      "cacheKey": "6a0d75c4cbc4144c.cache",
       "sourceFingerprint": "d82038b54464286b",
       "declFingerprints": {
         "appendNativeDeclRenderedText": "85927e38635a89b8",
@@ -1863,7 +1883,7 @@
     },
     {
       "moduleName": "Compiler.Emit.NativeMetadata",
-      "cacheKey": "744e0574065edde4.cache",
+      "cacheKey": "a59d08ac137821a8.cache",
       "sourceFingerprint": "1b8ae86fd2e0aaa2",
       "declFingerprints": {
         "appendNativeMetadataText": "8265febaefffcfa8",
@@ -1944,7 +1964,7 @@
     },
     {
       "moduleName": "Compiler.Emit.Native.RuntimeCodecEmit",
-      "cacheKey": "e7bcd14f82c08cdc.cache",
+      "cacheKey": "5d82737e9f24d41c.cache",
       "sourceFingerprint": "7727e85f6a481174",
       "declFingerprints": {
         "emitNativeJsonCodecImage": "ac865cee881ff5a5",
@@ -1960,7 +1980,7 @@
     },
     {
       "moduleName": "Compiler.Emit.Native.Layout",
-      "cacheKey": "b98ca4480f2e46e3.cache",
+      "cacheKey": "707e122b97d62f97.cache",
       "sourceFingerprint": "bd5091bbdc0ab7b3",
       "declFingerprints": {
         "emitNativeJsonNumberList": "af783c42630e4a9c",
@@ -2004,7 +2024,7 @@
     },
     {
       "moduleName": "Compiler.Emit.Native",
-      "cacheKey": "a63850c1a0e3d232.cache",
+      "cacheKey": "bbc30f452e3ff7b2.cache",
       "sourceFingerprint": "f04a07b9261ef0b9",
       "declFingerprints": {
         "emitNativeCompatibilitySurfaceImage": "a9509615d8be9f14",
@@ -2032,8 +2052,8 @@
     },
     {
       "moduleName": "Compiler.Driver.Native",
-      "cacheKey": "d405473d75a9f06a.cache",
-      "sourceFingerprint": "57120b5e55540455",
+      "cacheKey": "fcb7151b0e626b9d.cache",
+      "sourceFingerprint": "c7cdc33e324caeb4",
       "declFingerprints": {
         "nativeDriverSourceLoweredDecls": "e4f2f7b3dc4a4ee0",
         "nativeDriverSourceText": "d14ba781c4bb0c69",
@@ -2057,14 +2077,17 @@
         "nativeDriverImageProjectDeclNamesText": "6c304caa658de8b3",
         "nativeDriverImageProjectDeclModulePlanText": "fc6f47915211edbb",
         "nativeDriverImageProjectModuleDeclsText": "8af535e226fdd103",
-        "nativeDriverImageProjectModuleNamedDeclsText": "e226a7bedb125f4b",
-        "nativeDriverImageProjectNamedDeclsText": "19502ab382c1b3fc"
+        "nativeDriverSelectedDeclNameSentinel": "99287974f829214f",
+        "nativeDriverKeepSelectedDeclName": "93b275ed22f0fa9f",
+        "nativeDriverSelectedDeclNames": "b74400e33645c0cb",
+        "nativeDriverImageProjectModuleNamedDeclsText": "1c9858bb9374f3cf",
+        "nativeDriverImageProjectNamedDeclsText": "bced1b275ab78346"
       },
-      "summary": "nativeDriverSourceLoweredDecls : Str -> [LowerDeclText]\nnativeDriverSourceText : Str -> Str\nnativeDriverImageSourceText : Str -> Str\nnativeDriverProjectBundleHasSeparator : Str -> Bool\nnativeDriverProjectBundleIsSingleSourceModule : Str -> Bool\nnativeDriverProjectBundleSourceModule : Str -> HostedModuleAst\nnativeDriverProjectText : Str -> Str\nnativeDriverImageProjectText : Str -> Str\nnativeDriverImageProjectPlanText : Str -> Str\nnativeDriverImageProjectBuildPlanText : Str -> Str\nnativeDriverImageSourceModuleInterfaceFingerprintText : Str -> Str\nnativeDriverImageProjectModuleText : Str -> Str\nnativeDriverImageProjectExportsText : Str -> Str\nnativeDriverImageProjectEntrypointsText : Str -> Str\nnativeDriverImageProjectAbiText : Str -> Str\nnativeDriverImageProjectRuntimeText : Str -> Str\nnativeDriverImageProjectCompatibilityText : Str -> Str\nnativeDriverImageProjectDeclsText : Str -> Str\nnativeDriverImageProjectConstructorDeclsText : Str -> Str\nnativeDriverImageProjectDeclNamesText : Str -> Str\nnativeDriverImageProjectDeclModulePlanText : Str -> Str\nnativeDriverImageProjectModuleDeclsText : Str -> Str -> Str\nnativeDriverImageProjectModuleNamedDeclsText : Str -> Str -> Str -> Str\nnativeDriverImageProjectNamedDeclsText : Str -> Str -> Str"
+      "summary": "nativeDriverSourceLoweredDecls : Str -> [LowerDeclText]\nnativeDriverSourceText : Str -> Str\nnativeDriverImageSourceText : Str -> Str\nnativeDriverProjectBundleHasSeparator : Str -> Bool\nnativeDriverProjectBundleIsSingleSourceModule : Str -> Bool\nnativeDriverProjectBundleSourceModule : Str -> HostedModuleAst\nnativeDriverProjectText : Str -> Str\nnativeDriverImageProjectText : Str -> Str\nnativeDriverImageProjectPlanText : Str -> Str\nnativeDriverImageProjectBuildPlanText : Str -> Str\nnativeDriverImageSourceModuleInterfaceFingerprintText : Str -> Str\nnativeDriverImageProjectModuleText : Str -> Str\nnativeDriverImageProjectExportsText : Str -> Str\nnativeDriverImageProjectEntrypointsText : Str -> Str\nnativeDriverImageProjectAbiText : Str -> Str\nnativeDriverImageProjectRuntimeText : Str -> Str\nnativeDriverImageProjectCompatibilityText : Str -> Str\nnativeDriverImageProjectDeclsText : Str -> Str\nnativeDriverImageProjectConstructorDeclsText : Str -> Str\nnativeDriverImageProjectDeclNamesText : Str -> Str\nnativeDriverImageProjectDeclModulePlanText : Str -> Str\nnativeDriverImageProjectModuleDeclsText : Str -> Str -> Str\nnativeDriverSelectedDeclNameSentinel : Str\nnativeDriverKeepSelectedDeclName : Str -> Bool\nnativeDriverSelectedDeclNames : Str -> [Str]\nnativeDriverImageProjectModuleNamedDeclsText : Str -> Str -> Str -> Str\nnativeDriverImageProjectNamedDeclsText : Str -> Str -> Str"
     },
     {
       "moduleName": "Compiler.SnapshotFixture",
-      "cacheKey": "8ef87f0c597af9a1.cache",
+      "cacheKey": "61feb1c354f76313.cache",
       "sourceFingerprint": "02952be3932ed617",
       "declFingerprints": {
         "compilerSnapshotCheckEntrypoint": "d8fb81e3859e0248",
@@ -2094,7 +2117,7 @@
     },
     {
       "moduleName": "Main",
-      "cacheKey": "2f57bec155d3934b.cache",
+      "cacheKey": "975561ad9d8d3c57.cache",
       "sourceFingerprint": "620a96d67aa284e8",
       "declFingerprints": {
         "checkEntrypoint": "deec79af7e4f42cf",
@@ -2145,7 +2168,7 @@
     },
     {
       "moduleName": "CompilerMain",
-      "cacheKey": "25a55a446ad4a704.cache",
+      "cacheKey": "86aae2b3f8e49598.cache",
       "sourceFingerprint": "96a10d5a1a411c7d",
       "declFingerprints": {
         "checkSourceText": "5efff96a8fdefaa8",
@@ -2186,7 +2209,7 @@
     },
     {
       "moduleName": "GoalManagerResourceContext",
-      "cacheKey": "ff7fb85f497b53f5.cache",
+      "cacheKey": "48f8730ecf2364d7.cache",
       "sourceFingerprint": "81f3b3cc81a31e82",
       "declFingerprints": {
         "processResultError": "7e17fee18b64ddff",
@@ -2239,7 +2262,7 @@
     },
     {
       "moduleName": "HostResources",
-      "cacheKey": "e822a68a1765f55b.cache",
+      "cacheKey": "059061553c5a222d.cache",
       "sourceFingerprint": "7db2ac54d03c0e59",
       "declFingerprints": {
         "hostOkBool": "f9c368a0839ca77d",
@@ -2255,7 +2278,7 @@
     },
     {
       "moduleName": "GeneratedStateCleanupPlan",
-      "cacheKey": "427529b1f8a01f99.cache",
+      "cacheKey": "2c734c0c2a8971c7.cache",
       "sourceFingerprint": "fac43c357e166db0",
       "declFingerprints": {
         "emptyCleanupTargets": "b2ef73974de45827",
@@ -2355,7 +2378,7 @@
     },
     {
       "moduleName": "GoalManagerGeneratedCleanupHealth",
-      "cacheKey": "fc3055b143316a4a.cache",
+      "cacheKey": "d33cdf97374d8df0.cache",
       "sourceFingerprint": "4faaf2cff4d6d706",
       "declFingerprints": {
         "managerGeneratedCleanupBoolText": "eb7276157f83b965",
@@ -2374,7 +2397,7 @@
     },
     {
       "moduleName": "GoalManagerGeneratedCleanupHealthHarness",
-      "cacheKey": "58172d6256b4aac1.cache",
+      "cacheKey": "af90d4aec0cfb7a7.cache",
       "sourceFingerprint": "6f442d5f7577ed18",
       "declFingerprints": {
         "main": "e34815452d4ff155"

@@ -141,6 +141,8 @@ switch (slice) {
     assert(output.roster === "ok:[Str]", "checker roster inference changed");
     assert(output.matrix === "ok:[[Int]]", "checker matrix inference changed");
     assert(output.mixed === "error:expected Str but found Int", "checker mismatch diagnostic changed");
+    assert(output.nestedPattern === "accepted:Ada|rejected|none", "checker nested constructor pattern changed");
+    assert(output.wildcardPattern === "any", "checker wildcard pattern changed");
     break;
   case "lower":
     assert(output.listExpr === "list:[literal:Ada, literal:Grace]", "lower list expression changed");

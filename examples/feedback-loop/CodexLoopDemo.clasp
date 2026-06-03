@@ -244,18 +244,24 @@ stepRecordFromError spec message =
 writeStepStatus : CodexLoopStepRecord -> Str
 writeStepStatus record = writeText record.statusPath (encode record)
 
+codexStepRecordFromRunResult : CodexLoopStepSpec -> Result MonitoredStepResult -> CodexLoopStepRecord
+codexStepRecordFromRunResult spec result = match result {
+  Ok value -> stepRecordFromResult spec value,
+  Err message -> stepRecordFromError spec message
+}
+
+codexStepRecordAfterPrompt : CodexLoopStepSpec -> Str -> CodexLoopStepRecord
+codexStepRecordAfterPrompt spec promptWrite =
+  if promptWrite == "" then
+    codexStepRecordFromRunResult spec (runMonitored (toWatchedSpec spec))
+  else
+    stepRecordFromError spec promptWrite
+
 runCodexStep : CodexLoopStepSpec -> CodexLoopStepRecord
 runCodexStep spec = {
   let promptWrite = writeText spec.promptPath spec.prompt;
   let started = appendCodexLoopEvent "step-started" spec.role "running" spec.promptPath;
-  let record =
-    if promptWrite == "" then
-      match runMonitored (toWatchedSpec spec) {
-        Ok result -> stepRecordFromResult spec result,
-        Err message -> stepRecordFromError spec message
-      }
-    else
-      stepRecordFromError spec promptWrite;
+  let record = codexStepRecordAfterPrompt spec promptWrite;
   let wrote = writeStepStatus record;
   let completed = appendCodexLoopEvent "step-completed" record.role record.status record.finalPath;
   record

@@ -136,10 +136,104 @@ emitRecordField field = match field {
     textConcat [name, ": ", emitExpr value]
 }
 
+emitPatternAtomText : Str -> Str
+emitPatternAtomText rawValue = {
+  let value = trimSpaces rawValue;
+  match unwrapDelimited value "(" ")" {
+    ParsedText payload ->
+      trimSpaces payload,
+    MissingText notParenthesized ->
+      value
+  }
+}
+
+emitPatternAccessor : Str -> Int -> Str
+emitPatternAccessor subject index = textConcat [subject, "[", encode index, "]"]
+
+emitPatternCondition : Str -> Str -> Str
+emitPatternCondition subject rawPattern = {
+  let atom = emitPatternAtomText rawPattern;
+  if atom == "_" then {
+    ""
+  } else {
+    let parts = splitTopLevel atom " ";
+    let constructorName = firstText parts;
+    if startsWithUppercase constructorName then {
+      let mut conditions = [textConcat [subject, "[0] === ", encode constructorName]];
+      let mut index = 1;
+      for nestedPattern in remainingTexts parts {
+        let nestedCondition = emitPatternCondition (emitPatternAccessor subject index) nestedPattern;
+        conditions = if nestedCondition == "" then conditions else appendJsRenderedText conditions nestedCondition;
+        index = intAdd index 1;
+        conditions
+      };
+      textConcat ["(", textJoin " && " conditions, ")"]
+    } else {
+      ""
+    }
+  }
+}
+
+emitPatternBinderLines : Str -> Str -> [Str]
+emitPatternBinderLines subject rawPattern = {
+  let atom = emitPatternAtomText rawPattern;
+  if atom == "_" then {
+    emptyRenderedTexts
+  } else {
+    let parts = splitTopLevel atom " ";
+    let constructorName = firstText parts;
+    if startsWithUppercase constructorName then {
+      let mut rendered = emptyRenderedTexts;
+      let mut index = 1;
+      for nestedPattern in remainingTexts parts {
+        rendered = append rendered (emitPatternBinderLines (emitPatternAccessor subject index) nestedPattern);
+        index = intAdd index 1;
+        rendered
+      };
+      rendered
+    } else if atom == "" then {
+      emptyRenderedTexts
+    } else {
+      [textConcat ["    const ", atom, " = ", subject, ";"]]
+    }
+  }
+}
+
+emitMatchBranchConditionFromBinders : Str -> [Str] -> Str
+emitMatchBranchConditionFromBinders constructorName binders = {
+  if constructorName == "_" then {
+    "true"
+  } else {
+    let mut conditions = [textConcat ["__match[0] === ", encode constructorName]];
+    let mut index = 1;
+    for binder in binders {
+      let nestedCondition = emitPatternCondition (emitPatternAccessor "__match" index) binder;
+      conditions = if nestedCondition == "" then conditions else appendJsRenderedText conditions nestedCondition;
+      index = intAdd index 1;
+      conditions
+    };
+    textConcat ["(", textJoin " && " conditions, ")"]
+  }
+}
+
+emitMatchBranchBinderLines : [Str] -> [Str]
+emitMatchBranchBinderLines binders = {
+  let mut rendered = emptyRenderedTexts;
+  let mut index = 1;
+  for binder in binders {
+    rendered = append rendered (emitPatternBinderLines (emitPatternAccessor "__match" index) binder);
+    index = intAdd index 1;
+    rendered
+  };
+  rendered
+}
+
 emitMatchBranchLines : LowerMatchBranchText -> [Str]
 emitMatchBranchLines branch = match branch {
-  LowerMatchBranchText constructorName binders body ->
-    if hasJsValues binders then [textConcat ["  if (__match[0] === \"", constructorName, "\") {"], textConcat ["    const [_, ", textJoin ", " binders, "] = __match;"], textConcat ["    return ", emitExpr body, ";"], "  }"] else [textConcat ["  if (__match[0] === \"", constructorName, "\") {"], textConcat ["    return ", emitExpr body, ";"], "  }"]
+  LowerMatchBranchText constructorName binders body -> {
+    let condition = emitMatchBranchConditionFromBinders constructorName binders;
+    append [textConcat ["  if (", condition, ") {"]] (append (emitMatchBranchBinderLines binders) [textConcat ["    return ", emitExpr body, ";"], "  }"])
+  }
 }
 
 emitMatchBranchBlocks : [LowerMatchBranchText] -> [Str]

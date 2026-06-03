@@ -224,13 +224,17 @@ writeStepStatus record =
     Err message -> message
   }
 
+workflowStepRecordFromRunResult : WorkflowStepSpec -> Bool -> Result MonitoredStepResult -> WorkflowStepRecord
+workflowStepRecordFromRunResult spec failureHandled result =
+  match result {
+    Ok step -> stepRecordFromResult spec step failureHandled,
+    Err message -> stepRecordFromError spec message failureHandled
+  }
+
 runWorkflowStep : WorkflowStepSpec -> Bool -> WorkflowStepRecord
 runWorkflowStep spec failureHandled = {
   let started = appendWorkflowEvent "step-started" spec.stepId "running" spec.role;
-  let record = match runMonitored (toWatchedSpec spec) {
-    Ok result -> stepRecordFromResult spec result failureHandled,
-    Err message -> stepRecordFromError spec message failureHandled
-  };
+  let record = workflowStepRecordFromRunResult spec failureHandled (runMonitored (toWatchedSpec spec));
   let wrote = writeStepStatus record;
   let completed = appendWorkflowEvent "step-completed" record.stepId record.status (textConcat ["exit=", encode record.exitCode]);
   record

@@ -157,18 +157,29 @@ nativeDriverImageProjectModuleDeclsText bundle moduleName = if nativeDriverProje
     jsonArray [encode (textConcat ["ERROR:", message])]
 }
 
+nativeDriverSelectedDeclNameSentinel : Str
+nativeDriverSelectedDeclNameSentinel = "--CLASP-DECL-NAMES-END--"
+
+nativeDriverKeepSelectedDeclName : Str -> Bool
+nativeDriverKeepSelectedDeclName name =
+  if name == "" then false else name != nativeDriverSelectedDeclNameSentinel
+
+nativeDriverSelectedDeclNames : Str -> [Str]
+nativeDriverSelectedDeclNames namesText =
+  if namesText == "" then [] else filter nativeDriverKeepSelectedDeclName (textSplit (textConcat [namesText, "\n", nativeDriverSelectedDeclNameSentinel]) "\n")
+
 nativeDriverImageProjectModuleNamedDeclsText : Str -> Str -> Str -> Str
 nativeDriverImageProjectModuleNamedDeclsText bundle moduleName namesText = if nativeDriverProjectBundleIsSingleSourceModule bundle then {
   let sourceModuleValue = nativeDriverProjectBundleSourceModule bundle;
   if moduleName == moduleNameOf sourceModuleValue then
-    emitNativeModuleImageNamedDecls sourceModuleValue (if namesText == "" then [] else textSplit namesText "\n")
+    emitNativeModuleImageNamedDecls sourceModuleValue (nativeDriverSelectedDeclNames namesText)
   else
     jsonArray [encode (textConcat ["ERROR:", moduleName])]
 } else match resolveProjectModules bundle {
   HostedResolvedProjectOk mergedModule sourceModules ->
     match lookupProjectModule sourceModules moduleName {
       FoundHostedProjectModule sourceModule ->
-        emitNativeSourceModuleImageNamedDecls mergedModule sourceModule (if namesText == "" then [] else textSplit namesText "\n"),
+        emitNativeSourceModuleImageNamedDecls mergedModule sourceModule (nativeDriverSelectedDeclNames namesText),
       MissingHostedProjectModule missing ->
         jsonArray [encode (textConcat ["ERROR:", missing])]
     },
@@ -177,9 +188,9 @@ nativeDriverImageProjectModuleNamedDeclsText bundle moduleName namesText = if na
 }
 
 nativeDriverImageProjectNamedDeclsText : Str -> Str -> Str
-nativeDriverImageProjectNamedDeclsText bundle namesText = if nativeDriverProjectBundleIsSingleSourceModule bundle then emitNativeModuleImageNamedDecls (nativeDriverProjectBundleSourceModule bundle) (if namesText == "" then [] else textSplit namesText "\n") else match resolveProjectBundle bundle {
+nativeDriverImageProjectNamedDeclsText bundle namesText = if nativeDriverProjectBundleIsSingleSourceModule bundle then emitNativeModuleImageNamedDecls (nativeDriverProjectBundleSourceModule bundle) (nativeDriverSelectedDeclNames namesText) else match resolveProjectBundle bundle {
   HostedProjectBundleOk modl ->
-    emitNativeModuleImageNamedDecls modl (if namesText == "" then [] else textSplit namesText "\n"),
+    emitNativeModuleImageNamedDecls modl (nativeDriverSelectedDeclNames namesText),
   HostedProjectBundleError message ->
     jsonArray [encode (textConcat ["ERROR:", message])]
 }

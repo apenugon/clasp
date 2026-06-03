@@ -400,6 +400,15 @@ localRouteHasPlannerDiskResourcePressure prompt =
   else
     false
 
+localRouteHasAnyPlannerResourcePressure : Str -> Bool
+localRouteHasAnyPlannerResourcePressure prompt =
+  if localRouteHasPlannerResourcePressure prompt then
+    true
+  else if localRouteHasPlannerMemoryResourcePressure prompt then
+    true
+  else
+    localRouteHasPlannerDiskResourcePressure prompt
+
 localRouteResourcePressureKindForPrompt : Str -> Str
 localRouteResourcePressureKindForPrompt prompt =
   if localRouteHasPlannerMemoryResourcePressure prompt then
@@ -524,7 +533,7 @@ localRouteHasAffectedVerificationLaunchGap prompt =
 
 localRouteTaskKindForPrompt : Str -> Str
 localRouteTaskKindForPrompt prompt =
-  if localRouteHasPlannerResourcePressure prompt then
+  if localRouteHasAnyPlannerResourcePressure prompt then
     localRouteTaskKindResourcePressure
   else if localRouteHasAffectedVerificationLaunchGap prompt then
     localRouteTaskKindAffectedVerification
@@ -532,13 +541,13 @@ localRouteTaskKindForPrompt prompt =
     localRouteTaskKindCapabilityAudit
   else if localRouteHasCapabilityAuditContextHandoff prompt then
     localRouteTaskKindCapabilityAudit
+  else if localRouteHasAutonomousLaunchGateGap prompt then
+    localRouteTaskKindStandaloneSwarm
   else if localRouteHasCapabilityMailboxHandoff prompt then
     localRouteTaskKindCapabilityAudit
   else if localRouteHasManagedSwarmProofHandoff prompt then
     localRouteTaskKindCapabilityAudit
   else if localRouteHasStandaloneSwarmClosureHandoff prompt then
-    localRouteTaskKindStandaloneSwarm
-  else if localRouteHasAutonomousLaunchGateGap prompt then
     localRouteTaskKindStandaloneSwarm
   else if localRouteHasBackendConfigRepair prompt then
     localRouteTaskKindStandaloneSwarm

@@ -1876,22 +1876,30 @@ attemptTaskListHasId : Str -> [SwarmTask] -> Bool
 attemptTaskListHasId wanted taskValues =
   (fold attemptTaskIdSearch (AttemptTaskIdSearch { wanted = wanted, found = false }) taskValues).found
 
+attemptCreateObjectiveError : AttemptSpec -> Str
+attemptCreateObjectiveError spec =
+  match objectiveCreate spec.root spec.objectiveId spec.objectiveDetail spec.objectiveMaxTasks spec.objectiveMaxRuns {
+    Ok created -> "",
+    Err message -> message
+  }
+
 attemptEnsureObjective : AttemptSpec -> Str
 attemptEnsureObjective spec = match objectives spec.root {
   Ok objectiveValues ->
     if attemptObjectiveListHasId spec.objectiveId objectiveValues then
       ""
     else
-      match objectiveCreate spec.root spec.objectiveId spec.objectiveDetail spec.objectiveMaxTasks spec.objectiveMaxRuns {
-        Ok created -> "",
-        Err message -> message
-      },
+      attemptCreateObjectiveError spec,
   Err message ->
-    match objectiveCreate spec.root spec.objectiveId spec.objectiveDetail spec.objectiveMaxTasks spec.objectiveMaxRuns {
-      Ok created -> "",
-      Err createMessage -> createMessage
-    }
+    attemptCreateObjectiveError spec
 }
+
+attemptCreateTaskError : AttemptSpec -> Str -> Str -> [Str] -> Int -> Int -> Str
+attemptCreateTaskError spec taskId detail dependencies maxRuns leaseTimeoutMs =
+  match taskCreate (objectiveHandle spec.root spec.objectiveId) taskId detail dependencies maxRuns leaseTimeoutMs {
+    Ok created -> "",
+    Err message -> message
+  }
 
 attemptEnsureTask : AttemptSpec -> Str -> Str -> [Str] -> Int -> Int -> Str
 attemptEnsureTask spec taskId detail dependencies maxRuns leaseTimeoutMs = match tasks spec.root {
@@ -1899,15 +1907,9 @@ attemptEnsureTask spec taskId detail dependencies maxRuns leaseTimeoutMs = match
     if attemptTaskListHasId taskId taskValues then
       ""
     else
-      match taskCreate (objectiveHandle spec.root spec.objectiveId) taskId detail dependencies maxRuns leaseTimeoutMs {
-        Ok created -> "",
-        Err message -> message
-      },
+      attemptCreateTaskError spec taskId detail dependencies maxRuns leaseTimeoutMs,
   Err message ->
-    match taskCreate (objectiveHandle spec.root spec.objectiveId) taskId detail dependencies maxRuns leaseTimeoutMs {
-      Ok created -> "",
-      Err createMessage -> createMessage
-    }
+    attemptCreateTaskError spec taskId detail dependencies maxRuns leaseTimeoutMs
 }
 
 attemptEnsureAttemptTasks : AttemptSpec -> Int -> Str -> Str -> Str
@@ -2591,82 +2593,76 @@ loopAgentBackend : AgentBackendSpec
 loopAgentBackend =
   agentBackendSpec agentBin agentModel agentReasoning agentSandbox workspaceRoot agentCommandTemplate
 
+statusReadyTaskIds : [Str]
+statusReadyTaskIds =
+  match ready objectiveRef {
+    Ok readyTasks -> map taskIdOf readyTasks,
+    Err message -> emptyTexts
+  }
+
+statusViewBase : AttemptStatus -> Str -> Int -> [Str] -> [Str] -> [Str] -> Bool -> StatusView
+statusViewBase state projectedStatusValue taskCountValue allTaskIdValues completedTaskIdValues readyTaskIdValues mergeSatisfied =
+  StatusView {
+    state = state,
+    agentBackend = agentBackendSummary loopAgentBackend,
+    objectiveProjectedStatus = projectedStatusValue,
+    taskCount = taskCountValue,
+    allTaskIds = allTaskIdValues,
+    completedTaskIds = completedTaskIdValues,
+    readyTaskIds = readyTaskIdValues,
+    approvalCount = statusApprovalCount state,
+    mergeDecisionDetail = statusMergeDecisionDetail state,
+    mergeGateSatisfied = mergeSatisfied,
+    feedbackSummary = statusFeedbackSummary,
+    previousVerifierFeedback = attemptPreviousVerifierFeedback loopSpec,
+    retryDecision = attemptRetryDecisionFromStatus loopSpec state,
+    terminalOutcome = attemptOutcomeFromStatus loopSpec state
+  }
+
+statusMergeSatisfied : Int -> Str -> Str -> Bool
+statusMergeSatisfied approvalCountValue mergeDecisionDetailValue projectedStatusValue =
+  if approvalCountValue == 0 then
+    false
+  else
+    if mergeDecisionDetailValue == "" then
+      false
+    else
+      projectedStatusValue == "completed"
+
+statusViewWithValues : AttemptStatus -> [SwarmObjective] -> [SwarmTask] -> StatusView
+statusViewWithValues state objectiveValues taskValues = {
+  let scopedTasks = filter taskInObjective taskValues;
+  let projectedStatusValue = fold objectiveProjectedStatusFrom "missing" objectiveValues;
+  statusViewBase
+    state
+    projectedStatusValue
+    (length scopedTasks)
+    (map taskIdOf scopedTasks)
+    (map taskIdOf (filter taskCompleted scopedTasks))
+    statusReadyTaskIds
+    (statusMergeSatisfied (statusApprovalCount state) (statusMergeDecisionDetail state) projectedStatusValue)
+}
+
+statusViewTaskError : AttemptStatus -> Str -> StatusView
+statusViewTaskError state message =
+  statusViewBase state (textConcat ["task-error:", message]) 0 emptyTexts emptyTexts emptyTexts false
+
+statusViewObjectiveError : AttemptStatus -> Str -> StatusView
+statusViewObjectiveError state message =
+  statusViewBase state (textConcat ["objective-error:", message]) 0 emptyTexts emptyTexts emptyTexts false
+
+statusViewWithObjectives : AttemptStatus -> [SwarmObjective] -> StatusView
+statusViewWithObjectives state objectiveValues =
+  match tasks swarmStateRoot {
+    Ok taskValues -> statusViewWithValues state objectiveValues taskValues,
+    Err message -> statusViewTaskError state message
+  }
+
 statusView : AttemptStatus -> StatusView
 statusView state =
   match objectives swarmStateRoot {
-    Ok objectiveValues ->
-      match tasks swarmStateRoot {
-        Ok taskValues ->
-          let scopedTasks = filter taskInObjective taskValues in
-          let readyTaskIds = match ready objectiveRef {
-            Ok readyTasks -> map taskIdOf readyTasks,
-            Err message -> emptyTexts
-          } in
-          let approvalCountValue = statusApprovalCount state in
-          let mergeDecisionDetailValue = statusMergeDecisionDetail state in
-          let projectedStatusValue = fold objectiveProjectedStatusFrom "missing" objectiveValues in
-          StatusView {
-            state = state,
-            agentBackend = agentBackendSummary loopAgentBackend,
-            objectiveProjectedStatus = projectedStatusValue,
-            taskCount = length scopedTasks,
-            allTaskIds = map taskIdOf scopedTasks,
-            completedTaskIds = map taskIdOf (filter taskCompleted scopedTasks),
-            readyTaskIds = readyTaskIds,
-            approvalCount = approvalCountValue,
-            mergeDecisionDetail = mergeDecisionDetailValue,
-            mergeGateSatisfied =
-              if approvalCountValue == 0 then
-                false
-              else
-                if mergeDecisionDetailValue == "" then
-                  false
-                else
-                  projectedStatusValue == "completed",
-            feedbackSummary = statusFeedbackSummary,
-            previousVerifierFeedback = attemptPreviousVerifierFeedback loopSpec,
-            retryDecision = attemptRetryDecisionFromStatus loopSpec state,
-            terminalOutcome = attemptOutcomeFromStatus loopSpec state
-          },
-        Err message ->
-          let approvalCountValue = statusApprovalCount state in
-          let mergeDecisionDetailValue = statusMergeDecisionDetail state in
-          StatusView {
-            state = state,
-            agentBackend = agentBackendSummary loopAgentBackend,
-            objectiveProjectedStatus = textConcat ["task-error:", message],
-            taskCount = 0,
-            allTaskIds = emptyTexts,
-            completedTaskIds = emptyTexts,
-            readyTaskIds = emptyTexts,
-            approvalCount = approvalCountValue,
-            mergeDecisionDetail = mergeDecisionDetailValue,
-            mergeGateSatisfied = false,
-            feedbackSummary = statusFeedbackSummary,
-            previousVerifierFeedback = attemptPreviousVerifierFeedback loopSpec,
-            retryDecision = attemptRetryDecisionFromStatus loopSpec state,
-            terminalOutcome = attemptOutcomeFromStatus loopSpec state
-          }
-      },
-    Err message ->
-      let approvalCountValue = statusApprovalCount state in
-      let mergeDecisionDetailValue = statusMergeDecisionDetail state in
-      StatusView {
-        state = state,
-        agentBackend = agentBackendSummary loopAgentBackend,
-        objectiveProjectedStatus = textConcat ["objective-error:", message],
-        taskCount = 0,
-        allTaskIds = emptyTexts,
-        completedTaskIds = emptyTexts,
-        readyTaskIds = emptyTexts,
-        approvalCount = approvalCountValue,
-        mergeDecisionDetail = mergeDecisionDetailValue,
-        mergeGateSatisfied = false,
-        feedbackSummary = statusFeedbackSummary,
-        previousVerifierFeedback = attemptPreviousVerifierFeedback loopSpec,
-        retryDecision = attemptRetryDecisionFromStatus loopSpec state,
-        terminalOutcome = attemptOutcomeFromStatus loopSpec state
-      }
+    Ok objectiveValues -> statusViewWithObjectives state objectiveValues,
+    Err message -> statusViewObjectiveError state message
   }
 
 statusOutput : Str

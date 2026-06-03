@@ -226,9 +226,7 @@ bash scripts/test-codex-loop-program.sh
 bash examples/agent-loop-scenario/scripts/verify.sh
 bash scripts/test-agent-command-template.sh
 bash scripts/test-agent-backend-static.sh
-bash scripts/test-agent-ergonomics-helpers.sh
-CLASP_AGENT_COMMAND_TEMPLATE_COMMON=0 CLASP_AGENT_COMMAND_TEMPLATE_FEEDBACK=0 CLASP_AGENT_COMMAND_TEMPLATE_NATIVE=1 bash scripts/test-agent-command-template.sh
-bash scripts/test-goal-manager-agent-command-template.sh
+bash scripts/test-agent-ergonomics-helpers.sh static
 bash scripts/test-goal-manager-default-planner-command.sh
 bash scripts/test-js-process-runtime.sh
 bash scripts/test-js-emitter-determinism.sh

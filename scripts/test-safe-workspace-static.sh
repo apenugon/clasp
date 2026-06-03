@@ -94,7 +94,7 @@ assert(test.includes("replacement count limit"), "safe workspace runtime test sh
 
 assert(cleanupPlan.includes('foreign workspacePathSizeMbRaw : Str -> Str -> Result Int = "workspacePathSizeMb"'), "cleanup plan should use root-confined workspace size host boundary");
 assert(cleanupPlan.includes("record GeneratedCleanupProjection ="), "cleanup plan should expose cleanup projection record");
-assert(cleanupPlan.includes("generatedCleanupProjectionFor : Str -> Bool -> [GeneratedCleanupTarget] -> GeneratedCleanupDisk -> GeneratedCleanupProjection"), "cleanup plan should compute cleanup projection");
+assert(cleanupPlan.includes("generatedCleanupProjectionFor : Str -> Bool -> [GeneratedCleanupTarget] -> [GeneratedExternalLog] -> GeneratedCleanupDisk -> GeneratedCleanupProjection"), "cleanup plan should compute cleanup projection");
 assert(cleanupPlan.includes("generatedCleanupTargetsSizeMb"), "cleanup plan should total reclaimable repo targets");
 assert(cleanupPlan.includes("cleanupCanSatisfyGuard"), "cleanup plan should project guard sufficiency");
 

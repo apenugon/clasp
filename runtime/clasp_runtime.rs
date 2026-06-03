@@ -4419,19 +4419,8 @@ fn interpret_match_branch(
     env: &[(&str, *mut ClaspRtHeader)],
     depth: usize,
 ) -> *mut ClaspRtHeader {
-    let Some(branch) = branches.iter().find(|branch| branch.tag == tag) else {
-        return null_mut();
-    };
-
-    if branch.binders.len() > 1 {
-        return null_mut();
-    }
-
-    let mut extended_env: Vec<(&str, *mut ClaspRtHeader)> = env.to_vec();
-    if let Some(binder) = branch.binders.first() {
-        extended_env.push((binder.as_str(), payload));
-    }
-    interpret_native_expr(runtime, image, &branch.body, &extended_env, depth + 1)
+    let payloads = [payload];
+    interpret_match_branch_many(runtime, image, branches, tag, &payloads, env, depth)
 }
 
 fn interpret_match_branch_many(
@@ -4443,19 +4432,192 @@ fn interpret_match_branch_many(
     env: &[(&str, *mut ClaspRtHeader)],
     depth: usize,
 ) -> *mut ClaspRtHeader {
-    let Some(branch) = branches.iter().find(|branch| branch.tag == tag) else {
-        return null_mut();
-    };
+    for branch in branches {
+        let Some(bindings) = match_branch_payload_bindings(branch, tag, payloads) else {
+            continue;
+        };
 
-    if branch.binders.len() != payloads.len() {
-        return null_mut();
+        let mut extended_env: Vec<(&str, *mut ClaspRtHeader)> = env.to_vec();
+        for (name, value) in &bindings {
+            extended_env.push((name.as_str(), *value));
+        }
+        return interpret_native_expr(runtime, image, &branch.body, &extended_env, depth + 1);
+    }
+    null_mut()
+}
+
+fn match_branch_payload_bindings(
+    branch: &ClaspRtInterpretedMatchBranch,
+    tag: &str,
+    payloads: &[*mut ClaspRtHeader],
+) -> Option<Vec<(String, *mut ClaspRtHeader)>> {
+    if branch.tag == "_" {
+        return branch.binders.is_empty().then(Vec::new);
+    }
+    if branch.tag != tag || branch.binders.len() != payloads.len() {
+        return None;
     }
 
-    let mut extended_env: Vec<(&str, *mut ClaspRtHeader)> = env.to_vec();
+    let mut bindings = Vec::new();
     for (binder, payload) in branch.binders.iter().zip(payloads.iter().copied()) {
-        extended_env.push((binder.as_str(), payload));
+        if !collect_match_pattern_bindings(binder, payload, &mut bindings) {
+            return None;
+        }
     }
-    interpret_native_expr(runtime, image, &branch.body, &extended_env, depth + 1)
+    Some(bindings)
+}
+
+fn collect_match_pattern_bindings(
+    pattern: &str,
+    value: *mut ClaspRtHeader,
+    bindings: &mut Vec<(String, *mut ClaspRtHeader)>,
+) -> bool {
+    let checkpoint = bindings.len();
+    let matched = collect_match_pattern_bindings_inner(pattern, value, bindings);
+    if !matched {
+        bindings.truncate(checkpoint);
+    }
+    matched
+}
+
+fn collect_match_pattern_bindings_inner(
+    pattern: &str,
+    value: *mut ClaspRtHeader,
+    bindings: &mut Vec<(String, *mut ClaspRtHeader)>,
+) -> bool {
+    let pattern = normalize_match_pattern(pattern);
+    if pattern.is_empty() {
+        return false;
+    }
+    if pattern == "_" {
+        return true;
+    }
+
+    let parts = split_match_pattern_atoms(&pattern);
+    if let Some(head) = parts.first() {
+        if starts_with_uppercase_ascii(head) {
+            let Some((tag, payloads)) = match_value_tag_payloads(value) else {
+                return false;
+            };
+            if tag != *head || payloads.len() + 1 != parts.len() {
+                return false;
+            }
+            for (nested_pattern, nested_value) in parts.iter().skip(1).zip(payloads.iter().copied()) {
+                if !collect_match_pattern_bindings(nested_pattern, nested_value, bindings) {
+                    return false;
+                }
+            }
+            return true;
+        }
+    }
+
+    bindings.push((pattern, value));
+    true
+}
+
+fn normalize_match_pattern(pattern: &str) -> String {
+    let mut current = pattern.trim().to_owned();
+    loop {
+        let Some(inner) = strip_balanced_outer_parens(&current) else {
+            return current;
+        };
+        current = inner.trim().to_owned();
+    }
+}
+
+fn strip_balanced_outer_parens(value: &str) -> Option<&str> {
+    let bytes = value.as_bytes();
+    if bytes.first().copied() != Some(b'(') || bytes.last().copied() != Some(b')') {
+        return None;
+    }
+
+    let mut depth = 0i32;
+    for (index, byte) in bytes.iter().enumerate() {
+        match *byte {
+            b'(' => depth += 1,
+            b')' => {
+                depth -= 1;
+                if depth == 0 && index + 1 != bytes.len() {
+                    return None;
+                }
+                if depth < 0 {
+                    return None;
+                }
+            }
+            _ => {}
+        }
+    }
+    if depth == 0 {
+        Some(&value[1..value.len() - 1])
+    } else {
+        None
+    }
+}
+
+fn split_match_pattern_atoms(value: &str) -> Vec<String> {
+    let mut atoms = Vec::new();
+    let mut start: Option<usize> = None;
+    let mut depth = 0i32;
+
+    for (index, ch) in value.char_indices() {
+        match ch {
+            '(' => {
+                if start.is_none() {
+                    start = Some(index);
+                }
+                depth += 1;
+            }
+            ')' => {
+                depth -= 1;
+            }
+            ch if ch.is_whitespace() && depth == 0 => {
+                if let Some(atom_start) = start.take() {
+                    if atom_start < index {
+                        atoms.push(value[atom_start..index].trim().to_owned());
+                    }
+                }
+            }
+            _ => {
+                if start.is_none() {
+                    start = Some(index);
+                }
+            }
+        }
+    }
+
+    if let Some(atom_start) = start {
+        if atom_start < value.len() {
+            atoms.push(value[atom_start..].trim().to_owned());
+        }
+    }
+    atoms
+}
+
+fn starts_with_uppercase_ascii(value: &str) -> bool {
+    value
+        .as_bytes()
+        .first()
+        .copied()
+        .is_some_and(|byte| byte.is_ascii_uppercase())
+}
+
+fn match_value_tag_payloads(value: *mut ClaspRtHeader) -> Option<(String, Vec<*mut ClaspRtHeader>)> {
+    if value.is_null() {
+        return None;
+    }
+    unsafe {
+        if (*value).layout_id == CLASP_RT_LAYOUT_RESULT_STRING {
+            let result = value as *mut ClaspRtResultString;
+            let tag = if (*result).is_ok { "Ok" } else { "Err" };
+            return Some((tag.to_owned(), vec![(*result).value as *mut ClaspRtHeader]));
+        }
+        if (*value).layout_id == CLASP_RT_LAYOUT_VARIANT_VALUE {
+            let variant = value as *mut ClaspRtVariantValue;
+            let tag = String::from_utf8_lossy(string_bytes((*variant).tag)).into_owned();
+            return Some((tag, variant_items(variant).to_vec()));
+        }
+    }
+    None
 }
 
 impl Drop for ClaspRtNativeModuleImage {
@@ -16126,6 +16288,137 @@ mod tests {
             );
 
             release_header(null_mut(), result);
+            clasp_rt_native_module_image_free(null_mut(), image);
+            release_header(null_mut(), image_text as *mut ClaspRtHeader);
+        }
+    }
+
+    #[test]
+    fn interpreted_match_binds_nested_constructor_patterns() {
+        let image_json = r#"{
+            "format": "clasp-native-image-v1",
+            "module": "NestedPatternRuntime",
+            "exports": ["nestedPatternSummary", "wildcardPatternSummary"],
+            "entrypoints": [
+                {"name": "nestedPatternSummary", "symbol": "clasp_native__NestedPatternRuntime__nestedPatternSummary", "kind": "function", "arity": 1},
+                {"name": "wildcardPatternSummary", "symbol": "clasp_native__NestedPatternRuntime__wildcardPatternSummary", "kind": "function", "arity": 1}
+            ],
+            "abi": {"recordLayouts": [], "variantLayouts": []},
+            "runtime": {"profile": "compiler_backend_minimal", "bindings": [], "boundaries": []},
+            "compatibility": {
+                "interfaceFingerprint": "native-compat:test",
+                "acceptedPreviousFingerprints": [],
+                "migration": {
+                    "strategy": "exact-interface-only",
+                    "stateType": null,
+                    "snapshotSymbol": null,
+                    "handoffSymbol": null
+                }
+            },
+            "decls": [
+                {
+                    "kind": "function",
+                    "name": "nestedPatternSummary",
+                    "params": ["approval"],
+                    "body": {
+                        "kind": "match",
+                        "scrutinee": {"kind": "local", "name": "approval"},
+                        "branches": [
+                            {
+                                "tag": "SomeApproval",
+                                "binders": ["(Accepted name)"],
+                                "body": {"kind": "local", "name": "name"}
+                            },
+                            {
+                                "tag": "SomeApproval",
+                                "binders": ["(Rejected _)"],
+                                "body": {"kind": "string", "value": "rejected"}
+                            },
+                            {
+                                "tag": "SomeApproval",
+                                "binders": ["_"],
+                                "body": {"kind": "string", "value": "unknown"}
+                            },
+                            {
+                                "tag": "NoApproval",
+                                "binders": [],
+                                "body": {"kind": "string", "value": "none"}
+                            }
+                        ]
+                    }
+                },
+                {
+                    "kind": "function",
+                    "name": "wildcardPatternSummary",
+                    "params": ["approval"],
+                    "body": {
+                        "kind": "match",
+                        "scrutinee": {"kind": "local", "name": "approval"},
+                        "branches": [
+                            {
+                                "tag": "_",
+                                "binders": [],
+                                "body": {"kind": "string", "value": "any"}
+                            }
+                        ]
+                    }
+                }
+            ]
+        }"#;
+
+        unsafe {
+            let image_text = build_runtime_string(image_json.as_bytes());
+            let image = clasp_rt_native_module_image_load(image_text as *mut ClaspRtJson);
+            assert!(!image.is_null(), "expected native image fixture to load");
+
+            let accepted_name = build_runtime_string(b"Ada") as *mut ClaspRtHeader;
+            let accepted = clasp_rt_build_variant_header("Accepted", vec![accepted_name]);
+            let accepted_approval = clasp_rt_build_variant_header("SomeApproval", vec![accepted]);
+            let accepted_result =
+                interpret_native_decl(null_mut(), image, "nestedPatternSummary", &[accepted_approval], 0);
+            assert!(!accepted_result.is_null(), "expected nested binder to produce a value");
+            assert_eq!(
+                String::from_utf8_lossy(string_bytes(accepted_result as *mut ClaspRtString)),
+                "Ada"
+            );
+
+            let rejected_reason = build_runtime_string(b"blocked") as *mut ClaspRtHeader;
+            let rejected = clasp_rt_build_variant_header("Rejected", vec![rejected_reason]);
+            let rejected_approval = clasp_rt_build_variant_header("SomeApproval", vec![rejected]);
+            let rejected_result =
+                interpret_native_decl(null_mut(), image, "nestedPatternSummary", &[rejected_approval], 0);
+            assert!(!rejected_result.is_null(), "expected rejected branch to produce a value");
+            assert_eq!(
+                String::from_utf8_lossy(string_bytes(rejected_result as *mut ClaspRtString)),
+                "rejected"
+            );
+
+            let pending = clasp_rt_build_variant_header("Pending", Vec::new());
+            let pending_approval = clasp_rt_build_variant_header("SomeApproval", vec![pending]);
+            let pending_result =
+                interpret_native_decl(null_mut(), image, "nestedPatternSummary", &[pending_approval], 0);
+            assert!(!pending_result.is_null(), "expected constructor fallback to produce a value");
+            assert_eq!(
+                String::from_utf8_lossy(string_bytes(pending_result as *mut ClaspRtString)),
+                "unknown"
+            );
+
+            let no_approval = clasp_rt_build_variant_header("NoApproval", Vec::new());
+            let wildcard_result =
+                interpret_native_decl(null_mut(), image, "wildcardPatternSummary", &[no_approval], 0);
+            assert!(!wildcard_result.is_null(), "expected top-level wildcard to produce a value");
+            assert_eq!(
+                String::from_utf8_lossy(string_bytes(wildcard_result as *mut ClaspRtString)),
+                "any"
+            );
+
+            release_header(null_mut(), accepted_approval);
+            release_header(null_mut(), rejected_approval);
+            release_header(null_mut(), rejected_result);
+            release_header(null_mut(), pending_approval);
+            release_header(null_mut(), pending_result);
+            release_header(null_mut(), no_approval);
+            release_header(null_mut(), wildcard_result);
             clasp_rt_native_module_image_free(null_mut(), image);
             release_header(null_mut(), image_text as *mut ClaspRtHeader);
         }
