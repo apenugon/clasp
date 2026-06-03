@@ -78,6 +78,8 @@ emitNativeExprJson expr = match expr {
     jsonObject [jsonFieldText "kind" "intrinsic", jsonFieldText "name" "list.prepend", jsonFieldRaw "value" (emitNativeExprJson value), jsonFieldRaw "values" (emitNativeExprJson values)],
   LowerListReverse values ->
     jsonObject [jsonFieldText "kind" "intrinsic", jsonFieldText "name" "list.reverse", jsonFieldRaw "values" (emitNativeExprJson values)],
+  LowerListConcat values ->
+    jsonObject [jsonFieldText "kind" "intrinsic", jsonFieldText "name" "list.concat", jsonFieldRaw "values" (emitNativeExprJson values)],
   LowerLength value ->
     jsonObject [jsonFieldText "kind" "intrinsic", jsonFieldText "name" "length", jsonFieldRaw "value" (emitNativeExprJson value)],
   LowerListMap callee values ->

@@ -451,6 +451,7 @@ enum ClaspRtInterpretedIntrinsic {
     ListAppend(Box<ClaspRtInterpretedExpr>, Box<ClaspRtInterpretedExpr>),
     ListPrepend(Box<ClaspRtInterpretedExpr>, Box<ClaspRtInterpretedExpr>),
     ListReverse(Box<ClaspRtInterpretedExpr>),
+    ListConcat(Box<ClaspRtInterpretedExpr>),
     Length(Box<ClaspRtInterpretedExpr>),
     ListMap(String, Box<ClaspRtInterpretedExpr>),
     ListFilter(String, Box<ClaspRtInterpretedExpr>),
@@ -1677,6 +1678,39 @@ unsafe fn reverse_list_like_values(values: *mut ClaspRtHeader) -> Option<Vec<*mu
     Some(items)
 }
 
+unsafe fn concat_list_like_values(values: *mut ClaspRtHeader) -> Option<Vec<*mut ClaspRtHeader>> {
+    if values.is_null() || (*values).layout_id != CLASP_RT_LAYOUT_LIST_VALUE {
+        return None;
+    }
+
+    let mut items = Vec::new();
+    for nested in list_value_items(values as *mut ClaspRtListValue) {
+        if (*nested).is_null() {
+            for item in items {
+                release_header(null_mut(), item);
+            }
+            return None;
+        }
+        if (**nested).layout_id == CLASP_RT_LAYOUT_STRING_LIST {
+            for item in string_list_items_mut(*nested as *mut ClaspRtStringList) {
+                retain_header(*item as *mut ClaspRtHeader);
+                items.push(*item as *mut ClaspRtHeader);
+            }
+        } else if (**nested).layout_id == CLASP_RT_LAYOUT_LIST_VALUE {
+            for item in list_value_items(*nested as *mut ClaspRtListValue) {
+                retain_header(*item);
+                items.push(*item);
+            }
+        } else {
+            for item in items {
+                release_header(null_mut(), item);
+            }
+            return None;
+        }
+    }
+    Some(items)
+}
+
 unsafe fn list_or_text_length(value: *mut ClaspRtHeader) -> Option<i64> {
     if value.is_null() {
         return None;
@@ -1891,6 +1925,23 @@ fn interpret_legacy_list_builtin_call(
                 release_header(runtime, values);
             }
             Some(match reversed {
+                Some(items) => unsafe { build_runtime_list_value(items) as *mut ClaspRtHeader },
+                None => null_mut(),
+            })
+        }
+        "concat" if args.len() == 1 => {
+            let values = interpret_native_expr(runtime, image, &args[0], env, depth + 1);
+            if values.is_null() {
+                return Some(null_mut());
+            }
+            if unsafe { is_early_return_value(values) } {
+                return Some(values);
+            }
+            let concatenated = unsafe { concat_list_like_values(values) };
+            unsafe {
+                release_header(runtime, values);
+            }
+            Some(match concatenated {
                 Some(items) => unsafe { build_runtime_list_value(items) as *mut ClaspRtHeader },
                 None => null_mut(),
             })
@@ -2707,6 +2758,23 @@ fn interpret_native_expr(
                 release_header(runtime, values);
             }
             match reversed {
+                Some(items) => unsafe { build_runtime_list_value(items) as *mut ClaspRtHeader },
+                None => null_mut(),
+            }
+        }
+        ClaspRtInterpretedExpr::Intrinsic(ClaspRtInterpretedIntrinsic::ListConcat(values_expr)) => {
+            let values = interpret_native_expr(runtime, image, values_expr, env, depth + 1);
+            if values.is_null() {
+                return null_mut();
+            }
+            if unsafe { is_early_return_value(values) } {
+                return values;
+            }
+            let concatenated = unsafe { concat_list_like_values(values) };
+            unsafe {
+                release_header(runtime, values);
+            }
+            match concatenated {
                 Some(items) => unsafe { build_runtime_list_value(items) as *mut ClaspRtHeader },
                 None => null_mut(),
             }
@@ -6324,6 +6392,15 @@ fn parse_interpreted_expr_json(bytes: &[u8], expr_slice: JsonSlice) -> Option<Cl
             let values_slice = json_object_lookup(bytes, expr_slice, "values")?;
             return Some(ClaspRtInterpretedExpr::Intrinsic(
                 ClaspRtInterpretedIntrinsic::ListReverse(Box::new(parse_interpreted_expr_json(
+                    bytes,
+                    values_slice,
+                )?)),
+            ));
+        }
+        if json_string_equals(bytes, name_slice, "list.concat") {
+            let values_slice = json_object_lookup(bytes, expr_slice, "values")?;
+            return Some(ClaspRtInterpretedExpr::Intrinsic(
+                ClaspRtInterpretedIntrinsic::ListConcat(Box::new(parse_interpreted_expr_json(
                     bytes,
                     values_slice,
                 )?)),

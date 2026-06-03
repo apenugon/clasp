@@ -557,6 +557,7 @@ Package-backed foreign declarations are checked against the referenced declarati
 - `append left right` is overloaded by the checker: list operands lower to array concatenation, while `View` operands keep the view-append surface.
 - `prepend value values` inserts a single element at the front of a list and is polymorphic over the element type.
 - `reverse values` reverses a list and preserves the list item type.
+- `concat values` flattens one level of nested lists, with type `[[a]] -> [a]`.
 - `length value` returns the length of a list or string.
 - `map f values`, `filter f values`, `find f values`, `any f values`, `all f values`, and `fold f initial values` provide polymorphic list traversal helpers. `find` returns `Option a`, and these helpers today require a plain function name as their first argument.
 - `Dict Str a` is a compiler-known dictionary surface for state-heavy compiler and swarm code; `dictSet`, `dictGet`, `dictHas`, `dictRemove`, `dictKeys`, and `dictValues` provide immutable update and lookup helpers over string-keyed maps.

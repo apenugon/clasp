@@ -61,6 +61,8 @@ exprNeedsBuiltinPrelude expr = match expr {
     if exprNeedsBuiltinPrelude value then true else exprNeedsBuiltinPrelude values,
   LowerListReverse values ->
     exprNeedsBuiltinPrelude values,
+  LowerListConcat values ->
+    exprNeedsBuiltinPrelude values,
   LowerLength value ->
     exprNeedsBuiltinPrelude value,
   LowerListMap callee values ->
@@ -166,6 +168,8 @@ exprNeedsNodeProcessPrelude expr = match expr {
   LowerListPrepend value values ->
     if exprNeedsNodeProcessPrelude value then true else exprNeedsNodeProcessPrelude values,
   LowerListReverse values ->
+    exprNeedsNodeProcessPrelude values,
+  LowerListConcat values ->
     exprNeedsNodeProcessPrelude values,
   LowerLength value ->
     exprNeedsNodeProcessPrelude value,

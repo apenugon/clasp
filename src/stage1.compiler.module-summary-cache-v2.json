@@ -5,7 +5,7 @@
   "summaries": [
     {
       "moduleName": "Compiler.AstText",
-      "cacheKey": "562f89bb1f07c554.cache",
+      "cacheKey": "645d23c4659ae8ce.cache",
       "sourceFingerprint": "53472e027f83bf0f",
       "declFingerprints": {
         "astTextAppendChar": "b6356c40d145790b",
@@ -51,7 +51,7 @@
     },
     {
       "moduleName": "Compiler.Ast",
-      "cacheKey": "a883b2c65e4e26b4.cache",
+      "cacheKey": "5266b11ff3adbe5e.cache",
       "sourceFingerprint": "9ff8df0c069bd260",
       "declFingerprints": {
         "renderStringLiteral": "c2e6c2c04b0295ae",
@@ -503,7 +503,7 @@
     },
     {
       "moduleName": "Compiler.Checker.Types",
-      "cacheKey": "76192fd53109e4be.cache",
+      "cacheKey": "37d00a649a076710.cache",
       "sourceFingerprint": "00b82bcae8509731",
       "declFingerprints": {
         "keepNoTypeBinding": "d5431165551067a3",
@@ -520,8 +520,8 @@
     },
     {
       "moduleName": "Compiler.Checker.Builtins",
-      "cacheKey": "a02466cfbbd74ace.cache",
-      "sourceFingerprint": "54d3d5c3a31ad65e",
+      "cacheKey": "7d6e36b078baad82.cache",
+      "sourceFingerprint": "16df3faa302a7569",
       "declFingerprints": {
         "stringBuiltinType": "2716c46e8b6009e2",
         "intAddBuiltinType": "ed95a9706c829e02",
@@ -535,6 +535,7 @@
         "optionNoneConstructorName": "f9c061acc6948e40",
         "prependBuiltinType": "17b47c9425e891f6",
         "reverseBuiltinType": "ab48d755239737f0",
+        "concatBuiltinType": "56483540d10695f3",
         "mapBuiltinType": "81037ea00f900ea0",
         "filterBuiltinType": "934094609ae180a5",
         "findBuiltinType": "dc757d90e99dfaf3",
@@ -665,13 +666,13 @@
         "tenantBuiltinType": "ea8190166ac64bd9",
         "resourceIdentityBuiltinType": "f63ac4b45fb2fa21",
         "authSessionBuiltinType": "bf7789d3dba1302c",
-        "baseEnv": "875aca1a6f81f0af"
+        "baseEnv": "d05d1c8f92cfb42f"
       },
-      "summary": "stringBuiltinType : TypeText\nintAddBuiltinType : TypeText\nintSubtractBuiltinType : TypeText\nresultBuiltinTypeName : Str\nresultOkConstructorName : Str\nresultErrConstructorName : Str\nresultStringBuiltinType : TypeText\noptionBuiltinTypeName : Str\noptionSomeConstructorName : Str\noptionNoneConstructorName : Str\nprependBuiltinType : TypeText\nreverseBuiltinType : TypeText\nmapBuiltinType : TypeText\nfilterBuiltinType : TypeText\nfindBuiltinType : TypeText\nanyBuiltinType : TypeText\nallBuiltinType : TypeText\nfoldBuiltinType : TypeText\ntextConcatBuiltinType : TypeText\ntextJoinBuiltinType : TypeText\ntextSplitBuiltinType : TypeText\ntextCharsBuiltinType : TypeText\ntextFingerprint64HexBuiltinType : TypeText\ntextPrefixBuiltinType : TypeText\ntextSplitFirstBuiltinType : TypeText\ndictBuiltinType : TypeText\ndictEmptyBuiltinType : TypeText\ndictSetBuiltinType : TypeText\ndictGetBuiltinType : TypeText\ndictHasBuiltinType : TypeText\ndictRemoveBuiltinType : TypeText\ndictKeysBuiltinType : TypeText\ndictValuesBuiltinType : TypeText\ntextViewBuiltinType : TypeText\nelementBuiltinType : TypeText\nstyledBuiltinType : TypeText\nlinkBuiltinType : TypeText\nformBuiltinType : TypeText\ninputBuiltinType : TypeText\nsubmitBuiltinType : TypeText\nsystemPromptBuiltinType : TypeText\nassistantPromptBuiltinType : TypeText\nuserPromptBuiltinType : TypeText\nappendPromptBuiltinType : TypeText\npromptTextBuiltinType : TypeText\npageBuiltinType : TypeText\nredirectBuiltinType : TypeText\npathJoinBuiltinType : TypeText\npathDirnameBuiltinType : TypeText\npathBasenameBuiltinType : TypeText\nfileExistsBuiltinType : TypeText\nreadFileBuiltinType : TypeText\nlistDirBuiltinType : TypeText\nrunCommandJsonBuiltinType : TypeText\nrunCommandTimeoutJsonBuiltinType : TypeText\nspawnCommandJsonBuiltinType : TypeText\nspawnCommandWithLimitsJsonBuiltinType : TypeText\nwatchCommandJsonBuiltinType : TypeText\nwatchCommandWithLimitsJsonBuiltinType : TypeText\nreconcileWatchedProcessJsonBuiltinType : TypeText\nawaitWatchedProcessJsonBuiltinType : TypeText\nawaitWatchedProcessTimeoutJsonBuiltinType : TypeText\nhandoffCommandJsonBuiltinType : TypeText\nupgradeCommandJsonBuiltinType : TypeText\nsuperviseCommandJsonBuiltinType : TypeText\nsleepMsBuiltinType : TypeText\nswarmBootstrapJsonBuiltinType : TypeText\nswarmStartJsonBuiltinType : TypeText\nswarmLeaseJsonBuiltinType : TypeText\nswarmReleaseJsonBuiltinType : TypeText\nswarmHeartbeatJsonBuiltinType : TypeText\nswarmCompleteJsonBuiltinType : TypeText\nswarmFailJsonBuiltinType : TypeText\nswarmRetryJsonBuiltinType : TypeText\nswarmStopJsonBuiltinType : TypeText\nswarmResumeJsonBuiltinType : TypeText\nswarmStatusJsonBuiltinType : TypeText\nswarmHistoryJsonBuiltinType : TypeText\nswarmTasksJsonBuiltinType : TypeText\nswarmSummaryJsonBuiltinType : TypeText\nswarmTailJsonBuiltinType : TypeText\nswarmReadyJsonBuiltinType : TypeText\nswarmManagerNextJsonBuiltinType : TypeText\nswarmObjectiveCreateJsonBuiltinType : TypeText\nswarmObjectiveCreateWithDeadlineJsonBuiltinType : TypeText\nswarmObjectiveStatusJsonBuiltinType : TypeText\nswarmObjectivesJsonBuiltinType : TypeText\nswarmTaskCreateJsonBuiltinType : TypeText\nswarmTaskCreateWithDeadlineJsonBuiltinType : TypeText\nswarmPolicySetJsonBuiltinType : TypeText\nswarmToolRunJsonBuiltinType : TypeText\nswarmVerifierRunJsonBuiltinType : TypeText\nswarmApproveJsonBuiltinType : TypeText\nswarmApprovalsJsonBuiltinType : TypeText\nswarmMergegateDecideJsonBuiltinType : TypeText\nswarmRunsJsonBuiltinType : TypeText\nswarmArtifactsJsonBuiltinType : TypeText\nswarmMemoryPutJsonBuiltinType : TypeText\nswarmMemoryQueryJsonBuiltinType : TypeText\nswarmMemorySearchJsonBuiltinType : TypeText\nargvBuiltinType : TypeText\ntimeUnixMsBuiltinType : TypeText\nenvVarBuiltinType : TypeText\nwriteFileBuiltinType : TypeText\nappendFileBuiltinType : TypeText\nmkdirAllBuiltinType : TypeText\nbuiltinResultTypeDecl : HostedTypeDeclAst\nbuiltinOptionTypeDecl : HostedTypeDeclAst\nhostedTypeUsesNamedType : HostedTypeAst -> Str -> Bool\nrecordDeclUsesNamedType : HostedRecordDeclAst -> Str -> Bool\nconstructorDeclUsesNamedType : HostedConstructorDeclAst -> Str -> Bool\ntypeDeclUsesNamedType : HostedTypeDeclAst -> Str -> Bool\nannotationUsesNamedType : HostedAnnotationAst -> Str -> Bool\nexprUsesBuiltinResultRuntime : HostedExprAst -> Bool\nexprListUsesBuiltinResultRuntime : [HostedExprAst] -> Bool\nrecordFieldExprListUsesBuiltinResultRuntime : [HostedRecordFieldExprAst] -> Bool\nbranchUsesBuiltinResultRuntime : HostedMatchBranchAst -> Bool\nbranchListUsesBuiltinResultRuntime : [HostedMatchBranchAst] -> Bool\nexprUsesBuiltinOptionRuntime : HostedExprAst -> Bool\nexprListUsesBuiltinOptionRuntime : [HostedExprAst] -> Bool\nrecordFieldExprListUsesBuiltinOptionRuntime : [HostedRecordFieldExprAst] -> Bool\nbranchUsesBuiltinOptionRuntime : HostedMatchBranchAst -> Bool\nbranchListUsesBuiltinOptionRuntime : [HostedMatchBranchAst] -> Bool\ndeclUsesBuiltinResult : HostedDeclAst -> Bool\nforeignDeclUsesBuiltinResult : HostedForeignDeclAst -> Bool\ndeclUsesBuiltinOption : HostedDeclAst -> Bool\nforeignDeclUsesBuiltinOption : HostedForeignDeclAst -> Bool\nmoduleDeclaresBuiltinResult : HostedModuleAst -> Bool\nmoduleDeclaresBuiltinOption : HostedModuleAst -> Bool\nmoduleUsesBuiltinResult : HostedModuleAst -> Bool\nmoduleUsesBuiltinOption : HostedModuleAst -> Bool\nmoduleUsesCompilerKnownVariantTypes : HostedModuleAst -> Bool\nprincipalBuiltinRecordDecl : HostedRecordDeclAst\ntenantBuiltinRecordDecl : HostedRecordDeclAst\nresourceIdentityBuiltinRecordDecl : HostedRecordDeclAst\nauthSessionBuiltinRecordDecl : HostedRecordDeclAst\neffectiveModuleRecordDecls : HostedModuleAst -> [HostedRecordDeclAst]\neffectiveModuleTypeDecls : HostedModuleAst -> [HostedTypeDeclAst]\nprincipalBuiltinType : TypeText\ntenantBuiltinType : TypeText\nresourceIdentityBuiltinType : TypeText\nauthSessionBuiltinType : TypeText\nbaseEnv : [TypeBinding]"
+      "summary": "stringBuiltinType : TypeText\nintAddBuiltinType : TypeText\nintSubtractBuiltinType : TypeText\nresultBuiltinTypeName : Str\nresultOkConstructorName : Str\nresultErrConstructorName : Str\nresultStringBuiltinType : TypeText\noptionBuiltinTypeName : Str\noptionSomeConstructorName : Str\noptionNoneConstructorName : Str\nprependBuiltinType : TypeText\nreverseBuiltinType : TypeText\nconcatBuiltinType : TypeText\nmapBuiltinType : TypeText\nfilterBuiltinType : TypeText\nfindBuiltinType : TypeText\nanyBuiltinType : TypeText\nallBuiltinType : TypeText\nfoldBuiltinType : TypeText\ntextConcatBuiltinType : TypeText\ntextJoinBuiltinType : TypeText\ntextSplitBuiltinType : TypeText\ntextCharsBuiltinType : TypeText\ntextFingerprint64HexBuiltinType : TypeText\ntextPrefixBuiltinType : TypeText\ntextSplitFirstBuiltinType : TypeText\ndictBuiltinType : TypeText\ndictEmptyBuiltinType : TypeText\ndictSetBuiltinType : TypeText\ndictGetBuiltinType : TypeText\ndictHasBuiltinType : TypeText\ndictRemoveBuiltinType : TypeText\ndictKeysBuiltinType : TypeText\ndictValuesBuiltinType : TypeText\ntextViewBuiltinType : TypeText\nelementBuiltinType : TypeText\nstyledBuiltinType : TypeText\nlinkBuiltinType : TypeText\nformBuiltinType : TypeText\ninputBuiltinType : TypeText\nsubmitBuiltinType : TypeText\nsystemPromptBuiltinType : TypeText\nassistantPromptBuiltinType : TypeText\nuserPromptBuiltinType : TypeText\nappendPromptBuiltinType : TypeText\npromptTextBuiltinType : TypeText\npageBuiltinType : TypeText\nredirectBuiltinType : TypeText\npathJoinBuiltinType : TypeText\npathDirnameBuiltinType : TypeText\npathBasenameBuiltinType : TypeText\nfileExistsBuiltinType : TypeText\nreadFileBuiltinType : TypeText\nlistDirBuiltinType : TypeText\nrunCommandJsonBuiltinType : TypeText\nrunCommandTimeoutJsonBuiltinType : TypeText\nspawnCommandJsonBuiltinType : TypeText\nspawnCommandWithLimitsJsonBuiltinType : TypeText\nwatchCommandJsonBuiltinType : TypeText\nwatchCommandWithLimitsJsonBuiltinType : TypeText\nreconcileWatchedProcessJsonBuiltinType : TypeText\nawaitWatchedProcessJsonBuiltinType : TypeText\nawaitWatchedProcessTimeoutJsonBuiltinType : TypeText\nhandoffCommandJsonBuiltinType : TypeText\nupgradeCommandJsonBuiltinType : TypeText\nsuperviseCommandJsonBuiltinType : TypeText\nsleepMsBuiltinType : TypeText\nswarmBootstrapJsonBuiltinType : TypeText\nswarmStartJsonBuiltinType : TypeText\nswarmLeaseJsonBuiltinType : TypeText\nswarmReleaseJsonBuiltinType : TypeText\nswarmHeartbeatJsonBuiltinType : TypeText\nswarmCompleteJsonBuiltinType : TypeText\nswarmFailJsonBuiltinType : TypeText\nswarmRetryJsonBuiltinType : TypeText\nswarmStopJsonBuiltinType : TypeText\nswarmResumeJsonBuiltinType : TypeText\nswarmStatusJsonBuiltinType : TypeText\nswarmHistoryJsonBuiltinType : TypeText\nswarmTasksJsonBuiltinType : TypeText\nswarmSummaryJsonBuiltinType : TypeText\nswarmTailJsonBuiltinType : TypeText\nswarmReadyJsonBuiltinType : TypeText\nswarmManagerNextJsonBuiltinType : TypeText\nswarmObjectiveCreateJsonBuiltinType : TypeText\nswarmObjectiveCreateWithDeadlineJsonBuiltinType : TypeText\nswarmObjectiveStatusJsonBuiltinType : TypeText\nswarmObjectivesJsonBuiltinType : TypeText\nswarmTaskCreateJsonBuiltinType : TypeText\nswarmTaskCreateWithDeadlineJsonBuiltinType : TypeText\nswarmPolicySetJsonBuiltinType : TypeText\nswarmToolRunJsonBuiltinType : TypeText\nswarmVerifierRunJsonBuiltinType : TypeText\nswarmApproveJsonBuiltinType : TypeText\nswarmApprovalsJsonBuiltinType : TypeText\nswarmMergegateDecideJsonBuiltinType : TypeText\nswarmRunsJsonBuiltinType : TypeText\nswarmArtifactsJsonBuiltinType : TypeText\nswarmMemoryPutJsonBuiltinType : TypeText\nswarmMemoryQueryJsonBuiltinType : TypeText\nswarmMemorySearchJsonBuiltinType : TypeText\nargvBuiltinType : TypeText\ntimeUnixMsBuiltinType : TypeText\nenvVarBuiltinType : TypeText\nwriteFileBuiltinType : TypeText\nappendFileBuiltinType : TypeText\nmkdirAllBuiltinType : TypeText\nbuiltinResultTypeDecl : HostedTypeDeclAst\nbuiltinOptionTypeDecl : HostedTypeDeclAst\nhostedTypeUsesNamedType : HostedTypeAst -> Str -> Bool\nrecordDeclUsesNamedType : HostedRecordDeclAst -> Str -> Bool\nconstructorDeclUsesNamedType : HostedConstructorDeclAst -> Str -> Bool\ntypeDeclUsesNamedType : HostedTypeDeclAst -> Str -> Bool\nannotationUsesNamedType : HostedAnnotationAst -> Str -> Bool\nexprUsesBuiltinResultRuntime : HostedExprAst -> Bool\nexprListUsesBuiltinResultRuntime : [HostedExprAst] -> Bool\nrecordFieldExprListUsesBuiltinResultRuntime : [HostedRecordFieldExprAst] -> Bool\nbranchUsesBuiltinResultRuntime : HostedMatchBranchAst -> Bool\nbranchListUsesBuiltinResultRuntime : [HostedMatchBranchAst] -> Bool\nexprUsesBuiltinOptionRuntime : HostedExprAst -> Bool\nexprListUsesBuiltinOptionRuntime : [HostedExprAst] -> Bool\nrecordFieldExprListUsesBuiltinOptionRuntime : [HostedRecordFieldExprAst] -> Bool\nbranchUsesBuiltinOptionRuntime : HostedMatchBranchAst -> Bool\nbranchListUsesBuiltinOptionRuntime : [HostedMatchBranchAst] -> Bool\ndeclUsesBuiltinResult : HostedDeclAst -> Bool\nforeignDeclUsesBuiltinResult : HostedForeignDeclAst -> Bool\ndeclUsesBuiltinOption : HostedDeclAst -> Bool\nforeignDeclUsesBuiltinOption : HostedForeignDeclAst -> Bool\nmoduleDeclaresBuiltinResult : HostedModuleAst -> Bool\nmoduleDeclaresBuiltinOption : HostedModuleAst -> Bool\nmoduleUsesBuiltinResult : HostedModuleAst -> Bool\nmoduleUsesBuiltinOption : HostedModuleAst -> Bool\nmoduleUsesCompilerKnownVariantTypes : HostedModuleAst -> Bool\nprincipalBuiltinRecordDecl : HostedRecordDeclAst\ntenantBuiltinRecordDecl : HostedRecordDeclAst\nresourceIdentityBuiltinRecordDecl : HostedRecordDeclAst\nauthSessionBuiltinRecordDecl : HostedRecordDeclAst\neffectiveModuleRecordDecls : HostedModuleAst -> [HostedRecordDeclAst]\neffectiveModuleTypeDecls : HostedModuleAst -> [HostedTypeDeclAst]\nprincipalBuiltinType : TypeText\ntenantBuiltinType : TypeText\nresourceIdentityBuiltinType : TypeText\nauthSessionBuiltinType : TypeText\nbaseEnv : [TypeBinding]"
     },
     {
       "moduleName": "Compiler.Checker.TypeOps",
-      "cacheKey": "d2de98719162e448.cache",
+      "cacheKey": "e1046064800d79a0.cache",
       "sourceFingerprint": "35992138d4ce38e2",
       "declFingerprints": {
         "appendCheckerRenderedText": "b130a4e06db05e14",
@@ -770,7 +771,7 @@
     },
     {
       "moduleName": "Compiler.Checker.Bindings",
-      "cacheKey": "0ab03472015d8371.cache",
+      "cacheKey": "8ee83d4ee7b4a70d.cache",
       "sourceFingerprint": "7b3f1744a7124dcf",
       "declFingerprints": {
         "collectAnnotatedBindings": "ccfc7d20974f23b1",
@@ -789,7 +790,7 @@
     },
     {
       "moduleName": "Compiler.Checker.DeclFunction",
-      "cacheKey": "b0acade2fe672960.cache",
+      "cacheKey": "37104995d5cef342.cache",
       "sourceFingerprint": "a05ebe55105ba657",
       "declFingerprints": {
         "hasDeclParams": "4a65437bdd9b0a33",
@@ -802,7 +803,7 @@
     },
     {
       "moduleName": "Compiler.Checker.DecodeTarget",
-      "cacheKey": "fb40c86331a10eda.cache",
+      "cacheKey": "fcb587a4e3723e30.cache",
       "sourceFingerprint": "c57f012a5035f47e",
       "declFingerprints": {
         "decodeTargetTypeFromExpr": "196b890862d3754d"
@@ -811,7 +812,7 @@
     },
     {
       "moduleName": "Compiler.Checker.Equality",
-      "cacheKey": "ddc5a8a6c96720ad.cache",
+      "cacheKey": "6b8763a39b4228a7.cache",
       "sourceFingerprint": "a7093abf72fd8a87",
       "declFingerprints": {
         "supportsHostedEquality": "685f8424ffa2d0ec"
@@ -820,7 +821,7 @@
     },
     {
       "moduleName": "Compiler.Checker.RecordValidation",
-      "cacheKey": "ad2d6815055f3939.cache",
+      "cacheKey": "ca5e0327969d4385.cache",
       "sourceFingerprint": "796913c68b18fc9a",
       "declFingerprints": {
         "findRecordLiteralFieldValidationFailure": "5b46f394eb56e1a0"
@@ -829,7 +830,7 @@
     },
     {
       "moduleName": "Compiler.Checker.InferExpr",
-      "cacheKey": "4b42da5bd0ae266c.cache",
+      "cacheKey": "5137d7899a67e2e4.cache",
       "sourceFingerprint": "bbb84fca943624d4",
       "declFingerprints": {
         "inferRecordLiteralSubstitutions": "6fb62248550d0040",
@@ -874,7 +875,7 @@
     },
     {
       "moduleName": "Compiler.Checker.DeclInfer",
-      "cacheKey": "64a7c46a9b9e0d0c.cache",
+      "cacheKey": "252ce2aa4657a6bc.cache",
       "sourceFingerprint": "5540cbeb9bb81855",
       "declFingerprints": {
         "inferDecl": "1f9f03095207038d",
@@ -885,7 +886,7 @@
     },
     {
       "moduleName": "Compiler.Checker.ModuleEnv",
-      "cacheKey": "89b76d8a311b37ab.cache",
+      "cacheKey": "3243925a3055eff5.cache",
       "sourceFingerprint": "5c5296f8e2adeb80",
       "declFingerprints": {
         "moduleInitialEnv": "9a117f6f8074a630"
@@ -894,7 +895,7 @@
     },
     {
       "moduleName": "Compiler.Checker.ModulePass",
-      "cacheKey": "658332daf9845cbf.cache",
+      "cacheKey": "6578bcab22b1cd05.cache",
       "sourceFingerprint": "8a77a57144b81841",
       "declFingerprints": {
         "inferModulePassResult": "979ad1737a958598",
@@ -908,7 +909,7 @@
     },
     {
       "moduleName": "Compiler.Checker.ModuleValidation",
-      "cacheKey": "bcf0ef5edefc6b31.cache",
+      "cacheKey": "87364284a6b25da3.cache",
       "sourceFingerprint": "c012e4987375a8a1",
       "declFingerprints": {
         "metadataDeclarationShapeError": "a58f60b088d0f482",
@@ -920,7 +921,7 @@
     },
     {
       "moduleName": "Compiler.Checker.ModuleInfer",
-      "cacheKey": "f796c9907196c862.cache",
+      "cacheKey": "6f81c7e529a34cac.cache",
       "sourceFingerprint": "21b6b1b6b6c57050",
       "declFingerprints": {
         "inferModuleBindings": "d555986d5763622d",
@@ -930,7 +931,7 @@
     },
     {
       "moduleName": "Compiler.Checker.ModuleSummary",
-      "cacheKey": "d904ccfbc5fb4df7.cache",
+      "cacheKey": "b12f5bc9698df78d.cache",
       "sourceFingerprint": "855f5095c19e9865",
       "declFingerprints": {
         "renderModuleSummaryFromEnv": "fcebb0e5b02c520c",
@@ -944,14 +945,14 @@
     },
     {
       "moduleName": "Compiler.Checker",
-      "cacheKey": "5a8f414f6a91e12d.cache",
+      "cacheKey": "d557e3d3ea087ecf.cache",
       "sourceFingerprint": "ef2fefb76f192cd0",
       "declFingerprints": {},
       "summary": ""
     },
     {
       "moduleName": "Compiler.Json",
-      "cacheKey": "c07336bf1ecf21ce.cache",
+      "cacheKey": "766cf68c2c3b4aa4.cache",
       "sourceFingerprint": "1928aa5d2c3c6c44",
       "declFingerprints": {
         "keepNoJsonRenderedText": "c4f6254976f93445",
@@ -973,7 +974,7 @@
     },
     {
       "moduleName": "Compiler.CheckedCore",
-      "cacheKey": "19324ee2354feb6f.cache",
+      "cacheKey": "34e10c7c7b353b2d.cache",
       "sourceFingerprint": "fa9bbf56653ec961",
       "declFingerprints": {
         "keepNoCheckedCoreParamArtifact": "1e55f4bbe876dec1",
@@ -1040,8 +1041,8 @@
     },
     {
       "moduleName": "Compiler.Lower",
-      "cacheKey": "95ff2ec8cf6cb2d9.cache",
-      "sourceFingerprint": "5e3f20c9e3ff297a",
+      "cacheKey": "110806b62bf48875.cache",
+      "sourceFingerprint": "fd36a9190be9cfb4",
       "declFingerprints": {
         "keepNoLowerExpr": "f430839ca1ae06ff",
         "emptyLowerExprs": "c59fb638e842071e",
@@ -1070,6 +1071,7 @@
         "lowerAppendExpr": "11dadb1d4088dc17",
         "lowerPrependExpr": "0626294e6d8cee7b",
         "lowerReverseExpr": "7b40ad91f093158f",
+        "lowerConcatExpr": "9d05d30c9e78ef43",
         "lowerLengthExpr": "fad04e83cabe60e4",
         "lowerMapExpr": "cdb7d5980c1da9e3",
         "lowerFilterExpr": "a1340908333e286b",
@@ -1082,7 +1084,7 @@
         "lowerTryDecodeExpr": "6dc7aa64cc69f8aa",
         "recordUpdateLowerTempName": "5d69a7bcac3d6b1a",
         "lowerRecordUpdateExpr": "9a6cb1c151ed1498",
-        "lowerExpr": "5412594f1e72e1b0",
+        "lowerExpr": "5afe6c8e432b6879",
         "lowerFunctionLocalEnv": "f4256fc5386e7465",
         "lowerFunctionFnContext": "5765009120a69945",
         "lowerDecl": "e7087aeb1efebff7",
@@ -1092,17 +1094,17 @@
         "renderLowerRecordField": "7543425aeafbc8dd",
         "renderLowerMatchBranch": "aa10080fde43c1b1",
         "renderLowerMatchBranches": "bd6c56db337f691d",
-        "renderLowerExpr": "3753d8318b76838e",
+        "renderLowerExpr": "5ef2ab4907205212",
         "renderLowerDecl": "4b460049456f31b8",
         "renderLowerModuleSummary": "97d6e573fd1bde20",
         "renderLowerDeclByName": "3433d1ce24dd93ab",
         "lowerDeclName": "5de1acc176dfbe33"
       },
-      "summary": "keepNoLowerExpr : LowerExprText -> Bool\nemptyLowerExprs : [LowerExprText]\nkeepNoLowerRecordField : LowerRecordFieldText -> Bool\nemptyLowerRecordFields : [LowerRecordFieldText]\nkeepNoLowerMatchBranch : LowerMatchBranchText -> Bool\nemptyLowerMatchBranches : [LowerMatchBranchText]\nkeepNoLowerDecl : LowerDeclText -> Bool\nemptyLowerDecls : [LowerDeclText]\nappendLowerRenderedText : [Str] -> Str -> [Str]\nappendLowerExpr : [LowerExprText] -> LowerExprText -> [LowerExprText]\nappendLowerRecordField : [LowerRecordFieldText] -> LowerRecordFieldText -> [LowerRecordFieldText]\nappendLowerMatchBranch : [LowerMatchBranchText] -> LowerMatchBranchText -> [LowerMatchBranchText]\nappendLowerDecl : [LowerDeclText] -> LowerDeclText -> [LowerDeclText]\nhasLowerParams : HostedDeclAst -> Bool\nfallbackLowerEnv : HostedModuleAst -> [HostedTypeDeclAst] -> [TypeBinding]\nlowerModuleEnv : HostedModuleAst -> [HostedTypeDeclAst] -> [TypeBinding]\nunknownLowerType : TypeText\ninferredExprType : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedExprAst -> TypeText\nrecordNameForType : TypeText -> Str\nextendLowerLocalEnv : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> Str -> HostedExprAst -> [TypeBinding]\nextendLowerLoopLocalEnv : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> Str -> HostedExprAst -> [TypeBinding]\nlowerExprs : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> [LowerExprText]\nlowerRecordFields : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedRecordFieldExprAst] -> [LowerRecordFieldText]\nlowerMatchBranches : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedMatchBranchAst] -> [LowerMatchBranchText]\nlowerAppendExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> LowerExprText\nlowerPrependExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> LowerExprText\nlowerReverseExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> LowerExprText\nlowerLengthExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> LowerExprText\nlowerMapExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> LowerExprText\nlowerFilterExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> LowerExprText\nlowerFindExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> LowerExprText\nlowerAnyExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> LowerExprText\nlowerAllExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> LowerExprText\nlowerFoldExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> LowerExprText\nlowerEncodeExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> LowerExprText\nlowerDecodeExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> LowerExprText\nlowerTryDecodeExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> LowerExprText\nrecordUpdateLowerTempName : Str\nlowerRecordUpdateExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> LowerExprText\nlowerExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedExprAst -> LowerExprText\nlowerFunctionLocalEnv : HostedDeclAst -> [TypeBinding]\nlowerFunctionFnContext : HostedDeclAst -> ReturnContext\nlowerDecl : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> HostedDeclAst -> LowerDeclText\nlowerModule : HostedModuleAst -> [LowerDeclText]\nrenderLowerExprs : [LowerExprText] -> [Str]\nrenderLowerRecordFields : [LowerRecordFieldText] -> [Str]\nrenderLowerRecordField : LowerRecordFieldText -> Str\nrenderLowerMatchBranch : LowerMatchBranchText -> Str\nrenderLowerMatchBranches : [LowerMatchBranchText] -> [Str]\nrenderLowerExpr : LowerExprText -> Str\nrenderLowerDecl : LowerDeclText -> Str\nrenderLowerModuleSummary : [LowerDeclText] -> Str\nrenderLowerDeclByName : [LowerDeclText] -> Str -> Str\nlowerDeclName : LowerDeclText -> Str"
+      "summary": "keepNoLowerExpr : LowerExprText -> Bool\nemptyLowerExprs : [LowerExprText]\nkeepNoLowerRecordField : LowerRecordFieldText -> Bool\nemptyLowerRecordFields : [LowerRecordFieldText]\nkeepNoLowerMatchBranch : LowerMatchBranchText -> Bool\nemptyLowerMatchBranches : [LowerMatchBranchText]\nkeepNoLowerDecl : LowerDeclText -> Bool\nemptyLowerDecls : [LowerDeclText]\nappendLowerRenderedText : [Str] -> Str -> [Str]\nappendLowerExpr : [LowerExprText] -> LowerExprText -> [LowerExprText]\nappendLowerRecordField : [LowerRecordFieldText] -> LowerRecordFieldText -> [LowerRecordFieldText]\nappendLowerMatchBranch : [LowerMatchBranchText] -> LowerMatchBranchText -> [LowerMatchBranchText]\nappendLowerDecl : [LowerDeclText] -> LowerDeclText -> [LowerDeclText]\nhasLowerParams : HostedDeclAst -> Bool\nfallbackLowerEnv : HostedModuleAst -> [HostedTypeDeclAst] -> [TypeBinding]\nlowerModuleEnv : HostedModuleAst -> [HostedTypeDeclAst] -> [TypeBinding]\nunknownLowerType : TypeText\ninferredExprType : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedExprAst -> TypeText\nrecordNameForType : TypeText -> Str\nextendLowerLocalEnv : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> Str -> HostedExprAst -> [TypeBinding]\nextendLowerLoopLocalEnv : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> Str -> HostedExprAst -> [TypeBinding]\nlowerExprs : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> [LowerExprText]\nlowerRecordFields : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedRecordFieldExprAst] -> [LowerRecordFieldText]\nlowerMatchBranches : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedMatchBranchAst] -> [LowerMatchBranchText]\nlowerAppendExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> LowerExprText\nlowerPrependExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> LowerExprText\nlowerReverseExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> LowerExprText\nlowerConcatExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> LowerExprText\nlowerLengthExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> LowerExprText\nlowerMapExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> LowerExprText\nlowerFilterExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> LowerExprText\nlowerFindExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> LowerExprText\nlowerAnyExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> LowerExprText\nlowerAllExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> LowerExprText\nlowerFoldExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> LowerExprText\nlowerEncodeExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> LowerExprText\nlowerDecodeExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> LowerExprText\nlowerTryDecodeExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> LowerExprText\nrecordUpdateLowerTempName : Str\nlowerRecordUpdateExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> LowerExprText\nlowerExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> HostedExprAst -> LowerExprText\nlowerFunctionLocalEnv : HostedDeclAst -> [TypeBinding]\nlowerFunctionFnContext : HostedDeclAst -> ReturnContext\nlowerDecl : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> HostedDeclAst -> LowerDeclText\nlowerModule : HostedModuleAst -> [LowerDeclText]\nrenderLowerExprs : [LowerExprText] -> [Str]\nrenderLowerRecordFields : [LowerRecordFieldText] -> [Str]\nrenderLowerRecordField : LowerRecordFieldText -> Str\nrenderLowerMatchBranch : LowerMatchBranchText -> Str\nrenderLowerMatchBranches : [LowerMatchBranchText] -> [Str]\nrenderLowerExpr : LowerExprText -> Str\nrenderLowerDecl : LowerDeclText -> Str\nrenderLowerModuleSummary : [LowerDeclText] -> Str\nrenderLowerDeclByName : [LowerDeclText] -> Str -> Str\nlowerDeclName : LowerDeclText -> Str"
     },
     {
       "moduleName": "Compiler.Emit.JavaScript.Util",
-      "cacheKey": "cb700ca607039e25.cache",
+      "cacheKey": "8c981ff934c6c38b.cache",
       "sourceFingerprint": "ecb1c3173b52fda2",
       "declFingerprints": {
         "appendJsRenderedText": "b9235dcf1f49c218",
@@ -1114,13 +1116,13 @@
     },
     {
       "moduleName": "Compiler.Emit.JavaScript.Expr",
-      "cacheKey": "fbc255bdd92b6bce.cache",
-      "sourceFingerprint": "0faffc95ad4593eb",
+      "cacheKey": "04830e25cac82db7.cache",
+      "sourceFingerprint": "d017cd9f828bb3ff",
       "declFingerprints": {
         "hasReturnInExprs": "ec2bf94186ce7712",
         "hasReturnInRecordFields": "58011d2811192ba2",
         "hasReturnInMatchBranches": "1dc20a552da65e23",
-        "emitExprContainsReturn": "b8b4a55174e42af4",
+        "emitExprContainsReturn": "7df0b633ec6d8ae1",
         "emitExprs": "08cb8af55cd7c8fd",
         "emitRecordFields": "b24571eb69597c3d",
         "emitRecordField": "9490efcd4ae310e6",
@@ -1132,7 +1134,7 @@
         "emitMatchBranchBinderLines": "64683cf6494e3251",
         "emitMatchBranchLines": "91ea295c09c4550f",
         "emitMatchBranchBlocks": "6963701f55bf722d",
-        "emitExpr": "adc08769e979d6a2",
+        "emitExpr": "c7adea533eb6a505",
         "emitDecl": "19111299dd248d0d",
         "moduleHasReturn": "e354e7502a515116",
         "emitEarlyReturnPrelude": "3b3d6a64e0daa1de"
@@ -1141,7 +1143,7 @@
     },
     {
       "moduleName": "Compiler.Emit.JavaScript.Foreign",
-      "cacheKey": "00d1a33dfcc9be47.cache",
+      "cacheKey": "d0d61c8a748ea199.cache",
       "sourceFingerprint": "816770179cf0e9ed",
       "declFingerprints": {
         "defaultForeignParamNames": "91279a0574dad6b6",
@@ -1182,7 +1184,7 @@
     },
     {
       "moduleName": "Compiler.Emit.JavaScript.MetadataCore",
-      "cacheKey": "d8a1cb6732fb9b9d.cache",
+      "cacheKey": "5a4cf0c8350aec26.cache",
       "sourceFingerprint": "761b9046b98b9ee4",
       "declFingerprints": {
         "lowerDeclHasOneParamText": "0c3975628e6c26ca",
@@ -1211,7 +1213,7 @@
     },
     {
       "moduleName": "Compiler.Emit.JavaScript.MetadataBindings",
-      "cacheKey": "a60a4a69af76a720.cache",
+      "cacheKey": "ff8eebfb36d1bb15.cache",
       "sourceFingerprint": "1a741270e864ae25",
       "declFingerprints": {
         "emitFrontendModuleBindings": "43469da80a400666"
@@ -1220,7 +1222,7 @@
     },
     {
       "moduleName": "Compiler.Emit.JavaScript.MetadataContracts",
-      "cacheKey": "5f33bcf2923d1733.cache",
+      "cacheKey": "ef254609ce8f1cb0.cache",
       "sourceFingerprint": "bec9480ba3fb9a4a",
       "declFingerprints": {
         "emitHooks": "85a355d70dbc9f3d",
@@ -1233,15 +1235,15 @@
     },
     {
       "moduleName": "Compiler.Emit.JavaScript.Metadata",
-      "cacheKey": "6642d2fb6b74df53.cache",
+      "cacheKey": "8a7dec6fa576cc0c.cache",
       "sourceFingerprint": "c5b47cb67bbe057a",
       "declFingerprints": {},
       "summary": ""
     },
     {
       "moduleName": "Compiler.Emit.JavaScript.Needs",
-      "cacheKey": "e027a392065447d1.cache",
-      "sourceFingerprint": "fd867c5caba0e7d6",
+      "cacheKey": "d999abc143f89e76.cache",
+      "sourceFingerprint": "c149b2fa6c73905c",
       "declFingerprints": {
         "jsBuiltinPreludeName": "eebc8f810b6f6488",
         "jsNodeProcessBuiltinPreludeName": "b97a7907be212b1a",
@@ -1249,11 +1251,11 @@
         "exprsNeedBuiltinPrelude": "335f0cdde4d9de2d",
         "recordFieldsNeedBuiltinPrelude": "f5980920b5433e3d",
         "branchesNeedBuiltinPrelude": "f37bc27a87941bf8",
-        "exprNeedsBuiltinPrelude": "d0d8e43ac7db0679",
+        "exprNeedsBuiltinPrelude": "c5e227d700394527",
         "exprsNeedNodeProcessPrelude": "48079f09bf70ba4f",
         "recordFieldsNeedNodeProcessPrelude": "1486d94cd920c4e3",
         "branchesNeedNodeProcessPrelude": "274beb4c33e7d4ba",
-        "exprNeedsNodeProcessPrelude": "6bf2bcc8aaa036cb",
+        "exprNeedsNodeProcessPrelude": "de1d7dc6dee9c093",
         "moduleNeedsBuiltinPrelude": "7c500bbdab871c94",
         "declNeedsNodeProcessPrelude": "ee788df098f1c150",
         "moduleNeedsNodeProcessPrelude": "3426b6d27d7acaef",
@@ -1269,7 +1271,7 @@
     },
     {
       "moduleName": "Compiler.Emit.JavaScript.Prelude",
-      "cacheKey": "a501da2a223e5b2d.cache",
+      "cacheKey": "9ce1ed17e9d9ab80.cache",
       "sourceFingerprint": "fe66ea259af8d4ae",
       "declFingerprints": {
         "builtinPreludeLines": "bdf47fc95021a75c",
@@ -1279,7 +1281,7 @@
     },
     {
       "moduleName": "Compiler.Emit.JavaScript.Runtime",
-      "cacheKey": "f64e21e1464d4428.cache",
+      "cacheKey": "569d401ed96cf086.cache",
       "sourceFingerprint": "57d9c3f8e65c7c70",
       "declFingerprints": {
         "emitSelfHostedRuntimePrelude": "1a75b1f1ada15168"
@@ -1288,7 +1290,7 @@
     },
     {
       "moduleName": "Compiler.Emit.JavaScript.Schema",
-      "cacheKey": "baae5c176e62a688.cache",
+      "cacheKey": "094c97e99cacce9e.cache",
       "sourceFingerprint": "cc8527303449a47d",
       "declFingerprints": {
         "emitTypeSchemaDecodeExpr": "0a9a67427cc0c7dc",
@@ -1302,7 +1304,7 @@
     },
     {
       "moduleName": "Compiler.Emit.JavaScript",
-      "cacheKey": "596b1775ff3f6fb6.cache",
+      "cacheKey": "1c54cec9f554e337.cache",
       "sourceFingerprint": "64044b9820e359ca",
       "declFingerprints": {
         "emitFrontendModule": "0245a04319fd8043"
@@ -1311,7 +1313,7 @@
     },
     {
       "moduleName": "Compiler.Project",
-      "cacheKey": "6db302e97b0eeba2.cache",
+      "cacheKey": "787978045b3af250.cache",
       "sourceFingerprint": "a7927e07a4802d16",
       "declFingerprints": {
         "keepNoHostedModule": "9c8611c5b49d0668",
@@ -1344,7 +1346,7 @@
     },
     {
       "moduleName": "Compiler.SemanticArtifacts.Base",
-      "cacheKey": "9e45f9e7095993db.cache",
+      "cacheKey": "d61e5770608f107f.cache",
       "sourceFingerprint": "0b7e90d0bc0b8561",
       "declFingerprints": {
         "semanticJsonTextArray": "e5936281e18d7322",
@@ -1385,7 +1387,7 @@
     },
     {
       "moduleName": "Compiler.SemanticArtifacts.Air",
-      "cacheKey": "6130ebca0fa4adbe.cache",
+      "cacheKey": "5f6a2c1bbecfa690.cache",
       "sourceFingerprint": "4e5be22433faa976",
       "declFingerprints": {
         "semanticAirModuleNode": "586989d114ab36a4",
@@ -1414,7 +1416,7 @@
     },
     {
       "moduleName": "Compiler.SemanticArtifacts.Names",
-      "cacheKey": "f7300fb5e94714b4.cache",
+      "cacheKey": "f5d7b59fd831026a.cache",
       "sourceFingerprint": "0887277b4ec9f881",
       "declFingerprints": {
         "semanticRecordNames": "4922cc5cf6b6d5cd",
@@ -1442,7 +1444,7 @@
     },
     {
       "moduleName": "Compiler.SemanticArtifacts.Uses",
-      "cacheKey": "e7746d4b686ed15e.cache",
+      "cacheKey": "e5a9e2fcc550bd66.cache",
       "sourceFingerprint": "4270052634ab33fa",
       "declFingerprints": {
         "semanticDeclUseTargetNodeId": "312949670ef33b62",
@@ -1460,7 +1462,7 @@
     },
     {
       "moduleName": "Compiler.SemanticArtifacts.Impact",
-      "cacheKey": "16dd3b6da1934ccb.cache",
+      "cacheKey": "2f4f8fb0240113a7.cache",
       "sourceFingerprint": "3a48bb8c23c062a9",
       "declFingerprints": {
         "semanticAppendNonEmptyUniqueText": "6ae53b1607d6c138",
@@ -1528,7 +1530,7 @@
     },
     {
       "moduleName": "Compiler.SemanticArtifacts.ImpactIndex",
-      "cacheKey": "5f4344c0b18a1866.cache",
+      "cacheKey": "65a47f38e3de27ee.cache",
       "sourceFingerprint": "73f835e01c218733",
       "declFingerprints": {
         "semanticImpactEntry": "045f76e4ef1c27a0",
@@ -1546,7 +1548,7 @@
     },
     {
       "moduleName": "Compiler.SemanticArtifacts.SurfaceIndex",
-      "cacheKey": "b2b80a754c689185.cache",
+      "cacheKey": "0d497d3bd092f827.cache",
       "sourceFingerprint": "e05104691734ab50",
       "declFingerprints": {
         "semanticContextVerificationGuidance": "848bc09d12ba084a",
@@ -1571,7 +1573,7 @@
     },
     {
       "moduleName": "Compiler.SemanticArtifacts.ContextNodes",
-      "cacheKey": "74ad1afe0aa8ca73.cache",
+      "cacheKey": "331b73f2bc47bec1.cache",
       "sourceFingerprint": "649aa4e7be8f5569",
       "declFingerprints": {
         "semanticContextModuleNode": "8d4f564c63aa8d20",
@@ -1598,7 +1600,7 @@
     },
     {
       "moduleName": "Compiler.SemanticArtifacts",
-      "cacheKey": "5ffc936bf45d2706.cache",
+      "cacheKey": "293037bf2c610994.cache",
       "sourceFingerprint": "f4392e0305512ec7",
       "declFingerprints": {
         "semanticSourceNodeId": "7f7d5ea8de08a128",
@@ -1638,7 +1640,7 @@
     },
     {
       "moduleName": "Compiler.Driver.Frontend",
-      "cacheKey": "3daa6a63b4087491.cache",
+      "cacheKey": "a07be4b775bbd464.cache",
       "sourceFingerprint": "6440e74e493f2c83",
       "declFingerprints": {
         "frontendDriverSourceLoweredDecls": "a68438dc249b51a0",
@@ -1665,7 +1667,7 @@
     },
     {
       "moduleName": "Compiler.Emit.Native.Core",
-      "cacheKey": "bf36a30fae1c62e3.cache",
+      "cacheKey": "2971c941eed27670.cache",
       "sourceFingerprint": "10d4b8006c855913",
       "declFingerprints": {
         "appendNativeRenderedText": "031da1a51b657b78",
@@ -1687,7 +1689,7 @@
     },
     {
       "moduleName": "Compiler.Emit.Native.ExprText",
-      "cacheKey": "ffc101cbee6ddcdc.cache",
+      "cacheKey": "cba5215a788b981c.cache",
       "sourceFingerprint": "ba57e8ae5e85e78e",
       "declFingerprints": {
         "nativeExprNameText": "7a19f12f0e9ecc1d",
@@ -1719,15 +1721,15 @@
     },
     {
       "moduleName": "Compiler.Emit.Native.Expr",
-      "cacheKey": "038411929509853e.cache",
-      "sourceFingerprint": "f33741edf7d9b917",
+      "cacheKey": "ff5f50e0caea4e3f.cache",
+      "sourceFingerprint": "c14a690984fed256",
       "declFingerprints": {
         "emitNativeExprs": "28f7107a173fae6e",
         "emitNativeRecordFields": "405af81032479196",
         "emitNativeRecordField": "e5a66e70e1ba9e9e",
         "emitNativeMatchBranch": "92a50cdf764c4fce",
         "emitNativeMatchBranches": "597d0b9a6a81bc10",
-        "emitNativeExpr": "38deb08c1a2dc2a6",
+        "emitNativeExpr": "21418a8e87d7869b",
         "emitNativeDecl": "f01778c13e475756",
         "collectLowerDeclNames": "77032e7ce2602b88"
       },
@@ -1735,7 +1737,7 @@
     },
     {
       "moduleName": "Compiler.Emit.Native.RuntimeCodecs",
-      "cacheKey": "2fd3f8576e4a92a3.cache",
+      "cacheKey": "94145e46c5df9c46.cache",
       "sourceFingerprint": "d3745f7dce35b484",
       "declFingerprints": {
         "supportsRuntimeCodecType": "8368b3af9766b9e3",
@@ -1751,7 +1753,7 @@
     },
     {
       "moduleName": "Compiler.Emit.Native.RuntimeBindings",
-      "cacheKey": "fbfacb6013917bde.cache",
+      "cacheKey": "fa8f926319f68d2d.cache",
       "sourceFingerprint": "012c738f0c69dd5d",
       "declFingerprints": {
         "nativeRuntimeBindingSpecName": "db5f16ec5809433b",
@@ -1798,8 +1800,8 @@
     },
     {
       "moduleName": "Compiler.Emit.NativeJson",
-      "cacheKey": "0e515a0b835a661e.cache",
-      "sourceFingerprint": "76996efecf592ff9",
+      "cacheKey": "6cebf5ccb506d8e7.cache",
+      "sourceFingerprint": "12b10382d4e2bb12",
       "declFingerprints": {
         "appendNativeJsonText": "b06dd689089b87d6",
         "keepNoNativeJsonText": "efca2cf628d50935",
@@ -1809,7 +1811,7 @@
         "emitNativeJsonRecordFieldList": "2b955358ab4ab711",
         "emitNativeJsonMatchBranchList": "58cca76ea8fe9587",
         "emitNativeCompareOpJson": "6196df2dd8470df0",
-        "emitNativeExprJson": "35114716837cc1bc",
+        "emitNativeExprJson": "31d4ec45edde8505",
         "emitNativeRecordFieldJson": "f833b408b86825ed",
         "emitNativeMatchBranchJson": "81f0400ca1e6660d",
         "emitNativeDeclJson": "733c6d3373738a2b",
@@ -1819,7 +1821,7 @@
     },
     {
       "moduleName": "Compiler.Emit.NativeSurface",
-      "cacheKey": "4170266cb9445d7f.cache",
+      "cacheKey": "ade926956cdf35ca.cache",
       "sourceFingerprint": "995d29a6f7476d10",
       "declFingerprints": {
         "appendNativeSurfaceText": "3240ebc669264298",
@@ -1856,7 +1858,7 @@
     },
     {
       "moduleName": "Compiler.Emit.NativeDecls",
-      "cacheKey": "6a0d75c4cbc4144c.cache",
+      "cacheKey": "c9ead4819b77abd3.cache",
       "sourceFingerprint": "d82038b54464286b",
       "declFingerprints": {
         "appendNativeDeclRenderedText": "85927e38635a89b8",
@@ -1883,7 +1885,7 @@
     },
     {
       "moduleName": "Compiler.Emit.NativeMetadata",
-      "cacheKey": "a59d08ac137821a8.cache",
+      "cacheKey": "7d0bbf21154b1c21.cache",
       "sourceFingerprint": "1b8ae86fd2e0aaa2",
       "declFingerprints": {
         "appendNativeMetadataText": "8265febaefffcfa8",
@@ -1964,7 +1966,7 @@
     },
     {
       "moduleName": "Compiler.Emit.Native.RuntimeCodecEmit",
-      "cacheKey": "5d82737e9f24d41c.cache",
+      "cacheKey": "b9b5d79f1064e8ed.cache",
       "sourceFingerprint": "7727e85f6a481174",
       "declFingerprints": {
         "emitNativeJsonCodecImage": "ac865cee881ff5a5",
@@ -1980,7 +1982,7 @@
     },
     {
       "moduleName": "Compiler.Emit.Native.Layout",
-      "cacheKey": "707e122b97d62f97.cache",
+      "cacheKey": "c138107dace4dd0a.cache",
       "sourceFingerprint": "bd5091bbdc0ab7b3",
       "declFingerprints": {
         "emitNativeJsonNumberList": "af783c42630e4a9c",
@@ -2024,7 +2026,7 @@
     },
     {
       "moduleName": "Compiler.Emit.Native",
-      "cacheKey": "bbc30f452e3ff7b2.cache",
+      "cacheKey": "df1eb1c192597e7f.cache",
       "sourceFingerprint": "f04a07b9261ef0b9",
       "declFingerprints": {
         "emitNativeCompatibilitySurfaceImage": "a9509615d8be9f14",
@@ -2052,7 +2054,7 @@
     },
     {
       "moduleName": "Compiler.Driver.Native",
-      "cacheKey": "fcb7151b0e626b9d.cache",
+      "cacheKey": "118cbdc7c3b8a9ce.cache",
       "sourceFingerprint": "c7cdc33e324caeb4",
       "declFingerprints": {
         "nativeDriverSourceLoweredDecls": "e4f2f7b3dc4a4ee0",
@@ -2087,7 +2089,7 @@
     },
     {
       "moduleName": "Compiler.SnapshotFixture",
-      "cacheKey": "61feb1c354f76313.cache",
+      "cacheKey": "0246c1d03d5757dd.cache",
       "sourceFingerprint": "02952be3932ed617",
       "declFingerprints": {
         "compilerSnapshotCheckEntrypoint": "d8fb81e3859e0248",
@@ -2117,7 +2119,7 @@
     },
     {
       "moduleName": "Main",
-      "cacheKey": "975561ad9d8d3c57.cache",
+      "cacheKey": "41855b232516bb9a.cache",
       "sourceFingerprint": "620a96d67aa284e8",
       "declFingerprints": {
         "checkEntrypoint": "deec79af7e4f42cf",
@@ -2168,7 +2170,7 @@
     },
     {
       "moduleName": "CompilerMain",
-      "cacheKey": "86aae2b3f8e49598.cache",
+      "cacheKey": "374fbf50669e6e27.cache",
       "sourceFingerprint": "96a10d5a1a411c7d",
       "declFingerprints": {
         "checkSourceText": "5efff96a8fdefaa8",
@@ -2209,7 +2211,7 @@
     },
     {
       "moduleName": "GoalManagerResourceContext",
-      "cacheKey": "48f8730ecf2364d7.cache",
+      "cacheKey": "2674f2111217ecc9.cache",
       "sourceFingerprint": "81f3b3cc81a31e82",
       "declFingerprints": {
         "processResultError": "7e17fee18b64ddff",
@@ -2262,7 +2264,7 @@
     },
     {
       "moduleName": "HostResources",
-      "cacheKey": "059061553c5a222d.cache",
+      "cacheKey": "c4fef8c73e0b07a7.cache",
       "sourceFingerprint": "7db2ac54d03c0e59",
       "declFingerprints": {
         "hostOkBool": "f9c368a0839ca77d",
@@ -2278,7 +2280,7 @@
     },
     {
       "moduleName": "GeneratedStateCleanupPlan",
-      "cacheKey": "2c734c0c2a8971c7.cache",
+      "cacheKey": "7e9825b10c3e81b5.cache",
       "sourceFingerprint": "fac43c357e166db0",
       "declFingerprints": {
         "emptyCleanupTargets": "b2ef73974de45827",
@@ -2378,7 +2380,7 @@
     },
     {
       "moduleName": "GoalManagerGeneratedCleanupHealth",
-      "cacheKey": "d33cdf97374d8df0.cache",
+      "cacheKey": "13fcc0b63fcc1f2e.cache",
       "sourceFingerprint": "4faaf2cff4d6d706",
       "declFingerprints": {
         "managerGeneratedCleanupBoolText": "eb7276157f83b965",
@@ -2397,7 +2399,7 @@
     },
     {
       "moduleName": "GoalManagerGeneratedCleanupHealthHarness",
-      "cacheKey": "af90d4aec0cfb7a7.cache",
+      "cacheKey": "8a602c96d5a97545.cache",
       "sourceFingerprint": "6f442d5f7577ed18",
       "declFingerprints": {
         "main": "e34815452d4ff155"

@@ -981,6 +981,7 @@ fn compiler_builtin_reference_names() -> &'static [&'static str] {
         "String",
         "prepend",
         "reverse",
+        "concat",
         "map",
         "filter",
         "find",

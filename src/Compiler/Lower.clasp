@@ -11,7 +11,7 @@ import Compiler.Checker.ModuleInfer
 import Compiler.Checker.TypeOps
 import Compiler.Checker.Types
 
-type LowerExprText = LowerName Str | LowerLiteral Str | LowerInt Str | LowerBool Bool | LowerArray [LowerExprText] | LowerListAppend LowerExprText LowerExprText | LowerListPrepend LowerExprText LowerExprText | LowerListReverse LowerExprText | LowerLength LowerExprText | LowerListMap Str LowerExprText | LowerListFilter Str LowerExprText | LowerListFind Str LowerExprText | LowerListAny Str LowerExprText | LowerListAll Str LowerExprText | LowerListFold Str LowerExprText LowerExprText | LowerViewAppend LowerExprText LowerExprText | LowerEncode LowerExprText | LowerDecode TypeText LowerExprText | LowerTryDecode TypeText LowerExprText | LowerInvoke Str [LowerExprText] | LowerConstructor Str [LowerExprText] | LowerMatch LowerExprText [LowerMatchBranchText] | LowerRecord Str [LowerRecordFieldText] | LowerFieldAccess Str LowerExprText Str | LowerLet Str LowerExprText LowerExprText | LowerMutableLet Str LowerExprText LowerExprText | LowerAssign Str LowerExprText LowerExprText | LowerFor Str LowerExprText LowerExprText LowerExprText | LowerReturn LowerExprText | LowerIf LowerExprText LowerExprText LowerExprText | LowerEqual LowerExprText LowerExprText | LowerNotEqual LowerExprText LowerExprText | LowerLessThan LowerExprText LowerExprText | LowerLessThanOrEqual LowerExprText LowerExprText | LowerGreaterThan LowerExprText LowerExprText | LowerGreaterThanOrEqual LowerExprText LowerExprText
+type LowerExprText = LowerName Str | LowerLiteral Str | LowerInt Str | LowerBool Bool | LowerArray [LowerExprText] | LowerListAppend LowerExprText LowerExprText | LowerListPrepend LowerExprText LowerExprText | LowerListReverse LowerExprText | LowerListConcat LowerExprText | LowerLength LowerExprText | LowerListMap Str LowerExprText | LowerListFilter Str LowerExprText | LowerListFind Str LowerExprText | LowerListAny Str LowerExprText | LowerListAll Str LowerExprText | LowerListFold Str LowerExprText LowerExprText | LowerViewAppend LowerExprText LowerExprText | LowerEncode LowerExprText | LowerDecode TypeText LowerExprText | LowerTryDecode TypeText LowerExprText | LowerInvoke Str [LowerExprText] | LowerConstructor Str [LowerExprText] | LowerMatch LowerExprText [LowerMatchBranchText] | LowerRecord Str [LowerRecordFieldText] | LowerFieldAccess Str LowerExprText Str | LowerLet Str LowerExprText LowerExprText | LowerMutableLet Str LowerExprText LowerExprText | LowerAssign Str LowerExprText LowerExprText | LowerFor Str LowerExprText LowerExprText LowerExprText | LowerReturn LowerExprText | LowerIf LowerExprText LowerExprText LowerExprText | LowerEqual LowerExprText LowerExprText | LowerNotEqual LowerExprText LowerExprText | LowerLessThan LowerExprText LowerExprText | LowerLessThanOrEqual LowerExprText LowerExprText | LowerGreaterThan LowerExprText LowerExprText | LowerGreaterThanOrEqual LowerExprText LowerExprText
 type LowerRecordFieldText = LowerRecordFieldText Str LowerExprText
 type LowerMatchBranchText = LowerMatchBranchText Str [Str] LowerExprText
 type LowerDeclText = LowerConst Str LowerExprText | LowerFn Str [Str] LowerExprText
@@ -240,6 +240,19 @@ lowerReverseExpr typeDecls recordDecls env localEnv fnContext args = {
     LowerListReverse (lowerExpr typeDecls recordDecls env localEnv fnContext values)
   } else {
     LowerInvoke "reverse" (lowerExprs typeDecls recordDecls env localEnv fnContext args)
+  }
+}
+
+lowerConcatExpr : [HostedTypeDeclAst] -> [HostedRecordDeclAst] -> [TypeBinding] -> [TypeBinding] -> ReturnContext -> [HostedExprAst] -> LowerExprText
+lowerConcatExpr typeDecls recordDecls env localEnv fnContext args = {
+  let values = firstHostedExpr args;
+  let extra = firstHostedExpr (remainingHostedExprs args);
+  if expressionSummary values == "" then {
+    LowerInvoke "concat" (lowerExprs typeDecls recordDecls env localEnv fnContext args)
+  } else if expressionSummary extra == "" then {
+    LowerListConcat (lowerExpr typeDecls recordDecls env localEnv fnContext values)
+  } else {
+    LowerInvoke "concat" (lowerExprs typeDecls recordDecls env localEnv fnContext args)
   }
 }
 
@@ -816,7 +829,7 @@ lowerExpr typeDecls recordDecls env localEnv fnContext expr = match expr {
   HostedList values ->
     LowerArray (lowerExprs typeDecls recordDecls env localEnv fnContext values),
   HostedCall callee args ->
-    if callee == "append" then lowerAppendExpr typeDecls recordDecls env localEnv fnContext args else if callee == "prepend" then lowerPrependExpr typeDecls recordDecls env localEnv fnContext args else if callee == "reverse" then lowerReverseExpr typeDecls recordDecls env localEnv fnContext args else if callee == "length" then lowerLengthExpr typeDecls recordDecls env localEnv fnContext args else if callee == "map" then lowerMapExpr typeDecls recordDecls env localEnv fnContext args else if callee == "filter" then lowerFilterExpr typeDecls recordDecls env localEnv fnContext args else if callee == "find" then lowerFindExpr typeDecls recordDecls env localEnv fnContext args else if callee == "any" then lowerAnyExpr typeDecls recordDecls env localEnv fnContext args else if callee == "all" then lowerAllExpr typeDecls recordDecls env localEnv fnContext args else if callee == "fold" then lowerFoldExpr typeDecls recordDecls env localEnv fnContext args else if callee == "decode" then lowerDecodeExpr typeDecls recordDecls env localEnv fnContext args else if callee == "tryDecode" then lowerTryDecodeExpr typeDecls recordDecls env localEnv fnContext args else if callee == "encode" then lowerEncodeExpr typeDecls recordDecls env localEnv fnContext args else if callee == recordUpdateBuiltinName then lowerRecordUpdateExpr typeDecls recordDecls env localEnv fnContext args else LowerInvoke callee (lowerExprs typeDecls recordDecls env localEnv fnContext args),
+    if callee == "append" then lowerAppendExpr typeDecls recordDecls env localEnv fnContext args else if callee == "prepend" then lowerPrependExpr typeDecls recordDecls env localEnv fnContext args else if callee == "reverse" then lowerReverseExpr typeDecls recordDecls env localEnv fnContext args else if callee == "concat" then lowerConcatExpr typeDecls recordDecls env localEnv fnContext args else if callee == "length" then lowerLengthExpr typeDecls recordDecls env localEnv fnContext args else if callee == "map" then lowerMapExpr typeDecls recordDecls env localEnv fnContext args else if callee == "filter" then lowerFilterExpr typeDecls recordDecls env localEnv fnContext args else if callee == "find" then lowerFindExpr typeDecls recordDecls env localEnv fnContext args else if callee == "any" then lowerAnyExpr typeDecls recordDecls env localEnv fnContext args else if callee == "all" then lowerAllExpr typeDecls recordDecls env localEnv fnContext args else if callee == "fold" then lowerFoldExpr typeDecls recordDecls env localEnv fnContext args else if callee == "decode" then lowerDecodeExpr typeDecls recordDecls env localEnv fnContext args else if callee == "tryDecode" then lowerTryDecodeExpr typeDecls recordDecls env localEnv fnContext args else if callee == "encode" then lowerEncodeExpr typeDecls recordDecls env localEnv fnContext args else if callee == recordUpdateBuiltinName then lowerRecordUpdateExpr typeDecls recordDecls env localEnv fnContext args else LowerInvoke callee (lowerExprs typeDecls recordDecls env localEnv fnContext args),
   HostedConstructor constructorName args ->
     LowerConstructor constructorName (lowerExprs typeDecls recordDecls env localEnv fnContext args),
   HostedMatch subject branches ->
@@ -957,6 +970,8 @@ renderLowerExpr expr = match expr {
     textConcat ["list.prepend(", renderLowerExpr value, ", ", renderLowerExpr values, ")"],
   LowerListReverse values ->
     textConcat ["list.reverse(", renderLowerExpr values, ")"],
+  LowerListConcat values ->
+    textConcat ["list.concat(", renderLowerExpr values, ")"],
   LowerLength value ->
     textConcat ["length(", renderLowerExpr value, ")"],
   LowerListMap callee values ->

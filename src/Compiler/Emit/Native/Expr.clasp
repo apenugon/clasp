@@ -64,6 +64,8 @@ emitNativeExpr expr = match expr {
     nativeExprBinaryIntrinsicText "list.prepend" (emitNativeExpr value) (emitNativeExpr values),
   LowerListReverse values ->
     nativeExprUnaryIntrinsicText "list.reverse" (emitNativeExpr values),
+  LowerListConcat values ->
+    nativeExprUnaryIntrinsicText "list.concat" (emitNativeExpr values),
   LowerLength value ->
     nativeExprUnaryIntrinsicText "length" (emitNativeExpr value),
   LowerListMap callee values ->

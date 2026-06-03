@@ -23,6 +23,7 @@ claspc_bin="$(env -u CLASP_CLASPC -u CLASPC_BIN -u RUSTC "$project_root/scripts/
 source_path="$test_root/IntBuiltins.clasp"
 bad_single_and_path="$test_root/BadSingleAnd.clasp"
 bad_single_or_path="$test_root/BadSingleOr.clasp"
+bad_concat_path="$test_root/BadConcat.clasp"
 compiled_js="$test_root/int-builtins.mjs"
 native_binary="$test_root/int-builtins"
 native_output="$test_root/native-output.json"
@@ -38,6 +39,8 @@ record IntBuiltinReport = {
   negativeLiteral : Int,
   subtractNegativeLiteral : Int,
   folded : Int,
+  flattened : Str,
+  flattenedCount : Int,
   nested : Int,
   restored : Int,
   logicAnd : Bool,
@@ -70,6 +73,8 @@ main =
       negativeLiteral = -5,
       subtractNegativeLiteral = 12 - (-5),
       folded = fold sumStep 0 [1, 2, 3, 4],
+      flattened = textJoin "/" (concat [["plan"], ["build"], ["verify"]]),
+      flattenedCount = length (concat [[1, 2], [3, 4]]),
       nested = intSubtract (intAdd 20 25) 3,
       restored = decrement (bump 7),
       logicAnd = true && true,
@@ -94,6 +99,13 @@ main : Bool
 main = true | false
 EOF
 
+cat >"$bad_concat_path" <<'EOF'
+module Main
+
+main : [Int]
+main = concat [1, 2]
+EOF
+
 timeout "$timeout_secs" "$claspc_bin" --json check "$source_path" | grep -F '"status":"ok"' >/dev/null
 if timeout "$timeout_secs" "$claspc_bin" --json check "$bad_single_and_path" >/dev/null 2>&1; then
   printf 'single & should not parse as logical and\n' >&2
@@ -101,6 +113,10 @@ if timeout "$timeout_secs" "$claspc_bin" --json check "$bad_single_and_path" >/d
 fi
 if timeout "$timeout_secs" "$claspc_bin" --json check "$bad_single_or_path" >/dev/null 2>&1; then
   printf 'single | should not parse as logical or\n' >&2
+  exit 1
+fi
+if timeout "$timeout_secs" "$claspc_bin" --json check "$bad_concat_path" >/dev/null 2>&1; then
+  printf 'concat should reject non-nested lists\n' >&2
   exit 1
 fi
 timeout "$timeout_secs" "$claspc_bin" compile "$source_path" -o "$compiled_js" >/dev/null
@@ -125,6 +141,8 @@ assert(report.nestedOperatorDifference === 12, `js nestedOperatorDifference ${re
 assert(report.negativeLiteral === -5, `js negativeLiteral ${report.negativeLiteral}`);
 assert(report.subtractNegativeLiteral === 17, `js subtractNegativeLiteral ${report.subtractNegativeLiteral}`);
 assert(report.folded === 10, `js folded ${report.folded}`);
+assert(report.flattened === "plan/build/verify", `js flattened ${report.flattened}`);
+assert(report.flattenedCount === 4, `js flattenedCount ${report.flattenedCount}`);
 assert(report.nested === 42, `js nested ${report.nested}`);
 assert(report.restored === 7, `js restored ${report.restored}`);
 assert(report.logicAnd === true, `js logicAnd ${report.logicAnd}`);
@@ -156,6 +174,8 @@ assert(report.nestedOperatorDifference === 12, `native nestedOperatorDifference 
 assert(report.negativeLiteral === -5, `native negativeLiteral ${report.negativeLiteral}`);
 assert(report.subtractNegativeLiteral === 17, `native subtractNegativeLiteral ${report.subtractNegativeLiteral}`);
 assert(report.folded === 10, `native folded ${report.folded}`);
+assert(report.flattened === "plan/build/verify", `native flattened ${report.flattened}`);
+assert(report.flattenedCount === 4, `native flattenedCount ${report.flattenedCount}`);
 assert(report.nested === 42, `native nested ${report.nested}`);
 assert(report.restored === 7, `native restored ${report.restored}`);
 assert(report.logicAnd === true, `native logicAnd ${report.logicAnd}`);

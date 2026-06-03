@@ -52,6 +52,8 @@ emitExprContainsReturn expr = match expr {
     if emitExprContainsReturn value then true else emitExprContainsReturn values,
   LowerListReverse values ->
     emitExprContainsReturn values,
+  LowerListConcat values ->
+    emitExprContainsReturn values,
   LowerLength value ->
     emitExprContainsReturn value,
   LowerListMap callee values ->
@@ -264,6 +266,8 @@ emitExpr expr = match expr {
     textConcat ["[", emitExpr value, "].concat(", emitExpr values, ")"],
   LowerListReverse values ->
     textConcat ["(() => { const __values = ", emitExpr values, "; return Object.freeze([...__values].reverse()); })()"],
+  LowerListConcat values ->
+    textConcat ["Object.freeze((", emitExpr values, ").flat())"],
   LowerLength value ->
     textConcat ["(", emitExpr value, ").length"],
   LowerListMap callee values ->
