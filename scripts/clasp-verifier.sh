@@ -95,13 +95,21 @@ cat "$task_file" >> "$prompt_file"
 
 clasp_swarm_assert_prompt_size "$prompt_file" "verifier"
 
-HOME="$sandbox_runtime_home" \
-XDG_CACHE_HOME="$sandbox_runtime_home/.cache" \
-XDG_CONFIG_HOME="$sandbox_runtime_home/.config" \
-XDG_DATA_HOME="$sandbox_runtime_home/.local/share" \
-XDG_STATE_HOME="$sandbox_runtime_home/.local/state" \
-TMPDIR="$sandbox_runtime_home/tmp" \
-CODEX_HOME="$isolated_codex_home" codex exec - \
+clasp_codex_exec_with_tool_model_retry \
+  "verifier" \
+  "$isolated_codex_home" \
+  "$report_json" \
+  "$log_jsonl" \
+  "$prompt_file" \
+  env \
+  HOME="$sandbox_runtime_home" \
+  XDG_CACHE_HOME="$sandbox_runtime_home/.cache" \
+  XDG_CONFIG_HOME="$sandbox_runtime_home/.config" \
+  XDG_DATA_HOME="$sandbox_runtime_home/.local/share" \
+  XDG_STATE_HOME="$sandbox_runtime_home/.local/state" \
+  TMPDIR="$sandbox_runtime_home/tmp" \
+  CODEX_HOME="$isolated_codex_home" \
+  codex exec - \
   --json \
   -m "$model" \
   -c "model_reasoning_effort=\"$reasoning_effort\"" \
@@ -110,6 +118,4 @@ CODEX_HOME="$isolated_codex_home" codex exec - \
   "${codex_sandbox_args[@]}" \
   --ephemeral \
   --output-schema "$schema_file" \
-  -o "$report_json" \
-  < "$prompt_file" \
-  > "$log_jsonl"
+  -o "$report_json"

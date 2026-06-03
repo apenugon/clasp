@@ -964,6 +964,16 @@ switch (scenario) {
     assert(report.usedVerifyFastFallback === false, "known ordinary Codex loop harness should not use verify-fast fallback");
     assert(logHas("scripts/verify-runtime-slice.sh codex-loop"), "fake ordinary Codex loop slice command should execute");
     break;
+  case "codex-loop-infrastructure":
+    assert(report.changedFiles.includes("scripts/clasp-codex-home.sh"), "Codex home helper should be present");
+    assert(report.changedFiles.includes("scripts/test-codex-loop.sh"), "Codex loop harness should be present");
+    assert(hasCommand("bash -n 'scripts/clasp-codex-home.sh'"), "Codex home helper should run shell syntax check");
+    assert(hasCommand("bash -n 'scripts/test-codex-loop.sh'"), "Codex loop harness should run shell syntax check");
+    assert(hasCommand("bash scripts/test-codex-loop.sh"), "Codex loop infrastructure should run focused retry coverage");
+    assert(report.selectedCommands.filter((command) => command.command === "bash scripts/test-codex-loop.sh").length === 1, "Codex loop infrastructure command should be deduplicated");
+    assert(report.usedVerifyFastFallback === false, "known Codex loop infrastructure should not use verify-fast fallback");
+    assert(logHas("scripts/test-codex-loop.sh"), "fake Codex loop harness should execute");
+    break;
   case "host-runtime":
     assert(report.changedFiles.includes("examples/host-runtime/Main.clasp"), "host runtime source should be present");
     assert(report.changedFiles.includes("examples/host-runtime/Host.clasp"), "host runtime wrapper should be present");
@@ -1874,6 +1884,14 @@ codex_loop_program_script_log="$test_root/codex-loop-program-script.log"
 CLASP_TEST_FAKE_COMMAND_LOG="$codex_loop_program_script_log" \
   run_verify_affected --changed-file scripts/test-codex-loop-program.sh > "$codex_loop_program_script_report"
 assert_report "$codex_loop_program_script_report" "$codex_loop_program_script_log" codex-loop-program-script
+
+codex_loop_infrastructure_report="$test_root/codex-loop-infrastructure-report.json"
+codex_loop_infrastructure_log="$test_root/codex-loop-infrastructure.log"
+CLASP_TEST_FAKE_COMMAND_LOG="$codex_loop_infrastructure_log" \
+  run_verify_affected \
+    --changed-file scripts/clasp-codex-home.sh \
+    --changed-file scripts/test-codex-loop.sh > "$codex_loop_infrastructure_report"
+assert_report "$codex_loop_infrastructure_report" "$codex_loop_infrastructure_log" codex-loop-infrastructure
 
 host_runtime_report="$test_root/host-runtime-report.json"
 host_runtime_log="$test_root/host-runtime.log"

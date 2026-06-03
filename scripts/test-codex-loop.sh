@@ -158,6 +158,193 @@ grep -F 'scripts/clasp-codex-loop-start.sh' "$test_root/unmanaged-loop.err" >/de
 export CLASP_ALLOW_UNMANAGED_AGENT_RUNTIME=1
 export CLASP_TEST_CODEX_MODE=builder
 
+cat > "$project_dir/tools/codex" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+output_file=""
+workspace=""
+prompt=""
+state_root="$(cd "$(dirname "$0")/.." && pwd)/retry-state"
+invocations_log="$(cd "$(dirname "$0")/.." && pwd)/retry-invocations.log"
+mkdir -p "$state_root"
+
+printf '%s\n' "$*" >> "$invocations_log"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -o)
+      output_file="$2"
+      shift 2
+      ;;
+    --cd)
+      workspace="$2"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+
+prompt="$(cat)"
+
+if [[ "$prompt" == *"You are the builder subagent"* ]]; then
+  if [[ ! -f "$state_root/builder-failed-once" ]]; then
+    touch "$state_root/builder-failed-once"
+    printf '%s\n' '{"type":"error","message":"{\"type\":\"error\",\"error\":{\"type\":\"image_generation_user_error\",\"code\":\"invalid_value\",\"message\":\"The model '\''gpt-image-2'\'' does not exist.\"}}"}'
+    exit 1
+  fi
+
+  printf '%s\n' 'retried-builder' > "$workspace/app.txt"
+  cat > "$output_file" <<'JSON'
+{
+  "summary": "builder recovered from a retryable Codex tool-model failure",
+  "files_touched": ["app.txt"],
+  "tests_run": ["fake builder retry check"],
+  "residual_risks": []
+}
+JSON
+  exit 0
+fi
+
+if [[ "$prompt" == *"You are the verifier subagent"* ]]; then
+  if [[ ! -f "$state_root/verifier-failed-once" ]]; then
+    touch "$state_root/verifier-failed-once"
+    printf '%s\n' '{"type":"error","message":"{\"type\":\"error\",\"error\":{\"type\":\"image_generation_user_error\",\"code\":\"invalid_value\",\"message\":\"The model '\''gpt-image-2'\'' does not exist.\"}}"}'
+    exit 1
+  fi
+
+  cat > "$output_file" <<'JSON'
+{
+  "verdict": "pass",
+  "summary": "verifier recovered from a retryable Codex tool-model failure",
+  "findings": [],
+  "tests_run": ["fake verifier retry check"],
+  "follow_up": []
+}
+JSON
+  exit 0
+fi
+
+echo "unexpected prompt" >&2
+exit 1
+EOF
+chmod +x "$project_dir/tools/codex"
+
+workspace_dir_retry="$project_dir/workspace-retry-tool-model"
+baseline_dir_retry="$project_dir/baseline-retry-tool-model"
+run_dir_retry="$project_dir/retry-tool-model-run"
+rm -rf "$project_dir/retry-state" "$project_dir/retry-invocations.log"
+mkdir -p "$workspace_dir_retry" "$baseline_dir_retry" "$run_dir_retry"
+cat > "$workspace_dir_retry/app.txt" <<'EOF'
+initial
+EOF
+
+(
+  cd "$project_dir"
+  PATH="$project_dir/tools:$PATH" \
+    CLASP_SWARM_CODEX_SANDBOX=workspace-write \
+    bash scripts/clasp-builder.sh \
+      task.md \
+      "$workspace_dir_retry" \
+      "$run_dir_retry/builder-report.json" \
+      "$run_dir_retry/builder-log.jsonl" >/dev/null
+)
+[[ "$(< "$workspace_dir_retry/app.txt")" == "retried-builder" ]]
+grep -F '"type":"clasp.codex.retry"' "$run_dir_retry/builder-log.jsonl" >/dev/null
+grep -F -- '--ignore-user-config' "$project_dir/retry-invocations.log" >/dev/null
+[[ "$(grep -c -- '--ignore-user-config' "$project_dir/retry-invocations.log")" == "1" ]]
+[[ "$(node -e 'const fs=require("fs"); const data=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(data.summary);' "$run_dir_retry/builder-report.json")" == "builder recovered from a retryable Codex tool-model failure" ]]
+
+(
+  cd "$project_dir"
+  PATH="$project_dir/tools:$PATH" \
+    CLASP_SWARM_CODEX_SANDBOX=workspace-write \
+    bash scripts/clasp-verifier.sh \
+      task.md \
+      "$workspace_dir_retry" \
+      "$baseline_dir_retry" \
+      "$run_dir_retry/verifier-report.json" \
+      "$run_dir_retry/verifier-log.jsonl" >/dev/null
+)
+grep -F '"type":"clasp.codex.retry"' "$run_dir_retry/verifier-log.jsonl" >/dev/null
+[[ "$(grep -c -- '--ignore-user-config' "$project_dir/retry-invocations.log")" == "2" ]]
+[[ "$(node -e 'const fs=require("fs"); const data=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(data.verdict);' "$run_dir_retry/verifier-report.json")" == "pass" ]]
+
+cat > "$project_dir/tools/codex" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+output_file=""
+workspace=""
+prompt=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -o)
+      output_file="$2"
+      shift 2
+      ;;
+    --cd)
+      workspace="$2"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+
+prompt="$(cat)"
+
+if [[ "$prompt" == *"You are the builder subagent"* ]]; then
+  if [[ "$prompt" == *"Verifier feedback from the previous attempt:"* ]]; then
+    printf '%s\n' 'fixed-after-feedback' > "$workspace/app.txt"
+  else
+    printf '%s\n' 'first-attempt' > "$workspace/app.txt"
+  fi
+  cat > "$output_file" <<'JSON'
+{
+  "summary": "stub builder report",
+  "files_touched": ["app.txt"],
+  "tests_run": [],
+  "residual_risks": []
+}
+JSON
+  exit 0
+fi
+
+if [[ "$prompt" == *"You are the verifier subagent"* ]]; then
+  if [[ "$(< "$workspace/app.txt")" == "fixed-after-feedback" ]]; then
+    cat > "$output_file" <<'JSON'
+{
+  "verdict": "pass",
+  "summary": "verifier accepted the workspace",
+  "findings": [],
+  "tests_run": ["fake verifier check"],
+  "follow_up": []
+}
+JSON
+  else
+    cat > "$output_file" <<'JSON'
+{
+  "verdict": "fail",
+  "summary": "workspace still needs the feedback-driven fix",
+  "findings": ["app.txt still has the first-attempt content"],
+  "tests_run": ["fake verifier check"],
+  "follow_up": ["Use the verifier feedback to update app.txt"]
+}
+JSON
+  fi
+  exit 0
+fi
+
+echo "unexpected prompt" >&2
+exit 1
+EOF
+chmod +x "$project_dir/tools/codex"
+
 (
   cd "$project_dir"
   PATH="$project_dir/tools:$PATH" \

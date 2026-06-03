@@ -297,6 +297,7 @@ const COMMANDS = {
   monitoredStep: "bash scripts/test-monitored-step.sh",
   monitoredRunLog: "bash scripts/test-monitored-run-log.sh",
   monitoredWorkflow: "bash scripts/test-monitored-workflow.sh",
+  codexLoop: "bash scripts/test-codex-loop.sh",
   codexLoopProgram: "bash scripts/test-codex-loop-program.sh",
   hostRuntime: "bash scripts/test-host-runtime.sh",
   resourceGuardPolicy: "bash scripts/test-resource-guard-policy.sh",
@@ -2759,6 +2760,19 @@ function routeChangedFiles(changedFiles, inputFallbackMode) {
         file,
       );
       addSelected(selectedByCommand, "runtime-slice:workflow", COMMANDS.runtimeSliceWorkflow, "monitored workflow harness", file);
+    }
+
+    if (file === "scripts/clasp-codex-home.sh" || file === "scripts/test-codex-loop.sh") {
+      matched = true;
+      reason(file, "codex-loop-harness", "Codex loop infrastructure uses shell syntax plus focused retry and process-loop coverage");
+      addSelected(
+        selectedByCommand,
+        `bash-syntax:${file}`,
+        `bash -n ${shellQuote(file)}`,
+        "Codex loop infrastructure shell syntax",
+        file,
+      );
+      addSelected(selectedByCommand, "codex-loop", COMMANDS.codexLoop, "Codex loop infrastructure", file);
     }
 
     if (file === "scripts/test-codex-loop-program.sh") {
