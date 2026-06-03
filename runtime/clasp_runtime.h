@@ -285,6 +285,7 @@ ClaspRtHeader *clasp_rt_auth_session(
 );
 ClaspRtString *clasp_rt_text_join(ClaspRtString *separator, ClaspRtStringList *parts);
 ClaspRtStringList *clasp_rt_text_split(ClaspRtString *value, ClaspRtString *separator);
+bool clasp_rt_text_contains(ClaspRtString *value, ClaspRtString *needle);
 ClaspRtStringList *clasp_rt_text_chars(ClaspRtString *value);
 ClaspRtString *clasp_rt_text_fingerprint64_hex(ClaspRtString *value);
 ClaspRtResultString *clasp_rt_text_prefix(ClaspRtString *value, ClaspRtString *prefix);

@@ -95,6 +95,7 @@ The self-hosting slice also reserves a small compiler-known stdlib surface:
 - `textConcat : [Str] -> Str`
 - `textJoin : Str -> [Str] -> Str`
 - `textSplit : Str -> Str -> [Str]`
+- `textContains : Str -> Str -> Bool`
 - `textChars : Str -> [Str]`
 - `dictEmpty : Dict Str a`
 - `dictSet : Str -> a -> Dict Str a -> Dict Str a`

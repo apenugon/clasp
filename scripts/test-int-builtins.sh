@@ -41,6 +41,9 @@ record IntBuiltinReport = {
   folded : Int,
   flattened : Str,
   flattenedCount : Int,
+  containsPlan : Bool,
+  containsMissing : Bool,
+  containsEmpty : Bool,
   nested : Int,
   restored : Int,
   logicAnd : Bool,
@@ -75,6 +78,9 @@ main =
       folded = fold sumStep 0 [1, 2, 3, 4],
       flattened = textJoin "/" (concat [["plan"], ["build"], ["verify"]]),
       flattenedCount = length (concat [[1, 2], [3, 4]]),
+      containsPlan = textContains "plan/build/verify" "build",
+      containsMissing = textContains "plan/build/verify" "ship",
+      containsEmpty = textContains "plan" "",
       nested = intSubtract (intAdd 20 25) 3,
       restored = decrement (bump 7),
       logicAnd = true && true,
@@ -143,6 +149,9 @@ assert(report.subtractNegativeLiteral === 17, `js subtractNegativeLiteral ${repo
 assert(report.folded === 10, `js folded ${report.folded}`);
 assert(report.flattened === "plan/build/verify", `js flattened ${report.flattened}`);
 assert(report.flattenedCount === 4, `js flattenedCount ${report.flattenedCount}`);
+assert(report.containsPlan === true, `js containsPlan ${report.containsPlan}`);
+assert(report.containsMissing === false, `js containsMissing ${report.containsMissing}`);
+assert(report.containsEmpty === true, `js containsEmpty ${report.containsEmpty}`);
 assert(report.nested === 42, `js nested ${report.nested}`);
 assert(report.restored === 7, `js restored ${report.restored}`);
 assert(report.logicAnd === true, `js logicAnd ${report.logicAnd}`);
@@ -176,6 +185,9 @@ assert(report.subtractNegativeLiteral === 17, `native subtractNegativeLiteral ${
 assert(report.folded === 10, `native folded ${report.folded}`);
 assert(report.flattened === "plan/build/verify", `native flattened ${report.flattened}`);
 assert(report.flattenedCount === 4, `native flattenedCount ${report.flattenedCount}`);
+assert(report.containsPlan === true, `native containsPlan ${report.containsPlan}`);
+assert(report.containsMissing === false, `native containsMissing ${report.containsMissing}`);
+assert(report.containsEmpty === true, `native containsEmpty ${report.containsEmpty}`);
 assert(report.nested === 42, `native nested ${report.nested}`);
 assert(report.restored === 7, `native restored ${report.restored}`);
 assert(report.logicAnd === true, `native logicAnd ${report.logicAnd}`);

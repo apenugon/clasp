@@ -5,7 +5,7 @@
   "summaries": [
     {
       "moduleName": "Compiler.AstText",
-      "cacheKey": "645d23c4659ae8ce.cache",
+      "cacheKey": "980f00b9dceb90d0.cache",
       "sourceFingerprint": "53472e027f83bf0f",
       "declFingerprints": {
         "astTextAppendChar": "b6356c40d145790b",
@@ -51,7 +51,7 @@
     },
     {
       "moduleName": "Compiler.Ast",
-      "cacheKey": "5266b11ff3adbe5e.cache",
+      "cacheKey": "ca3472cf01e43b20.cache",
       "sourceFingerprint": "9ff8df0c069bd260",
       "declFingerprints": {
         "renderStringLiteral": "c2e6c2c04b0295ae",
@@ -503,7 +503,7 @@
     },
     {
       "moduleName": "Compiler.Checker.Types",
-      "cacheKey": "37d00a649a076710.cache",
+      "cacheKey": "e9c9036c9cf1c29a.cache",
       "sourceFingerprint": "00b82bcae8509731",
       "declFingerprints": {
         "keepNoTypeBinding": "d5431165551067a3",
@@ -520,8 +520,8 @@
     },
     {
       "moduleName": "Compiler.Checker.Builtins",
-      "cacheKey": "7d6e36b078baad82.cache",
-      "sourceFingerprint": "16df3faa302a7569",
+      "cacheKey": "2517a08094a2095a.cache",
+      "sourceFingerprint": "ec7581482944c28a",
       "declFingerprints": {
         "stringBuiltinType": "2716c46e8b6009e2",
         "intAddBuiltinType": "ed95a9706c829e02",
@@ -545,6 +545,7 @@
         "textConcatBuiltinType": "94e024647fcad391",
         "textJoinBuiltinType": "b441d937c3e55091",
         "textSplitBuiltinType": "7366f72dd5add26d",
+        "textContainsBuiltinType": "4257479eb9c987e1",
         "textCharsBuiltinType": "03c8dc26f0130919",
         "textFingerprint64HexBuiltinType": "4ae36b6f2bae9fe2",
         "textPrefixBuiltinType": "1e1fe2201ca19c18",
@@ -666,13 +667,13 @@
         "tenantBuiltinType": "ea8190166ac64bd9",
         "resourceIdentityBuiltinType": "f63ac4b45fb2fa21",
         "authSessionBuiltinType": "bf7789d3dba1302c",
-        "baseEnv": "d05d1c8f92cfb42f"
+        "baseEnv": "ca1c1cd6475b431f"
       },
-      "summary": "stringBuiltinType : TypeText\nintAddBuiltinType : TypeText\nintSubtractBuiltinType : TypeText\nresultBuiltinTypeName : Str\nresultOkConstructorName : Str\nresultErrConstructorName : Str\nresultStringBuiltinType : TypeText\noptionBuiltinTypeName : Str\noptionSomeConstructorName : Str\noptionNoneConstructorName : Str\nprependBuiltinType : TypeText\nreverseBuiltinType : TypeText\nconcatBuiltinType : TypeText\nmapBuiltinType : TypeText\nfilterBuiltinType : TypeText\nfindBuiltinType : TypeText\nanyBuiltinType : TypeText\nallBuiltinType : TypeText\nfoldBuiltinType : TypeText\ntextConcatBuiltinType : TypeText\ntextJoinBuiltinType : TypeText\ntextSplitBuiltinType : TypeText\ntextCharsBuiltinType : TypeText\ntextFingerprint64HexBuiltinType : TypeText\ntextPrefixBuiltinType : TypeText\ntextSplitFirstBuiltinType : TypeText\ndictBuiltinType : TypeText\ndictEmptyBuiltinType : TypeText\ndictSetBuiltinType : TypeText\ndictGetBuiltinType : TypeText\ndictHasBuiltinType : TypeText\ndictRemoveBuiltinType : TypeText\ndictKeysBuiltinType : TypeText\ndictValuesBuiltinType : TypeText\ntextViewBuiltinType : TypeText\nelementBuiltinType : TypeText\nstyledBuiltinType : TypeText\nlinkBuiltinType : TypeText\nformBuiltinType : TypeText\ninputBuiltinType : TypeText\nsubmitBuiltinType : TypeText\nsystemPromptBuiltinType : TypeText\nassistantPromptBuiltinType : TypeText\nuserPromptBuiltinType : TypeText\nappendPromptBuiltinType : TypeText\npromptTextBuiltinType : TypeText\npageBuiltinType : TypeText\nredirectBuiltinType : TypeText\npathJoinBuiltinType : TypeText\npathDirnameBuiltinType : TypeText\npathBasenameBuiltinType : TypeText\nfileExistsBuiltinType : TypeText\nreadFileBuiltinType : TypeText\nlistDirBuiltinType : TypeText\nrunCommandJsonBuiltinType : TypeText\nrunCommandTimeoutJsonBuiltinType : TypeText\nspawnCommandJsonBuiltinType : TypeText\nspawnCommandWithLimitsJsonBuiltinType : TypeText\nwatchCommandJsonBuiltinType : TypeText\nwatchCommandWithLimitsJsonBuiltinType : TypeText\nreconcileWatchedProcessJsonBuiltinType : TypeText\nawaitWatchedProcessJsonBuiltinType : TypeText\nawaitWatchedProcessTimeoutJsonBuiltinType : TypeText\nhandoffCommandJsonBuiltinType : TypeText\nupgradeCommandJsonBuiltinType : TypeText\nsuperviseCommandJsonBuiltinType : TypeText\nsleepMsBuiltinType : TypeText\nswarmBootstrapJsonBuiltinType : TypeText\nswarmStartJsonBuiltinType : TypeText\nswarmLeaseJsonBuiltinType : TypeText\nswarmReleaseJsonBuiltinType : TypeText\nswarmHeartbeatJsonBuiltinType : TypeText\nswarmCompleteJsonBuiltinType : TypeText\nswarmFailJsonBuiltinType : TypeText\nswarmRetryJsonBuiltinType : TypeText\nswarmStopJsonBuiltinType : TypeText\nswarmResumeJsonBuiltinType : TypeText\nswarmStatusJsonBuiltinType : TypeText\nswarmHistoryJsonBuiltinType : TypeText\nswarmTasksJsonBuiltinType : TypeText\nswarmSummaryJsonBuiltinType : TypeText\nswarmTailJsonBuiltinType : TypeText\nswarmReadyJsonBuiltinType : TypeText\nswarmManagerNextJsonBuiltinType : TypeText\nswarmObjectiveCreateJsonBuiltinType : TypeText\nswarmObjectiveCreateWithDeadlineJsonBuiltinType : TypeText\nswarmObjectiveStatusJsonBuiltinType : TypeText\nswarmObjectivesJsonBuiltinType : TypeText\nswarmTaskCreateJsonBuiltinType : TypeText\nswarmTaskCreateWithDeadlineJsonBuiltinType : TypeText\nswarmPolicySetJsonBuiltinType : TypeText\nswarmToolRunJsonBuiltinType : TypeText\nswarmVerifierRunJsonBuiltinType : TypeText\nswarmApproveJsonBuiltinType : TypeText\nswarmApprovalsJsonBuiltinType : TypeText\nswarmMergegateDecideJsonBuiltinType : TypeText\nswarmRunsJsonBuiltinType : TypeText\nswarmArtifactsJsonBuiltinType : TypeText\nswarmMemoryPutJsonBuiltinType : TypeText\nswarmMemoryQueryJsonBuiltinType : TypeText\nswarmMemorySearchJsonBuiltinType : TypeText\nargvBuiltinType : TypeText\ntimeUnixMsBuiltinType : TypeText\nenvVarBuiltinType : TypeText\nwriteFileBuiltinType : TypeText\nappendFileBuiltinType : TypeText\nmkdirAllBuiltinType : TypeText\nbuiltinResultTypeDecl : HostedTypeDeclAst\nbuiltinOptionTypeDecl : HostedTypeDeclAst\nhostedTypeUsesNamedType : HostedTypeAst -> Str -> Bool\nrecordDeclUsesNamedType : HostedRecordDeclAst -> Str -> Bool\nconstructorDeclUsesNamedType : HostedConstructorDeclAst -> Str -> Bool\ntypeDeclUsesNamedType : HostedTypeDeclAst -> Str -> Bool\nannotationUsesNamedType : HostedAnnotationAst -> Str -> Bool\nexprUsesBuiltinResultRuntime : HostedExprAst -> Bool\nexprListUsesBuiltinResultRuntime : [HostedExprAst] -> Bool\nrecordFieldExprListUsesBuiltinResultRuntime : [HostedRecordFieldExprAst] -> Bool\nbranchUsesBuiltinResultRuntime : HostedMatchBranchAst -> Bool\nbranchListUsesBuiltinResultRuntime : [HostedMatchBranchAst] -> Bool\nexprUsesBuiltinOptionRuntime : HostedExprAst -> Bool\nexprListUsesBuiltinOptionRuntime : [HostedExprAst] -> Bool\nrecordFieldExprListUsesBuiltinOptionRuntime : [HostedRecordFieldExprAst] -> Bool\nbranchUsesBuiltinOptionRuntime : HostedMatchBranchAst -> Bool\nbranchListUsesBuiltinOptionRuntime : [HostedMatchBranchAst] -> Bool\ndeclUsesBuiltinResult : HostedDeclAst -> Bool\nforeignDeclUsesBuiltinResult : HostedForeignDeclAst -> Bool\ndeclUsesBuiltinOption : HostedDeclAst -> Bool\nforeignDeclUsesBuiltinOption : HostedForeignDeclAst -> Bool\nmoduleDeclaresBuiltinResult : HostedModuleAst -> Bool\nmoduleDeclaresBuiltinOption : HostedModuleAst -> Bool\nmoduleUsesBuiltinResult : HostedModuleAst -> Bool\nmoduleUsesBuiltinOption : HostedModuleAst -> Bool\nmoduleUsesCompilerKnownVariantTypes : HostedModuleAst -> Bool\nprincipalBuiltinRecordDecl : HostedRecordDeclAst\ntenantBuiltinRecordDecl : HostedRecordDeclAst\nresourceIdentityBuiltinRecordDecl : HostedRecordDeclAst\nauthSessionBuiltinRecordDecl : HostedRecordDeclAst\neffectiveModuleRecordDecls : HostedModuleAst -> [HostedRecordDeclAst]\neffectiveModuleTypeDecls : HostedModuleAst -> [HostedTypeDeclAst]\nprincipalBuiltinType : TypeText\ntenantBuiltinType : TypeText\nresourceIdentityBuiltinType : TypeText\nauthSessionBuiltinType : TypeText\nbaseEnv : [TypeBinding]"
+      "summary": "stringBuiltinType : TypeText\nintAddBuiltinType : TypeText\nintSubtractBuiltinType : TypeText\nresultBuiltinTypeName : Str\nresultOkConstructorName : Str\nresultErrConstructorName : Str\nresultStringBuiltinType : TypeText\noptionBuiltinTypeName : Str\noptionSomeConstructorName : Str\noptionNoneConstructorName : Str\nprependBuiltinType : TypeText\nreverseBuiltinType : TypeText\nconcatBuiltinType : TypeText\nmapBuiltinType : TypeText\nfilterBuiltinType : TypeText\nfindBuiltinType : TypeText\nanyBuiltinType : TypeText\nallBuiltinType : TypeText\nfoldBuiltinType : TypeText\ntextConcatBuiltinType : TypeText\ntextJoinBuiltinType : TypeText\ntextSplitBuiltinType : TypeText\ntextContainsBuiltinType : TypeText\ntextCharsBuiltinType : TypeText\ntextFingerprint64HexBuiltinType : TypeText\ntextPrefixBuiltinType : TypeText\ntextSplitFirstBuiltinType : TypeText\ndictBuiltinType : TypeText\ndictEmptyBuiltinType : TypeText\ndictSetBuiltinType : TypeText\ndictGetBuiltinType : TypeText\ndictHasBuiltinType : TypeText\ndictRemoveBuiltinType : TypeText\ndictKeysBuiltinType : TypeText\ndictValuesBuiltinType : TypeText\ntextViewBuiltinType : TypeText\nelementBuiltinType : TypeText\nstyledBuiltinType : TypeText\nlinkBuiltinType : TypeText\nformBuiltinType : TypeText\ninputBuiltinType : TypeText\nsubmitBuiltinType : TypeText\nsystemPromptBuiltinType : TypeText\nassistantPromptBuiltinType : TypeText\nuserPromptBuiltinType : TypeText\nappendPromptBuiltinType : TypeText\npromptTextBuiltinType : TypeText\npageBuiltinType : TypeText\nredirectBuiltinType : TypeText\npathJoinBuiltinType : TypeText\npathDirnameBuiltinType : TypeText\npathBasenameBuiltinType : TypeText\nfileExistsBuiltinType : TypeText\nreadFileBuiltinType : TypeText\nlistDirBuiltinType : TypeText\nrunCommandJsonBuiltinType : TypeText\nrunCommandTimeoutJsonBuiltinType : TypeText\nspawnCommandJsonBuiltinType : TypeText\nspawnCommandWithLimitsJsonBuiltinType : TypeText\nwatchCommandJsonBuiltinType : TypeText\nwatchCommandWithLimitsJsonBuiltinType : TypeText\nreconcileWatchedProcessJsonBuiltinType : TypeText\nawaitWatchedProcessJsonBuiltinType : TypeText\nawaitWatchedProcessTimeoutJsonBuiltinType : TypeText\nhandoffCommandJsonBuiltinType : TypeText\nupgradeCommandJsonBuiltinType : TypeText\nsuperviseCommandJsonBuiltinType : TypeText\nsleepMsBuiltinType : TypeText\nswarmBootstrapJsonBuiltinType : TypeText\nswarmStartJsonBuiltinType : TypeText\nswarmLeaseJsonBuiltinType : TypeText\nswarmReleaseJsonBuiltinType : TypeText\nswarmHeartbeatJsonBuiltinType : TypeText\nswarmCompleteJsonBuiltinType : TypeText\nswarmFailJsonBuiltinType : TypeText\nswarmRetryJsonBuiltinType : TypeText\nswarmStopJsonBuiltinType : TypeText\nswarmResumeJsonBuiltinType : TypeText\nswarmStatusJsonBuiltinType : TypeText\nswarmHistoryJsonBuiltinType : TypeText\nswarmTasksJsonBuiltinType : TypeText\nswarmSummaryJsonBuiltinType : TypeText\nswarmTailJsonBuiltinType : TypeText\nswarmReadyJsonBuiltinType : TypeText\nswarmManagerNextJsonBuiltinType : TypeText\nswarmObjectiveCreateJsonBuiltinType : TypeText\nswarmObjectiveCreateWithDeadlineJsonBuiltinType : TypeText\nswarmObjectiveStatusJsonBuiltinType : TypeText\nswarmObjectivesJsonBuiltinType : TypeText\nswarmTaskCreateJsonBuiltinType : TypeText\nswarmTaskCreateWithDeadlineJsonBuiltinType : TypeText\nswarmPolicySetJsonBuiltinType : TypeText\nswarmToolRunJsonBuiltinType : TypeText\nswarmVerifierRunJsonBuiltinType : TypeText\nswarmApproveJsonBuiltinType : TypeText\nswarmApprovalsJsonBuiltinType : TypeText\nswarmMergegateDecideJsonBuiltinType : TypeText\nswarmRunsJsonBuiltinType : TypeText\nswarmArtifactsJsonBuiltinType : TypeText\nswarmMemoryPutJsonBuiltinType : TypeText\nswarmMemoryQueryJsonBuiltinType : TypeText\nswarmMemorySearchJsonBuiltinType : TypeText\nargvBuiltinType : TypeText\ntimeUnixMsBuiltinType : TypeText\nenvVarBuiltinType : TypeText\nwriteFileBuiltinType : TypeText\nappendFileBuiltinType : TypeText\nmkdirAllBuiltinType : TypeText\nbuiltinResultTypeDecl : HostedTypeDeclAst\nbuiltinOptionTypeDecl : HostedTypeDeclAst\nhostedTypeUsesNamedType : HostedTypeAst -> Str -> Bool\nrecordDeclUsesNamedType : HostedRecordDeclAst -> Str -> Bool\nconstructorDeclUsesNamedType : HostedConstructorDeclAst -> Str -> Bool\ntypeDeclUsesNamedType : HostedTypeDeclAst -> Str -> Bool\nannotationUsesNamedType : HostedAnnotationAst -> Str -> Bool\nexprUsesBuiltinResultRuntime : HostedExprAst -> Bool\nexprListUsesBuiltinResultRuntime : [HostedExprAst] -> Bool\nrecordFieldExprListUsesBuiltinResultRuntime : [HostedRecordFieldExprAst] -> Bool\nbranchUsesBuiltinResultRuntime : HostedMatchBranchAst -> Bool\nbranchListUsesBuiltinResultRuntime : [HostedMatchBranchAst] -> Bool\nexprUsesBuiltinOptionRuntime : HostedExprAst -> Bool\nexprListUsesBuiltinOptionRuntime : [HostedExprAst] -> Bool\nrecordFieldExprListUsesBuiltinOptionRuntime : [HostedRecordFieldExprAst] -> Bool\nbranchUsesBuiltinOptionRuntime : HostedMatchBranchAst -> Bool\nbranchListUsesBuiltinOptionRuntime : [HostedMatchBranchAst] -> Bool\ndeclUsesBuiltinResult : HostedDeclAst -> Bool\nforeignDeclUsesBuiltinResult : HostedForeignDeclAst -> Bool\ndeclUsesBuiltinOption : HostedDeclAst -> Bool\nforeignDeclUsesBuiltinOption : HostedForeignDeclAst -> Bool\nmoduleDeclaresBuiltinResult : HostedModuleAst -> Bool\nmoduleDeclaresBuiltinOption : HostedModuleAst -> Bool\nmoduleUsesBuiltinResult : HostedModuleAst -> Bool\nmoduleUsesBuiltinOption : HostedModuleAst -> Bool\nmoduleUsesCompilerKnownVariantTypes : HostedModuleAst -> Bool\nprincipalBuiltinRecordDecl : HostedRecordDeclAst\ntenantBuiltinRecordDecl : HostedRecordDeclAst\nresourceIdentityBuiltinRecordDecl : HostedRecordDeclAst\nauthSessionBuiltinRecordDecl : HostedRecordDeclAst\neffectiveModuleRecordDecls : HostedModuleAst -> [HostedRecordDeclAst]\neffectiveModuleTypeDecls : HostedModuleAst -> [HostedTypeDeclAst]\nprincipalBuiltinType : TypeText\ntenantBuiltinType : TypeText\nresourceIdentityBuiltinType : TypeText\nauthSessionBuiltinType : TypeText\nbaseEnv : [TypeBinding]"
     },
     {
       "moduleName": "Compiler.Checker.TypeOps",
-      "cacheKey": "e1046064800d79a0.cache",
+      "cacheKey": "a66fb576672891b2.cache",
       "sourceFingerprint": "35992138d4ce38e2",
       "declFingerprints": {
         "appendCheckerRenderedText": "b130a4e06db05e14",
@@ -771,7 +772,7 @@
     },
     {
       "moduleName": "Compiler.Checker.Bindings",
-      "cacheKey": "8ee83d4ee7b4a70d.cache",
+      "cacheKey": "6890b0bdeb58a30f.cache",
       "sourceFingerprint": "7b3f1744a7124dcf",
       "declFingerprints": {
         "collectAnnotatedBindings": "ccfc7d20974f23b1",
@@ -790,7 +791,7 @@
     },
     {
       "moduleName": "Compiler.Checker.DeclFunction",
-      "cacheKey": "37104995d5cef342.cache",
+      "cacheKey": "1fa4feecaab6ab14.cache",
       "sourceFingerprint": "a05ebe55105ba657",
       "declFingerprints": {
         "hasDeclParams": "4a65437bdd9b0a33",
@@ -803,7 +804,7 @@
     },
     {
       "moduleName": "Compiler.Checker.DecodeTarget",
-      "cacheKey": "fcb587a4e3723e30.cache",
+      "cacheKey": "5f36b3b91b7d2ad0.cache",
       "sourceFingerprint": "c57f012a5035f47e",
       "declFingerprints": {
         "decodeTargetTypeFromExpr": "196b890862d3754d"
@@ -812,7 +813,7 @@
     },
     {
       "moduleName": "Compiler.Checker.Equality",
-      "cacheKey": "6b8763a39b4228a7.cache",
+      "cacheKey": "a2785f8154216f81.cache",
       "sourceFingerprint": "a7093abf72fd8a87",
       "declFingerprints": {
         "supportsHostedEquality": "685f8424ffa2d0ec"
@@ -821,7 +822,7 @@
     },
     {
       "moduleName": "Compiler.Checker.RecordValidation",
-      "cacheKey": "ca5e0327969d4385.cache",
+      "cacheKey": "39948e39055ae617.cache",
       "sourceFingerprint": "796913c68b18fc9a",
       "declFingerprints": {
         "findRecordLiteralFieldValidationFailure": "5b46f394eb56e1a0"
@@ -830,7 +831,7 @@
     },
     {
       "moduleName": "Compiler.Checker.InferExpr",
-      "cacheKey": "5137d7899a67e2e4.cache",
+      "cacheKey": "e2c3e2f2b45b734e.cache",
       "sourceFingerprint": "bbb84fca943624d4",
       "declFingerprints": {
         "inferRecordLiteralSubstitutions": "6fb62248550d0040",
@@ -875,7 +876,7 @@
     },
     {
       "moduleName": "Compiler.Checker.DeclInfer",
-      "cacheKey": "252ce2aa4657a6bc.cache",
+      "cacheKey": "198ef29ac3da25f2.cache",
       "sourceFingerprint": "5540cbeb9bb81855",
       "declFingerprints": {
         "inferDecl": "1f9f03095207038d",
@@ -886,7 +887,7 @@
     },
     {
       "moduleName": "Compiler.Checker.ModuleEnv",
-      "cacheKey": "3243925a3055eff5.cache",
+      "cacheKey": "54514460e7031975.cache",
       "sourceFingerprint": "5c5296f8e2adeb80",
       "declFingerprints": {
         "moduleInitialEnv": "9a117f6f8074a630"
@@ -895,7 +896,7 @@
     },
     {
       "moduleName": "Compiler.Checker.ModulePass",
-      "cacheKey": "6578bcab22b1cd05.cache",
+      "cacheKey": "f0f18decfd6a0f41.cache",
       "sourceFingerprint": "8a77a57144b81841",
       "declFingerprints": {
         "inferModulePassResult": "979ad1737a958598",
@@ -909,7 +910,7 @@
     },
     {
       "moduleName": "Compiler.Checker.ModuleValidation",
-      "cacheKey": "87364284a6b25da3.cache",
+      "cacheKey": "73b1f44f46e44ed7.cache",
       "sourceFingerprint": "c012e4987375a8a1",
       "declFingerprints": {
         "metadataDeclarationShapeError": "a58f60b088d0f482",
@@ -921,7 +922,7 @@
     },
     {
       "moduleName": "Compiler.Checker.ModuleInfer",
-      "cacheKey": "6f81c7e529a34cac.cache",
+      "cacheKey": "9236db0e3305149c.cache",
       "sourceFingerprint": "21b6b1b6b6c57050",
       "declFingerprints": {
         "inferModuleBindings": "d555986d5763622d",
@@ -931,7 +932,7 @@
     },
     {
       "moduleName": "Compiler.Checker.ModuleSummary",
-      "cacheKey": "b12f5bc9698df78d.cache",
+      "cacheKey": "6c0c4ee68802ea9d.cache",
       "sourceFingerprint": "855f5095c19e9865",
       "declFingerprints": {
         "renderModuleSummaryFromEnv": "fcebb0e5b02c520c",
@@ -945,14 +946,14 @@
     },
     {
       "moduleName": "Compiler.Checker",
-      "cacheKey": "d557e3d3ea087ecf.cache",
+      "cacheKey": "3c9cfff317bb4727.cache",
       "sourceFingerprint": "ef2fefb76f192cd0",
       "declFingerprints": {},
       "summary": ""
     },
     {
       "moduleName": "Compiler.Json",
-      "cacheKey": "766cf68c2c3b4aa4.cache",
+      "cacheKey": "4d849525f8c7e502.cache",
       "sourceFingerprint": "1928aa5d2c3c6c44",
       "declFingerprints": {
         "keepNoJsonRenderedText": "c4f6254976f93445",
@@ -974,7 +975,7 @@
     },
     {
       "moduleName": "Compiler.CheckedCore",
-      "cacheKey": "34e10c7c7b353b2d.cache",
+      "cacheKey": "b542ec88f7dba811.cache",
       "sourceFingerprint": "fa9bbf56653ec961",
       "declFingerprints": {
         "keepNoCheckedCoreParamArtifact": "1e55f4bbe876dec1",
@@ -1041,7 +1042,7 @@
     },
     {
       "moduleName": "Compiler.Lower",
-      "cacheKey": "110806b62bf48875.cache",
+      "cacheKey": "e8e1ba7831e3afff.cache",
       "sourceFingerprint": "fd36a9190be9cfb4",
       "declFingerprints": {
         "keepNoLowerExpr": "f430839ca1ae06ff",
@@ -1104,7 +1105,7 @@
     },
     {
       "moduleName": "Compiler.Emit.JavaScript.Util",
-      "cacheKey": "8c981ff934c6c38b.cache",
+      "cacheKey": "87b92803f130a281.cache",
       "sourceFingerprint": "ecb1c3173b52fda2",
       "declFingerprints": {
         "appendJsRenderedText": "b9235dcf1f49c218",
@@ -1116,7 +1117,7 @@
     },
     {
       "moduleName": "Compiler.Emit.JavaScript.Expr",
-      "cacheKey": "04830e25cac82db7.cache",
+      "cacheKey": "984fb0ae76f5b437.cache",
       "sourceFingerprint": "d017cd9f828bb3ff",
       "declFingerprints": {
         "hasReturnInExprs": "ec2bf94186ce7712",
@@ -1143,7 +1144,7 @@
     },
     {
       "moduleName": "Compiler.Emit.JavaScript.Foreign",
-      "cacheKey": "d0d61c8a748ea199.cache",
+      "cacheKey": "931c50c6d51ab96b.cache",
       "sourceFingerprint": "816770179cf0e9ed",
       "declFingerprints": {
         "defaultForeignParamNames": "91279a0574dad6b6",
@@ -1184,7 +1185,7 @@
     },
     {
       "moduleName": "Compiler.Emit.JavaScript.MetadataCore",
-      "cacheKey": "5a4cf0c8350aec26.cache",
+      "cacheKey": "e4208ab8aeb251cc.cache",
       "sourceFingerprint": "761b9046b98b9ee4",
       "declFingerprints": {
         "lowerDeclHasOneParamText": "0c3975628e6c26ca",
@@ -1213,7 +1214,7 @@
     },
     {
       "moduleName": "Compiler.Emit.JavaScript.MetadataBindings",
-      "cacheKey": "ff8eebfb36d1bb15.cache",
+      "cacheKey": "e591022c52f40fb5.cache",
       "sourceFingerprint": "1a741270e864ae25",
       "declFingerprints": {
         "emitFrontendModuleBindings": "43469da80a400666"
@@ -1222,7 +1223,7 @@
     },
     {
       "moduleName": "Compiler.Emit.JavaScript.MetadataContracts",
-      "cacheKey": "ef254609ce8f1cb0.cache",
+      "cacheKey": "46588dc3d1fe5dfa.cache",
       "sourceFingerprint": "bec9480ba3fb9a4a",
       "declFingerprints": {
         "emitHooks": "85a355d70dbc9f3d",
@@ -1235,17 +1236,17 @@
     },
     {
       "moduleName": "Compiler.Emit.JavaScript.Metadata",
-      "cacheKey": "8a7dec6fa576cc0c.cache",
+      "cacheKey": "ee4ab1e9a567cbc2.cache",
       "sourceFingerprint": "c5b47cb67bbe057a",
       "declFingerprints": {},
       "summary": ""
     },
     {
       "moduleName": "Compiler.Emit.JavaScript.Needs",
-      "cacheKey": "d999abc143f89e76.cache",
-      "sourceFingerprint": "c149b2fa6c73905c",
+      "cacheKey": "26512e39879ec100.cache",
+      "sourceFingerprint": "2c7c1577b1153468",
       "declFingerprints": {
-        "jsBuiltinPreludeName": "eebc8f810b6f6488",
+        "jsBuiltinPreludeName": "6d6911ccc57d123a",
         "jsNodeProcessBuiltinPreludeName": "b97a7907be212b1a",
         "jsSwarmDeadlineBuiltinPreludeName": "61478e5f93c3c37f",
         "exprsNeedBuiltinPrelude": "335f0cdde4d9de2d",
@@ -1271,17 +1272,17 @@
     },
     {
       "moduleName": "Compiler.Emit.JavaScript.Prelude",
-      "cacheKey": "9ce1ed17e9d9ab80.cache",
-      "sourceFingerprint": "fe66ea259af8d4ae",
+      "cacheKey": "0b39e8067f8f7132.cache",
+      "sourceFingerprint": "02fa7581f60e9f39",
       "declFingerprints": {
-        "builtinPreludeLines": "bdf47fc95021a75c",
+        "builtinPreludeLines": "15556fc98ec980db",
         "emitBuiltinPrelude": "c519a865a2646d09"
       },
       "summary": "builtinPreludeLines : [Str]\nemitBuiltinPrelude : [LowerDeclText] -> [HostedForeignDeclAst] -> [Str]"
     },
     {
       "moduleName": "Compiler.Emit.JavaScript.Runtime",
-      "cacheKey": "569d401ed96cf086.cache",
+      "cacheKey": "3b3cf6a21c198e54.cache",
       "sourceFingerprint": "57d9c3f8e65c7c70",
       "declFingerprints": {
         "emitSelfHostedRuntimePrelude": "1a75b1f1ada15168"
@@ -1290,7 +1291,7 @@
     },
     {
       "moduleName": "Compiler.Emit.JavaScript.Schema",
-      "cacheKey": "094c97e99cacce9e.cache",
+      "cacheKey": "ddf289501f1005ac.cache",
       "sourceFingerprint": "cc8527303449a47d",
       "declFingerprints": {
         "emitTypeSchemaDecodeExpr": "0a9a67427cc0c7dc",
@@ -1304,7 +1305,7 @@
     },
     {
       "moduleName": "Compiler.Emit.JavaScript",
-      "cacheKey": "1c54cec9f554e337.cache",
+      "cacheKey": "4f7f53fca5cf96cd.cache",
       "sourceFingerprint": "64044b9820e359ca",
       "declFingerprints": {
         "emitFrontendModule": "0245a04319fd8043"
@@ -1313,7 +1314,7 @@
     },
     {
       "moduleName": "Compiler.Project",
-      "cacheKey": "787978045b3af250.cache",
+      "cacheKey": "a62b2f6297ccfb78.cache",
       "sourceFingerprint": "a7927e07a4802d16",
       "declFingerprints": {
         "keepNoHostedModule": "9c8611c5b49d0668",
@@ -1346,7 +1347,7 @@
     },
     {
       "moduleName": "Compiler.SemanticArtifacts.Base",
-      "cacheKey": "d61e5770608f107f.cache",
+      "cacheKey": "8b7ec621d7ff70f9.cache",
       "sourceFingerprint": "0b7e90d0bc0b8561",
       "declFingerprints": {
         "semanticJsonTextArray": "e5936281e18d7322",
@@ -1387,7 +1388,7 @@
     },
     {
       "moduleName": "Compiler.SemanticArtifacts.Air",
-      "cacheKey": "5f6a2c1bbecfa690.cache",
+      "cacheKey": "afd29778ab90f430.cache",
       "sourceFingerprint": "4e5be22433faa976",
       "declFingerprints": {
         "semanticAirModuleNode": "586989d114ab36a4",
@@ -1416,7 +1417,7 @@
     },
     {
       "moduleName": "Compiler.SemanticArtifacts.Names",
-      "cacheKey": "f5d7b59fd831026a.cache",
+      "cacheKey": "0bb8dc6ed1f696da.cache",
       "sourceFingerprint": "0887277b4ec9f881",
       "declFingerprints": {
         "semanticRecordNames": "4922cc5cf6b6d5cd",
@@ -1444,7 +1445,7 @@
     },
     {
       "moduleName": "Compiler.SemanticArtifacts.Uses",
-      "cacheKey": "e5a9e2fcc550bd66.cache",
+      "cacheKey": "7c25ebf739afcf84.cache",
       "sourceFingerprint": "4270052634ab33fa",
       "declFingerprints": {
         "semanticDeclUseTargetNodeId": "312949670ef33b62",
@@ -1462,7 +1463,7 @@
     },
     {
       "moduleName": "Compiler.SemanticArtifacts.Impact",
-      "cacheKey": "2f4f8fb0240113a7.cache",
+      "cacheKey": "1d144c1665d23985.cache",
       "sourceFingerprint": "3a48bb8c23c062a9",
       "declFingerprints": {
         "semanticAppendNonEmptyUniqueText": "6ae53b1607d6c138",
@@ -1530,7 +1531,7 @@
     },
     {
       "moduleName": "Compiler.SemanticArtifacts.ImpactIndex",
-      "cacheKey": "65a47f38e3de27ee.cache",
+      "cacheKey": "d7cb77f3c7501934.cache",
       "sourceFingerprint": "73f835e01c218733",
       "declFingerprints": {
         "semanticImpactEntry": "045f76e4ef1c27a0",
@@ -1548,7 +1549,7 @@
     },
     {
       "moduleName": "Compiler.SemanticArtifacts.SurfaceIndex",
-      "cacheKey": "0d497d3bd092f827.cache",
+      "cacheKey": "2a8fbc217f75cba3.cache",
       "sourceFingerprint": "e05104691734ab50",
       "declFingerprints": {
         "semanticContextVerificationGuidance": "848bc09d12ba084a",
@@ -1573,7 +1574,7 @@
     },
     {
       "moduleName": "Compiler.SemanticArtifacts.ContextNodes",
-      "cacheKey": "331b73f2bc47bec1.cache",
+      "cacheKey": "b5f4dd0a63feaae9.cache",
       "sourceFingerprint": "649aa4e7be8f5569",
       "declFingerprints": {
         "semanticContextModuleNode": "8d4f564c63aa8d20",
@@ -1600,7 +1601,7 @@
     },
     {
       "moduleName": "Compiler.SemanticArtifacts",
-      "cacheKey": "293037bf2c610994.cache",
+      "cacheKey": "8a999591ea35404c.cache",
       "sourceFingerprint": "f4392e0305512ec7",
       "declFingerprints": {
         "semanticSourceNodeId": "7f7d5ea8de08a128",
@@ -1640,7 +1641,7 @@
     },
     {
       "moduleName": "Compiler.Driver.Frontend",
-      "cacheKey": "a07be4b775bbd464.cache",
+      "cacheKey": "819287fde31094c4.cache",
       "sourceFingerprint": "6440e74e493f2c83",
       "declFingerprints": {
         "frontendDriverSourceLoweredDecls": "a68438dc249b51a0",
@@ -1667,7 +1668,7 @@
     },
     {
       "moduleName": "Compiler.Emit.Native.Core",
-      "cacheKey": "2971c941eed27670.cache",
+      "cacheKey": "fa5e6a7d2417d266.cache",
       "sourceFingerprint": "10d4b8006c855913",
       "declFingerprints": {
         "appendNativeRenderedText": "031da1a51b657b78",
@@ -1689,7 +1690,7 @@
     },
     {
       "moduleName": "Compiler.Emit.Native.ExprText",
-      "cacheKey": "cba5215a788b981c.cache",
+      "cacheKey": "fa980e4ca93c22ce.cache",
       "sourceFingerprint": "ba57e8ae5e85e78e",
       "declFingerprints": {
         "nativeExprNameText": "7a19f12f0e9ecc1d",
@@ -1721,7 +1722,7 @@
     },
     {
       "moduleName": "Compiler.Emit.Native.Expr",
-      "cacheKey": "ff5f50e0caea4e3f.cache",
+      "cacheKey": "7ba9443a89073a6d.cache",
       "sourceFingerprint": "c14a690984fed256",
       "declFingerprints": {
         "emitNativeExprs": "28f7107a173fae6e",
@@ -1737,7 +1738,7 @@
     },
     {
       "moduleName": "Compiler.Emit.Native.RuntimeCodecs",
-      "cacheKey": "94145e46c5df9c46.cache",
+      "cacheKey": "21668b41e6278aae.cache",
       "sourceFingerprint": "d3745f7dce35b484",
       "declFingerprints": {
         "supportsRuntimeCodecType": "8368b3af9766b9e3",
@@ -1753,15 +1754,15 @@
     },
     {
       "moduleName": "Compiler.Emit.Native.RuntimeBindings",
-      "cacheKey": "fa8f926319f68d2d.cache",
-      "sourceFingerprint": "012c738f0c69dd5d",
+      "cacheKey": "6588c68cd5878fdd.cache",
+      "sourceFingerprint": "1a7d80be8f0f1176",
       "declFingerprints": {
         "nativeRuntimeBindingSpecName": "db5f16ec5809433b",
         "nativeRuntimeBindingSpecRuntimeName": "cd3f5c8145f8f49d",
         "nativeRuntimeBindingSpecType": "bf4d44097a22912f",
         "appendUniqueTextValue": "d4c3601a987cc342",
         "appendUniqueTextValues": "898d5fdc400cf105",
-        "builtinCoreRuntimeBindingSpecs": "d8cf9cfe36234a31",
+        "builtinCoreRuntimeBindingSpecs": "fdb1cc920577d44a",
         "builtinUiRuntimeBindingSpecs": "a257fc4892d5daa7",
         "builtinPromptRuntimeBindingSpecs": "7a75129c860ecb89",
         "builtinWebRuntimeBindingSpecs": "3de0df57975387a8",
@@ -1800,7 +1801,7 @@
     },
     {
       "moduleName": "Compiler.Emit.NativeJson",
-      "cacheKey": "6cebf5ccb506d8e7.cache",
+      "cacheKey": "4d345ac2ec596b61.cache",
       "sourceFingerprint": "12b10382d4e2bb12",
       "declFingerprints": {
         "appendNativeJsonText": "b06dd689089b87d6",
@@ -1821,7 +1822,7 @@
     },
     {
       "moduleName": "Compiler.Emit.NativeSurface",
-      "cacheKey": "ade926956cdf35ca.cache",
+      "cacheKey": "076ac5aea80331f6.cache",
       "sourceFingerprint": "995d29a6f7476d10",
       "declFingerprints": {
         "appendNativeSurfaceText": "3240ebc669264298",
@@ -1858,7 +1859,7 @@
     },
     {
       "moduleName": "Compiler.Emit.NativeDecls",
-      "cacheKey": "c9ead4819b77abd3.cache",
+      "cacheKey": "8096dc2db86e572b.cache",
       "sourceFingerprint": "d82038b54464286b",
       "declFingerprints": {
         "appendNativeDeclRenderedText": "85927e38635a89b8",
@@ -1885,7 +1886,7 @@
     },
     {
       "moduleName": "Compiler.Emit.NativeMetadata",
-      "cacheKey": "7d0bbf21154b1c21.cache",
+      "cacheKey": "dd1fd0740ca69e55.cache",
       "sourceFingerprint": "1b8ae86fd2e0aaa2",
       "declFingerprints": {
         "appendNativeMetadataText": "8265febaefffcfa8",
@@ -1966,7 +1967,7 @@
     },
     {
       "moduleName": "Compiler.Emit.Native.RuntimeCodecEmit",
-      "cacheKey": "b9b5d79f1064e8ed.cache",
+      "cacheKey": "c70e9bff1b63cdd7.cache",
       "sourceFingerprint": "7727e85f6a481174",
       "declFingerprints": {
         "emitNativeJsonCodecImage": "ac865cee881ff5a5",
@@ -1982,7 +1983,7 @@
     },
     {
       "moduleName": "Compiler.Emit.Native.Layout",
-      "cacheKey": "c138107dace4dd0a.cache",
+      "cacheKey": "5c99c4d04dbe430e.cache",
       "sourceFingerprint": "bd5091bbdc0ab7b3",
       "declFingerprints": {
         "emitNativeJsonNumberList": "af783c42630e4a9c",
@@ -2026,7 +2027,7 @@
     },
     {
       "moduleName": "Compiler.Emit.Native",
-      "cacheKey": "df1eb1c192597e7f.cache",
+      "cacheKey": "b7de9be88bfc83eb.cache",
       "sourceFingerprint": "f04a07b9261ef0b9",
       "declFingerprints": {
         "emitNativeCompatibilitySurfaceImage": "a9509615d8be9f14",
@@ -2054,7 +2055,7 @@
     },
     {
       "moduleName": "Compiler.Driver.Native",
-      "cacheKey": "118cbdc7c3b8a9ce.cache",
+      "cacheKey": "9a93edb674919f72.cache",
       "sourceFingerprint": "c7cdc33e324caeb4",
       "declFingerprints": {
         "nativeDriverSourceLoweredDecls": "e4f2f7b3dc4a4ee0",
@@ -2089,7 +2090,7 @@
     },
     {
       "moduleName": "Compiler.SnapshotFixture",
-      "cacheKey": "0246c1d03d5757dd.cache",
+      "cacheKey": "65e73e355e44deaf.cache",
       "sourceFingerprint": "02952be3932ed617",
       "declFingerprints": {
         "compilerSnapshotCheckEntrypoint": "d8fb81e3859e0248",
@@ -2119,7 +2120,7 @@
     },
     {
       "moduleName": "Main",
-      "cacheKey": "41855b232516bb9a.cache",
+      "cacheKey": "441f56a786bf5ff8.cache",
       "sourceFingerprint": "620a96d67aa284e8",
       "declFingerprints": {
         "checkEntrypoint": "deec79af7e4f42cf",
@@ -2170,7 +2171,7 @@
     },
     {
       "moduleName": "CompilerMain",
-      "cacheKey": "374fbf50669e6e27.cache",
+      "cacheKey": "2e961b28927e3475.cache",
       "sourceFingerprint": "96a10d5a1a411c7d",
       "declFingerprints": {
         "checkSourceText": "5efff96a8fdefaa8",
@@ -2211,7 +2212,7 @@
     },
     {
       "moduleName": "GoalManagerResourceContext",
-      "cacheKey": "2674f2111217ecc9.cache",
+      "cacheKey": "ecb536264a619dbb.cache",
       "sourceFingerprint": "81f3b3cc81a31e82",
       "declFingerprints": {
         "processResultError": "7e17fee18b64ddff",
@@ -2264,7 +2265,7 @@
     },
     {
       "moduleName": "HostResources",
-      "cacheKey": "c4fef8c73e0b07a7.cache",
+      "cacheKey": "56a8df2a97d57cb9.cache",
       "sourceFingerprint": "7db2ac54d03c0e59",
       "declFingerprints": {
         "hostOkBool": "f9c368a0839ca77d",
@@ -2280,7 +2281,7 @@
     },
     {
       "moduleName": "GeneratedStateCleanupPlan",
-      "cacheKey": "7e9825b10c3e81b5.cache",
+      "cacheKey": "10640e831da63aa3.cache",
       "sourceFingerprint": "fac43c357e166db0",
       "declFingerprints": {
         "emptyCleanupTargets": "b2ef73974de45827",
@@ -2380,7 +2381,7 @@
     },
     {
       "moduleName": "GoalManagerGeneratedCleanupHealth",
-      "cacheKey": "13fcc0b63fcc1f2e.cache",
+      "cacheKey": "2767f5d127a435a4.cache",
       "sourceFingerprint": "4faaf2cff4d6d706",
       "declFingerprints": {
         "managerGeneratedCleanupBoolText": "eb7276157f83b965",
@@ -2399,7 +2400,7 @@
     },
     {
       "moduleName": "GoalManagerGeneratedCleanupHealthHarness",
-      "cacheKey": "8a602c96d5a97545.cache",
+      "cacheKey": "d8b7ec0e6c64a16b.cache",
       "sourceFingerprint": "6f442d5f7577ed18",
       "declFingerprints": {
         "main": "e34815452d4ff155"

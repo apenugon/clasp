@@ -45,6 +45,7 @@ builtinCoreRuntimeBindingSpecs = {
   NativeRuntimeBindingSpec "textConcat" "textConcat" "[Str] -> Str",
   NativeRuntimeBindingSpec "textJoin" "textJoin" "Str -> [Str] -> Str",
   NativeRuntimeBindingSpec "textSplit" "textSplit" "Str -> Str -> [Str]",
+  NativeRuntimeBindingSpec "textContains" "textContains" "Str -> Str -> Bool",
   NativeRuntimeBindingSpec "textChars" "textChars" "Str -> [Str]",
   NativeRuntimeBindingSpec "textFingerprint64Hex" "textFingerprint64Hex" "Str -> Str",
   NativeRuntimeBindingSpec "not" "not" "Bool -> Bool",

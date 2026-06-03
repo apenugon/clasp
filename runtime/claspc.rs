@@ -991,6 +991,7 @@ fn compiler_builtin_reference_names() -> &'static [&'static str] {
         "textConcat",
         "textJoin",
         "textSplit",
+        "textContains",
         "textChars",
         "textFingerprint64Hex",
         "textPrefix",

@@ -3162,6 +3162,9 @@ fn interpret_runtime_binding(
                 .unwrap_or(null_mut())
         },
         ("textSplit", 2) => unsafe { clasp_rt_text_split(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("textContains", 2) => unsafe {
+            build_runtime_bool(clasp_rt_text_contains(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString)) as *mut ClaspRtHeader
+        },
         ("textChars", 1) => unsafe { clasp_rt_text_chars(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("textFingerprint64Hex", 1) => unsafe { clasp_rt_text_fingerprint64_hex(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("intAdd", 2) => unsafe { clasp_rt_int_add(args[0], args[1]) },
@@ -3459,6 +3462,9 @@ fn interpret_builtin_runtime_binding(
                 .unwrap_or(null_mut())
         },
         ("textSplit", 2) => unsafe { clasp_rt_text_split(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString) as *mut ClaspRtHeader },
+        ("textContains", 2) => unsafe {
+            build_runtime_bool(clasp_rt_text_contains(args[0] as *mut ClaspRtString, args[1] as *mut ClaspRtString)) as *mut ClaspRtHeader
+        },
         ("textChars", 1) => unsafe { clasp_rt_text_chars(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("textFingerprint64Hex", 1) => unsafe { clasp_rt_text_fingerprint64_hex(args[0] as *mut ClaspRtString) as *mut ClaspRtHeader },
         ("intAdd", 2) => unsafe { clasp_rt_int_add(args[0], args[1]) },
@@ -3722,6 +3728,7 @@ fn builtin_runtime_binding_name(name: &str) -> bool {
         "textConcat"
             | "textJoin"
             | "textSplit"
+            | "textContains"
             | "textChars"
             | "textFingerprint64Hex"
             | "intAdd"
@@ -11520,6 +11527,14 @@ pub unsafe extern "C" fn clasp_rt_text_split(
         string_list_items_mut(list)[index] = build_runtime_string(part);
     }
     list
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn clasp_rt_text_contains(
+    value: *mut ClaspRtString,
+    needle: *mut ClaspRtString,
+) -> bool {
+    find_subslice(string_bytes(value), string_bytes(needle), 0).is_some()
 }
 
 #[no_mangle]
